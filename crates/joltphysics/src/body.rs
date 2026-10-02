@@ -153,6 +153,7 @@ pub struct BodySettings {
     gravity_factor: f32,
     allow_sleeping: bool,
     activation: Activation,
+    enhanced_internal_edge_removal: bool,
 }
 
 impl Default for BodySettings {
@@ -172,6 +173,7 @@ impl Default for BodySettings {
             gravity_factor: 1.0,
             allow_sleeping: true,
             activation: Activation::Activate,
+            enhanced_internal_edge_removal: false,
         }
     }
 }
@@ -287,6 +289,15 @@ impl BodySettings {
         self
     }
 
+    /// Whether Jolt removes ghost contacts of this body against internal edges of triangle
+    /// shapes (heightfields, meshes), Jolt's enhanced internal edge removal. Costs extra CPU per
+    /// contact. Default false.
+    #[must_use]
+    pub fn enhanced_internal_edge_removal(mut self, value: bool) -> Self {
+        self.enhanced_internal_edge_removal = value;
+        self
+    }
+
     fn validate(&self, object_layer_count: u32) -> Result<(), BodyError> {
         if self.object_layer.get() >= object_layer_count {
             return Err(BodyError::UnknownObjectLayer(self.object_layer));
@@ -359,21 +370,42 @@ fn has_finite_inverse(properties: &JPH_MassProperties) -> bool {
         return false;
     }
     let [x, y, z, _] = properties.inertia.column;
-    let tensor = [x.x, x.y, x.z, y.x, y.y, y.z, z.x, z.y, z.z];
-    if !tensor.iter().all(|value| value.is_finite()) {
+    let tensor = [[x.x, y.x, z.x], [x.y, y.y, z.y], [x.z, y.z, z.z]];
+    if !tensor.iter().flatten().all(|value| value.is_finite()) {
         return false;
     }
-    debug_assert!(
-        [x.y, x.z, y.x, y.z, z.x, z.y]
-            .iter()
-            .all(|&value| value == 0.0),
-        "box and sphere inertia is diagonal; rotated inertia needs Jolt's eigen decomposition here"
-    );
-    // A diagonal tensor is its own principal decomposition (Jolt `EigenValueSymmetric`).
-    let diagonal = [x.x, y.y, z.z];
-    let length_sq: f32 = diagonal.iter().map(|value| value * value).sum();
-    // Jolt `Vec3::IsNearZero` (squared length at most 1e-12) selects the unit-sphere fallback.
-    length_sq <= 1.0e-12 || diagonal.iter().all(|value| (1.0 / value).is_finite())
+    let off_diagonal = [x.y, x.z, y.x, y.z, z.x, z.y];
+    if off_diagonal.iter().all(|&value| value == 0.0) {
+        // Jolt's `EigenValueSymmetric` returns a diagonal tensor unchanged, so the diagonal is
+        // exactly what Jolt inverts.
+        let diagonal = [x.x, y.y, z.z];
+        let length_sq: f32 = diagonal.iter().map(|value| value * value).sum();
+        // Jolt `Vec3::IsNearZero` (squared length at most 1e-12) selects the unit-sphere
+        // fallback.
+        return length_sq <= 1.0e-12 || diagonal.iter().all(|value| (1.0 / value).is_finite());
+    }
+    has_well_conditioned_principal_moments(tensor.map(|row| row.map(f64::from)))
+}
+
+/// Whether Jolt can decompose a symmetric, non-diagonal inertia tensor into principal moments
+/// that are safe to invert.
+///
+/// The squared Frobenius norm is the sum of the squared principal moments, so a tensor below
+/// Jolt's near-zero limit (`1e-12`, halved to stay clear of f32 rounding) gets Jolt's
+/// unit-sphere inertia. Otherwise `det / |I|_F^2` is a lower bound of the smallest principal
+/// moment (the product of the other two is at most `|I|_F^2`). Jolt decomposes the tensor in
+/// f32, so a principal moment below its rounding error (a few `f32::EPSILON * |I|`) could come
+/// back as zero or negative and give an infinite or negative inverse inertia. The floor of
+/// `1e-5 * |I|_F` is about 80 times that error; it rejects only extremely slender rotated or
+/// offset bodies (aspect ratios of several hundred), which is conservative.
+fn has_well_conditioned_principal_moments(tensor: [[f64; 3]; 3]) -> bool {
+    let frobenius_sq: f64 = tensor.iter().flatten().map(|value| value * value).sum();
+    if frobenius_sq <= 0.5e-12 {
+        return true;
+    }
+    let [[a, b, c], [d, e, f], [g, h, i]] = tensor;
+    let det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    det > 0.0 && det / frobenius_sq >= 1.0e-5 * frobenius_sq.sqrt()
 }
 
 /// Owns a `JPH_BodyCreationSettings`, which holds its own reference to the shape.
@@ -419,6 +451,10 @@ impl CreationSettings {
             JPH_BodyCreationSettings_SetMotionQuality(ptr, settings.motion_quality.to_jph());
             JPH_BodyCreationSettings_SetGravityFactor(ptr, settings.gravity_factor);
             JPH_BodyCreationSettings_SetAllowSleeping(ptr, settings.allow_sleeping);
+            JPH_BodyCreationSettings_SetEnhancedInternalEdgeRemoval(
+                ptr,
+                settings.enhanced_internal_edge_removal,
+            );
         }
         if let Some(mass) = settings.mass {
             // Jolt ignores the inertia with `CalculateInertia` (`BodyCreationSettings.cpp`).
@@ -446,15 +482,26 @@ impl PhysicsWorld {
     /// Creates a body from `shape` and adds it to the world. The body keeps its own reference
     /// to the shape, so `shape` may be dropped afterwards.
     ///
-    /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, including a
-    /// dynamic or kinematic body whose mass (overridden, or computed from a tiny shape) is too
-    /// small for Jolt to invert.
+    /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, when a dynamic or
+    /// kinematic body uses a shape that only static bodies may use (a heightfield, or a
+    /// compound that contains one), and when a dynamic or kinematic body's mass or inertia
+    /// (overridden, or computed from a tiny or very slender shape) is too small for Jolt to
+    /// invert.
     pub fn create_body(
         &mut self,
         shape: &Shape,
         settings: &BodySettings,
     ) -> Result<BodyId, BodyError> {
         settings.validate(self.object_layer_count)?;
+        // Jolt itself never checks this when creating a body.
+        if settings.motion_type != MotionType::Static
+            // SAFETY: `shape` is live for the call; the getter only reads it.
+            && unsafe { JPH_Shape_MustBeStatic(shape.as_ptr()) }
+        {
+            return Err(BodyError::InvalidValue(
+                "this shape can only be used by static bodies",
+            ));
+        }
         // Jolt computes mass properties for every body that is not static
         // (`BodyCreationSettings::HasMassProperties`).
         if settings.motion_type != MotionType::Static
@@ -878,10 +925,67 @@ mod tests {
                 JPH_BodyCreationSettings_GetOverrideMassProperties(ptr),
                 JPH_OverrideMassProperties_CalculateMassAndInertia
             );
+            assert_eq!(
+                JPH_BodyCreationSettings_GetEnhancedInternalEdgeRemoval(ptr),
+                ours.enhanced_internal_edge_removal
+            );
             assert!(ours.mass.is_none());
             // The one documented difference: Jolt's default layer is 0.
             assert_eq!(JPH_BodyCreationSettings_GetObjectLayer(ptr), 0);
         }
         assert_eq!(ours.object_layer, ObjectLayer::MOVING);
+    }
+
+    /// Mass 1 with the inertia `R * diag(moments) * R^T`, `R` a rotation of 30 degrees about Z.
+    fn rotated_inertia(moments: [f32; 3]) -> JPH_MassProperties {
+        let (sin, cos) = 30.0_f32.to_radians().sin_cos();
+        let rotation = [[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]];
+        let mut properties = JPH_MassProperties {
+            mass: 1.0,
+            ..ZERO_MASS_PROPERTIES
+        };
+        for (column, out) in properties.inertia.column.iter_mut().take(3).enumerate() {
+            let entry = |row: usize| -> f32 {
+                (0..3)
+                    .map(|k| rotation[row][k] * moments[k] * rotation[column][k])
+                    .sum()
+            };
+            *out = JPH_Vec4 {
+                x: entry(0),
+                y: entry(1),
+                z: entry(2),
+                w: 0.0,
+            };
+        }
+        properties
+    }
+
+    #[test]
+    fn rotated_inertia_is_accepted() {
+        let properties = rotated_inertia([1.0, 2.0, 3.0]);
+        assert_ne!(
+            properties.inertia.column[0].y, 0.0,
+            "the tensor is not diagonal"
+        );
+        assert!(has_finite_inverse(&properties));
+    }
+
+    #[test]
+    fn non_finite_inertia_is_rejected() {
+        let mut properties = rotated_inertia([1.0, 2.0, 3.0]);
+        properties.inertia.column[1].x = f32::NAN;
+        assert!(!has_finite_inverse(&properties));
+    }
+
+    #[test]
+    fn ill_conditioned_rotated_inertia_is_rejected() {
+        assert!(!has_finite_inverse(&rotated_inertia([1.0, 1.0e-9, 1.0])));
+    }
+
+    #[test]
+    fn tiny_rotated_inertia_uses_the_unit_sphere() {
+        assert!(has_finite_inverse(&rotated_inertia([
+            1.0e-7, 2.0e-7, 3.0e-7
+        ])));
     }
 }
