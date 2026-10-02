@@ -50,6 +50,8 @@ Features: `double-precision`, `cross-platform-deterministic` and `debug-renderer
 Start with the [guide](docs/guide.md) (a terrain, a chunk compound, an item, queries and a rebase,
 run as a test), the crate docs (`cargo doc -p joltphysics --open`) and the `hello_world` example
 (`cargo run -p joltphysics --example hello_world`).
+Timings against the game's budgets are in [docs/benchmarks.md](docs/benchmarks.md)
+(`cargo bench -p joltphysics --bench budgets`).
 
 ## What is bound and tested
 Tests are in `crates/joltphysics/tests/` unless a path says otherwise; `src/...` names a unit test
