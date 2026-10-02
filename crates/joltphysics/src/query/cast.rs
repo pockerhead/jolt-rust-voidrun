@@ -44,6 +44,14 @@ impl fmt::Debug for ShapeCast<'_> {
 }
 
 impl<'a> ShapeCast<'a> {
+    /// Largest [`target_distance`](Self::target_distance) accepted, in metres, inclusive.
+    ///
+    /// A joltphysics guard, not a Jolt limit: the reported
+    /// [`ShapeCastHit::penetration_depth`] is Jolt's depth minus the target distance, which
+    /// loses millimetre precision in `f32` well beyond a kilometre and overflows to infinity for
+    /// huge values.
+    pub const MAX_TARGET_DISTANCE: f32 = 1000.0;
+
     /// Casts `shape`, whose origin starts at `position` with `rotation`, along `direction`
     /// (metres). No target distance, no deepest point, back faces ignored.
     pub fn new(shape: &'a Shape, position: RVec3, rotation: Quat, direction: Vec3) -> Self {
@@ -58,8 +66,8 @@ impl<'a> ShapeCast<'a> {
         }
     }
 
-    /// Stops the cast `metres` before the shape would touch an obstacle, finite and not
-    /// negative. Default 0. Only sphere and capsule query shapes support a target distance
+    /// Stops the cast `metres` before the shape would touch an obstacle, finite, not negative
+    /// and at most [`MAX_TARGET_DISTANCE`](Self::MAX_TARGET_DISTANCE). Default 0. Only sphere and capsule query shapes support a target distance
     /// above 0: the cast uses a copy of the shape whose radius is grown by `metres`, which
     /// allocates one temporary shape per cast.
     #[must_use]
@@ -157,8 +165,8 @@ impl PhysicsWorld {
     /// See [`ShapeCastHit`] for the normal and depth conventions.
     ///
     /// The position must be finite, the rotation a finite unit quaternion, the direction finite
-    /// and not zero, the target distance finite and not negative (and 0 unless the shape is a
-    /// sphere or capsule), the shape not a heightfield, and the filter valid for this world;
+    /// and not zero, the target distance finite, not negative and at most
+    /// [`ShapeCast::MAX_TARGET_DISTANCE`] (and 0 unless the shape is a sphere or capsule), the shape not a heightfield, and the filter valid for this world;
     /// otherwise [`QueryError::InvalidValue`] is returned.
     pub fn cast_shape(
         &self,
@@ -175,6 +183,11 @@ impl PhysicsWorld {
         if !is_finite_non_negative(target_distance) {
             return Err(QueryError::InvalidValue(
                 "target distance must be finite and not negative",
+            ));
+        }
+        if target_distance > ShapeCast::MAX_TARGET_DISTANCE {
+            return Err(QueryError::InvalidValue(
+                "target distance must be at most ShapeCast::MAX_TARGET_DISTANCE",
             ));
         }
         let inflated = if target_distance > 0.0 {
