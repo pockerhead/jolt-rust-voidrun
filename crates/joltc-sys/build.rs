@@ -337,6 +337,11 @@ fn use_prebuilt(dir: PathBuf, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
     for input in &inputs {
         println!("cargo:rerun-if-changed={}", input.display());
     }
+    // A configuration mismatch explains a missing archive (for example
+    // joltc_double without double precision), so it is reported first.
+    if manifest.is_file() {
+        check_manifest(&manifest, cfg)?;
+    }
     let missing: Vec<String> = inputs
         .iter()
         .filter(|path| !path.is_file())
@@ -350,7 +355,6 @@ fn use_prebuilt(dir: PathBuf, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
         );
     }
 
-    check_manifest(&manifest, cfg)?;
     check_header(&header)?;
     Ok(dir)
 }
