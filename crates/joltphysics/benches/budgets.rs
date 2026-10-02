@@ -10,20 +10,24 @@
 //!   walker's step.
 //! - A chunk landing next to that grid: building its shapes, inserting its terrain and compound
 //!   bodies, and the broad-phase optimisation after it. One sample is one landing.
-//! - A steady world step with 8 items always in flight, on 1 and on 4 worker threads. One sample
-//!   is one `step`.
+//! - A steady world step with 8 active items, each replaced once it has come to rest, on 1 and on
+//!   4 worker threads. One sample is one `step`.
 //! - Rays of two kinds: spawn ground (down onto terrain and structures) and line of sight
 //!   (sideways at eye height against structures and features). One sample is one ray.
 //! - A tick of 30 near steps and 60 structure-top rays for the mid-band actors, on a world with
-//!   4 worker threads. One sample is one tick.
+//!   4 worker threads, once with the mid actors walking rings over mostly open ground and once
+//!   with every mid actor on a structure top. One sample is one tick.
 //!
-//! Every case runs a warm-up that is not reported; the first call after the scene is built is
-//! shown as its own "cold first call" row. Percentiles use the nearest rank: the p-th percentile
-//! of n sorted samples is sample `ceil(p * n)` (counting from 1). Queries see bodies as soon as
-//! they are created, so a per-tick broad-phase refresh costs nothing here.
+//! Every case runs a warm-up that is not reported. The first call after the scene is built is
+//! shown as its own "cold first call" row; the landing reports it for the insertion and the rays
+//! for the first (spawn ground) ray. Percentiles use the nearest rank: the p-th percentile of n
+//! sorted samples is sample `ceil(p * n)` (counting from 1). Queries see bodies as soon as they
+//! are created, so a per-tick broad-phase refresh costs nothing here.
 //!
-//! Run with `cargo bench -p joltphysics --bench budgets`. The timings are wall-clock and only
-//! reported, never checked; nothing timed feeds back into the simulation.
+//! Run with `cargo bench -p joltphysics --bench budgets`; words after `--` run only the cases
+//! whose names contain one of them (`update_character`, `near step`, `landing`, `steady step`,
+//! `ray`, `tick`). The timings are wall-clock and only reported, never checked; nothing timed
+//! feeds back into the simulation.
 
 #[path = "../tests/common/mod.rs"]
 mod common;
@@ -320,10 +324,17 @@ fn run(with_terrain: bool) -> Result<[Row; 2], Box<dyn Error>> {
         }
     }
     let supported = f64::from(supported_updates) / durations.len() as f64;
-    let case = if with_terrain {
-        "update_character, terrain in filter: yes (flat 3 x 3 scene)"
+    let (case, limit) = if with_terrain {
+        (
+            "update_character, terrain in filter: yes (flat 3 x 3 scene)",
+            Limit::Reference(RAPIER),
+        )
     } else {
-        "update_character, terrain in filter: no (flat 3 x 3 scene)"
+        // Without terrain the characters stand on nothing: not comparable with the reference.
+        (
+            "update_character, terrain in filter: no (flat 3 x 3 scene)",
+            Limit::None,
+        )
     };
     Ok([
         Row::cold(case, "one call", cold),
@@ -331,7 +342,7 @@ fn run(with_terrain: bool) -> Result<[Row; 2], Box<dyn Error>> {
             case,
             "one call",
             durations,
-            Limit::Reference(RAPIER),
+            limit,
             format!("supported after {:.0}% of calls", supported * 100.0),
         ),
     ])
@@ -613,8 +624,9 @@ fn drop_item(
     })
 }
 
-/// A steady world step with 8 items falling under radial gravity on `worker_threads` threads.
-/// An item that has been calm for 30 ticks, or has flown for 600, is replaced by a new one.
+/// A steady world step with 8 items under radial gravity on `worker_threads` threads. An item
+/// that has been calm for 30 ticks, or has flown for 600, is replaced by a new one dropped from
+/// above the ground.
 fn run_steady_steps(worker_threads: u32) -> Result<[Row; 2], Box<dyn Error>> {
     let (mut world, layers) = planet_scene(worker_threads)?;
     let shape = Shape::new_box(Vec3::new(0.35, 0.06, 0.04))?;
@@ -778,7 +790,10 @@ fn run_rays() -> Result<[Row; 4], Box<dyn Error>> {
             "one ray",
             spawn_us,
             Limit::P99AtMost(50.0),
-            format!("55 m down, structures only; {}", spawn_hits.describe()),
+            format!(
+                "55 m down, terrain and structure children; {}",
+                spawn_hits.describe()
+            ),
         ),
         Row::new(
             "ray: line of sight",
@@ -793,32 +808,75 @@ fn run_rays() -> Result<[Row; 4], Box<dyn Error>> {
     ])
 }
 
+/// Where the mid-band actors of the tick case stand.
+#[derive(Clone, Copy)]
+enum MidBand {
+    /// Walking rings 20-45 m from the anchor at 2 m/s, over mostly open ground.
+    Rings,
+    /// Each on a structure top, on another one every tick.
+    OnStructures,
+}
+
+/// The mid band's filter: chunk compounds, structure children only.
+fn structures_only(chunk_layer: &[ObjectLayer; 1]) -> QueryFilter<'_> {
+    QueryFilter::new()
+        .object_layers(chunk_layer)
+        .child_groups(1 << Groups::STRUCTURE)
+}
+
+/// The mid band's ray under an actor at the ground point `ground`: 55 m down from 5 m above it.
+fn mid_ray(ground: [f64; 3]) -> RayCast {
+    let up = up_at(ground);
+    RayCast::new(rvec3(add(ground, scale(up, 5.0))), vec3(scale(up, -55.0)))
+}
+
+/// The ground points of a 1 m grid within 45 m of the anchor that lie under a structure top.
+fn structure_spots(
+    world: &PhysicsWorld,
+    chunk_layer: &[ObjectLayer; 1],
+) -> Result<Vec<[f64; 3]>, Box<dyn Error>> {
+    let filter = structures_only(chunk_layer);
+    let mut spots = Vec::new();
+    for x in -45..=45 {
+        for z in -45..=45 {
+            let (x, z) = (f64::from(x), f64::from(z));
+            let ground = ground_at(x, z);
+            if x * x + z * z <= 45.0 * 45.0 && world.cast_ray(mid_ray(ground), &filter)?.is_some() {
+                spots.push(ground);
+            }
+        }
+    }
+    Ok(spots)
+}
+
+/// Where mid actor `n` stands at `tick`.
+fn mid_position(mid: MidBand, spots: &[[f64; 3]], n: usize, tick: usize) -> [f64; 3] {
+    match mid {
+        MidBand::Rings => {
+            let radius = 20.0 + (n % 6) as f64 * 5.0;
+            let sign = if n.is_multiple_of(2) { 1.0 } else { -1.0 };
+            let walked = sign * tick as f64 * 2.0 * f64::from(DT) / radius;
+            let angle = n as f64 / MID_ACTORS as f64 * std::f64::consts::TAU + 0.1 + walked;
+            ground_at(radius * angle.cos(), radius * angle.sin())
+        }
+        MidBand::OnStructures => spots[(n * 7 + tick) % spots.len()],
+    }
+}
+
 /// One tick of the game's near and mid bands on a world with 4 worker threads: 30 near steps,
 /// then one structure-top ray under each of 60 mid-band actors (the mid band has no physics
-/// solve and queries structures only; its actors are positions here, not bodies).
-fn run_ticks() -> Result<[Row; 2], Box<dyn Error>> {
+/// solve and queries structures only; its actors are positions here, not bodies). The actors
+/// move every tick, so every tick casts different rays.
+fn run_ticks(mid: MidBand) -> Result<[Row; 2], Box<dyn Error>> {
     let (mut world, layers) = planet_scene(4)?;
     let walkers = planet_walkers(&mut world, &layers);
     let mut carries = vec![Carry::RESTING; CHARACTERS];
-    let mid: Vec<[f64; 3]> = (0..MID_ACTORS)
-        .map(|n| {
-            let angle = n as f64 / MID_ACTORS as f64 * std::f64::consts::TAU + 0.1;
-            let radius = 20.0 + (n % 6) as f64 * 5.0;
-            ground_at(radius * angle.cos(), radius * angle.sin())
-        })
-        .collect();
-    let rays: Vec<RayCast> = mid
-        .iter()
-        .map(|&ground| {
-            let up = up_at(ground);
-            RayCast::new(rvec3(add(ground, scale(up, 5.0))), vec3(scale(up, -55.0)))
-        })
-        .collect();
     let chunk_layer = [layers.chunk];
-    let structures = QueryFilter::new()
-        .object_layers(&chunk_layer)
-        .child_groups(1 << Groups::STRUCTURE);
+    let structures = structures_only(&chunk_layer);
+    let spots = structure_spots(&world, &chunk_layer)?;
+    assert!(!spots.is_empty(), "no structure tops in the scene");
     let mut desired = [[0.0; 3]; CHARACTERS];
+    let mut rays = Vec::with_capacity(MID_ACTORS);
     let mut grounded = [false; CHARACTERS];
     let mut tops = [false; MID_ACTORS];
     let mut durations = Vec::with_capacity(TICKS);
@@ -828,6 +886,8 @@ fn run_ticks() -> Result<[Row; 2], Box<dyn Error>> {
         for (n, walker) in walkers.iter().enumerate() {
             desired[n] = wanted(&world, walker, n, tick);
         }
+        rays.clear();
+        rays.extend((0..MID_ACTORS).map(|n| mid_ray(mid_position(mid, &spots, n, tick))));
         let start = Instant::now();
         for (n, (walker, carry)) in walkers.iter().zip(&mut carries).enumerate() {
             grounded[n] = near_tick(&mut world, walker, carry, desired[n]).grounded;
@@ -845,7 +905,12 @@ fn run_ticks() -> Result<[Row; 2], Box<dyn Error>> {
             top_hits += tops.iter().filter(|&&t| t).count();
         }
     }
-    let case = "tick: 30 near steps + 60 mid-band structure-top rays";
+    let case = match mid {
+        MidBand::Rings => "tick: 30 near steps + 60 mid-band rays, mid actors walking rings",
+        MidBand::OnStructures => {
+            "tick: 30 near steps + 60 mid-band rays, every mid actor on a structure top"
+        }
+    };
     Ok([
         Row::cold(case, "one tick", cold),
         Row::new(
@@ -887,17 +952,37 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("run with `cargo bench -p joltphysics --bench budgets`");
         return Ok(());
     }
+    let filters: Vec<String> = std::env::args()
+        .skip(1)
+        .filter(|arg| !arg.starts_with('-'))
+        .collect();
+    let selected =
+        |case: &str| filters.is_empty() || filters.iter().any(|f| case.contains(f.as_str()));
     let mut rows = Vec::new();
-    for with_terrain in [true, false] {
-        rows.extend(run(with_terrain)?);
+    if selected("update_character") {
+        for with_terrain in [true, false] {
+            rows.extend(run(with_terrain)?);
+        }
     }
-    rows.extend(run_near_steps()?);
-    rows.extend(run_landings()?);
-    for worker_threads in [1, 4] {
-        rows.extend(run_steady_steps(worker_threads)?);
+    if selected("near step") {
+        rows.extend(run_near_steps()?);
     }
-    rows.extend(run_rays()?);
-    rows.extend(run_ticks()?);
+    if selected("landing") {
+        rows.extend(run_landings()?);
+    }
+    if selected("steady step") {
+        for worker_threads in [1, 4] {
+            rows.extend(run_steady_steps(worker_threads)?);
+        }
+    }
+    if selected("ray") {
+        rows.extend(run_rays()?);
+    }
+    if selected("tick") {
+        for mid in [MidBand::Rings, MidBand::OnStructures] {
+            rows.extend(run_ticks(mid)?);
+        }
+    }
     print_table(&rows);
 
     let threads = std::thread::available_parallelism().map_or(0, |n| n.get());

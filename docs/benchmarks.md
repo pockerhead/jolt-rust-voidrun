@@ -13,7 +13,9 @@ cargo bench -p joltphysics --bench budgets
 Run one cargo process at a time on a quiet machine with a fixed power plan ("High performance"
 below). The first run builds Jolt and joltc in Release under `target/release` unless
 `JOLTC_LIB_DIR` points at a matching prebuilt prefix. Without the `--bench` argument that
-`cargo bench` passes (for example under `cargo test --benches`) the binary returns at once.
+`cargo bench` passes (for example under `cargo test --benches`) the binary returns at once. Words
+after `--` run only the cases whose names contain one of them, for example
+`cargo bench -p joltphysics --bench budgets -- tick`.
 
 ## Machine
 
@@ -52,15 +54,18 @@ Other programs were not closed for the run, so single samples (the max column) c
   another optimisation) so every landing starts from the same world.
 - **Steady step**: 8 items with the game's settings (box 0.35 x 0.06 x 0.04 half extents, 1.2 kg,
   friction 0.8, restitution 0.1, linear cast), pulled radially at 9.8 m/s² by the caller and dropped
-  1-3 m above the centre chunk. An item calm for 30 ticks or older than 600 ticks is replaced, so
-  items are always in flight.
+  1-3 m above the centre chunk. An item calm for 30 ticks or older than 600 ticks is replaced by a
+  new one, so the world always holds 8 active items, but an item can rest on the ground for up to
+  30 ticks before it is replaced. "Awake" in the note only says that no item has gone to sleep.
 - **Rays**: ground points within 40 m of the anchor; spawn ground rays go 55 m down from 5 m above
   the ground against terrain and structures; line-of-sight rays go 10-40 m sideways from 1.6 m above
   the ground against structures and features.
 - **Tick**: the 30 walkers' near steps, then one structure-top ray (55 m down, structures only)
-  under each of 60 mid-band actors on rings 20-45 m from the anchor. The mid band has no physics
-  solve, so its actors are positions, not bodies. The world has 4 worker threads, but the near
-  steps and the rays run on the calling thread.
+  under each of 60 mid-band actors. The mid band has no physics solve, so its actors are positions,
+  not bodies, and they move every tick. The case runs twice: with the actors walking rings 20-45 m
+  from the anchor at 2 m/s, mostly over open ground (few rays hit), and with every actor on a
+  structure top, on another one every tick (every ray hits). The two rows bound the hit mix. The
+  world has 4 worker threads, but the near steps and the rays run on the calling thread.
 
 ## Samples
 
@@ -70,11 +75,12 @@ Other programs were not closed for the run, so single samples (the max column) c
 | landing | 50 landings | 2,000 landings |
 | steady step | 300 ticks | 5,000 steps |
 | rays | 1,000 rays | 10,000 rays (5,000 of each kind) |
-| tick | 300 ticks | 5,000 ticks |
+| tick (each of the two variants) | 300 ticks | 5,000 ticks |
 
 The first call after a scene is built is shown on its own "cold first call" row and is not among
-the samples. Percentiles use the nearest rank: the p-th percentile of n sorted samples is sample
-`ceil(p * n)`, counting from 1.
+the samples. The landing has this row for the insertion only, and the rays for the first ray, a
+spawn ground ray. Percentiles use the nearest rank: the p-th percentile of n sorted samples is
+sample `ceil(p * n)`, counting from 1.
 
 ## Results
 
@@ -83,7 +89,7 @@ the samples. Percentiles use the nearest rank: the p-th percentile of n sorted s
 | update_character, terrain in filter: yes (flat 3 x 3 scene): cold first call | one call | 1 | 38.3 | 38.3 | 38.3 | - | - |  |
 | update_character, terrain in filter: yes (flat 3 x 3 scene) | one call | 150000 | 2.7 | 6.0 | 116.7 | Rapier 86-156 us per character with terrain | - | supported after 100% of calls |
 | update_character, terrain in filter: no (flat 3 x 3 scene): cold first call | one call | 1 | 4.8 | 4.8 | 4.8 | - | - |  |
-| update_character, terrain in filter: no (flat 3 x 3 scene) | one call | 150000 | 0.2 | 0.3 | 16.6 | Rapier 86-156 us per character with terrain | - | supported after 0% of calls |
+| update_character, terrain in filter: no (flat 3 x 3 scene) | one call | 150000 | 0.2 | 0.3 | 16.6 | - | - | supported after 0% of calls |
 | near step (radial planet): cold first call | one walker step | 1 | 34.8 | 34.8 | 34.8 | - | - |  |
 | near step (radial planet) | one walker step | 150000 | 5.1 | 9.7 | 87.7 | Rapier 86-156 us per character with terrain | - | grounded after 100% of steps |
 | chunk shape build (off the sim thread in the game) | one chunk | 2000 | 36.9 | 43.1 | 72.2 | - | - | 33 x 33 heightfield + 20-child compound |
@@ -97,15 +103,23 @@ the samples. Percentiles use the nearest rank: the p-th percentile of n sorted s
 | steady step, 8 items, 4 worker threads | one step | 5000 | 36.7 | 53.9 | 174.6 | <= 1000 us (limit, no percentile given; p99 shown) | within | 8.0 awake items per tick on average; 496 items replaced |
 | ray: cold first call | one ray | 1 | 14.0 | 14.0 | 14.0 | - | - |  |
 | ray (all) | one ray | 10000 | 0.7 | 1.1 | 114.0 | p99 <= 50 us | within | spawn ground and line of sight alternating |
-| ray: spawn ground | one ray | 5000 | 0.8 | 1.2 | 114.0 | p99 <= 50 us | within | 55 m down, structures only; terrain 4876, structure 124, feature 0, miss 0 |
+| ray: spawn ground | one ray | 5000 | 0.8 | 1.2 | 114.0 | p99 <= 50 us | within | 55 m down, terrain and structure children; terrain 4876, structure 124, feature 0, miss 0 |
 | ray: line of sight | one ray | 5000 | 0.5 | 1.0 | 40.4 | p99 <= 50 us | within | 10-40 m at eye height, structures and features; terrain 0, structure 811, feature 459, miss 3730 |
-| tick: 30 near steps + 60 mid-band structure-top rays: cold first call | one tick | 1 | 245.0 | 245.0 | 245.0 | - | - |  |
-| tick: 30 near steps + 60 mid-band structure-top rays | one tick | 5000 | 185.6 | 251.1 | 346.1 | p99 <= 2000 us | within | grounded after 100% of steps; 3% of mid rays hit a structure top; the walker update and queries run on the calling thread, the world's 4 worker threads take no part; refresh is zero work (queries see bodies immediately) |
+| tick: 30 near steps + 60 mid-band rays, mid actors walking rings: cold first call | one tick | 1 | 303.8 | 303.8 | 303.8 | - | - |  |
+| tick: 30 near steps + 60 mid-band rays, mid actors walking rings | one tick | 5000 | 187.6 | 278.6 | 324.2 | p99 <= 2000 us | within | grounded after 100% of steps; 2% of mid rays hit a structure top; the walker update and queries run on the calling thread, the world's 4 worker threads take no part; refresh is zero work (queries see bodies immediately) |
+| tick: 30 near steps + 60 mid-band rays, every mid actor on a structure top: cold first call | one tick | 1 | 257.9 | 257.9 | 257.9 | - | - |  |
+| tick: 30 near steps + 60 mid-band rays, every mid actor on a structure top | one tick | 5000 | 202.8 | 301.5 | 405.9 | p99 <= 2000 us | within | grounded after 100% of steps; 100% of mid rays hit a structure top; the walker update and queries run on the calling thread, the world's 4 worker threads take no part; refresh is zero work (queries see bodies immediately) |
+
+The tick rows come from a separate run of the tick case alone (`-- tick`), on the same machine and
+day as the rest of the table.
 
 ## Reading
 
-- Every limit holds, by a wide margin. Ray p99 is about 1 us against 50 us; the 30 + 60 tick has a
-  p99 of 251 us against 2 ms; the steady step's p99 is 35 us on one worker thread against 1 ms.
+- Every limit holds, by a wide margin. Ray p99 is about 1 us against 50 us; the steady step's p99
+  is 35 us on one worker thread against 1 ms. The 30 + 60 tick has a p99 of 279 us with the mid
+  actors over mostly open ground (2% of mid rays hit) and 302 us with every mid ray hitting a
+  structure top, against 2 ms. These rows cover the walkers and the mid-band queries only; the
+  world step is measured on its own in the steady-step rows.
 - The landing limit (2 ms) is compared on the insertion row, the work on the simulation thread. The
   game builds the heightfield and compound off that thread; even with the build included a landing
   costs 44 us at p99. The broad-phase optimisation is not needed for queries (they see new bodies at
@@ -117,5 +131,6 @@ the samples. Percentiles use the nearest rank: the p-th percentile of n sorted s
 - The character rows compare with Rapier's 86-156 us per character with terrain in the query: one
   `update_character` costs 2.7 us at the median and 6.0 us at p99 with terrain, and a whole near step
   5.1 / 9.7 us. With the terrain left out of the flat scene's filter the characters find nothing to
-  stand on and fall, so that row is cheap and only shows what the terrain adds.
+  stand on and fall, so that row is cheap, only shows what the terrain adds, and is not compared
+  with the reference.
 - Maximum values are single outliers (the machine's scheduler) and vary most between runs.
