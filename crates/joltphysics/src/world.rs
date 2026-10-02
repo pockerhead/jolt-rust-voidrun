@@ -63,6 +63,11 @@ impl WorldSettings {
     /// Largest body count Jolt supports (`PhysicsSystem::cMaxBodiesLimit`).
     const MAX_BODIES_LIMIT: u32 = 1 << 23;
 
+    /// Largest accepted [`worker_threads`](Self::worker_threads) value. Jolt starts one OS
+    /// thread per worker; this bound is chosen by joltphysics to keep thread creation sane and
+    /// is not a Jolt limit.
+    pub const MAX_WORKER_THREADS: u32 = 64;
+
     /// Maximum number of bodies in the world, at most 2²³. Default 10240.
     #[must_use]
     pub fn max_bodies(mut self, value: u32) -> Self {
@@ -85,8 +90,9 @@ impl WorldSettings {
     }
 
     /// Worker threads Jolt's job system starts in addition to the thread that calls
-    /// [`PhysicsWorld::step`], which also runs jobs. At least 1. Default 1. Results are
-    /// bit-identical for any value on one machine.
+    /// [`PhysicsWorld::step`], which also runs jobs. At least 1 and at most
+    /// [`WorldSettings::MAX_WORKER_THREADS`]. Default 1. Results are bit-identical for any value
+    /// on one machine.
     #[must_use]
     pub fn worker_threads(mut self, value: u32) -> Self {
         self.worker_threads = value;
@@ -125,8 +131,8 @@ impl WorldSettings {
         if self.max_contact_constraints == 0 {
             return invalid("max_contact_constraints must be at least 1");
         }
-        if !(1..=i32::MAX as u32).contains(&self.worker_threads) {
-            return invalid("worker_threads must be between 1 and i32::MAX");
+        if !(1..=Self::MAX_WORKER_THREADS).contains(&self.worker_threads) {
+            return invalid("worker_threads must be between 1 and 64");
         }
         if self.temp_allocator_size == 0 {
             return invalid("temp_allocator_size must be at least 1");
@@ -233,7 +239,8 @@ impl PhysicsWorld {
         let config = JobSystemThreadPoolConfig {
             maxJobs: 0,
             maxBarriers: 0,
-            // `validate` bounds the count to `1..=i32::MAX`; 0 would mean "all hardware threads".
+            // `validate` bounds the count to `1..=MAX_WORKER_THREADS`; 0 would mean all hardware
+            // threads.
             numThreads: settings.worker_threads as i32,
         };
         // SAFETY: Jolt is initialised; `config` is a live local. Zero job and barrier limits
@@ -351,5 +358,23 @@ impl PhysicsWorld {
             body_pair_cache: errors & JPH_PhysicsUpdateError_BodyPairCacheFull != 0,
             contact_constraints: errors & JPH_PhysicsUpdateError_ContactConstraintsFull != 0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worker_thread_bounds_are_validated() {
+        for valid in [1, WorldSettings::MAX_WORKER_THREADS] {
+            assert_eq!(WorldSettings::default().worker_threads(valid).validate(), Ok(()));
+        }
+        for invalid in [0, WorldSettings::MAX_WORKER_THREADS + 1, u32::MAX] {
+            assert!(matches!(
+                WorldSettings::default().worker_threads(invalid).validate(),
+                Err(WorldError::InvalidSettings(_))
+            ));
+        }
     }
 }

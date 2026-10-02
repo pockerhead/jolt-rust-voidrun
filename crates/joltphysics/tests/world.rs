@@ -27,6 +27,8 @@ fn default_world_steps() {
 fn invalid_settings_are_rejected() {
     let invalid = [
         WorldSettings::default().worker_threads(0),
+        WorldSettings::default().worker_threads(65),
+        WorldSettings::default().worker_threads(u32::MAX),
         WorldSettings::default().max_bodies(0),
         WorldSettings::default().max_bodies((1 << 23) + 1),
         WorldSettings::default().max_body_pairs(0),
