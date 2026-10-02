@@ -13,6 +13,8 @@ use joltphysics::*;
 
 type V = [f64; 3];
 
+// `Real` is already `f64` with the `double-precision` feature.
+#[allow(clippy::useless_conversion)]
 fn real3(p: RVec3) -> V {
     [f64::from(p.x), f64::from(p.y), f64::from(p.z)]
 }
@@ -778,11 +780,8 @@ fn identity_rebase_changes_nothing() {
     {
         assert_eq!(bits, old_bits);
         assert_eq!(sleeping, old_sleeping);
-        let expected = [
-            f64::from(old_position.x) + 5.0,
-            f64::from(old_position.y),
-            f64::from(old_position.z) - 2.0,
-        ];
+        let [x, y, z] = real3(old_position);
+        let expected = [x + 5.0, y, z - 2.0];
         let error = norm(sub(real3(position), expected));
         assert!(error <= 1e-4, "{position:?} vs {expected:?}");
     }
