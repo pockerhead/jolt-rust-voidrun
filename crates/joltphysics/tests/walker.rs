@@ -229,6 +229,119 @@ fn step_law_climbs_up_to_045_but_not_05() {
     assert!((0.45..0.5).contains(&highest), "climbs up to {highest}");
 }
 
+/// As `walk_into_block`, but the block is one sharp dynamic box in the item layer, and the item
+/// layer is in the controller filter when `in_filter` is set. The world is never stepped, so the
+/// box stays where it is.
+fn walk_into_item(height: f64, in_filter: bool) -> (NearOutput, f64) {
+    let (mut world, layers) = fixture_world(1);
+    flat_chunk(&mut world, &layers, 0.0);
+    let face = 1.0 + f64::from(RADIUS);
+    let top = flat_ground(face, 0.0) + height;
+    let block = Shape::new_box_with_convex_radius(vec3([2.0, 1.5, 2.0]), 0.0).unwrap();
+    world
+        .create_body(
+            &block,
+            &BodySettings::new_dynamic()
+                .position(rvec3([face + 2.0, top - 1.5, 0.0]))
+                .object_layer(layers.item),
+        )
+        .unwrap();
+    let mut walker = add_walker(&mut world, &layers, resting_at(0.0, 0.0));
+    walker.items_in_filter = in_filter;
+    let outputs = run(&mut world, &walker, 120, walking([1.0, 0.0, 0.0], SPEED));
+    (*outputs.last().unwrap(), face)
+}
+
+/// The highest dynamic box, to 1 mm, that a walker with the item layer in its filter climbs.
+fn max_climbable_item() -> f64 {
+    let (mut low, mut high) = (0.0, 1.5);
+    while high - low > 1e-3 {
+        let mid = 0.5 * (low + high);
+        let (out, face) = walk_into_item(mid, true);
+        if climbed(&out, mid, face) {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    low
+}
+
+/// Items (dynamic bodies) are not in the game's controller mask, so a 0.4 m item in the way is
+/// walked through as if it were not there.
+#[test]
+fn items_outside_the_controller_filter_are_no_obstacle() {
+    let (out, _) = walk_into_item(0.4, false);
+    assert!(out.pos[0] > 3.5, "{out:?}");
+    assert!(out.grounded, "{out:?}");
+    let feet = height_above_flat(out.pos) - f64::from(REST_HEIGHT);
+    assert!(feet.abs() < 0.05, "feet {feet} off the ground");
+}
+
+/// With the item layer put in the controller filter against the game's rules, the game's
+/// autostep still never steps onto a dynamic body: a 0.4 m dynamic box, which is climbed as a
+/// static structure (see the step law), is not. `CharacterVirtual` by itself creeps onto a sharp
+/// dynamic box up to about 0.37 m; the game's mask, which has no item group, avoids that.
+#[test]
+fn the_autostep_never_climbs_a_dynamic_body_in_the_filter() {
+    let (out, face) = walk_into_item(0.4, true);
+    assert!(!climbed(&out, 0.4, face), "{out:?}");
+    let highest = max_climbable_item();
+    assert!(highest < 0.4, "climbs dynamic boxes up to {highest}");
+}
+
+/// The 0.4 m block of `walk_into_block` under a slab 0.5 m thick whose bottom is
+/// `slab_bottom_above_ground` above the ground at the block's face, spanning the walker's start
+/// and the step; walks into the block at 2 m/s for 120 ticks. Returns the last output and the x
+/// of the block's face.
+fn walk_under_slab(slab_bottom_above_ground: f64) -> (NearOutput, f64) {
+    let (mut world, layers) = fixture_world(1);
+    flat_chunk(&mut world, &layers, 0.0);
+    let face = 1.0 + f64::from(RADIUS);
+    let top = flat_ground(face, 0.0) + 0.4;
+    structure_box(
+        &mut world,
+        &layers,
+        [face + 2.0, top - 1.5, 0.0],
+        [2.0, 1.5, 2.0],
+        0.0,
+    );
+    let slab_centre = flat_ground(face, 0.0) + slab_bottom_above_ground + 0.25;
+    structure_box(
+        &mut world,
+        &layers,
+        [face, slab_centre, 0.0],
+        [3.0, 0.25, 2.0],
+        0.0,
+    );
+    let walker = add_walker(&mut world, &layers, resting_at(0.0, 0.0));
+    let outputs = run(&mut world, &walker, 120, walking([1.0, 0.0, 0.0], SPEED));
+    (*outputs.last().unwrap(), face)
+}
+
+/// Spec D.1: the autostep needs free room above the walker for the lift. Under a slab 2.40 m
+/// above the ground the resting head (2.237 m) has 0.16 m to spare, less than the 0.47 m lift,
+/// so a 0.4 m step is not taken and the walker stays on the ground; with the slab at 3.0 m the
+/// same step is climbed.
+#[test]
+fn a_step_under_a_low_ceiling_is_not_taken() {
+    let head = f64::from(CENTRE_UP + HALF_HEIGHT + RADIUS);
+    let (out, face) = walk_under_slab(2.40);
+    assert!(!climbed(&out, 0.4, face), "{out:?}");
+    assert!(out.grounded, "{out:?}");
+    let feet = height_above_flat(out.pos) - f64::from(REST_HEIGHT);
+    assert!(feet.abs() < 0.05, "feet {feet} off the ground");
+    assert!(
+        out.pos[1] + head < flat_ground(face, 0.0) + 2.40,
+        "head at {}",
+        out.pos[1] + head
+    );
+    assert_eq!(out.blocker.and_then(|b| b.group), Some(Groups::STRUCTURE));
+
+    let (out, face) = walk_under_slab(3.0);
+    assert!(climbed(&out, 0.4, face), "{out:?}");
+}
+
 /// The anchor chunk with `sloped(0, tan)` terrain.
 fn slope_scene(tan: f64) -> (PhysicsWorld, Layers) {
     let (mut world, layers) = fixture_world(1);
@@ -648,8 +761,8 @@ fn rising_into_a_ceiling_resets_vel_up() {
 
 /// Runs the script for `ticks` ticks in blocks of `block` ticks. Each block builds the scene
 /// afresh (same bodies, same ids), creates the walker, restores the character state and the
-/// game's carried state of the previous block, and runs on. `block == ticks` is the continuous
-/// run. Returns the digest of every tick.
+/// game's carried state of the previous block, and runs on. `block == ticks` rebuilds the world
+/// and restores the state once, at tick 0. Returns the digest of every tick.
 fn scripted_run(ticks: usize, block: usize) -> Vec<Vec<u8>> {
     let (mut world, layers) = script_scene(1);
     let walker = add_walker(&mut world, &layers, script_start());
@@ -677,18 +790,39 @@ fn scripted_run(ticks: usize, block: usize) -> Vec<Vec<u8>> {
     records
 }
 
-/// Chaining the game's near steps from saved state equals one continuous run, bit for bit, for
-/// blocks of 1 and of 7 ticks: position, velocity, vel_up, grounded, sliding, the character
-/// state and the contacts of every tick.
+/// Runs the script for `ticks` ticks in one world, with no rebuild, save or restore. Returns the
+/// digest of every tick.
+fn single_pass_run(ticks: usize) -> Vec<Vec<u8>> {
+    let (mut world, layers) = script_scene(1);
+    let walker = add_walker(&mut world, &layers, script_start());
+    let mut player = Player::new(&mut world, &walker);
+    (0..ticks)
+        .map(|tick| {
+            let out = script_tick(&mut world, &walker, &mut player, tick);
+            let mut record = Vec::new();
+            record_walker(&world, &walker, &out, &mut record);
+            record
+        })
+        .collect()
+}
+
+/// Chaining the game's near steps from saved state equals one uninterrupted run in one world,
+/// bit for bit: restored once at tick 0, and in blocks of 1 and of 7 ticks. Compared are
+/// position, velocity, vel_up, grounded, sliding, the character state and the contacts of every
+/// tick.
 #[test]
 fn chained_near_step_replay_is_bit_exact() {
     const TICKS: usize = 300;
-    let continuous = scripted_run(TICKS, TICKS);
-    for block in [1, 7] {
+    let reference = single_pass_run(TICKS);
+    assert_eq!(reference.len(), TICKS);
+    for block in [TICKS, 1, 7] {
         let chained = scripted_run(TICKS, block);
-        for (tick, (a, b)) in continuous.iter().zip(&chained).enumerate() {
-            assert!(a == b, "blocks of {block}: tick {tick} differs");
+        assert_eq!(chained.len(), TICKS, "blocks of {block}");
+        for (tick, (a, b)) in reference.iter().zip(&chained).enumerate() {
+            assert!(
+                a == b,
+                "blocks of {block}: tick {tick} differs from the single pass"
+            );
         }
-        assert_eq!(chained.len(), TICKS);
     }
 }
