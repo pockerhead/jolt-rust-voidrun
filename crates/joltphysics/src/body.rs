@@ -1,9 +1,12 @@
 //! Rigid bodies: ids, creation settings, and read and write access.
 
+use std::any::Any;
+use std::ffi::c_void;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::ptr::NonNull;
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+use std::ptr::{null, NonNull};
 
 use joltphysics_sys::*;
 
@@ -575,8 +578,10 @@ impl PhysicsWorld {
 
     /// Removes a body from the world and destroys it.
     ///
-    /// Jolt does not wake the bodies around a removed one by itself, so joltphysics wakes every body
-    /// whose bounds overlap the removed body's bounds; a stack whose bottom is removed falls.
+    /// Jolt does not wake the bodies around a removed one by itself, so joltphysics wakes every
+    /// non-static body whose current bounds overlap (or touch) the removed body's bounds, in
+    /// body-id order. The woken set depends only on body poses, not on broad-phase maintenance or
+    /// worker threads; a stack whose bottom is removed falls.
     pub fn remove_body(&mut self, id: BodyId) -> Result<(), BodyError> {
         self.check(id)?;
         let mut bounds = JPH_AABox {
@@ -591,19 +596,155 @@ impl PhysicsWorld {
         .ok_or(BodyError::NotFound(id))?;
         // SAFETY: `check` just confirmed the id names a body in this world, and `&mut self`
         // keeps anyone else from removing it in between, so the body is removed exactly once
-        // (Jolt does not validate ids in `DestroyBody`). `bounds` is a live local and null
-        // filters select Jolt's accept-all defaults.
-        unsafe {
-            JPH_BodyInterface_RemoveAndDestroyBody(self.body_interface.as_ptr(), id.raw);
-            JPH_BodyInterface_ActivateBodiesInAABox(
-                self.body_interface.as_ptr(),
-                &bounds,
-                std::ptr::null(),
-                std::ptr::null(),
-            );
-        }
+        // (Jolt does not validate ids in `DestroyBody`). This thread holds no body lock.
+        unsafe { JPH_BodyInterface_RemoveAndDestroyBody(self.body_interface.as_ptr(), id.raw) };
+        self.wake_bodies_overlapping(&bounds);
         Ok(())
     }
+
+    /// Wakes every non-static body whose world bounds overlap `bounds`, in body-id order.
+    ///
+    /// Jolt's broad phase keeps widened bounds for moved bodies until its next maintenance, so
+    /// which bodies it reports depends on that history (Jolt docs, "Deterministic Simulation").
+    /// Here it only proposes candidates; each is kept only when its exact bounds overlap.
+    fn wake_bodies_overlapping(&mut self, bounds: &JPH_AABox) {
+        let mut hits = BroadPhaseHits {
+            ids: Vec::with_capacity(self.body_count() as usize),
+            panic: None,
+        };
+        // SAFETY: the broad-phase query belongs to this live world, borrowed mutably, so no
+        // step runs. `bounds` is live for the call. `hits` is a live local that only the
+        // collector touches during the call, as the `BroadPhaseHits` it expects. Null filters
+        // select joltc's accept-all defaults.
+        unsafe {
+            JPH_BroadPhaseQuery_CollideAABox(
+                self.broad_phase_query.as_ptr(),
+                bounds,
+                Some(collect_broad_phase_hit),
+                (&mut hits as *mut BroadPhaseHits).cast(),
+                null(),
+                null(),
+            );
+        }
+        if let Some(payload) = hits.panic {
+            resume_unwind(payload);
+        }
+        let mut candidates = hits.ids;
+        // Jolt's `BodyID::operator<` compares the raw value.
+        candidates.sort_unstable();
+        candidates.dedup();
+        let woken = self.overlapping_movable_bodies(bounds, &candidates);
+        if woken.is_empty() {
+            return;
+        }
+        // SAFETY: the body interface belongs to this live world, borrowed mutably; `woken` holds
+        // `woken.len()` ids and lives for the call. This thread holds no body lock:
+        // `overlapping_movable_bodies` has released its locks, which `ActivateBodies` takes
+        // again (Jolt's body mutexes are not recursive).
+        unsafe {
+            JPH_BodyInterface_ActivateBodies(
+                self.body_interface.as_ptr(),
+                woken.as_ptr(),
+                woken.len() as u32,
+            );
+        }
+    }
+
+    /// Those of the sorted `candidates` that are non-static bodies whose world bounds overlap
+    /// `bounds`, in the same order. Locks all candidates at once and releases them before
+    /// returning.
+    fn overlapping_movable_bodies(
+        &self,
+        bounds: &JPH_AABox,
+        candidates: &[JPH_BodyID],
+    ) -> Vec<JPH_BodyID> {
+        let mut woken = Vec::new();
+        if candidates.is_empty() {
+            return woken;
+        }
+        // SAFETY: the lock interface belongs to this live world. joltc copies the ids into the
+        // lock object, so `candidates` only has to live for the call. The handle takes over the
+        // lock and releases it when it goes out of scope.
+        let lock = unsafe {
+            Owned::from_raw(JPH_BodyLockInterface_LockMultiWrite(
+                self.body_lock_interface.as_ptr(),
+                candidates.as_ptr(),
+                candidates.len() as u32,
+            ))
+        };
+        let Some(lock) = lock else {
+            return woken;
+        };
+        for (index, &candidate) in candidates.iter().enumerate() {
+            // SAFETY: `lock` is live and holds `candidates.len()` ids, so `index` is in range.
+            // Jolt returns null unless the id still names a live body.
+            let body = unsafe { JPH_BodyLockMultiWrite_GetBody(lock.as_ptr(), index as u32) };
+            let Some(body) = NonNull::new(body) else {
+                continue;
+            };
+            let mut candidate_bounds = JPH_AABox {
+                min: Vec3::ZERO.to_jph(),
+                max: Vec3::ZERO.to_jph(),
+            };
+            // SAFETY: `body` is locked for writing while `lock` lives; the getters only read
+            // it, and `candidate_bounds` is a live local.
+            let is_static = unsafe {
+                JPH_Body_GetWorldSpaceBounds(body.as_ptr(), &mut candidate_bounds);
+                JPH_Body_IsStatic(body.as_ptr())
+            };
+            if !is_static && bounds_overlap(bounds, &candidate_bounds) {
+                woken.push(candidate);
+            }
+        }
+        woken
+    }
+}
+
+/// What the broad-phase collector of [`PhysicsWorld::remove_body`] gathers.
+struct BroadPhaseHits {
+    /// Candidate ids, at most as many as the capacity reserved before the query.
+    ids: Vec<JPH_BodyID>,
+    /// The payload of a panic caught in the collector, re-raised after the query.
+    panic: Option<Box<dyn Any + Send>>,
+}
+
+/// Jolt's `CollisionCollectorTraitsCollideShape::InitialEarlyOutFraction`: keep collecting.
+const KEEP_COLLECTING: f32 = f32::MAX;
+/// Jolt's `CollisionCollectorTraitsCollideShape::ShouldEarlyOutFraction`: stop the query.
+const STOP_COLLECTING: f32 = -f32::MAX;
+
+/// Broad-phase collector of [`PhysicsWorld::remove_body`]: records each candidate id without
+/// allocating and never lets a panic unwind into joltc.
+///
+/// # Safety
+/// Called only by joltc during the `JPH_BroadPhaseQuery_CollideAABox` call of
+/// `wake_bodies_overlapping`, with that call's live `*mut BroadPhaseHits` as `user_data`, which
+/// nothing else accesses during the call.
+unsafe extern "C" fn collect_broad_phase_hit(user_data: *mut c_void, body: JPH_BodyID) -> f32 {
+    // SAFETY: guaranteed by the caller (function contract); this is the only reference to the
+    // hits during the call.
+    let hits = unsafe { &mut *user_data.cast::<BroadPhaseHits>() };
+    let ids = &mut hits.ids;
+    let collected = catch_unwind(AssertUnwindSafe(|| {
+        if ids.len() < ids.capacity() {
+            ids.push(body);
+        }
+    }));
+    match collected {
+        Ok(()) => KEEP_COLLECTING,
+        Err(payload) => {
+            hits.panic = Some(payload);
+            STOP_COLLECTING
+        }
+    }
+}
+
+/// Whether two boxes overlap, touching included (Jolt `AABox::Overlaps`).
+fn bounds_overlap(a: &JPH_AABox, b: &JPH_AABox) -> bool {
+    let axis = |a_min: f32, a_max: f32, b_min: f32, b_max: f32| a_min <= b_max && b_min <= a_max;
+    axis(a.min.x, a.max.x, b.min.x, b.max.x)
+        && axis(a.min.y, a.max.y, b.min.y, b.max.y)
+        && axis(a.min.z, a.max.z, b.min.z, b.max.z)
 }
 
 /// A body write lock. Destroying it deletes Jolt's `BodyLockMultiWrite`, which unlocks the
@@ -1040,6 +1181,39 @@ mod tests {
     #[test]
     fn ill_conditioned_rotated_inertia_is_rejected() {
         assert!(!has_finite_inverse(&rotated_inertia([1.0, 1.0e-9, 1.0])));
+    }
+
+    fn aabox(min: [f32; 3], max: [f32; 3]) -> JPH_AABox {
+        JPH_AABox {
+            min: Vec3::from(min).to_jph(),
+            max: Vec3::from(max).to_jph(),
+        }
+    }
+
+    #[test]
+    fn bounds_overlap_counts_touching_and_containment() {
+        let unit = aabox([0.0; 3], [1.0; 3]);
+        assert!(bounds_overlap(&unit, &aabox([0.5; 3], [2.0; 3])));
+        assert!(bounds_overlap(
+            &unit,
+            &aabox([1.0, 0.0, 0.0], [2.0, 1.0, 1.0])
+        ));
+        assert!(bounds_overlap(&unit, &aabox([0.25; 3], [0.75; 3])));
+        assert!(bounds_overlap(&aabox([0.25; 3], [0.75; 3]), &unit));
+    }
+
+    #[test]
+    fn bounds_separated_on_any_axis_do_not_overlap() {
+        let unit = aabox([0.0; 3], [1.0; 3]);
+        for axis in 0..3 {
+            let mut min = [0.0; 3];
+            let mut max = [1.0; 3];
+            min[axis] = 1.5;
+            max[axis] = 2.5;
+            let apart = aabox(min, max);
+            assert!(!bounds_overlap(&unit, &apart), "axis {axis}");
+            assert!(!bounds_overlap(&apart, &unit), "axis {axis}");
+        }
     }
 
     #[test]

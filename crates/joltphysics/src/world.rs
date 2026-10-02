@@ -214,6 +214,7 @@ pub struct PhysicsWorld {
     pub(crate) body_interface: NonNull<JPH_BodyInterface>,
     pub(crate) body_lock_interface: NonNull<JPH_BodyLockInterface>,
     pub(crate) narrow_phase_query: NonNull<JPH_NarrowPhaseQuery>,
+    pub(crate) broad_phase_query: NonNull<JPH_BroadPhaseQuery>,
     pub(crate) object_layer_count: u32,
     pub(crate) tag: WorldTag,
 }
@@ -363,14 +364,15 @@ impl PhysicsWorld {
         // SAFETY: `system` is live and `gravity` is a live local.
         unsafe { JPH_PhysicsSystem_SetGravity(system.as_ptr(), &gravity) };
 
-        // SAFETY: `system` is live. The interfaces and the narrow-phase query live inside the
-        // Jolt system and stay valid as long as it does; the world stores them next to the
-        // system that owns them.
-        let (body_interface, body_lock_interface, narrow_phase_query) = unsafe {
+        // SAFETY: `system` is live. The interfaces and the narrow-phase and broad-phase queries
+        // live inside the Jolt system and stay valid as long as it does; the world stores them
+        // next to the system that owns them.
+        let (body_interface, body_lock_interface, narrow_phase_query, broad_phase_query) = unsafe {
             (
                 JPH_PhysicsSystem_GetBodyInterface(system.as_ptr()),
                 JPH_PhysicsSystem_GetBodyLockInterface(system.as_ptr()),
                 JPH_PhysicsSystem_GetNarrowPhaseQuery(system.as_ptr()),
+                JPH_PhysicsSystem_GetBroadPhaseQuery(system.as_ptr()),
             )
         };
         let body_interface =
@@ -379,6 +381,8 @@ impl PhysicsWorld {
             .ok_or(WorldError::AllocationFailed("body lock interface"))?;
         let narrow_phase_query = NonNull::new(narrow_phase_query.cast_mut())
             .ok_or(WorldError::AllocationFailed("narrow phase query"))?;
+        let broad_phase_query = NonNull::new(broad_phase_query.cast_mut())
+            .ok_or(WorldError::AllocationFailed("broad phase query"))?;
 
         Ok(Self {
             system,
@@ -387,6 +391,7 @@ impl PhysicsWorld {
             body_interface,
             body_lock_interface,
             narrow_phase_query,
+            broad_phase_query,
             object_layer_count: settings.layers.object_layer_count(),
             tag: WorldTag::next(),
         })

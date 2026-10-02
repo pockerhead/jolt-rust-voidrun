@@ -188,6 +188,45 @@ fn removal_wakes_bodies_resting_on_it() {
     assert!(world.body(top).unwrap().is_active());
 }
 
+/// Two sleeping cubes 3 m apart are moved by a rebase, which widens the broad phase's stored
+/// bounds until its next maintenance; then the left one is removed. Returns whether the right
+/// cube, 2 m outside the removed cube's bounds, was woken.
+fn removal_wakes_the_far_cube(optimize_before_removal: bool) -> bool {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let floor = add_floor(&mut world);
+    let left = add_cube(&mut world, RVec3::new(-3.0, 0.5, 0.0));
+    let right = add_cube(&mut world, RVec3::new(0.0, 0.5, 0.0));
+    let mut ticks = 0;
+    while !(world.body(left).unwrap().is_sleeping() && world.body(right).unwrap().is_sleeping()) {
+        assert!(world.step(DT).unwrap().is_complete());
+        ticks += 1;
+        assert!(ticks < 600, "the cubes never fell asleep");
+    }
+    world
+        .rebase(
+            &[floor, left, right],
+            Quat::IDENTITY,
+            RVec3::new(3.0, 0.0, 0.0),
+        )
+        .unwrap();
+    assert!(world.body(right).unwrap().is_sleeping());
+    if optimize_before_removal {
+        world.optimize_broad_phase();
+    }
+    world.remove_body(left).unwrap();
+    !world.body(right).unwrap().is_sleeping()
+}
+
+#[test]
+fn removal_wakes_the_same_bodies_whether_or_not_the_broad_phase_was_optimized() {
+    for optimize in [false, true] {
+        assert!(
+            !removal_wakes_the_far_cube(optimize),
+            "optimized {optimize}"
+        );
+    }
+}
+
 #[test]
 fn invalid_body_settings_are_rejected() {
     let mut world = world(Vec3::ZERO, 1);
