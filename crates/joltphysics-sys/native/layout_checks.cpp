@@ -14,7 +14,10 @@
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Body/MotionQuality.h>
 #include <Jolt/Physics/Body/MotionType.h>
+#include <Jolt/Physics/Collision/ActiveEdgeMode.h>
+#include <Jolt/Physics/Collision/BackFaceMode.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
+#include <Jolt/Physics/Collision/CollectFacesMode.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeID.h>
@@ -69,6 +72,40 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RayCastResult, bodyID, 0);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RayCastResult, fraction, 4);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RayCastResult, subShapeID2, 8);
 
+// Scene query settings and results. joltc converts these field by field
+// (ToJolt/FromJolt), so only the C ABI is pinned here, not agreement with the
+// C++ layout.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_RayCastSettings, 12, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RayCastSettings, backFaceModeTriangles, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RayCastSettings, backFaceModeConvex, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RayCastSettings, treatConvexAsSolid, 8);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_CollideSettingsBase, 28, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideSettingsBase, activeEdgeMode, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideSettingsBase, collectFacesMode, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideSettingsBase, collisionTolerance, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideSettingsBase, penetrationTolerance, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideSettingsBase, activeEdgeMovementDirection, 16);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_CollideShapeSettings, 36, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeSettings, maxSeparationDistance, 28);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeSettings, backFaceMode, 32);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ShapeCastSettings, 40, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastSettings, backFaceModeTriangles, 28);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastSettings, backFaceModeConvex, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastSettings, useShrunkenShapeAndConvexRadius, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastSettings, returnDeepestPoint, 37);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ShapeCastResult, 60, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, contactPointOn1, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, contactPointOn2, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, penetrationAxis, 24);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, penetrationDepth, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, subShapeID1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, subShapeID2, 44);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, bodyID2, 48);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, fraction, 52);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, isBackFaceHit, 56);
+
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JobSystemThreadPoolConfig, 12, 4);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JobSystemThreadPoolConfig, numThreads, 8);
 
@@ -78,6 +115,29 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, maxContactConstraints, 
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, broadPhaseLayerInterface, 24);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, objectLayerPairFilter, 32);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, objectVsBroadPhaseLayerFilter, 40);
+
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_CollideShapeResult, 80, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, contactPointOn1, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, contactPointOn2, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, penetrationAxis, 24);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, penetrationDepth, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, subShapeID1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, subShapeID2, 44);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, bodyID2, 48);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, shape1FaceCount, 52);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, shape1Faces, 56);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, shape2FaceCount, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, shape2Faces, 72);
+
+// Filter proc tables that joltphysics fills with its callbacks.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ObjectLayerFilter_Procs, 8, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ObjectLayerFilter_Procs, ShouldCollide, 0);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_BodyFilter_Procs, 16, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_BodyFilter_Procs, ShouldCollide, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_BodyFilter_Procs, ShouldCollideLocked, 8);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ShapeFilter_Procs, 16, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeFilter_Procs, ShouldCollide, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeFilter_Procs, ShouldCollide2, 8);
 #endif
 
 // joltc copies JPH_Mat4 to and from JPH::Mat44 with memcpy, so the sizes must
@@ -105,6 +165,10 @@ static_assert(sizeof(JPH_PhysicsUpdateError) == 4, "JPH_PhysicsUpdateError: unex
 static_assert(sizeof(JPH_MotionQuality) == 4, "JPH_MotionQuality: unexpected size");
 static_assert(sizeof(JPH_OverrideMassProperties) == 4, "JPH_OverrideMassProperties: unexpected size");
 static_assert(sizeof(JPH_ShapeSubType) == 4, "JPH_ShapeSubType: unexpected size");
+static_assert(sizeof(JPH_BackFaceMode) == 4, "JPH_BackFaceMode: unexpected size");
+static_assert(sizeof(JPH_ActiveEdgeMode) == 4, "JPH_ActiveEdgeMode: unexpected size");
+static_assert(sizeof(JPH_CollectFacesMode) == 4, "JPH_CollectFacesMode: unexpected size");
+static_assert(sizeof(JPH_CollisionCollectorType) == 4, "JPH_CollisionCollectorType: unexpected size");
 
 static_assert(int(JPH_MotionType_Static) == int(JPH::EMotionType::Static), "JPH_MotionType_Static");
 static_assert(int(JPH_MotionType_Kinematic) == int(JPH::EMotionType::Kinematic), "JPH_MotionType_Kinematic");
@@ -140,3 +204,12 @@ static_assert(int(JPH_ShapeSubType_Cylinder) == int(JPH::EShapeSubType::Cylinder
 static_assert(int(JPH_ShapeSubType_StaticCompound) == int(JPH::EShapeSubType::StaticCompound), "JPH_ShapeSubType_StaticCompound");
 static_assert(int(JPH_ShapeSubType_MutableCompound) == int(JPH::EShapeSubType::MutableCompound), "JPH_ShapeSubType_MutableCompound");
 static_assert(int(JPH_ShapeSubType_HeightField) == int(JPH::EShapeSubType::HeightField), "JPH_ShapeSubType_HeightField");
+
+// Jolt declares these as uint8 enums; joltc casts the 4-byte C values.
+// JPH_CollisionCollectorType is joltc's own and has no Jolt counterpart.
+static_assert(int(JPH_BackFaceMode_IgnoreBackFaces) == int(JPH::EBackFaceMode::IgnoreBackFaces), "JPH_BackFaceMode_IgnoreBackFaces");
+static_assert(int(JPH_BackFaceMode_CollideWithBackFaces) == int(JPH::EBackFaceMode::CollideWithBackFaces), "JPH_BackFaceMode_CollideWithBackFaces");
+static_assert(int(JPH_ActiveEdgeMode_CollideOnlyWithActive) == int(JPH::EActiveEdgeMode::CollideOnlyWithActive), "JPH_ActiveEdgeMode_CollideOnlyWithActive");
+static_assert(int(JPH_ActiveEdgeMode_CollideWithAll) == int(JPH::EActiveEdgeMode::CollideWithAll), "JPH_ActiveEdgeMode_CollideWithAll");
+static_assert(int(JPH_CollectFacesMode_CollectFaces) == int(JPH::ECollectFacesMode::CollectFaces), "JPH_CollectFacesMode_CollectFaces");
+static_assert(int(JPH_CollectFacesMode_NoFaces) == int(JPH::ECollectFacesMode::NoFaces), "JPH_CollectFacesMode_NoFaces");

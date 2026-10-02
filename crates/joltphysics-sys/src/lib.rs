@@ -32,6 +32,12 @@
 //!   `JPH_PhysicsSystem_Update2` with a per-world `JPH_TempAllocator` instead.
 //! - `JPH_JobSystemThreadPool_Create` maps `numThreads <= 0` to "as many as there are
 //!   hardware threads", so pass a positive worker count when the count matters.
+//! - joltc's object-layer, body and shape filters (`JPH_ObjectLayerFilter_*`,
+//!   `JPH_BodyFilter_*`, `JPH_ShapeFilter_*`) call one process-global proc table per filter
+//!   type. The `joltphysics` crate installs those tables once and owns them. Code that links
+//!   both crates must not call `JPH_*Filter_SetProcs` for these three types, and must not pass
+//!   filters it created with `JPH_*Filter_Create` to queries, because the callbacks of
+//!   `joltphysics` would receive their `userData`.
 //! - These joltc functions are not bound: `JPH_RagdollSettings_DisableParentChildCollisions`,
 //!   `JPH_Ragdoll_SetPose2`, `JPH_Ragdoll_GetPose2`, `JPH_SkeletonMapper_Initialize`,
 //!   `JPH_SkeletonMapper_LockAllTranslations`, `JPH_SkeletonMapper_LockTranslations`,
