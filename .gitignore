@@ -1,1 +1,7 @@
 /target
+
+# MAW pipeline state (local-only; the orchestrator copies it into worktrees)
+maw/
+# Local agent-pipeline tooling (not part of the library)
+.claude/skills/maw-*/
+.claude/agents/maw-*.md
