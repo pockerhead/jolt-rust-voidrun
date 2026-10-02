@@ -173,3 +173,68 @@ pub fn add_static_in(
         )
         .unwrap()
 }
+
+/// Bodies and layers of [`wireframe_scene`].
+pub struct WireframeScene {
+    pub world: PhysicsWorld,
+    pub layers: [ObjectLayer; 5],
+    pub terrain: BodyId,
+    pub chunk: BodyId,
+    pub capsule: BodyId,
+    pub far_box: BodyId,
+}
+
+/// Rotation of the chunk's structure box about y, in radians.
+pub const WIREFRAME_BOX_TURN: f32 = 0.3;
+
+/// A scene with every collider kind the game draws, near the origin: the flat terrain
+/// heightfield; at (5, 0, 5) a chunk compound with a unit structure box (half extent 1, centre
+/// (5, 1, 5), turned about y by [`WIREFRAME_BOX_TURN`]) and a feature Y-cylinder (half height 1,
+/// radius 0.5, centre (9, 1, 5)); an actor capsule (half height 0.7, radius 0.4) at (-5, 1.5, 0);
+/// and a far box (half extent 1) at (500, 0, 0).
+pub fn wireframe_scene() -> WireframeScene {
+    let (mut world, layers) = five_layer_world();
+    let [terrain_layer, chunk_layer, feature_layer, _, actor_layer] = layers;
+    let structure = Shape::new_box(Vec3::new(1.0, 1.0, 1.0)).unwrap();
+    let feature = Shape::new_cylinder(1.0, 0.5).unwrap();
+    let compound = Shape::new_compound(&[
+        CompoundChild {
+            shape: &structure,
+            position: Vec3::new(0.0, 1.0, 0.0),
+            rotation: quat_about(Vec3::new(0.0, 1.0, 0.0), WIREFRAME_BOX_TURN),
+            user_data: Groups::STRUCTURE,
+        },
+        CompoundChild {
+            shape: &feature,
+            position: Vec3::new(4.0, 1.0, 0.0),
+            rotation: Quat::IDENTITY,
+            user_data: Groups::FEATURE,
+        },
+    ])
+    .unwrap();
+    let capsule = Shape::new_capsule(0.7, 0.4).unwrap();
+    let far_box = Shape::new_box(Vec3::new(1.0, 1.0, 1.0)).unwrap();
+    WireframeScene {
+        terrain: add_static_in(&mut world, &flat_height_field(), RVec3::ZERO, terrain_layer),
+        chunk: add_static_in(
+            &mut world,
+            &compound,
+            RVec3::new(5.0, 0.0, 5.0),
+            chunk_layer,
+        ),
+        capsule: add_static_in(
+            &mut world,
+            &capsule,
+            RVec3::new(-5.0, 1.5, 0.0),
+            actor_layer,
+        ),
+        far_box: add_static_in(
+            &mut world,
+            &far_box,
+            RVec3::new(500.0, 0.0, 0.0),
+            feature_layer,
+        ),
+        world,
+        layers,
+    }
+}

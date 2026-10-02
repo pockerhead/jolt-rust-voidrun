@@ -13,6 +13,8 @@
 //! - `double-precision`: world positions ([`Real`], `JPH_RVec3`, `JPH_RMat4`) use `f64`.
 //! - `cross-platform-deterministic`: build Jolt with its cross-platform deterministic
 //!   floating point settings (slower; same results across compilers and platforms).
+//! - `debug-renderer`: compile Jolt's debug renderer into the native libraries and bind joltc's
+//!   debug drawing functions.
 //!
 //! # Native build and `JOLTC_LIB_DIR`
 //! By default the build script builds joltc and Jolt from the `vendor/` submodules with
@@ -59,6 +61,14 @@
 //!   `JPH_SkeletonMapper_Map` and `JPH_SkeletonMapper_MapReverse`. They reinterpret a
 //!   4-aligned `JPH_Mat4` array as Jolt's 16-aligned `Mat44`, which is undefined
 //!   behaviour for most arrays a caller can pass.
+//! - The debug drawing functions (`JPH_DebugRenderer_*`, `JPH_BodyDrawFilter_*`,
+//!   `JPH_PhysicsSystem_Draw*`, `JPH_Shape_Draw`) exist only with the `debug-renderer` feature,
+//!   which also compiles Jolt's debug renderer into the native libraries.
+//! - Jolt's `DebugRenderer` is a process singleton and joltc's `JPH_DebugRenderer_SetProcs` sets
+//!   one global proc table. With the `debug-renderer` feature of `joltphysics`, that crate
+//!   installs the table and creates a renderer during `PhysicsWorld::debug_lines`; code that
+//!   links both crates must not call `JPH_DebugRenderer_SetProcs` or keep its own
+//!   `JPH_DebugRenderer` alive.
 //!
 //! [Jolt Physics]: https://github.com/jrouwe/JoltPhysics
 //! [joltc]: https://github.com/amerkoleci/joltc

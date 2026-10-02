@@ -9,6 +9,9 @@ edition = "2021"
 [features]
 double-precision = ["joltphysics-sys/double-precision"]
 cross-platform-deterministic = ["joltphysics-sys/cross-platform-deterministic"]
+# Debug wireframe of colliders as line data (`PhysicsWorld::debug_lines`); also compiles Jolt's
+# debug renderer into the native libraries.
+debug-renderer = ["joltphysics-sys/debug-renderer"]
 
 [dependencies]
 joltphysics-sys = { version = "0.4.0", path = "../joltphysics-sys" }

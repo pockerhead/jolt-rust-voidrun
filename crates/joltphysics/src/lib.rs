@@ -67,11 +67,18 @@
 //! rotation and translation, without waking or putting to sleep any body. It must name every
 //! body of the world in a stable order.
 //!
+//! # Debug lines
+//! With the `debug-renderer` feature, `PhysicsWorld::debug_lines` produces the wireframe of
+//! the colliders around a point as line data (`DebugLines`); it never draws anything. The
+//! feature also compiles Jolt's native debug renderer, which is left out of the native
+//! libraries without it.
+//!
 //! # Global state
 //! joltphysics calls `JPH_Init` once per process and never calls `JPH_Shutdown`. It also
 //! installs joltc's object-layer, body and shape filter procs once per process and owns them;
 //! code that uses `joltphysics-sys` directly must leave them alone (see its notes on the raw
-//! API).
+//! API). With `debug-renderer`, joltphysics also installs joltc's debug renderer procs once and
+//! serializes debug drawing.
 #![warn(
     missing_docs,
     unsafe_op_in_unsafe_fn,
@@ -81,6 +88,8 @@
 
 mod body;
 mod character;
+#[cfg(feature = "debug-renderer")]
+mod debug;
 mod error;
 mod filter;
 mod layers;
@@ -95,6 +104,8 @@ pub use character::{
     CharacterContact, CharacterId, CharacterMut, CharacterRef, CharacterSettings, CharacterState,
     ExtendedUpdateSettings, GroundState, InnerBody,
 };
+#[cfg(feature = "debug-renderer")]
+pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{BodyError, CharacterError, QueryError, ShapeError, StepError, WorldError};
 pub use filter::QueryFilter;
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};

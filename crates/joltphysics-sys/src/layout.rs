@@ -247,3 +247,12 @@ const _: () = {
     assert!(offset_of!(JPH_CharacterContact, canPushCharacter) == 114);
     assert!(offset_of!(JPH_CharacterContact, isBackFacingContact) == 115);
 };
+
+#[cfg(feature = "debug-renderer")]
+const _: () = {
+    assert!(size_of::<JPH_DebugRenderer_Procs>() == 24);
+    assert!(align_of::<JPH_DebugRenderer_Procs>() == 8);
+    assert!(offset_of!(JPH_DebugRenderer_Procs, DrawLine) == 0);
+    assert!(offset_of!(JPH_DebugRenderer_Procs, DrawTriangle) == 8);
+    assert!(offset_of!(JPH_DebugRenderer_Procs, DrawText3D) == 16);
+};
