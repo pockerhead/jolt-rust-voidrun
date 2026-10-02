@@ -386,6 +386,8 @@ unsafe extern "C" fn object_layer_should_collide(
     // SAFETY: guaranteed by the caller (function contract).
     let state = unsafe { filter_state(user_data) };
     state.guarded(false, || {
+        #[cfg(test)]
+        tests::panic_if_injected(tests::Callback::ObjectLayer);
         state
             .filter
             .object_layers
@@ -402,6 +404,8 @@ unsafe extern "C" fn body_should_collide(user_data: *mut c_void, body: JPH_BodyI
     // SAFETY: guaranteed by the caller (function contract).
     let state = unsafe { filter_state(user_data) };
     state.guarded(false, || {
+        #[cfg(test)]
+        tests::panic_if_injected(tests::Callback::Body);
         state
             .filter
             .excluded_body
@@ -421,7 +425,11 @@ unsafe extern "C" fn shape_should_collide(
 ) -> bool {
     // SAFETY: guaranteed by the caller (function contract).
     let (state, id2) = unsafe { (filter_state(user_data), *sub_shape_id2) };
-    state.guarded(false, || state.keeps_child(shape2, id2))
+    state.guarded(false, || {
+        #[cfg(test)]
+        tests::panic_if_injected(tests::Callback::Shape);
+        state.keeps_child(shape2, id2)
+    })
 }
 
 /// Shape filter callback of shape casts and collide queries: applies
@@ -440,13 +448,42 @@ unsafe extern "C" fn shape_should_collide2(
 ) -> bool {
     // SAFETY: guaranteed by the caller (function contract).
     let (state, id2) = unsafe { (filter_state(user_data), *sub_shape_id2) };
-    state.guarded(false, || state.keeps_child(shape2, id2))
+    state.guarded(false, || {
+        #[cfg(test)]
+        tests::panic_if_injected(tests::Callback::Shape2);
+        state.keeps_child(shape2, id2)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BroadPhaseLayer, CollisionLayers, WorldSettings};
+    use crate::{
+        BodySettings, BroadPhaseLayer, CollideShape, CollisionLayers, CompoundChild, Quat, RVec3,
+        RayCast, Shape, ShapeCast, Vec3, WorldSettings,
+    };
+
+    /// A filter callback that a test can make panic.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) enum Callback {
+        ObjectLayer,
+        Body,
+        Shape,
+        Shape2,
+    }
+
+    thread_local! {
+        /// The callback that panics on this thread. Callbacks run on the querying thread, so
+        /// tests running in parallel do not see each other's choice.
+        static INJECTED_PANIC: Cell<Option<Callback>> = const { Cell::new(None) };
+    }
+
+    /// Panics when the running test made `callback` panic.
+    pub(super) fn panic_if_injected(callback: Callback) {
+        if INJECTED_PANIC.get() == Some(callback) {
+            panic!("injected {callback:?} panic");
+        }
+    }
 
     fn world() -> PhysicsWorld {
         PhysicsWorld::new(WorldSettings::default()).unwrap()
@@ -490,6 +527,117 @@ mod tests {
         }));
         let payload = result.expect_err("the panic is re-raised");
         assert_eq!(payload.downcast_ref::<&str>(), Some(&"in a callback"));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Query {
+        Ray,
+        ShapeCast,
+        Collide,
+    }
+
+    /// The body `query` finds first around the origin, from above or overlapping y 0.5.
+    fn found_body(
+        world: &PhysicsWorld,
+        filter: &QueryFilter<'_>,
+        query: Query,
+        ball: &Shape,
+    ) -> Option<BodyId> {
+        let above = RVec3::new(0.0, 5.0, 0.0);
+        let down = Vec3::new(0.0, -10.0, 0.0);
+        match query {
+            Query::Ray => world
+                .cast_ray(RayCast::new(above, down), filter)
+                .unwrap()
+                .map(|hit| hit.body),
+            Query::ShapeCast => world
+                .cast_shape(&ShapeCast::new(ball, above, Quat::IDENTITY, down), filter)
+                .unwrap()
+                .map(|hit| hit.body),
+            Query::Collide => {
+                let overlapping = RVec3::new(0.0, 0.5, 0.0);
+                world
+                    .collide_shape(
+                        &CollideShape::new(ball, overlapping, Quat::IDENTITY),
+                        filter,
+                    )
+                    .unwrap()
+                    .first()
+                    .map(|hit| hit.body)
+            }
+        }
+    }
+
+    #[test]
+    fn a_panic_in_a_filter_callback_resumes_after_the_query() {
+        let mut world = world();
+        let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        let compound = Shape::new_compound(&[
+            CompoundChild {
+                shape: &unit_box,
+                position: Vec3::ZERO,
+                rotation: Quat::IDENTITY,
+                user_data: 1,
+            },
+            CompoundChild {
+                shape: &unit_box,
+                position: Vec3::new(3.0, 0.0, 0.0),
+                rotation: Quat::IDENTITY,
+                user_data: 2,
+            },
+        ])
+        .unwrap();
+        let target = world
+            .create_body(&compound, &BodySettings::new_static())
+            .unwrap();
+        let ball = Shape::new_sphere(0.25).unwrap();
+        let excluded = world
+            .create_body(
+                &ball,
+                &BodySettings::new_static().position(RVec3::new(50.0, 0.0, 0.0)),
+            )
+            .unwrap();
+        let layers = [ObjectLayer::NON_MOVING];
+        let filter = QueryFilter::new()
+            .object_layers(&layers)
+            .child_groups(1 << 1)
+            .exclude_body(excluded);
+
+        let cases = [
+            (Query::Ray, Callback::ObjectLayer),
+            (Query::Ray, Callback::Body),
+            (Query::Ray, Callback::Shape),
+            (Query::ShapeCast, Callback::ObjectLayer),
+            (Query::ShapeCast, Callback::Body),
+            (Query::ShapeCast, Callback::Shape2),
+            (Query::Collide, Callback::ObjectLayer),
+            (Query::Collide, Callback::Body),
+            (Query::Collide, Callback::Shape2),
+        ];
+        for (query, callback) in cases {
+            INJECTED_PANIC.set(Some(callback));
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                found_body(&world, &filter, query, &ball)
+            }));
+            INJECTED_PANIC.set(None);
+            let payload = result.expect_err("joltc returned and the panic resumed");
+            assert_eq!(
+                payload.downcast_ref::<String>().map(String::as_str),
+                Some(format!("injected {callback:?} panic").as_str()),
+                "{query:?}"
+            );
+            assert_eq!(
+                found_body(&world, &filter, query, &ball),
+                Some(target),
+                "{query:?} after a {callback:?} panic"
+            );
+        }
+
+        // No body lock is left held: removing the body takes its write lock.
+        world.remove_body(target).unwrap();
+        for query in [Query::Ray, Query::ShapeCast, Query::Collide] {
+            assert_eq!(found_body(&world, &filter, query, &ball), None, "{query:?}");
+        }
     }
 
     #[test]
