@@ -62,11 +62,11 @@ in `crates/joltphysics/src/`.
 | Collision layers | `CollisionLayers`, `ObjectLayer`, `BroadPhaseLayer` | `dynamics.rs`: `collision_layers_decide_which_bodies_touch`; `src/layers.rs`: `validate_rejects_inconsistent_tables` |
 | Several worlds, threads | `PhysicsWorld: Send + Sync`, `WorldSettings::worker_threads` | `dynamics.rs`: `two_worlds_side_by_side_do_not_interfere`, `worlds_step_in_parallel_threads`; `world.rs`: `world_and_shape_are_send_and_sync`, `world_is_readable_from_many_threads` |
 | Static, kinematic and dynamic bodies, ids | `BodySettings`, `create_body`, `BodyId` | `bodies.rs`: `ids_follow_insertion_order`, `foreign_and_stale_ids_are_rejected`, `invalid_body_settings_are_rejected`, `full_world_rejects_another_body` |
-| Pose and velocity, read and write | `BodyRef`, `BodyMut` | `bodies.rs`: `pose_and_velocity_read_back_as_exact_bits` |
+| Pose and velocity, read and write | `BodyRef`, `BodyMut`, `Activation` | `bodies.rs`: `pose_and_velocity_read_back_as_exact_bits` |
 | Forces, torque, reset | `BodyMut::add_force`, `add_force_at_point`, `add_torque`, `reset_forces` | `bodies.rs`: `forces`, `reset_forces_ignores_static_and_kinematic_bodies` |
-| Sleeping and active state | `BodyRef::is_sleeping`, `is_active`, `Activation` | `bodies.rs`: `sleeping_flag_is_readable` |
+| Sleeping and active state | `BodyRef::is_sleeping`, `is_active` | `bodies.rs`: `sleeping_flag_is_readable` |
 | Removal wakes the bodies around it | `PhysicsWorld::remove_body` | `bodies.rs`: `removal_wakes_bodies_resting_on_it`, `removal_wakes_the_same_bodies_whether_or_not_the_broad_phase_was_optimized` |
-| Mass override, continuous collision, gravity factor | `BodySettings::mass`, `motion_quality`, `gravity_factor` | `bodies.rs`: `mass_too_small_to_invert_is_rejected`; `dynamics.rs`: `linear_cast_body_does_not_tunnel_through_thin_static`, `item_settles_under_caller_radial_gravity` |
+| Mass override, continuous collision, gravity factor | `BodySettings::mass`, `motion_quality`, `gravity_factor` | `bodies.rs`: `forces`, `mass_too_small_to_invert_is_rejected`, `gravity_factor_scales_the_fall`; `dynamics.rs`: `linear_cast_body_does_not_tunnel_through_thin_static` |
 | Enhanced internal edge removal (setting passed to Jolt; its effect on contacts is not tested) | `BodySettings::enhanced_internal_edge_removal` | `src/body.rs`: `enhanced_internal_edge_removal_reaches_the_body` (reads the flag back from the Jolt body) |
 | Box, sphere, Y-cylinder, Y-capsule, convex radius | `Shape::new_box`, `new_box_with_convex_radius`, `new_sphere`, `new_cylinder`, `new_capsule` | `shapes.rs`: `sharp_box_edge_ray_hits_the_exact_corner`, `convex_radius_rounds_box_edges_for_contacts`; `src/shape.rs`: `cylinder_and_capsule_dimensions_reach_jolt`, `invalid_dimensions_are_rejected` |
 | Heightfield (n = 33, holes, block size; active-edge threshold passed to Jolt, its effect on contacts not tested) | `Shape::new_height_field`, `HeightFieldSettings` | `shapes.rs`: `height_field_33_builds_and_matches_samples_at_nodes`, `height_field_rising_along_z_matches_analytic_surface`, `height_field_of_holes_has_no_collision`, `height_field_with_custom_active_edge_threshold_builds`, `static_only_shapes_are_rejected_for_moving_bodies` |
@@ -126,7 +126,7 @@ bounds overlap the removed one, in id order, so it adds no hidden state.
 What is not guaranteed by default: equal results across compilers, compiler flags, operating systems or
 CPU architectures. The `cross-platform-deterministic` feature (off by default, roughly 8 % slower) builds
 Jolt with `CROSS_PLATFORM_DETERMINISTIC`. Jolt then
-[claims](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md#deterministic-simulation)
+[claims](https://github.com/jrouwe/JoltPhysics/blob/v5.6.0/Docs/Architecture.md#deterministic-simulation)
 equal results across compilers, configurations, operating systems and architectures, as long as the same
 source is built with the same defines: never compare a `double-precision` build with a single-precision
 one, and FPU rounding and denormal (DAZ/FTZ) modes must match. This repository's gate runs on one
@@ -140,7 +140,7 @@ iteration order, time or thread identity into its calls.
 How it is checked: `cargo test -p joltphysics --test determinism` runs each scene in two child
 processes, with 1 and with 4 workers, records ticks 0 to 1000 of a chunk, terrain and item scene and
 requires them to match byte for byte; the same bodies created in another order must fail the gate. CI
-runs it in the default, `cross-platform-deterministic` and `double-precision` configurations.
+runs it in all four configurations.
 
 ## Building
 Requirements: a C++ toolchain (MSVC on Windows), CMake 3.20 or newer, and LLVM/libclang for `bindgen`

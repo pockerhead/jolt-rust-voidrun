@@ -460,3 +460,25 @@ fn full_world_rejects_another_body() {
     assert_eq!(world.body_count(), 1);
     assert_eq!(world.body(first).unwrap().position(), position);
 }
+
+#[test]
+fn gravity_factor_scales_the_fall() {
+    let fall_speed = |factor: f32| {
+        let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+        let id = world
+            .create_body(
+                &cube_shape(),
+                &BodySettings::new_dynamic().gravity_factor(factor),
+            )
+            .unwrap();
+        step(&mut world, 30);
+        world.body(id).unwrap().linear_velocity().y
+    };
+    let (full, none, half) = (fall_speed(1.0), fall_speed(0.0), fall_speed(0.5));
+    assert!(full < -4.0, "full gravity fell at {full}");
+    assert_eq!(none, 0.0);
+    assert!(
+        (half - full / 2.0).abs() < 1e-4,
+        "half {half} vs full {full}"
+    );
+}

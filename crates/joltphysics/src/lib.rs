@@ -1,6 +1,6 @@
 //! Safe Rust API for [Jolt Physics](https://github.com/jrouwe/JoltPhysics) over the
 //! [joltc](https://github.com/amerkoleci/joltc) raw layer in
-//! [`joltphysics-sys`](https://docs.rs/joltphysics-sys).
+//! [`joltphysics-sys`](https://github.com/pockerhead/jolt-rust-voidrun/tree/main/crates/joltphysics-sys).
 //!
 //! A [`PhysicsWorld`] owns a Jolt physics system with its collision layers
 //! ([`CollisionLayers`]), its own job system and temp allocator. Bodies are created from a
