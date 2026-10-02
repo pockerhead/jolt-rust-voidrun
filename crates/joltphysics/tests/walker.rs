@@ -229,27 +229,62 @@ fn step_law_climbs_up_to_045_but_not_05() {
     assert!((0.45..0.5).contains(&highest), "climbs up to {highest}");
 }
 
-/// As `walk_into_block`, but the block is one sharp dynamic box in the item layer, and the item
-/// layer is in the controller filter when `in_filter` is set. The world is never stepped, so the
-/// box stays where it is.
-fn walk_into_item(height: f64, in_filter: bool) -> (NearOutput, f64) {
+/// A sharp box in the way of the walker, 4 m wide along z. Distances are metres along x from the
+/// face of `walk_into_block`, heights are above the ground at that face.
+#[derive(Clone, Copy)]
+struct SharpBox {
+    near_x: f64,
+    depth: f64,
+    bottom: f64,
+    top: f64,
+    /// A dynamic body in the item layer, else a static structure.
+    dynamic: bool,
+}
+
+/// As `walk_into_block`, but with `boxes` in the way, and the item layer in the controller filter
+/// when `in_filter` is set. The world is never stepped, so dynamic boxes stay where they are.
+fn walk_into_boxes(boxes: &[SharpBox], in_filter: bool) -> (NearOutput, f64) {
     let (mut world, layers) = fixture_world(1);
     flat_chunk(&mut world, &layers, 0.0);
     let face = 1.0 + f64::from(RADIUS);
-    let top = flat_ground(face, 0.0) + height;
-    let block = Shape::new_box_with_convex_radius(vec3([2.0, 1.5, 2.0]), 0.0).unwrap();
-    world
-        .create_body(
-            &block,
-            &BodySettings::new_dynamic()
-                .position(rvec3([face + 2.0, top - 1.5, 0.0]))
-                .object_layer(layers.item),
-        )
-        .unwrap();
+    let ground = flat_ground(face, 0.0);
+    for b in boxes {
+        let centre = [
+            face + b.near_x + 0.5 * b.depth,
+            ground + 0.5 * (b.bottom + b.top),
+            0.0,
+        ];
+        let half = [0.5 * b.depth, 0.5 * (b.top - b.bottom), 2.0];
+        if b.dynamic {
+            let block = Shape::new_box_with_convex_radius(vec3(half), 0.0).unwrap();
+            world
+                .create_body(
+                    &block,
+                    &BodySettings::new_dynamic()
+                        .position(rvec3(centre))
+                        .object_layer(layers.item),
+                )
+                .unwrap();
+        } else {
+            structure_box(&mut world, &layers, centre, half, 0.0);
+        }
+    }
     let mut walker = add_walker(&mut world, &layers, resting_at(0.0, 0.0));
     walker.items_in_filter = in_filter;
     let outputs = run(&mut world, &walker, 120, walking([1.0, 0.0, 0.0], SPEED));
     (*outputs.last().unwrap(), face)
+}
+
+/// As `walk_into_block`, but the block is one sharp dynamic box in the item layer.
+fn walk_into_item(height: f64, in_filter: bool) -> (NearOutput, f64) {
+    let item = SharpBox {
+        near_x: 0.0,
+        depth: 4.0,
+        bottom: height - 3.0,
+        top: height,
+        dynamic: true,
+    };
+    walk_into_boxes(&[item], in_filter)
 }
 
 /// The highest dynamic box, to 1 mm, that a walker with the item layer in its filter climbs.
@@ -280,14 +315,79 @@ fn items_outside_the_controller_filter_are_no_obstacle() {
 
 /// With the item layer put in the controller filter against the game's rules, the game's
 /// autostep still never steps onto a dynamic body: a 0.4 m dynamic box, which is climbed as a
-/// static structure (see the step law), is not. `CharacterVirtual` by itself creeps onto a sharp
-/// dynamic box up to about 0.37 m; the game's mask, which has no item group, avoids that.
+/// static structure (see the step law), holds the walker back and is not climbed.
+/// `CharacterVirtual` by itself creeps onto a sharp dynamic box up to about 0.37 m, so a 0.3 m
+/// box is climbed; the game's mask, which has no item group, avoids that.
 #[test]
 fn the_autostep_never_climbs_a_dynamic_body_in_the_filter() {
     let (out, face) = walk_into_item(0.4, true);
     assert!(!climbed(&out, 0.4, face), "{out:?}");
+    assert_eq!(out.blocker.and_then(|b| b.group), Some(Groups::ITEM));
+    let (out, face) = walk_into_item(0.3, true);
+    assert!(climbed(&out, 0.3, face), "native creep: {out:?}");
     let highest = max_climbable_item();
-    assert!(highest < 0.4, "climbs dynamic boxes up to {highest}");
+    assert!(
+        (0.3..0.4).contains(&highest),
+        "climbs dynamic boxes up to {highest}"
+    );
+}
+
+/// The autostep does not start from a dynamic body it is pushed against: a 0.05 m thick dynamic
+/// plate 0.40 m high stands in front of a static 0.45 m step, and the walker stays in front of the
+/// plate. With the item layer out of the filter the plate is not seen, and the step is climbed.
+#[test]
+fn a_dynamic_body_in_front_of_a_step_does_not_start_the_autostep() {
+    let scene = [
+        SharpBox {
+            near_x: 0.0,
+            depth: 0.05,
+            bottom: -1.0,
+            top: 0.40,
+            dynamic: true,
+        },
+        SharpBox {
+            near_x: 0.05,
+            depth: 4.0,
+            bottom: -1.0,
+            top: 0.45,
+            dynamic: false,
+        },
+    ];
+    let (out, face) = walk_into_boxes(&scene, true);
+    assert!(!climbed(&out, 0.45, face), "{out:?}");
+    assert_eq!(out.blocker.and_then(|b| b.group), Some(Groups::ITEM));
+    let (out, face) = walk_into_boxes(&scene, false);
+    assert!(climbed(&out, 0.45, face), "plate not seen: {out:?}");
+}
+
+/// The autostep does not land on a dynamic body: a static 0.40 m step 0.1 m deep holds the walker
+/// back, and the top behind it is a dynamic box 0.45 m high. With that box static, the step is
+/// climbed.
+#[test]
+fn the_autostep_does_not_land_on_a_dynamic_body() {
+    let scene = |dynamic| {
+        [
+            SharpBox {
+                near_x: 0.0,
+                depth: 0.1,
+                bottom: -1.0,
+                top: 0.40,
+                dynamic: false,
+            },
+            SharpBox {
+                near_x: 0.1,
+                depth: 4.0,
+                bottom: -1.0,
+                top: 0.45,
+                dynamic,
+            },
+        ]
+    };
+    let (out, face) = walk_into_boxes(&scene(true), true);
+    assert!(!climbed(&out, 0.45, face), "{out:?}");
+    assert_eq!(out.blocker.and_then(|b| b.group), Some(Groups::STRUCTURE));
+    let (out, face) = walk_into_boxes(&scene(false), true);
+    assert!(climbed(&out, 0.45, face), "static top: {out:?}");
 }
 
 /// The 0.4 m block of `walk_into_block` under a slab 0.5 m thick whose bottom is

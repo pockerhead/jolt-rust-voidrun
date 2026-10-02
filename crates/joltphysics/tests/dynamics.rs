@@ -314,7 +314,9 @@ fn slide_over_compound(enhanced_internal_edge_removal: bool) -> (f32, f32, Real)
 fn enhanced_internal_edge_removal_smooths_sliding_over_a_compound() {
     let off = slide_over_compound(false);
     let on = slide_over_compound(true);
-    // Measured largest vertical speeds: 7.02 m/s off, 0.00035 m/s on.
+    // Measured largest vertical speeds: 7.02 m/s off, 0.00035 m/s on; final x -0.88 off, 0.52 on.
     assert!(off.1 > 3.5, "off {off:?}, on {on:?}");
     assert!(off.1 >= 3.0 * on.1, "off {off:?}, on {on:?}");
+    assert!(on.1 < 0.01, "off {off:?}, on {on:?}");
+    assert!(on.2 > off.2, "off {off:?}, on {on:?}");
 }
