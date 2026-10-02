@@ -12,6 +12,11 @@ fn world_and_shape_are_send_and_sync() {
     assert_send_sync::<PhysicsWorld>();
     assert_send_sync::<Shape>();
     assert_send_sync::<BodyId>();
+    assert_send_sync::<RayCast>();
+    assert_send_sync::<RayHit>();
+    assert_send_sync::<SubShapeId>();
+    assert_send_sync::<CompoundSubShape>();
+    assert_send_sync::<HeightFieldSettings>();
 }
 
 #[test]

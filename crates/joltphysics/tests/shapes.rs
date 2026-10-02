@@ -548,3 +548,125 @@ fn dynamic_compound_with_rotated_child_is_accepted() {
     assert!(length(body.linear_velocity()).is_finite());
     assert!(length(body.angular_velocity()).is_finite());
 }
+
+#[test]
+fn sharp_box_edge_ray_hits_the_exact_corner() {
+    let half_extent = Vec3::new(1.0, 1.0, 1.0);
+    let ray = RayCast::new(RVec3::new(2.0, 2.0, 0.0), Vec3::new(-2.0, -2.0, 0.0));
+    let sharp = Shape::new_box_with_convex_radius(half_extent, 0.0).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &sharp, RVec3::new(0.0, 0.0, 0.0));
+    let hit = world.cast_ray(ray).unwrap().expect("the edge is hit");
+    assert_eq!(hit.fraction, 0.5);
+    assert_eq!(ray.point_at(hit.fraction), RVec3::new(1.0, 1.0, 0.0));
+
+    // Jolt casts rays against the sharp box whatever the convex radius.
+    let rounded = Shape::new_box(half_extent).unwrap();
+    let mut world = common::world(Vec3::ZERO, 1);
+    add_static(&mut world, &rounded, RVec3::new(0.0, 0.0, 0.0));
+    let hit = world.cast_ray(ray).unwrap().expect("the edge is hit");
+    assert_eq!(hit.fraction, 0.5);
+}
+
+/// Places a resting sphere of radius 0.5 at `(1 + offset, 1 + offset, 0)`, next to an edge of
+/// the static box `block` (half extent 1) at the origin, steps 10 times without gravity and
+/// returns the sphere's position before and after.
+fn sphere_next_to_box_edge(block: &Shape, offset: Real) -> ([Real; 3], [Real; 3]) {
+    let ball_shape = Shape::new_sphere(0.5).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, block, RVec3::new(0.0, 0.0, 0.0));
+    let start = 1.0 + offset;
+    let ball = world
+        .create_body(
+            &ball_shape,
+            &BodySettings::new_dynamic().position(RVec3::new(start, start, 0.0)),
+        )
+        .unwrap();
+    let before = world.body(ball).unwrap().position().into();
+    step(&mut world, 10);
+    (before, world.body(ball).unwrap().position().into())
+}
+
+#[test]
+fn convex_radius_rounds_box_edges_for_contacts() {
+    let half_extent = Vec3::new(1.0, 1.0, 1.0);
+    let sharp = Shape::new_box_with_convex_radius(half_extent, 0.0).unwrap();
+    let rounded = Shape::new_box(half_extent).unwrap();
+    let edge_distance = |p: [Real; 3]| ((p[0] - 1.0).powi(2) + (p[1] - 1.0).powi(2)).sqrt();
+
+    // The sphere's centre is sqrt(2) * 0.33 = 0.467 from the sharp edge: it penetrates by
+    // 0.033, more than Jolt's 0.02 penetration slop, and is pushed out.
+    let (before, after) = sphere_next_to_box_edge(&sharp, 0.33);
+    assert!(
+        edge_distance(after) > edge_distance(before) + 0.01,
+        "{before:?} -> {after:?}"
+    );
+    // Rounded by the default 0.05, the edge is 0.0126 inside the sphere, within the slop, so
+    // the sphere stays exactly where it is.
+    let (before, after) = sphere_next_to_box_edge(&rounded, 0.33);
+    assert_eq!(after.map(Real::to_bits), before.map(Real::to_bits));
+
+    // Jolt uses at most 0.05 of the convex radius for contacts
+    // (`ScaleHelpers::ScaleConvexRadius`), so a radius of 0.2 collides like the default.
+    let large = Shape::new_box_with_convex_radius(half_extent, 0.2).unwrap();
+    let (_, after_default) = sphere_next_to_box_edge(&rounded, 0.32);
+    let (_, after_large) = sphere_next_to_box_edge(&large, 0.32);
+    let (_, after_sharp) = sphere_next_to_box_edge(&sharp, 0.32);
+    assert_eq!(
+        after_large.map(Real::to_bits),
+        after_default.map(Real::to_bits)
+    );
+    assert_ne!(
+        after_sharp.map(Real::to_bits),
+        after_default.map(Real::to_bits)
+    );
+}
+
+#[test]
+fn shapes_are_shared_across_bodies_and_worlds() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let pillar = Shape::new_cylinder(1.0, 0.3).unwrap();
+    let compound = Shape::new_compound(&[
+        child(&unit_box, Vec3::ZERO, Quat::IDENTITY, 1),
+        child(&pillar, Vec3::new(2.0, 0.5, 0.0), Quat::IDENTITY, 2),
+    ])
+    .unwrap();
+    drop((unit_box, pillar));
+    let samples: Vec<f32> = (0..17 * 17).map(|i| 0.05 * (i % 7) as f32).collect();
+    let terrain_settings = HeightFieldSettings::default().offset(Vec3::new(-8.0, -2.0, -8.0));
+    let terrain = Shape::new_height_field(17, &samples, &terrain_settings).unwrap();
+
+    let mut world_a = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let mut world_b = world(Vec3::new(0.0, -9.81, 0.0), 4);
+    for world in [&mut world_a, &mut world_b] {
+        add_static(world, &terrain, RVec3::new(0.0, 0.0, 0.0));
+        add_static(world, &compound, RVec3::new(0.0, 0.0, 0.0));
+    }
+    add_static(&mut world_a, &compound, RVec3::new(-5.0, 0.0, 5.0));
+    drop((compound, terrain));
+    step(&mut world_a, 10);
+    step(&mut world_b, 10);
+
+    let rays: Vec<RayCast> = [(0.0, 0.0), (2.0, 0.0), (3.3, -4.1), (-6.2, 1.7), (5.5, 6.5)]
+        .into_iter()
+        .map(|(x, z)| down_from(x, 10.0, z, 20.0))
+        .collect();
+    let cast_all = |world: &PhysicsWorld| -> Vec<u32> {
+        rays.iter()
+            .map(|&ray| {
+                let hit = world.cast_ray(ray).unwrap().expect("every ray hits");
+                hit.fraction.to_bits()
+            })
+            .collect()
+    };
+    let expected = cast_all(&world_b);
+    assert_eq!(cast_all(&world_a), expected);
+
+    std::thread::scope(|scope| {
+        scope.spawn(|| step(&mut world_a, 10));
+        let reader = scope.spawn(|| cast_all(&world_b));
+        assert_eq!(reader.join().unwrap(), expected);
+    });
+    drop(world_a);
+    assert_eq!(cast_all(&world_b), expected);
+}
