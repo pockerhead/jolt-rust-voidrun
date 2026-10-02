@@ -385,3 +385,224 @@ fn queries_see_created_moved_and_removed_bodies_without_a_step() {
     world.remove_body(body).unwrap();
     assert_eq!(world.cast_ray(at_ten, &ALL), Ok(None));
 }
+
+// Shape casts. The capsule is 2 * (0.70845 + 0.4) = 2.2169 m tall.
+const HALF_HEIGHT: f32 = 0.70845;
+const RADIUS: f32 = 0.4;
+const CAPSULE_HALF_EXTENT: f32 = HALF_HEIGHT + RADIUS;
+
+fn capsule() -> Shape {
+    Shape::new_capsule(HALF_HEIGHT, RADIUS).unwrap()
+}
+
+fn down(length: f32) -> Vec3 {
+    Vec3::new(0.0, -length, 0.0)
+}
+
+/// A static box with its underside at y = 4.
+fn add_ceiling(world: &mut PhysicsWorld) -> BodyId {
+    let shape = Shape::new_box(Vec3::new(100.0, 1.0, 100.0)).unwrap();
+    world
+        .create_body(
+            &shape,
+            &BodySettings::new_static().position(RVec3::new(0.0, 5.0, 0.0)),
+        )
+        .unwrap()
+}
+
+#[test]
+fn capsule_cast_down_reports_floor_normal_and_distance() {
+    let mut world = world(Vec3::ZERO, 1);
+    let floor = add_floor(&mut world);
+    let shape = capsule();
+    let cast = ShapeCast::new(&shape, RVec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, down(2.0));
+    let hit = world.cast_shape(&cast, &ALL).unwrap().expect("the floor");
+    assert_eq!(hit.body, floor);
+    assert!(
+        (hit.distance - (2.0 - CAPSULE_HALF_EXTENT)).abs() < 1e-3,
+        "{hit:?}"
+    );
+    assert!(hit.normal.y > 0.99, "{hit:?}");
+    assert!(hit.point.y.abs() < 1e-3, "{hit:?}");
+}
+
+#[test]
+fn capsule_cast_up_reports_ceiling_normal() {
+    let mut world = world(Vec3::ZERO, 1);
+    let ceiling = add_ceiling(&mut world);
+    let shape = capsule();
+    let up = Vec3::new(0.0, 2.0, 0.0);
+    let cast = ShapeCast::new(&shape, RVec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, up);
+    let hit = world.cast_shape(&cast, &ALL).unwrap().expect("the ceiling");
+    assert_eq!(hit.body, ceiling);
+    assert!(hit.normal.y < 0.0, "{hit:?}");
+    assert!(
+        (hit.distance - (2.0 - CAPSULE_HALF_EXTENT)).abs() < 1e-3,
+        "{hit:?}"
+    );
+}
+
+#[test]
+fn rotated_capsule_cast_uses_its_rotation() {
+    let mut world = world(Vec3::ZERO, 1);
+    add_floor(&mut world);
+    let shape = capsule();
+    let lying = quat_about(Vec3::new(0.0, 0.0, 1.0), 90.0_f32.to_radians());
+    let cast = ShapeCast::new(&shape, RVec3::new(0.0, 2.0, 0.0), lying, down(2.0));
+    let hit = world.cast_shape(&cast, &ALL).unwrap().expect("the floor");
+    assert!((hit.distance - 1.6).abs() < 1e-3, "{hit:?}");
+    assert!(hit.normal.y > 0.99, "{hit:?}");
+}
+
+#[test]
+fn target_distance_stops_short() {
+    let mut world = world(Vec3::ZERO, 1);
+    add_floor(&mut world);
+    let shape = capsule();
+    let cast = ShapeCast::new(&shape, RVec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, down(2.0))
+        .target_distance(0.02);
+    let hit = world.cast_shape(&cast, &ALL).unwrap().expect("the floor");
+    let expected = 2.0 - CAPSULE_HALF_EXTENT - 0.02;
+    assert!((hit.distance - expected).abs() < 1e-3, "{hit:?}");
+    assert!((hit.penetration_depth + 0.02).abs() < 1e-3, "{hit:?}");
+
+    let gap = 0.01155;
+    let near = RVec3::new(0.0, (CAPSULE_HALF_EXTENT + gap) as Real, 0.0);
+    let cast = ShapeCast::new(&shape, near, Quat::IDENTITY, down(2.0)).target_distance(0.02);
+    let hit = world.cast_shape(&cast, &ALL).unwrap().expect("the floor");
+    assert_eq!(hit.fraction, 0.0);
+    assert!((hit.penetration_depth + gap).abs() < 1e-3, "{hit:?}");
+    assert!(hit.normal.y > 0.99, "{hit:?}");
+
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let cast = ShapeCast::new(
+        &unit_box,
+        RVec3::new(0.0, 2.0, 0.0),
+        Quat::IDENTITY,
+        down(2.0),
+    )
+    .target_distance(0.02);
+    assert!(matches!(
+        world.cast_shape(&cast, &ALL),
+        Err(QueryError::InvalidValue(_))
+    ));
+}
+
+#[test]
+fn inflated_cast_matches_a_larger_capsule() {
+    let mut world = world(Vec3::ZERO, 1);
+    add_floor(&mut world);
+    let start = RVec3::new(0.3, 2.0, -0.2);
+    let tilted = quat_about(Vec3::new(1.0, 0.0, 0.0), 20.0_f32.to_radians());
+    let shape = capsule();
+    let padded = ShapeCast::new(&shape, start, tilted, down(2.0)).target_distance(0.1);
+    let larger_shape = Shape::new_capsule(HALF_HEIGHT, RADIUS + 0.1).unwrap();
+    let larger = ShapeCast::new(&larger_shape, start, tilted, down(2.0));
+    let padded = world.cast_shape(&padded, &ALL).unwrap().unwrap();
+    let larger = world.cast_shape(&larger, &ALL).unwrap().unwrap();
+    assert!(
+        (padded.fraction - larger.fraction).abs() < 1e-6,
+        "{padded:?} {larger:?}"
+    );
+}
+
+#[test]
+fn start_penetrating_is_reported_moving_in_not_out() {
+    let mut world = world(Vec3::ZERO, 1);
+    let floor = add_floor(&mut world);
+    let shape = capsule();
+    let sunk = RVec3::new(0.0, (CAPSULE_HALF_EXTENT - 0.1) as Real, 0.0);
+    let cast = ShapeCast::new(&shape, sunk, Quat::IDENTITY, down(2.0)).return_deepest_point(true);
+    let hit = world.cast_shape(&cast, &ALL).unwrap().expect("the floor");
+    assert_eq!(hit.body, floor);
+    assert_eq!(hit.fraction, 0.0);
+    assert!((hit.penetration_depth - 0.1).abs() < 1e-3, "{hit:?}");
+    assert!(hit.normal.y > 0.99, "{hit:?}");
+
+    let up = ShapeCast::new(&shape, sunk, Quat::IDENTITY, Vec3::new(0.0, 2.0, 0.0));
+    assert_eq!(world.cast_shape(&up, &ALL), Ok(None));
+}
+
+/// A chunk compound with a FEATURE canopy (top at y = 3.5) over a STRUCTURE porch (top at
+/// y = 1), on the chunk layer, and a flat terrain at y = 0.
+fn porch_and_canopy(world: &mut PhysicsWorld, terrain: ObjectLayer, chunk: ObjectLayer) {
+    let porch = Shape::new_box(Vec3::new(2.0, 0.5, 2.0)).unwrap();
+    let canopy = Shape::new_cylinder(0.5, 2.0).unwrap();
+    let house = Shape::new_compound(&[
+        child(&porch, Vec3::new(0.0, 0.5, 0.0), Groups::STRUCTURE),
+        child(&canopy, Vec3::new(0.0, 3.0, 0.0), Groups::FEATURE),
+    ])
+    .unwrap();
+    add_static_in(world, &house, RVec3::ZERO, chunk);
+    add_static_in(world, &flat_height_field(), RVec3::ZERO, terrain);
+}
+
+#[test]
+fn ball_cast_terrain_only() {
+    let (mut world, [terrain, chunk, ..]) = five_layer_world();
+    porch_and_canopy(&mut world, terrain, chunk);
+    let ball = Shape::new_sphere(0.05).unwrap();
+    let cast = ShapeCast::new(&ball, RVec3::new(0.5, 5.0, 0.5), Quat::IDENTITY, down(50.0));
+    let terrain_only = [terrain];
+    let hit = world
+        .cast_shape(&cast, &QueryFilter::new().object_layers(&terrain_only))
+        .unwrap()
+        .expect("the terrain");
+    assert_eq!(hit.object_layer, terrain);
+    assert!(hit.point.y.abs() < 1e-3, "{hit:?}");
+    assert!((hit.distance - 4.95).abs() < 1e-3, "{hit:?}");
+    assert!(hit.normal.y > 0.99, "{hit:?}");
+
+    let hit = world.cast_shape(&cast, &ALL).unwrap().expect("the canopy");
+    assert!((hit.point.y - 3.5).abs() < 1e-3, "{hit:?}");
+}
+
+#[test]
+fn shape_cast_child_group_filter() {
+    let (mut world, [terrain, chunk, ..]) = five_layer_world();
+    porch_and_canopy(&mut world, terrain, chunk);
+    let ball = Shape::new_sphere(0.25).unwrap();
+    let cast = ShapeCast::new(&ball, RVec3::new(0.5, 6.0, 0.5), Quat::IDENTITY, down(10.0));
+    let structure = QueryFilter::new().child_groups(1 << Groups::STRUCTURE);
+    let hit = world.cast_shape(&cast, &structure).unwrap().expect("porch");
+    assert_eq!(
+        hit.compound_child.map(|c| c.user_data),
+        Some(Groups::STRUCTURE)
+    );
+    assert!((hit.point.y - 1.0).abs() < 1e-3, "{hit:?}");
+    let feature = QueryFilter::new().child_groups(1 << Groups::FEATURE);
+    let hit = world.cast_shape(&cast, &feature).unwrap().expect("canopy");
+    assert_eq!(
+        hit.compound_child.map(|c| c.user_data),
+        Some(Groups::FEATURE)
+    );
+}
+
+#[test]
+fn shape_cast_rejects_invalid_input() {
+    let mut world = world(Vec3::ZERO, 1);
+    add_floor(&mut world);
+    let shape = capsule();
+    let start = RVec3::new(0.0, 2.0, 0.0);
+    let terrain = flat_height_field();
+    let nan_start = RVec3::new(Real::NAN, 0.0, 0.0);
+    let long = Quat::from_xyzw(0.0, 0.0, 0.0, 2.0);
+    let invalid = [
+        ShapeCast::new(&shape, nan_start, Quat::IDENTITY, down(1.0)),
+        ShapeCast::new(&shape, start, long, down(1.0)),
+        ShapeCast::new(&shape, start, Quat::IDENTITY, Vec3::ZERO),
+        ShapeCast::new(&shape, start, Quat::IDENTITY, Vec3::new(f32::NAN, 0.0, 0.0)),
+        ShapeCast::new(&shape, start, Quat::IDENTITY, down(1.0)).target_distance(-0.1),
+        ShapeCast::new(&shape, start, Quat::IDENTITY, down(1.0)).target_distance(f32::NAN),
+        ShapeCast::new(&terrain, start, Quat::IDENTITY, down(1.0)),
+    ];
+    for cast in invalid {
+        assert!(
+            matches!(
+                world.cast_shape(&cast, &ALL),
+                Err(QueryError::InvalidValue(_))
+            ),
+            "{cast:?}"
+        );
+    }
+}

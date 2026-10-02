@@ -640,9 +640,46 @@ impl Shape {
     }
 
     /// Jolt's concrete shape type.
-    fn sub_type(&self) -> JPH_ShapeSubType {
+    pub(crate) fn sub_type(&self) -> JPH_ShapeSubType {
         // SAFETY: the shape is live for the call; the getter only reads it.
         unsafe { JPH_Shape_GetSubType(self.as_ptr()) }
+    }
+
+    /// Whether Jolt allows this shape only on static bodies (heightfields and compounds that
+    /// contain one).
+    pub(crate) fn must_be_static(&self) -> bool {
+        // SAFETY: the shape is live for the call; the getter only reads it.
+        unsafe { JPH_Shape_MustBeStatic(self.as_ptr()) }
+    }
+
+    /// This sphere or capsule with its radius grown by `by` metres; `Ok(None)` for every other
+    /// shape type.
+    ///
+    /// For spheres and capsules Jolt's default support function is the core (a point or a
+    /// segment) plus a convex radius equal to the radius (`SphereShape.cpp`, `CapsuleShape.cpp`
+    /// `GetSupportFunction`), and a shape cast adds `ShapeCastSettings::mExtraConvexRadius` to
+    /// that same radius (`ConvexShape.cpp`, `CastSphereVsTriangles.cpp`,
+    /// `CastConvexVsTriangles.cpp`). Casting the grown shape is therefore the cast Jolt does
+    /// with an extra convex radius of `by`.
+    pub(crate) fn inflated(&self, by: f32) -> Result<Option<Shape>, ShapeError> {
+        let sub_type = self.sub_type();
+        if sub_type == JPH_ShapeSubType_Sphere {
+            // SAFETY: the shape is live and a sphere (checked above); the getter only reads it.
+            let radius = unsafe { JPH_SphereShape_GetRadius(self.as_ptr().cast()) };
+            Shape::new_sphere(radius + by).map(Some)
+        } else if sub_type == JPH_ShapeSubType_Capsule {
+            let capsule: *const JPH_CapsuleShape = self.as_ptr().cast();
+            // SAFETY: the shape is live and a capsule (checked above); the getters only read it.
+            let (half_height, radius) = unsafe {
+                (
+                    JPH_CapsuleShape_GetHalfHeightOfCylinder(capsule),
+                    JPH_CapsuleShape_GetRadius(capsule),
+                )
+            };
+            Shape::new_capsule(half_height, radius + by).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -784,6 +821,45 @@ mod tests {
             );
             assert_eq!(JPH_CapsuleShape_GetRadius(capsule.as_ptr().cast()), 0.4);
         }
+    }
+
+    #[test]
+    fn inflated_grows_spheres_and_capsules_only() {
+        let sphere = Shape::new_sphere(0.05)
+            .unwrap()
+            .inflated(0.1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(sphere.sub_type(), JPH_ShapeSubType_Sphere);
+        // SAFETY: the shape is live and a sphere; the getter only reads it.
+        let radius = unsafe { JPH_SphereShape_GetRadius(sphere.as_ptr().cast()) };
+        assert!((radius - 0.15).abs() < 1e-6);
+
+        let capsule = Shape::new_capsule(0.7, 0.4)
+            .unwrap()
+            .inflated(0.1)
+            .unwrap()
+            .unwrap();
+        // SAFETY: the shape is live and a capsule; the getters only read it.
+        unsafe {
+            assert_eq!(
+                JPH_CapsuleShape_GetHalfHeightOfCylinder(capsule.as_ptr().cast()),
+                0.7
+            );
+            assert!((JPH_CapsuleShape_GetRadius(capsule.as_ptr().cast()) - 0.5).abs() < 1e-6);
+        }
+
+        let unit_box = unit_box();
+        assert!(unit_box.inflated(0.1).unwrap().is_none());
+        let huge = Shape::new_capsule(1.0, f32::MAX).unwrap();
+        assert!(huge.inflated(f32::MAX).is_err());
+    }
+
+    #[test]
+    fn static_only_is_read_from_jolt() {
+        assert!(!unit_box().must_be_static());
+        let terrain = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default());
+        assert!(terrain.unwrap().must_be_static());
     }
 
     #[test]

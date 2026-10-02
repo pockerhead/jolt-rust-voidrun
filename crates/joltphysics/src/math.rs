@@ -62,6 +62,20 @@ impl Vec3 {
     pub(crate) fn length(self) -> f32 {
         self.dot(self).sqrt()
     }
+
+    pub(crate) fn scale(self, factor: f32) -> Self {
+        Self::new(self.x * factor, self.y * factor, self.z * factor)
+    }
+
+    /// The unit vector along `self`, or zero when `self` is too short to have a direction.
+    pub(crate) fn normalized_or_zero(self) -> Self {
+        let length_squared = self.dot(self);
+        if length_squared <= 1.0e-12 {
+            Self::ZERO
+        } else {
+            self.scale(1.0 / length_squared.sqrt())
+        }
+    }
 }
 
 impl From<[f32; 3]> for Vec3 {
@@ -262,5 +276,16 @@ mod tests {
         assert!(Quat::IDENTITY.is_valid_rotation());
         assert!(!Quat::from_xyzw(f32::NAN, 0.0, 0.0, 1.0).is_valid_rotation());
         assert!(!Quat::from_xyzw(0.0, 0.0, 0.0, 2.0).is_valid_rotation());
+    }
+
+    #[test]
+    fn vector_helpers() {
+        let v = Vec3::new(3.0, 0.0, 4.0);
+        assert_eq!(v.dot(Vec3::new(1.0, 1.0, 1.0)), 7.0);
+        assert_eq!(v.length(), 5.0);
+        assert_eq!(v.scale(2.0), Vec3::new(6.0, 0.0, 8.0));
+        assert_eq!(v.normalized_or_zero(), Vec3::new(0.6, 0.0, 0.8));
+        assert_eq!(Vec3::ZERO.normalized_or_zero(), Vec3::ZERO);
+        assert_eq!(Vec3::new(1e-7, 0.0, 0.0).normalized_or_zero(), Vec3::ZERO);
     }
 }
