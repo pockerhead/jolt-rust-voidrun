@@ -12,6 +12,11 @@ fn world_and_shape_are_send_and_sync() {
     assert_send_sync::<PhysicsWorld>();
     assert_send_sync::<Shape>();
     assert_send_sync::<BodyId>();
+    assert_send_sync::<RayCast>();
+    assert_send_sync::<RayHit>();
+    assert_send_sync::<SubShapeId>();
+    assert_send_sync::<CompoundSubShape>();
+    assert_send_sync::<HeightFieldSettings>();
 }
 
 #[test]
@@ -27,6 +32,8 @@ fn default_world_steps() {
 fn invalid_settings_are_rejected() {
     let invalid = [
         WorldSettings::default().worker_threads(0),
+        WorldSettings::default().worker_threads(65),
+        WorldSettings::default().worker_threads(u32::MAX),
         WorldSettings::default().max_bodies(0),
         WorldSettings::default().max_bodies((1 << 23) + 1),
         WorldSettings::default().max_body_pairs(0),
@@ -114,6 +121,49 @@ fn world_is_readable_from_many_threads() {
             for digest in reader.join().unwrap() {
                 assert_eq!(digest, expected);
             }
+        }
+    });
+}
+
+#[test]
+fn rays_are_cast_from_many_threads() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    add_floor(&mut world);
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    for i in 0..20 {
+        let position = RVec3::new(
+            (i % 5) as Real * 2.0 - 4.0,
+            0.5,
+            (i / 5) as Real * 2.0 - 3.0,
+        );
+        world
+            .create_body(&unit_box, &BodySettings::new_static().position(position))
+            .unwrap();
+    }
+    let rays: Vec<RayCast> = (0..100)
+        .map(|i| {
+            let x = (i % 10) as Real - 4.5;
+            let z = (i / 10) as Real - 4.5;
+            RayCast::new(RVec3::new(x, 5.0, z), Vec3::new(0.1, -10.0, 0.05))
+        })
+        .collect();
+    let cast_all = |world: &PhysicsWorld| -> Vec<(BodyId, u32)> {
+        rays.iter()
+            .map(|&ray| {
+                let hit = world
+                    .cast_ray(ray)
+                    .unwrap()
+                    .expect("every ray hits the floor");
+                (hit.body, hit.fraction.to_bits())
+            })
+            .collect()
+    };
+    let expected = cast_all(&world);
+    let shared = &world;
+    std::thread::scope(|scope| {
+        let casters: Vec<_> = (0..4).map(|_| scope.spawn(|| cast_all(shared))).collect();
+        for caster in casters {
+            assert_eq!(caster.join().unwrap(), expected);
         }
     });
 }

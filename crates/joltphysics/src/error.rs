@@ -40,6 +40,10 @@ pub enum ShapeError {
     InitFailed,
     /// A dimension is not finite or not positive; the payload names it.
     InvalidDimensions(&'static str),
+    /// A setting other than a dimension is out of range; the payload names it.
+    InvalidSettings(&'static str),
+    /// Jolt refused the shape settings (joltc does not pass on Jolt's message).
+    Rejected,
     /// joltc returned null.
     AllocationFailed,
 }
@@ -49,12 +53,32 @@ impl fmt::Display for ShapeError {
         match self {
             Self::InitFailed => f.write_str("Jolt initialisation failed"),
             Self::InvalidDimensions(what) => write!(f, "invalid shape dimensions: {what}"),
+            Self::InvalidSettings(what) => write!(f, "invalid shape setting: {what}"),
+            Self::Rejected => f.write_str("Jolt rejected the shape settings"),
             Self::AllocationFailed => f.write_str("could not create the shape"),
         }
     }
 }
 
 impl std::error::Error for ShapeError {}
+
+/// Why a scene query could not run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum QueryError {
+    /// A query input is out of range; the payload names it.
+    InvalidValue(&'static str),
+}
+
+impl fmt::Display for QueryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidValue(what) => write!(f, "invalid query value: {what}"),
+        }
+    }
+}
+
+impl std::error::Error for QueryError {}
 
 /// Why [`PhysicsWorld::step`](crate::PhysicsWorld::step) reported a problem.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,0 +1,769 @@
+//! Shapes and the closest-hit ray.
+
+mod common;
+
+use common::*;
+use joltphysics::*;
+
+fn down_from(x: Real, y: Real, z: Real, length: f32) -> RayCast {
+    RayCast::new(RVec3::new(x, y, z), Vec3::new(0.0, -length, 0.0))
+}
+
+#[test]
+fn ray_hits_a_body_right_after_creation() {
+    let mut world = world(Vec3::ZERO, 1);
+    let floor = add_floor(&mut world);
+    let hit = world
+        .cast_ray(down_from(0.0, 5.0, 0.0, 10.0))
+        .unwrap()
+        .expect("the floor is hit");
+    assert_eq!(hit.body, floor);
+    assert!((hit.fraction - 0.5).abs() <= 1.0e-6, "{hit:?}");
+}
+
+#[test]
+fn ray_misses_return_none() {
+    let mut world = world(Vec3::ZERO, 1);
+    add_floor(&mut world);
+    let up = RayCast::new(RVec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
+    assert_eq!(world.cast_ray(up), Ok(None));
+}
+
+#[test]
+fn ray_starting_inside_a_box_hits_at_zero() {
+    let mut world = world(Vec3::ZERO, 1);
+    let floor = add_floor(&mut world);
+    let hit = world
+        .cast_ray(down_from(0.0, -0.5, 0.0, 10.0))
+        .unwrap()
+        .expect("the floor is hit");
+    assert_eq!(hit.body, floor);
+    assert_eq!(hit.fraction, 0.0);
+}
+
+#[test]
+fn invalid_rays_are_rejected() {
+    let world = world(Vec3::ZERO, 1);
+    let invalid = [
+        RayCast::new(RVec3::new(Real::NAN, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)),
+        RayCast::new(RVec3::new(0.0, 0.0, 0.0), Vec3::ZERO),
+        RayCast::new(
+            RVec3::new(0.0, 0.0, 0.0),
+            Vec3::new(f32::INFINITY, 0.0, 0.0),
+        ),
+    ];
+    for ray in invalid {
+        assert!(
+            matches!(world.cast_ray(ray), Err(QueryError::InvalidValue(_))),
+            "{ray:?} was accepted"
+        );
+    }
+}
+
+/// Converts a column-major height grid (`heights_zx[j * n + i]` is the height at row `i` along
+/// Z and column `j` along X) into Jolt's row-major samples (`samples[i * n + j]`).
+fn column_major_to_jolt(heights_zx: &[f32], n: usize) -> Vec<f32> {
+    let mut samples = vec![0.0; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            samples[i * n + j] = heights_zx[j * n + i];
+        }
+    }
+    samples
+}
+
+fn add_static(world: &mut PhysicsWorld, shape: &Shape, position: RVec3) -> BodyId {
+    world
+        .create_body(shape, &BodySettings::new_static().position(position))
+        .unwrap()
+}
+
+/// World height where a downward ray from `y = 20` at `(x, z)` hits, if it does.
+fn surface_height(world: &PhysicsWorld, x: Real, z: Real) -> Option<Real> {
+    let ray = down_from(x, 20.0, z, 40.0);
+    let hit = world.cast_ray(ray).unwrap()?;
+    Some(ray.point_at(hit.fraction).y)
+}
+
+#[test]
+fn height_field_rising_along_z_matches_analytic_surface() {
+    const N: usize = 33;
+    // Column-major source: row `i` lies at local z = -16 + i and rises 0.2 m per metre.
+    let mut heights_zx = vec![0.0; N * N];
+    for i in 0..N {
+        for j in 0..N {
+            heights_zx[j * N + i] = 0.2 * i as f32;
+        }
+    }
+    let samples = column_major_to_jolt(&heights_zx, N);
+    let settings = HeightFieldSettings::default().offset(Vec3::new(-16.0, 0.0, -16.0));
+    let shape = Shape::new_height_field(N as u32, &samples, &settings).unwrap();
+
+    let mut world = world(Vec3::ZERO, 1);
+    let origin = RVec3::new(100.0, -3.0, 50.0);
+    let terrain = add_static(&mut world, &shape, origin);
+
+    // Every point has |x - z| >= 1, so a mapping without the transpose is off by 0.2 m or more.
+    let points: [(Real, Real); 5] = [
+        (-10.3, -12.7),
+        (3.25, 0.5),
+        (12.9, 9.1),
+        (-0.4, 14.6),
+        (7.7, -5.2),
+    ];
+    for (x, z) in points {
+        let ray = RayCast::new(
+            RVec3::new(origin.x + x, 17.0, origin.z + z),
+            Vec3::new(0.0, -30.0, 0.0),
+        );
+        let hit = world.cast_ray(ray).unwrap().expect("the terrain is hit");
+        assert_eq!(hit.body, terrain);
+        let expected = -3.0 + 0.2 * (z + 16.0);
+        let actual = ray.point_at(hit.fraction).y;
+        assert!(
+            (actual - expected).abs() <= 0.02,
+            "at ({x}, {z}): hit {actual}, expected {expected}"
+        );
+    }
+}
+
+#[test]
+fn height_field_33_builds_and_matches_samples_at_nodes() {
+    const N: u32 = 33;
+    let height = |x: u32, y: u32| {
+        let (x, y) = (x as f32, y as f32);
+        1.5 * (0.4 * x).sin() * (0.3 * y).cos() + 0.05 * y
+    };
+    let samples: Vec<f32> = (0..N)
+        .flat_map(|y| (0..N).map(move |x| height(x, y)))
+        .collect();
+    let settings = HeightFieldSettings::default()
+        .bits_per_sample(16)
+        .scale(Vec3::new(0.5, 1.0, 0.5));
+    let shape = Shape::new_height_field(N, &samples, &settings).unwrap();
+
+    for y in 0..N {
+        for x in 0..N {
+            let p = shape.height_field_position(x, y).expect("a stored node");
+            assert!(
+                (p.y - height(x, y)).abs() <= 1.0e-4,
+                "node ({x}, {y}): {} vs {}",
+                p.y,
+                height(x, y)
+            );
+            assert_eq!(p.x, 0.5 * x as f32);
+            assert_eq!(p.z, 0.5 * y as f32);
+        }
+    }
+    // n = 33 is padded to 34 with holes; 34 is outside the stored grid.
+    assert_eq!(shape.height_field_position(33, 0), None);
+    assert_eq!(shape.height_field_position(0, 33), None);
+    assert_eq!(shape.height_field_position(34, 0), None);
+
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &shape, RVec3::new(0.0, 0.0, 0.0));
+    assert!(
+        surface_height(&world, 15.75, 15.75).is_some(),
+        "cell (31, 31)"
+    );
+    assert!(surface_height(&world, 16.01, 8.0).is_none(), "padding cell");
+}
+
+#[test]
+fn height_field_with_larger_blocks_matches_samples_at_nodes() {
+    const N: u32 = 33;
+    let height = |x: u32, y: u32| 0.06 * x as f32 - 0.04 * y as f32 + 0.002 * (x * y) as f32;
+    let samples: Vec<f32> = (0..N)
+        .flat_map(|y| (0..N).map(move |x| height(x, y)))
+        .collect();
+    // n = 33 is padded to 36 with block size 4 and to 40 with block size 8.
+    for (block_size, padded) in [(4, 36), (8, 40)] {
+        let settings = HeightFieldSettings::default()
+            .block_size(block_size)
+            .bits_per_sample(16);
+        let shape = Shape::new_height_field(N, &samples, &settings).unwrap();
+        for y in 0..N {
+            for x in 0..N {
+                let p = shape.height_field_position(x, y).expect("a stored node");
+                assert!(
+                    (p.y - height(x, y)).abs() <= 1.0e-4,
+                    "block {block_size}, node ({x}, {y}): {} vs {}",
+                    p.y,
+                    height(x, y)
+                );
+            }
+        }
+        for padding in N..=padded {
+            assert_eq!(shape.height_field_position(padding, 0), None);
+            assert_eq!(shape.height_field_position(0, padding), None);
+        }
+        let mut world = world(Vec3::ZERO, 1);
+        add_static(&mut world, &shape, RVec3::new(0.0, 0.0, 0.0));
+        assert!(
+            surface_height(&world, 31.5, 31.5).is_some(),
+            "cell (31, 31)"
+        );
+        assert!(surface_height(&world, 32.5, 16.0).is_none(), "padding cell");
+    }
+}
+
+#[test]
+fn height_field_cell_diagonal_runs_from_x_y_to_x1_y1() {
+    let mut samples = vec![0.0; 9];
+    samples[3 + 1] = 1.0;
+    let settings = HeightFieldSettings::default().bits_per_sample(16);
+    let shape = Shape::new_height_field(3, &samples, &settings).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &shape, RVec3::new(0.0, 0.0, 0.0));
+    // Along the other diagonal both points would lie on triangles of height 0.
+    for (x, z) in [(0.75, 0.25), (0.25, 0.75)] {
+        let y = surface_height(&world, x, z).expect("the cell is hit");
+        assert!((y - 0.25).abs() <= 1.0e-3, "at ({x}, {z}): {y}");
+    }
+}
+
+#[test]
+fn height_field_is_hit_from_below() {
+    let shape = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    let terrain = add_static(&mut world, &shape, RVec3::new(0.0, 0.0, 0.0));
+    let ray = RayCast::new(RVec3::new(0.5, -1.0, 0.5), Vec3::new(0.0, 2.0, 0.0));
+    let hit = world.cast_ray(ray).unwrap().expect("the underside is hit");
+    assert_eq!(hit.body, terrain);
+    assert!(ray.point_at(hit.fraction).y.abs() <= 1.0e-3);
+}
+
+#[test]
+fn invalid_height_fields_are_rejected() {
+    let defaults = HeightFieldSettings::default;
+    let flat = vec![0.0; 9];
+    let with_samples = |changes: &[(usize, f32)]| {
+        let mut samples = flat.clone();
+        for &(index, value) in changes {
+            samples[index] = value;
+        }
+        samples
+    };
+    let dimension_cases = [
+        (1, vec![0.0], defaults()),
+        (3, vec![0.0; 8], defaults()),
+        (3, with_samples(&[(4, f32::NAN)]), defaults()),
+        (3, with_samples(&[(4, f32::INFINITY)]), defaults()),
+        (3, with_samples(&[(0, -3.0e38), (4, 3.0e38)]), defaults()),
+        (3, flat.clone(), defaults().scale(Vec3::new(0.0, 1.0, 1.0))),
+        (
+            3,
+            flat.clone(),
+            defaults().scale(Vec3::new(1.0, f32::NAN, 1.0)),
+        ),
+        (3, flat.clone(), defaults().scale(Vec3::new(1.0, 1.0, -1.0))),
+        (
+            3,
+            flat.clone(),
+            defaults().offset(Vec3::new(f32::NAN, 0.0, 0.0)),
+        ),
+        (
+            3,
+            flat.clone(),
+            defaults().offset(Vec3::new(0.0, 0.0, f32::INFINITY)),
+        ),
+        // Finite offset and scale whose far edge along x is not.
+        (
+            3,
+            flat.clone(),
+            defaults().scale(Vec3::new(3.0e38, 1.0, 1.0)),
+        ),
+        (
+            3,
+            flat.clone(),
+            defaults()
+                .offset(Vec3::new(0.0, 0.0, -3.0e38))
+                .scale(Vec3::new(1.0, 1.0, 3.0e38)),
+        ),
+        // Finite offset and scale whose highest point is not.
+        (
+            3,
+            with_samples(&[(4, 2.0)]),
+            defaults()
+                .offset(Vec3::new(0.0, 3.0e38, 0.0))
+                .scale(Vec3::new(1.0, 3.0e38, 1.0)),
+        ),
+    ];
+    for (count, samples, settings) in dimension_cases {
+        let result = Shape::new_height_field(count, &samples, &settings);
+        assert!(
+            matches!(result, Err(ShapeError::InvalidDimensions(_))),
+            "n = {count}, {settings:?}"
+        );
+    }
+    let settings_cases = [
+        (3, flat.clone(), defaults().block_size(1)),
+        (3, flat.clone(), defaults().block_size(9)),
+        (3, flat.clone(), defaults().bits_per_sample(0)),
+        (3, flat.clone(), defaults().bits_per_sample(17)),
+        (
+            3,
+            flat.clone(),
+            defaults().active_edge_cos_threshold_angle(-0.1),
+        ),
+        (
+            3,
+            flat.clone(),
+            defaults().active_edge_cos_threshold_angle(1.5),
+        ),
+        (
+            3,
+            flat.clone(),
+            defaults().active_edge_cos_threshold_angle(f32::NAN),
+        ),
+        (2, vec![0.0; 4], defaults()),
+        // The size check runs before the length check, so no huge buffer is needed.
+        (40000, Vec::new(), defaults()),
+    ];
+    for (count, samples, settings) in settings_cases {
+        let result = Shape::new_height_field(count, &samples, &settings);
+        assert!(
+            matches!(result, Err(ShapeError::InvalidSettings(_))),
+            "n = {count}, {settings:?}"
+        );
+    }
+}
+
+#[test]
+fn height_field_of_holes_has_no_collision() {
+    let shape =
+        Shape::new_height_field(3, &[f32::MAX; 9], &HeightFieldSettings::default()).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &shape, RVec3::new(0.0, 0.0, 0.0));
+    assert_eq!(surface_height(&world, 1.0, 1.0), None);
+    assert_eq!(shape.height_field_position(1, 1), None);
+}
+
+#[test]
+fn static_only_shapes_are_rejected_for_moving_bodies() {
+    let shape = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    for settings in [BodySettings::new_dynamic(), BodySettings::new_kinematic()] {
+        assert!(matches!(
+            world.create_body(&shape, &settings),
+            Err(BodyError::InvalidValue(_))
+        ));
+    }
+    assert_eq!(world.body_count(), 0);
+    assert!(world
+        .create_body(&shape, &BodySettings::new_static())
+        .is_ok());
+}
+
+#[test]
+fn compounds_containing_a_height_field_are_static_only() {
+    let terrain = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
+    let block = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let compound = Shape::new_compound(&[
+        child(&block, Vec3::new(0.0, 1.0, 0.0), Quat::IDENTITY, 1),
+        child(&terrain, Vec3::ZERO, Quat::IDENTITY, 2),
+    ])
+    .unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    for settings in [BodySettings::new_dynamic(), BodySettings::new_kinematic()] {
+        assert!(matches!(
+            world.create_body(&compound, &settings),
+            Err(BodyError::InvalidValue(_))
+        ));
+    }
+    assert_eq!(world.body_count(), 0);
+    assert!(world
+        .create_body(&compound, &BodySettings::new_static())
+        .is_ok());
+}
+
+#[test]
+fn height_field_with_custom_active_edge_threshold_builds() {
+    const N: u32 = 9;
+    let samples: Vec<f32> = (0..N)
+        .flat_map(|y| (0..N).map(move |x| 0.1 * ((x + y) % 3) as f32))
+        .collect();
+    let settings = HeightFieldSettings::default()
+        .offset(Vec3::new(-4.0, 0.0, -4.0))
+        .active_edge_cos_threshold_angle(30.0_f32.to_radians().cos());
+    let shape = Shape::new_height_field(N, &samples, &settings).unwrap();
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    add_static(&mut world, &shape, RVec3::new(0.0, 0.0, 0.0));
+    let ball_shape = Shape::new_sphere(0.5).unwrap();
+    let ball = world
+        .create_body(
+            &ball_shape,
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(0.3, 2.0, -0.2))
+                .enhanced_internal_edge_removal(true),
+        )
+        .unwrap();
+    step(&mut world, 60);
+    let body = world.body(ball).unwrap();
+    let position: [Real; 3] = body.position().into();
+    assert!(position.iter().all(|value| value.is_finite()));
+    assert!(length(body.linear_velocity()).is_finite());
+    assert!(
+        position[1] > 0.3,
+        "the ball stays above the surface: {position:?}"
+    );
+}
+
+const X_AXIS: Vec3 = Vec3::new(1.0, 0.0, 0.0);
+const Z_AXIS: Vec3 = Vec3::new(0.0, 0.0, 1.0);
+
+fn child(shape: &Shape, position: Vec3, rotation: Quat, user_data: u32) -> CompoundChild<'_> {
+    CompoundChild {
+        shape,
+        position,
+        rotation,
+        user_data,
+    }
+}
+
+/// The closest hit of a downward ray from `y = 20` at `(x, z)` and the world height it hits.
+fn hit_below(world: &PhysicsWorld, x: Real, z: Real) -> (RayHit, Real) {
+    let ray = down_from(x, 20.0, z, 40.0);
+    let hit = world.cast_ray(ray).unwrap().expect("something is hit");
+    (hit, ray.point_at(hit.fraction).y)
+}
+
+#[test]
+fn compound_children_report_their_user_data() {
+    let block = Shape::new_box(Vec3::new(1.0, 0.5, 1.0)).unwrap();
+    let pillar = Shape::new_cylinder(1.0, 0.5).unwrap();
+    let compound = Shape::new_compound(&[
+        child(&block, Vec3::new(-3.0, 0.0, 0.0), Quat::IDENTITY, 2),
+        child(
+            &pillar,
+            Vec3::new(3.0, 0.0, 0.0),
+            quat_about(X_AXIS, 30.0_f32.to_radians()),
+            3,
+        ),
+    ])
+    .unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    let body = add_static(&mut world, &compound, RVec3::new(10.0, 1.0, -4.0));
+
+    let (hit, y) = hit_below(&world, 7.0, -4.0);
+    assert_eq!(hit.body, body);
+    assert_eq!(
+        world.compound_sub_shape(hit.body, hit.sub_shape_id),
+        Ok(Some(CompoundSubShape {
+            index: 0,
+            user_data: 2
+        }))
+    );
+    assert!((y - 1.5).abs() <= 1.0e-5, "box top at {y}");
+
+    let (hit, y) = hit_below(&world, 13.0, -4.0);
+    assert_eq!(hit.body, body);
+    assert_eq!(
+        world.compound_sub_shape(hit.body, hit.sub_shape_id),
+        Ok(Some(CompoundSubShape {
+            index: 1,
+            user_data: 3
+        }))
+    );
+    // The tilted cylinder's highest rim point is at 1 + cos 30 + 0.5 sin 30 = 2.116.
+    assert!(y > 1.0 && y < 2.2, "cylinder hit at {y}");
+}
+
+#[test]
+fn compound_child_order_is_insertion_order() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let user_data = [14, 10, 13, 11, 12];
+    let children: Vec<_> = user_data
+        .iter()
+        .enumerate()
+        .map(|(i, &value)| {
+            child(
+                &unit_box,
+                Vec3::new(4.0 * i as f32, 0.0, 0.0),
+                Quat::IDENTITY,
+                value,
+            )
+        })
+        .collect();
+    let compound = Shape::new_compound(&children).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &compound, RVec3::new(0.0, 0.0, 0.0));
+    for (i, &value) in user_data.iter().enumerate() {
+        let (hit, _) = hit_below(&world, 4.0 * i as Real, 0.0);
+        assert_eq!(
+            world.compound_sub_shape(hit.body, hit.sub_shape_id),
+            Ok(Some(CompoundSubShape {
+                index: i as u32,
+                user_data: value
+            }))
+        );
+    }
+}
+
+#[test]
+fn single_child_compound_keeps_its_user_data() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let rotation = quat_about(Z_AXIS, 45.0_f32.to_radians());
+    let compound = Shape::new_compound(&[child(&unit_box, Vec3::ZERO, rotation, 7)]).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &compound, RVec3::new(0.0, 0.0, 0.0));
+    let (hit, y) = hit_below(&world, 0.0, 0.0);
+    assert_eq!(
+        world.compound_sub_shape(hit.body, hit.sub_shape_id),
+        Ok(Some(CompoundSubShape {
+            index: 0,
+            user_data: 7
+        }))
+    );
+    // The top edge of the tilted box lies at 0.5 * sqrt(2).
+    assert!((y - 0.5 * Real::sqrt(2.0)).abs() <= 1.0e-4, "hit at {y}");
+}
+
+#[test]
+fn child_pose_is_applied() {
+    let slab = Shape::new_box(Vec3::new(1.0, 0.25, 0.5)).unwrap();
+    let rotation = quat_about(X_AXIS, 90.0_f32.to_radians());
+    let compound =
+        Shape::new_compound(&[child(&slab, Vec3::new(0.0, 2.0, 0.0), rotation, 0)]).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &compound, RVec3::new(0.0, 0.0, 0.0));
+    // The rotation turns the z extent upright.
+    let (_, y) = hit_below(&world, 0.0, 0.0);
+    assert!((y - 2.5).abs() <= 1.0e-5, "hit at {y}");
+}
+
+#[test]
+fn non_compound_hits_have_no_sub_shape() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let terrain = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &unit_box, RVec3::new(0.0, 0.0, 0.0));
+    add_static(&mut world, &terrain, RVec3::new(10.0, 0.0, 0.0));
+    for x in [0.0, 11.0] {
+        let (hit, _) = hit_below(&world, x, 0.5);
+        assert_eq!(
+            world.compound_sub_shape(hit.body, hit.sub_shape_id),
+            Ok(None)
+        );
+    }
+    let (hit, _) = hit_below(&world, 0.0, 0.0);
+    assert_eq!(unit_box.compound_sub_shape(hit.sub_shape_id), None);
+}
+
+#[test]
+fn sub_shape_ids_of_other_shapes_never_name_a_missing_child() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let children: Vec<_> = (0..3)
+        .map(|i| {
+            child(
+                &unit_box,
+                Vec3::new(2.0 * i as f32, 0.0, 0.0),
+                Quat::IDENTITY,
+                i,
+            )
+        })
+        .collect();
+    let compound = Shape::new_compound(&children).unwrap();
+    let terrain = Shape::new_height_field(5, &[0.0; 25], &HeightFieldSettings::default()).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &terrain, RVec3::new(-20.0, 0.0, -20.0));
+    // Heightfield triangle ids decoded as if they came from the compound.
+    for (x, z) in [
+        (-19.5, -19.5),
+        (-17.25, -18.75),
+        (-16.5, -16.5),
+        (-18.1, -16.2),
+    ] {
+        let (hit, _) = hit_below(&world, x, z);
+        let resolved = compound.compound_sub_shape(hit.sub_shape_id);
+        assert!(resolved.is_none_or(|child| child.index < 3), "{resolved:?}");
+    }
+}
+
+#[test]
+fn foreign_body_is_rejected_by_compound_sub_shape() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let compound = Shape::new_compound(&[child(&unit_box, Vec3::ZERO, Quat::IDENTITY, 1)]).unwrap();
+    let mut first = world(Vec3::ZERO, 1);
+    let second = world(Vec3::ZERO, 1);
+    add_static(&mut first, &compound, RVec3::new(0.0, 0.0, 0.0));
+    let (hit, _) = hit_below(&first, 0.0, 0.0);
+    assert_eq!(
+        second.compound_sub_shape(hit.body, hit.sub_shape_id),
+        Err(BodyError::WrongWorld(hit.body))
+    );
+}
+
+#[test]
+fn empty_or_invalid_compounds_are_rejected() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let invalid = [
+        Shape::new_compound(&[]),
+        Shape::new_compound(&[child(
+            &unit_box,
+            Vec3::new(f32::NAN, 0.0, 0.0),
+            Quat::IDENTITY,
+            0,
+        )]),
+        Shape::new_compound(&[child(
+            &unit_box,
+            Vec3::ZERO,
+            Quat::from_xyzw(0.0, 0.0, 0.0, 2.0),
+            0,
+        )]),
+    ];
+    for result in invalid {
+        assert!(matches!(result, Err(ShapeError::InvalidSettings(_))));
+    }
+}
+
+#[test]
+fn dynamic_compound_with_rotated_child_is_accepted() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let compound = Shape::new_compound(&[
+        child(&unit_box, Vec3::ZERO, Quat::IDENTITY, 0),
+        child(
+            &unit_box,
+            Vec3::new(1.0, 0.5, 0.0),
+            quat_about(Z_AXIS, 30.0_f32.to_radians()),
+            1,
+        ),
+    ])
+    .unwrap();
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    add_floor(&mut world);
+    let body = world
+        .create_body(
+            &compound,
+            &BodySettings::new_dynamic().position(RVec3::new(0.0, 3.0, 0.0)),
+        )
+        .unwrap();
+    step(&mut world, 60);
+    let body = world.body(body).unwrap();
+    let position: [Real; 3] = body.position().into();
+    assert!(position.iter().all(|value| value.is_finite()));
+    assert!(length(body.linear_velocity()).is_finite());
+    assert!(length(body.angular_velocity()).is_finite());
+}
+
+#[test]
+fn sharp_box_edge_ray_hits_the_exact_corner() {
+    let half_extent = Vec3::new(1.0, 1.0, 1.0);
+    let ray = RayCast::new(RVec3::new(2.0, 2.0, 0.0), Vec3::new(-2.0, -2.0, 0.0));
+    let sharp = Shape::new_box_with_convex_radius(half_extent, 0.0).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &sharp, RVec3::new(0.0, 0.0, 0.0));
+    let hit = world.cast_ray(ray).unwrap().expect("the edge is hit");
+    assert_eq!(hit.fraction, 0.5);
+    assert_eq!(ray.point_at(hit.fraction), RVec3::new(1.0, 1.0, 0.0));
+
+    // Jolt casts rays against the sharp box whatever the convex radius.
+    let rounded = Shape::new_box(half_extent).unwrap();
+    let mut world = common::world(Vec3::ZERO, 1);
+    add_static(&mut world, &rounded, RVec3::new(0.0, 0.0, 0.0));
+    let hit = world.cast_ray(ray).unwrap().expect("the edge is hit");
+    assert_eq!(hit.fraction, 0.5);
+}
+
+/// Places a resting sphere of radius 0.5 at `(1 + offset, 1 + offset, 0)`, next to an edge of
+/// the static box `block` (half extent 1) at the origin, steps 10 times without gravity and
+/// returns the sphere's position before and after.
+fn sphere_next_to_box_edge(block: &Shape, offset: Real) -> ([Real; 3], [Real; 3]) {
+    let ball_shape = Shape::new_sphere(0.5).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, block, RVec3::new(0.0, 0.0, 0.0));
+    let start = 1.0 + offset;
+    let ball = world
+        .create_body(
+            &ball_shape,
+            &BodySettings::new_dynamic().position(RVec3::new(start, start, 0.0)),
+        )
+        .unwrap();
+    let before = world.body(ball).unwrap().position().into();
+    step(&mut world, 10);
+    (before, world.body(ball).unwrap().position().into())
+}
+
+#[test]
+fn convex_radius_rounds_box_edges_for_contacts() {
+    let half_extent = Vec3::new(1.0, 1.0, 1.0);
+    let sharp = Shape::new_box_with_convex_radius(half_extent, 0.0).unwrap();
+    let rounded = Shape::new_box(half_extent).unwrap();
+    let edge_distance = |p: [Real; 3]| ((p[0] - 1.0).powi(2) + (p[1] - 1.0).powi(2)).sqrt();
+
+    // The sphere's centre is sqrt(2) * 0.33 = 0.467 from the sharp edge: it penetrates by
+    // 0.033, more than Jolt's 0.02 penetration slop, and is pushed out.
+    let (before, after) = sphere_next_to_box_edge(&sharp, 0.33);
+    assert!(
+        edge_distance(after) > edge_distance(before) + 0.01,
+        "{before:?} -> {after:?}"
+    );
+    // Rounded by the default 0.05, the edge is 0.0126 inside the sphere, within the slop, so
+    // the sphere stays exactly where it is.
+    let (before, after) = sphere_next_to_box_edge(&rounded, 0.33);
+    assert_eq!(after.map(Real::to_bits), before.map(Real::to_bits));
+
+    // Jolt uses at most 0.05 of the convex radius for contacts
+    // (`ScaleHelpers::ScaleConvexRadius`), so a radius of 0.2 collides like the default.
+    let large = Shape::new_box_with_convex_radius(half_extent, 0.2).unwrap();
+    let (_, after_default) = sphere_next_to_box_edge(&rounded, 0.32);
+    let (_, after_large) = sphere_next_to_box_edge(&large, 0.32);
+    let (_, after_sharp) = sphere_next_to_box_edge(&sharp, 0.32);
+    assert_eq!(
+        after_large.map(Real::to_bits),
+        after_default.map(Real::to_bits)
+    );
+    assert_ne!(
+        after_sharp.map(Real::to_bits),
+        after_default.map(Real::to_bits)
+    );
+}
+
+#[test]
+fn shapes_are_shared_across_bodies_and_worlds() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let pillar = Shape::new_cylinder(1.0, 0.3).unwrap();
+    let compound = Shape::new_compound(&[
+        child(&unit_box, Vec3::ZERO, Quat::IDENTITY, 1),
+        child(&pillar, Vec3::new(2.0, 0.5, 0.0), Quat::IDENTITY, 2),
+    ])
+    .unwrap();
+    drop((unit_box, pillar));
+    let samples: Vec<f32> = (0..17 * 17).map(|i| 0.05 * (i % 7) as f32).collect();
+    let terrain_settings = HeightFieldSettings::default().offset(Vec3::new(-8.0, -2.0, -8.0));
+    let terrain = Shape::new_height_field(17, &samples, &terrain_settings).unwrap();
+
+    let mut world_a = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let mut world_b = world(Vec3::new(0.0, -9.81, 0.0), 4);
+    for world in [&mut world_a, &mut world_b] {
+        add_static(world, &terrain, RVec3::new(0.0, 0.0, 0.0));
+        add_static(world, &compound, RVec3::new(0.0, 0.0, 0.0));
+    }
+    add_static(&mut world_a, &compound, RVec3::new(-5.0, 0.0, 5.0));
+    drop((compound, terrain));
+    step(&mut world_a, 10);
+    step(&mut world_b, 10);
+
+    let rays: Vec<RayCast> = [(0.0, 0.0), (2.0, 0.0), (3.3, -4.1), (-6.2, 1.7), (5.5, 6.5)]
+        .into_iter()
+        .map(|(x, z)| down_from(x, 10.0, z, 20.0))
+        .collect();
+    let cast_all = |world: &PhysicsWorld| -> Vec<u32> {
+        rays.iter()
+            .map(|&ray| {
+                let hit = world.cast_ray(ray).unwrap().expect("every ray hits");
+                hit.fraction.to_bits()
+            })
+            .collect()
+    };
+    let expected = cast_all(&world_b);
+    assert_eq!(cast_all(&world_a), expected);
+
+    std::thread::scope(|scope| {
+        scope.spawn(|| step(&mut world_a, 10));
+        let reader = scope.spawn(|| cast_all(&world_b));
+        assert_eq!(reader.join().unwrap(), expected);
+    });
+    drop(world_a);
+    assert_eq!(cast_all(&world_b), expected);
+}

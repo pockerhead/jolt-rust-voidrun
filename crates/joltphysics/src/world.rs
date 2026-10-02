@@ -63,6 +63,11 @@ impl WorldSettings {
     /// Largest body count Jolt supports (`PhysicsSystem::cMaxBodiesLimit`).
     const MAX_BODIES_LIMIT: u32 = 1 << 23;
 
+    /// Largest accepted [`worker_threads`](Self::worker_threads) value. Jolt starts one OS
+    /// thread per worker; this bound is chosen by joltphysics to keep thread creation sane and
+    /// is not a Jolt limit.
+    pub const MAX_WORKER_THREADS: u32 = 64;
+
     /// Maximum number of bodies in the world, at most 2²³. Default 10240.
     #[must_use]
     pub fn max_bodies(mut self, value: u32) -> Self {
@@ -85,8 +90,9 @@ impl WorldSettings {
     }
 
     /// Worker threads Jolt's job system starts in addition to the thread that calls
-    /// [`PhysicsWorld::step`], which also runs jobs. At least 1. Default 1. Results are
-    /// bit-identical for any value on one machine.
+    /// [`PhysicsWorld::step`], which also runs jobs. At least 1 and at most
+    /// [`WorldSettings::MAX_WORKER_THREADS`]. Default 1. Results are bit-identical for any value
+    /// on one machine.
     #[must_use]
     pub fn worker_threads(mut self, value: u32) -> Self {
         self.worker_threads = value;
@@ -125,8 +131,8 @@ impl WorldSettings {
         if self.max_contact_constraints == 0 {
             return invalid("max_contact_constraints must be at least 1");
         }
-        if !(1..=i32::MAX as u32).contains(&self.worker_threads) {
-            return invalid("worker_threads must be between 1 and i32::MAX");
+        if !(1..=Self::MAX_WORKER_THREADS).contains(&self.worker_threads) {
+            return invalid("worker_threads must be between 1 and 64");
         }
         if self.temp_allocator_size == 0 {
             return invalid("temp_allocator_size must be at least 1");
@@ -202,6 +208,7 @@ pub struct PhysicsWorld {
     temp_allocator: TempAllocator,
     pub(crate) body_interface: NonNull<JPH_BodyInterface>,
     pub(crate) body_lock_interface: NonNull<JPH_BodyLockInterface>,
+    pub(crate) narrow_phase_query: NonNull<JPH_NarrowPhaseQuery>,
     pub(crate) object_layer_count: u32,
     pub(crate) tag: WorldTag,
 }
@@ -210,9 +217,10 @@ pub struct PhysicsWorld {
 // needs `&mut self`, so the allocator and job system serve one `Update` at a time
 // (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access).
 unsafe impl Send for PhysicsWorld {}
-// SAFETY: every `&self` method only calls Jolt's locking body interface or read-only system
-// getters, which Jolt allows from several threads at once. Jolt forbids body access only while
-// `PhysicsSystem::Update` runs, and `step` needs `&mut self`
+// SAFETY: every `&self` method only calls Jolt's locking body interface, read-only system
+// getters, or Jolt's locking narrow-phase queries, which read bodies under body read locks and
+// the broad phase under its query lock. Jolt allows all of these from several threads at once.
+// Jolt forbids body access only while `PhysicsSystem::Update` runs, and `step` needs `&mut self`
 // (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access).
 unsafe impl Sync for PhysicsWorld {}
 
@@ -233,7 +241,8 @@ impl PhysicsWorld {
         let config = JobSystemThreadPoolConfig {
             maxJobs: 0,
             maxBarriers: 0,
-            // `validate` bounds the count to `1..=i32::MAX`; 0 would mean "all hardware threads".
+            // `validate` bounds the count to `1..=MAX_WORKER_THREADS`; 0 would mean all hardware
+            // threads.
             numThreads: settings.worker_threads as i32,
         };
         // SAFETY: Jolt is initialised; `config` is a live local. Zero job and barrier limits
@@ -273,18 +282,22 @@ impl PhysicsWorld {
         // SAFETY: `system` is live and `gravity` is a live local.
         unsafe { JPH_PhysicsSystem_SetGravity(system.0.as_ptr(), &gravity) };
 
-        // SAFETY: `system` is live. Both interfaces live inside the Jolt system and stay valid
-        // as long as it does; the world stores them next to the system that owns them.
-        let (body_interface, body_lock_interface) = unsafe {
+        // SAFETY: `system` is live. The interfaces and the narrow-phase query live inside the
+        // Jolt system and stay valid as long as it does; the world stores them next to the
+        // system that owns them.
+        let (body_interface, body_lock_interface, narrow_phase_query) = unsafe {
             (
                 JPH_PhysicsSystem_GetBodyInterface(system.0.as_ptr()),
                 JPH_PhysicsSystem_GetBodyLockInterface(system.0.as_ptr()),
+                JPH_PhysicsSystem_GetNarrowPhaseQuery(system.0.as_ptr()),
             )
         };
         let body_interface =
             NonNull::new(body_interface).ok_or(WorldError::AllocationFailed("body interface"))?;
         let body_lock_interface = NonNull::new(body_lock_interface.cast_mut())
             .ok_or(WorldError::AllocationFailed("body lock interface"))?;
+        let narrow_phase_query = NonNull::new(narrow_phase_query.cast_mut())
+            .ok_or(WorldError::AllocationFailed("narrow phase query"))?;
 
         Ok(Self {
             system,
@@ -292,6 +305,7 @@ impl PhysicsWorld {
             temp_allocator,
             body_interface,
             body_lock_interface,
+            narrow_phase_query,
             object_layer_count: settings.layers.object_layer_count(),
             tag: WorldTag::next(),
         })
@@ -351,5 +365,26 @@ impl PhysicsWorld {
             body_pair_cache: errors & JPH_PhysicsUpdateError_BodyPairCacheFull != 0,
             contact_constraints: errors & JPH_PhysicsUpdateError_ContactConstraintsFull != 0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worker_thread_bounds_are_validated() {
+        for valid in [1, WorldSettings::MAX_WORKER_THREADS] {
+            assert_eq!(
+                WorldSettings::default().worker_threads(valid).validate(),
+                Ok(())
+            );
+        }
+        for invalid in [0, WorldSettings::MAX_WORKER_THREADS + 1, u32::MAX] {
+            assert!(matches!(
+                WorldSettings::default().worker_threads(invalid).validate(),
+                Err(WorldError::InvalidSettings(_))
+            ));
+        }
     }
 }

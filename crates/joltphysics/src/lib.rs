@@ -4,7 +4,10 @@
 //!
 //! A [`PhysicsWorld`] owns a Jolt physics system with its collision layers
 //! ([`CollisionLayers`]), its own job system and temp allocator. Bodies are created from a
-//! [`Shape`] and [`BodySettings`] and named by a [`BodyId`].
+//! [`Shape`] and [`BodySettings`] and named by a [`BodyId`]. Shapes are boxes (with a
+//! configurable convex radius), spheres, Y-cylinders, Y-capsules, heightfields and compounds
+//! whose children carry their own pose and user data, and one shape may serve
+//! many bodies in many worlds. [`PhysicsWorld::cast_ray`] finds the closest body along a ray.
 //!
 //! ```
 //! use joltphysics::*;
@@ -55,12 +58,14 @@ mod body;
 mod error;
 mod layers;
 mod math;
+mod query;
 mod shape;
 mod world;
 
 pub use body::{Activation, BodyId, BodyMut, BodyRef, BodySettings, MotionQuality, MotionType};
-pub use error::{BodyError, ShapeError, StepError, WorldError};
+pub use error::{BodyError, QueryError, ShapeError, StepError, WorldError};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use math::{Quat, RVec3, Real, Vec3};
-pub use shape::Shape;
+pub use query::{RayCast, RayHit};
+pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
 pub use world::{PhysicsWorld, WorldSettings};

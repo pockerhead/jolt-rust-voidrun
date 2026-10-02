@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        features: ["", "cross-platform-deterministic"]
+        features: ["", "cross-platform-deterministic", "double-precision"]
     defaults:
       run:
         shell: bash

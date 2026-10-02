@@ -34,11 +34,18 @@ const _: () = {
     assert!(offset_of!(JPH_MassProperties, mass) == 0);
     assert!(offset_of!(JPH_MassProperties, inertia) == 4);
 
+    assert!(size_of::<JPH_RayCastResult>() == 12);
+    assert!(align_of::<JPH_RayCastResult>() == 4);
+    assert!(offset_of!(JPH_RayCastResult, bodyID) == 0);
+    assert!(offset_of!(JPH_RayCastResult, fraction) == 4);
+    assert!(offset_of!(JPH_RayCastResult, subShapeID2) == 8);
+
     assert!(size_of::<JobSystemThreadPoolConfig>() == 12);
     assert!(align_of::<JobSystemThreadPoolConfig>() == 4);
     assert!(offset_of!(JobSystemThreadPoolConfig, numThreads) == 8);
 
     assert!(size_of::<JPH_BodyID>() == 4);
+    assert!(size_of::<JPH_SubShapeID>() == 4);
     assert!(size_of::<JPH_ObjectLayer>() == 4);
     assert!(size_of::<JPH_BroadPhaseLayer>() == 1);
 
@@ -47,6 +54,7 @@ const _: () = {
     assert!(size_of::<JPH_PhysicsUpdateError>() == 4);
     assert!(size_of::<JPH_MotionQuality>() == 4);
     assert!(size_of::<JPH_OverrideMassProperties>() == 4);
+    assert!(size_of::<JPH_ShapeSubType>() == 4);
 };
 
 #[cfg(feature = "double-precision")]
