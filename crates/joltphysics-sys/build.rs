@@ -46,11 +46,22 @@ const EXCLUDED_FUNCTIONS: &[&str] = &[
     "JPH_SkeletonMapper_MapReverse",
 ];
 
+/// joltc functions that joltc.cpp defines only under `JPH_DEBUG_RENDERER`; left out of the
+/// bindings without the `debug-renderer` feature, so no Rust code can reference a missing symbol.
+const DEBUG_RENDERER_FUNCTIONS: &[&str] = &[
+    "JPH_Shape_Draw",
+    "JPH_PhysicsSystem_Draw.*",
+    "JPH_BodyDrawFilter_.*",
+    "JPH_DebugRenderer_.*",
+];
+
 /// Everything about the target and the crate features that shapes the native build.
 struct NativeConfig {
     double_precision: bool,
     cross_platform_deterministic: bool,
     asserts: bool,
+    /// Jolt's debug renderer and joltc's drawing functions are compiled in.
+    debug_renderer: bool,
     target: String,
     target_os: String,
     target_env: String,
@@ -79,6 +90,7 @@ impl NativeConfig {
             double_precision: feature("DOUBLE_PRECISION"),
             cross_platform_deterministic: feature("CROSS_PLATFORM_DETERMINISTIC"),
             asserts: feature("ASSERTS"),
+            debug_renderer: feature("DEBUG_RENDERER"),
             target: var("TARGET"),
             target_os: var("CARGO_CFG_TARGET_OS"),
             target_env,
@@ -135,7 +147,7 @@ fn manifest_entries(cfg: &NativeConfig) -> Vec<(&'static str, String)> {
         ),
         ("asserts", on_off(cfg.asserts).to_owned()),
         ("object_layer_bits", "32".to_owned()),
-        ("debug_renderer", "ON".to_owned()),
+        ("debug_renderer", on_off(cfg.debug_renderer).to_owned()),
         ("floating_point_exceptions", "OFF".to_owned()),
         ("profiler", "OFF".to_owned()),
         ("joltc_lib", cfg.joltc_lib().to_owned()),
@@ -248,9 +260,13 @@ fn build_with_cmake(cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
     config.define("FLOATING_POINT_EXCEPTIONS_ENABLED", "OFF");
     // No profiler API is bound; the instrumentation would only cost time.
     config.define("PROFILER_IN_DEBUG_AND_RELEASE", "OFF");
-    // joltc declares its debug drawing functions unconditionally and defines
-    // them only with the debug renderer compiled in.
-    config.define("DEBUG_RENDERER_IN_DISTRIBUTION", "ON");
+    // Jolt's debug renderer only with the `debug-renderer` feature. Both switches are needed:
+    // DEBUG_RENDERER_IN_DEBUG_AND_RELEASE defaults to ON and would enable it for this Release build.
+    config.define("DEBUG_RENDERER_IN_DISTRIBUTION", on_off(cfg.debug_renderer));
+    config.define(
+        "DEBUG_RENDERER_IN_DEBUG_AND_RELEASE",
+        on_off(cfg.debug_renderer),
+    );
 
     // These feature flags affect the compilation of both Jolt and joltc.
     config.define("DOUBLE_PRECISION", on_off(cfg.double_precision));
@@ -495,12 +511,18 @@ fn generate_bindings(header: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
             bindgen::CargoCallbacks::new().rerun_on_header_files(false),
         ));
 
-    // The header's only ABI switch; JPH_DEBUG_RENDERER only affects joltc.cpp.
+    // The header's only ABI switch. JPH_DEBUG_RENDERER does not change the header; it only
+    // decides which functions joltc defines, which DEBUG_RENDERER_FUNCTIONS handles.
     if cfg.double_precision {
         builder = builder.clang_arg("-DJPH_DOUBLE_PRECISION");
     }
     for function in EXCLUDED_FUNCTIONS {
         builder = builder.blocklist_function(function);
+    }
+    if !cfg.debug_renderer {
+        for function in DEBUG_RENDERER_FUNCTIONS {
+            builder = builder.blocklist_function(function);
+        }
     }
 
     let bindings = builder

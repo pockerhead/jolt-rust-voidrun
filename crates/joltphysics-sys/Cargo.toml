@@ -47,6 +47,12 @@ double-precision = []
 # Mirrors the `enhanced-determinism` cargo feature shape on rapier3d.
 cross-platform-deterministic = []
 
+# Compiles Jolt's debug renderer (`JPH_DEBUG_RENDERER`) into the native libraries and binds joltc's
+# drawing functions (`JPH_DebugRenderer_*`, `JPH_BodyDrawFilter_*`, `JPH_PhysicsSystem_Draw*`,
+# `JPH_Shape_Draw`). Off by default: Jolt notes that the debug renderer costs performance even when
+# nothing is drawn. Changes Jolt's class layouts, so it is part of the native manifest.
+debug-renderer = []
+
 [dependencies]
 
 [build-dependencies]
