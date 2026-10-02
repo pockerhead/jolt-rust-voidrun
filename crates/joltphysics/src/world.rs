@@ -397,6 +397,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn any_full_buffer_makes_a_report_incomplete() {
+        let complete = StepReport {
+            manifold_cache_full: false,
+            body_pair_cache_full: false,
+            contact_constraints_full: false,
+        };
+        assert!(complete.is_complete());
+        for report in [
+            StepReport {
+                manifold_cache_full: true,
+                ..complete
+            },
+            StepReport {
+                body_pair_cache_full: true,
+                ..complete
+            },
+            StepReport {
+                contact_constraints_full: true,
+                ..complete
+            },
+        ] {
+            assert!(!report.is_complete(), "{report:?}");
+        }
+    }
+
+    #[test]
     fn worker_thread_bounds_are_validated() {
         for valid in [1, WorldSettings::MAX_WORKER_THREADS] {
             assert_eq!(

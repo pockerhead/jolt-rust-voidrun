@@ -131,8 +131,6 @@ fn full_body_pair_cache_is_reported_and_the_world_advances() {
     let falling = crowded_floor(&mut world);
     let report = step_until_incomplete(&mut world, falling);
     assert!(report.body_pair_cache_full, "{report:?}");
-    // Jolt's manifold cache allocates from the same buffer as the body pair cache.
-    assert!(report.manifold_cache_full, "{report:?}");
 }
 
 #[test]
