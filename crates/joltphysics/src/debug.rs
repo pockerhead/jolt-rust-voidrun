@@ -132,6 +132,14 @@ impl PhysicsWorld {
     /// singleton. Jolt keeps a heightfield's debug geometry in the shape after the first draw,
     /// until the shape is freed.
     ///
+    /// # Cost
+    /// There is no level of detail by camera distance: every shape is drawn with Jolt's finest
+    /// geometry, so one capsule gives 6528 lines and one cylinder 768, whatever their size and
+    /// distance. Each call also builds a new Jolt debug renderer with its unit geometries. Use
+    /// the radius and [`DebugLineSettings::max_lines`] to bound the output. Only bodies are
+    /// drawn: a character (`CharacterVirtual`) appears only through its inner body, if it has
+    /// one.
+    ///
     /// # Errors
     /// [`QueryError::InvalidValue`] when the center is not finite, the radius is negative or not
     /// finite, or `filter` names a layer or body of another world.
