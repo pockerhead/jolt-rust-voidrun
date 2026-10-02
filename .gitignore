@@ -5,3 +5,6 @@ maw/
 # Local agent-pipeline tooling (not part of the library)
 .claude/skills/maw-*/
 .claude/agents/maw-*.md
+
+# Editor settings
+.vscode/
