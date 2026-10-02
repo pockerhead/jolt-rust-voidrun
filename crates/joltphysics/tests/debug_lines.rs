@@ -334,3 +334,47 @@ fn compound_children_follow_body_and_child_rotation() {
     assert_eq!(seen, [true; 8]);
     assert_eq!(lines_of(&lines, body, Some(Groups::FEATURE)).len(), 36);
 }
+
+#[test]
+fn worlds_sharing_a_height_field_draw_it_concurrently() {
+    // The shape's debug geometry is built lazily by the first draw, so both threads race for it.
+    let terrain = flat_height_field();
+    let worlds: Vec<PhysicsWorld> = (0..2)
+        .map(|_| {
+            let (mut world, [terrain_layer, ..]) = five_layer_world();
+            add_static_in(&mut world, &terrain, RVec3::ZERO, terrain_layer);
+            world
+        })
+        .collect();
+    let start = std::sync::Barrier::new(worlds.len());
+    let drawn: Vec<_> = std::thread::scope(|scope| {
+        let threads: Vec<_> = worlds
+            .iter()
+            .map(|world| {
+                let start = &start;
+                scope.spawn(move || {
+                    start.wait();
+                    (0..20)
+                        .map(|_| {
+                            fingerprint(&lines_near(world, 20.0, usize::MAX, &QueryFilter::new()))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect()
+    });
+    let reference = fingerprint(&lines_near(
+        &worlds[0],
+        20.0,
+        usize::MAX,
+        &QueryFilter::new(),
+    ));
+    assert!(!reference.is_empty());
+    for calls in drawn {
+        assert!(calls.iter().all(|lines| *lines == reference));
+    }
+}
