@@ -266,14 +266,9 @@ pub(crate) fn rotation_translation(rotation: Quat, position: RVec3) -> JPH_RMat4
     let rotation = rotation.to_jph();
     let position = position.to_jph();
     let mut matrix = MaybeUninit::<JPH_RMat4>::uninit();
-    // SAFETY: joltc writes the whole matrix; `rotation` and `position` are live locals. In
-    // single precision `JPH_RMat4` is `JPH_Mat4` and joltc declares the `JPH_RMat4_*` functions
-    // only for double precision.
+    // SAFETY: joltc writes the whole matrix; `rotation` and `position` are live locals.
     unsafe {
-        #[cfg(feature = "double-precision")]
         JPH_RMat4_RotationTranslation(matrix.as_mut_ptr(), &rotation, &position);
-        #[cfg(not(feature = "double-precision"))]
-        JPH_Mat4_RotationTranslation(matrix.as_mut_ptr(), &rotation, &position);
         matrix.assume_init()
     }
 }

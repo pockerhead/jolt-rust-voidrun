@@ -60,3 +60,24 @@ pub type Real = f64;
 /// Scalar type of world positions: `f64` with the `double-precision` feature, `f32` otherwise.
 #[cfg(not(feature = "double-precision"))]
 pub type Real = f32;
+
+/// `JPH_Mat4_RotationTranslation` under the name double precision uses.
+///
+/// joltc declares the `JPH_RMat4_*` functions only for double precision; in single precision
+/// `JPH_RMat4` is `JPH_Mat4` and `JPH_RVec3` is `JPH_Vec3`, so this forwards to the `JPH_Mat4_*`
+/// function and callers name one function in both builds.
+///
+/// # Safety
+/// As for the joltc function: `result` is valid for writing one matrix, `rotation` and
+/// `translation` are valid for reading.
+#[cfg(not(feature = "double-precision"))]
+#[allow(non_snake_case)]
+pub unsafe fn JPH_RMat4_RotationTranslation(
+    result: *mut JPH_RMat4,
+    rotation: *const JPH_Quat,
+    translation: *const JPH_RVec3,
+) {
+    // SAFETY: the caller upholds the joltc function's contract, and the types are identical in
+    // single precision.
+    unsafe { JPH_Mat4_RotationTranslation(result, rotation, translation) }
+}
