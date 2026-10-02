@@ -153,6 +153,14 @@ JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ShapeFilter_Procs, 16, 8);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeFilter_Procs, ShouldCollide, 0);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeFilter_Procs, ShouldCollide2, 8);
 
+#ifdef JPH_DEBUG_RENDERER
+// Debug renderer proc table that joltphysics fills with its line callback.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_DebugRenderer_Procs, 24, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DebugRenderer_Procs, DrawLine, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DebugRenderer_Procs, DrawTriangle, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DebugRenderer_Procs, DrawText3D, 16);
+#endif
+
 // Character settings and contacts, which hold pointers. joltc converts these
 // field by field, so only the C ABI is pinned here.
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_CharacterBaseSettings, 48, 8);
