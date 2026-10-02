@@ -149,8 +149,7 @@ impl Quat {
 
     /// Unit length within the tolerance of Jolt's `Quat::IsNormalized` (`|length² − 1| <= 1e-5`).
     pub(crate) fn is_normalized(&self) -> bool {
-        let length_squared =
-            self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w;
+        let length_squared = self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w;
         (length_squared - 1.0).abs() <= 1.0e-5
     }
 }
@@ -180,7 +179,12 @@ mod tests {
     use super::*;
 
     /// Values whose bits a lossy conversion would change.
-    const AWKWARD: [f32; 4] = [-0.0, f32::MIN_POSITIVE / 2.0, f32::MAX, f32::from_bits(0x7fc0_1234)];
+    const AWKWARD: [f32; 4] = [
+        -0.0,
+        f32::MIN_POSITIVE / 2.0,
+        f32::MAX,
+        f32::from_bits(0x7fc0_1234),
+    ];
 
     fn bits3(v: [f32; 3]) -> [u32; 3] {
         v.map(f32::to_bits)
