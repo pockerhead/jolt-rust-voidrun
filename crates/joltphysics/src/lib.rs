@@ -50,7 +50,8 @@
 //! The same calls in the same order give bit-identical results on one machine, for any
 //! [`WorldSettings::worker_threads`]. The order of body creation and removal is part of the
 //! state: it decides the [`BodyId`]s. Results agree across platforms and compilers only with
-//! the `cross-platform-deterministic` feature.
+//! the `cross-platform-deterministic` feature. The repository README's Determinism section
+//! lists what is and is not covered.
 //!
 //! # Frame
 //! [`PhysicsWorld::rebase`] moves the whole world into a new frame (a floating origin) with one

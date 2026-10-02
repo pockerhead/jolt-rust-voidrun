@@ -30,6 +30,33 @@ Features:
 - `double-precision`: Forwards to `joltphysics-sys/double-precision`
 - `cross-platform-deterministic`: Forwards to `joltphysics-sys/cross-platform-deterministic`
 
+## Determinism
+What is guaranteed: on one machine, the same binary given the same calls in the same order produces
+bit-identical body ids, poses, velocities and sleep flags for any `WorldSettings::worker_threads`
+(`worker_threads(n)` means n workers plus the thread that calls `step`). The call history includes the
+order of body creation and removal, which decides each `BodyId`'s index and sequence number, as well as
+rebases, `optimize_broad_phase`, forces and velocity writes. `remove_body` wakes the bodies whose exact
+bounds overlap the removed one, in id order, so it adds no hidden state.
+
+What is not guaranteed by default: equal results across compilers, compiler flags, operating systems or
+CPU architectures. The `cross-platform-deterministic` feature (off by default, roughly 8 % slower) builds
+Jolt with `CROSS_PLATFORM_DETERMINISTIC`. Jolt then
+[claims](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md#deterministic-simulation)
+equal results across compilers, configurations, operating systems and architectures, as long as the same
+source is built with the same defines: never compare a `double-precision` build with a single-precision
+one, and FPU rounding and denormal (DAZ/FTZ) modes must match. This repository's gate runs on one
+machine and checks thread-count equality in each configuration; it does not check equality across
+machines.
+
+Order caveats: narrow-phase query hits (`collide_shape` and friends) come in an unspecified order; sort
+them by body id and sub-shape id when order matters. Code that drives the world must not feed hash-map
+iteration order, time or thread identity into its calls.
+
+How it is checked: `cargo test -p joltphysics --test determinism` runs each scene in two child
+processes, with 1 and with 4 workers, records ticks 0 to 1000 of a chunk, terrain and item scene and
+requires them to match byte for byte; the same bodies created in another order must fail the gate. CI
+runs it in the default, `cross-platform-deterministic` and `double-precision` configurations.
+
 ## Building
 Requirements: a C++ toolchain (MSVC on Windows), CMake 3.20 or newer, and LLVM/libclang for `bindgen`
 (see the [bindgen guide](https://rust-lang.github.io/rust-bindgen/requirements.html)).
