@@ -133,7 +133,9 @@ fn record_body(bodies: *mut JPH_BodyInterface, id: JPH_BodyID, digest: &mut Vec<
 /// The BodyIDs of the first tick, in scene order.
 fn first_tick_ids(digest: &[u8]) -> Vec<JPH_BodyID> {
     digest[..BODY_COUNT * BODY_RECORD_SIZE]
-        .chunks_exact(BODY_RECORD_SIZE)
+        .as_chunks::<BODY_RECORD_SIZE>()
+        .0
+        .iter()
         .map(|record| JPH_BodyID::from_le_bytes(record[..4].try_into().unwrap()))
         .collect()
 }
