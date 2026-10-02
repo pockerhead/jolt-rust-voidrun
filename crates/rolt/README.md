@@ -1,14 +1,10 @@
-# `rolt` — aspirationally safe Rust Jolt bindings
-This crate contains a higher-level wrapper around JoltC, providing ergonomics comparable to using Jolt from C++.
-
-The safety of this crate is currently provided on a best-effort basis.
-
-For more complete and unsafe bindings, see [joltc-sys](https://crates.io/crates/joltc-sys).
-
-## Build Requirements
-- CMake 3.16 or newer
-- `libclang`, see the [bindgen guide](https://rust-lang.github.io/rust-bindgen/requirements.html) for installation steps.
+# `rolt` — safe Rust API for Jolt Physics
+The safe API over [joltc-sys](../joltc-sys) is being rebuilt on the [joltc] raw layer
+(Jolt Physics 5.6). This version contains no public items; use `joltc-sys` directly in the
+meantime.
 
 ## Features
-- `double-precision`: Forwards to `joltc-sys/double-precision`
-- `object-layer-u32`: Forwards to `joltc-sys/object-layer-u32`
+- `double-precision`: forwards to `joltc-sys/double-precision`
+- `cross-platform-deterministic`: forwards to `joltc-sys/cross-platform-deterministic`
+
+[joltc]: https://github.com/amerkoleci/joltc

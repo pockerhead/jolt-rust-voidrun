@@ -1,44 +1,273 @@
+//! Builds joltc and Jolt (or validates a prebuilt copy), links them and
+//! generates the raw bindings over `joltc.h`.
+//!
+//! Two ways to get the native libraries:
+//! - by default, CMake builds `native/` from the `vendor/` submodules into
+//!   `OUT_DIR/joltc`, an install prefix with `lib/`, `include/joltc.h` and a
+//!   manifest describing everything that affects the ABI;
+//! - with `JOLTC_LIB_DIR` set, an already built prefix of that shape is used
+//!   after its manifest, archives and header are validated, and CMake is not
+//!   run at all.
+
+use std::collections::BTreeMap;
 use std::env;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 
-fn main() {
-    let flags = build_flags();
+/// joltc commit of the `vendor/joltc` submodule. Must match the gitlink; CI checks this.
+const JOLTC_COMMIT: &str = "886e088675bae3a086f8318c7803f8ee962c2f2c";
+/// Jolt Physics commit of the `vendor/JoltPhysics` submodule. Must match the gitlink; CI checks this.
+const JOLT_COMMIT: &str = "e77f175595e64cb44218cc9d9d56fc365ad0e36a";
+/// Jolt Physics release of [`JOLT_COMMIT`].
+const JOLT_VERSION: &str = "5.6.0";
+/// Name of the manifest file in an install prefix.
+const MANIFEST_FILE: &str = "joltc-sys-manifest.txt";
 
-    build_joltc();
-    link();
-    generate_bindings(&flags).unwrap();
+/// joltc functions left out of the bindings.
+///
+/// They `reinterpret_cast` a `JPH_Mat4*` (4-aligned) to a `JPH::Mat44*`
+/// (16-aligned), which is undefined behaviour for most caller-provided arrays.
+/// The ragdoll work has to fix the wrapper (copy through aligned storage)
+/// before they can come back.
+const EXCLUDED_FUNCTIONS: &[&str] = &[
+    "JPH_RagdollSettings_DisableParentChildCollisions",
+    "JPH_Ragdoll_SetPose2",
+    "JPH_Ragdoll_GetPose2",
+    "JPH_SkeletonMapper_Initialize",
+    "JPH_SkeletonMapper_LockAllTranslations",
+    "JPH_SkeletonMapper_LockTranslations",
+    "JPH_SkeletonMapper_Map",
+    "JPH_SkeletonMapper_MapReverse",
+];
+
+/// Everything about the target and the crate features that shapes the native build.
+struct NativeConfig {
+    double_precision: bool,
+    cross_platform_deterministic: bool,
+    asserts: bool,
+    target: String,
+    target_os: String,
+    target_env: String,
+    target_arch: String,
+    /// MSVC runtime library in CMake's spelling, or `"none"` off MSVC.
+    crt: &'static str,
 }
 
-fn build_joltc() {
-    let mut config = cmake::Config::new("JoltC");
+impl NativeConfig {
+    /// Reads the target from Cargo's environment; `cfg!` would describe the build host.
+    fn from_env() -> Self {
+        let feature = |name: &str| env::var_os(format!("CARGO_FEATURE_{name}")).is_some();
+        let var = |name: &str| env::var(name).unwrap_or_default();
+
+        let target_env = var("CARGO_CFG_TARGET_ENV");
+        let crt_static = var("CARGO_CFG_TARGET_FEATURE")
+            .split(',')
+            .any(|f| f == "crt-static");
+        let crt = match (target_env.as_str(), crt_static) {
+            ("msvc", true) => "MultiThreaded",
+            ("msvc", false) => "MultiThreadedDLL",
+            _ => "none",
+        };
+
+        NativeConfig {
+            double_precision: feature("DOUBLE_PRECISION"),
+            cross_platform_deterministic: feature("CROSS_PLATFORM_DETERMINISTIC"),
+            asserts: feature("ASSERTS"),
+            target: var("TARGET"),
+            target_os: var("CARGO_CFG_TARGET_OS"),
+            target_env,
+            target_arch: var("CARGO_CFG_TARGET_ARCH"),
+            crt,
+        }
+    }
+
+    /// Name of the joltc library target, which joltc derives from the precision.
+    fn joltc_lib(&self) -> &'static str {
+        if self.double_precision {
+            "joltc_double"
+        } else {
+            "joltc"
+        }
+    }
+
+    /// File name of a static library as the target's toolchain spells it.
+    fn archive_name(&self, lib: &str) -> String {
+        if self.target_env == "msvc" {
+            format!("{lib}.lib")
+        } else {
+            format!("lib{lib}.a")
+        }
+    }
+}
+
+/// `ON` or `OFF`, as CMake options expect.
+fn on_off(value: bool) -> &'static str {
+    if value {
+        "ON"
+    } else {
+        "OFF"
+    }
+}
+
+/// Every input that changes the ABI or the archive contents, in manifest order.
+///
+/// Both the CMake path (writing) and the prebuilt path (validating) use this
+/// one list, so they cannot drift apart.
+fn manifest_entries(cfg: &NativeConfig) -> Vec<(&'static str, String)> {
+    vec![
+        ("format", "1".to_owned()),
+        ("joltc_commit", JOLTC_COMMIT.to_owned()),
+        ("jolt_commit", JOLT_COMMIT.to_owned()),
+        ("jolt_version", JOLT_VERSION.to_owned()),
+        ("target", cfg.target.clone()),
+        ("crt", cfg.crt.to_owned()),
+        ("double_precision", on_off(cfg.double_precision).to_owned()),
+        (
+            "cross_platform_deterministic",
+            on_off(cfg.cross_platform_deterministic).to_owned(),
+        ),
+        ("asserts", on_off(cfg.asserts).to_owned()),
+        ("object_layer_bits", "32".to_owned()),
+        ("debug_renderer", "ON".to_owned()),
+        ("floating_point_exceptions", "OFF".to_owned()),
+        ("profiler", "OFF".to_owned()),
+        ("joltc_lib", cfg.joltc_lib().to_owned()),
+    ]
+}
+
+/// The manifest file contents: one `key=value` per line.
+fn manifest_text(cfg: &NativeConfig) -> String {
+    manifest_entries(cfg)
+        .iter()
+        .map(|(key, value)| format!("{key}={value}\n"))
+        .collect()
+}
+
+/// Directory of this crate.
+fn manifest_dir() -> anyhow::Result<PathBuf> {
+    env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .context("CARGO_MANIFEST_DIR is not set")
+}
+
+/// Path with forward slashes, which CMake accepts on every platform.
+fn cmake_path(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
+fn main() -> anyhow::Result<()> {
+    println!("cargo:rerun-if-env-changed=JOLTC_LIB_DIR");
+    println!("cargo:rerun-if-changed=build.rs");
+
+    let cfg = NativeConfig::from_env();
+    let prefix = match env::var_os("JOLTC_LIB_DIR") {
+        Some(dir) => use_prebuilt(PathBuf::from(dir), &cfg)?,
+        None => build_with_cmake(&cfg)?,
+    };
+
+    link(&prefix, &cfg);
+    generate_bindings(&prefix.join("include").join("joltc.h"), &cfg)
+}
+
+/// Builds the native prefix from the submodules with CMake and returns its path.
+fn build_with_cmake(cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
+    let crate_dir = manifest_dir()?;
+    let joltc_dir = crate_dir.join("vendor").join("joltc");
+    let jolt_dir = crate_dir.join("vendor").join("JoltPhysics");
+
+    // Printing any rerun rule replaces Cargo's scan of the whole package, so
+    // Rust-only edits do not rerun CMake. Jolt's Assets are left out on purpose.
+    for input in [
+        "native",
+        "vendor/joltc/CMakeLists.txt",
+        "vendor/joltc/include",
+        "vendor/joltc/src",
+        "vendor/JoltPhysics/Build",
+        "vendor/JoltPhysics/Jolt",
+    ] {
+        println!("cargo:rerun-if-changed={input}");
+    }
+
+    if !joltc_dir.join("CMakeLists.txt").exists() || !jolt_dir.join("Build").exists() {
+        bail!(
+            "the joltc and Jolt Physics sources are missing under {}: run `git submodule update --init`, \
+             or set JOLTC_LIB_DIR to a prebuilt prefix",
+            crate_dir.join("vendor").display()
+        );
+    }
+
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").context("OUT_DIR is not set")?);
+    let mut config = cmake::Config::new(crate_dir.join("native"));
 
     // We always have to build in Release.
     //
     // On Windows, Rust always links against the non-debug CRT. Using the Debug
     // profile (which the cmake crate will sometimes pick by default) causes
-    // Jolt/JoltC to be linked against the debug CRT, causing linker issues.
-    //
-    // Forcing Jolt and JoltC to be compiled with the non-debug CRT (/MT)
-    // doesn't change enough about the build to work.
+    // Jolt/joltc to be linked against the debug CRT, causing linker issues.
     //
     // As a nice side effect, this ensures that we build with a known
     // configuration instead of accidentally enabling or disabling extra
     // features just based on opt-level.
     config.profile("Release");
+    config.out_dir(out_dir.join("joltc"));
 
-    // Read the actual cross-compile target rather than the build host so
-    // the rest of this fn can dispatch correctly. `cfg!(...)` would
-    // evaluate at build-script-compile time on the HOST.
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    config.define("JOLTC_SOURCE_DIR", cmake_path(&joltc_dir));
+    config.define("JOLT_PHYSICS_ROOT", cmake_path(&jolt_dir));
+    // Jolt comes from the submodule; never download anything at build time.
+    config.define("FETCHCONTENT_FULLY_DISCONNECTED", "ON");
 
-    // Jolt fails to compile via the cmake crate without specifying exception
-    // handling behavior under MSVC. I'm not sure that this is the correct
-    // exception handling mode.
-    if target_os == "windows" {
+    // Having IPO/LTO turned on breaks lld on Windows, and MSVC `/GL` objects
+    // cannot be linked by other toolchains.
+    config.define("INTERPROCEDURAL_OPTIMIZATION", "OFF");
+    // Warnings when building Jolt or joltc don't matter to users of joltc-sys.
+    config.define("ENABLE_ALL_WARNINGS", "OFF");
+    // build.rs installs only what it links (see native/CMakeLists.txt).
+    config.define("ENABLE_INSTALL", "OFF");
+    config.define("GENERATE_DEBUG_SYMBOLS", "OFF");
+
+    // Headless: no GPU compute backends. DX12 would also add system libraries
+    // to the link that this script does not emit.
+    for backend in [
+        "JPH_USE_DX12",
+        "JPH_USE_VK",
+        "JPH_USE_MTL",
+        "JPH_USE_CPU_COMPUTE",
+    ] {
+        config.define(backend, "OFF");
+    }
+
+    // Otherwise every Jolt worker thread enables floating point traps, and
+    // Rust callbacks would later run under them.
+    config.define("FLOATING_POINT_EXCEPTIONS_ENABLED", "OFF");
+    // No profiler API is bound; the instrumentation would only cost time.
+    config.define("PROFILER_IN_DEBUG_AND_RELEASE", "OFF");
+    // joltc declares its debug drawing functions unconditionally and defines
+    // them only with the debug renderer compiled in.
+    config.define("DEBUG_RENDERER_IN_DISTRIBUTION", "ON");
+
+    // These feature flags affect the compilation of both Jolt and joltc.
+    config.define("DOUBLE_PRECISION", on_off(cfg.double_precision));
+    config.define("USE_ASSERTS", on_off(cfg.asserts));
+    // Pins Jolt's floating-point flags to its cross-platform-deterministic
+    // settings: MSVC `/fp:precise` instead of `/fp:fast`, Clang
+    // `-ffp-contract=off`, FMADD off on x86. See the feature in Cargo.toml.
+    config.define(
+        "CROSS_PLATFORM_DETERMINISTIC",
+        on_off(cfg.cross_platform_deterministic),
+    );
+
+    if cfg.target_env == "msvc" {
+        // Jolt and joltc strip `/EHsc` from their own scopes while C++
+        // exceptions are off; the layout checks in the wrapper scope need it.
         config.cxxflag("/EHsc");
+
+        // The native libraries use the same CRT as the Rust binary: the DLL
+        // CRT by default, the static CRT with `crt-static`. Without this, Jolt
+        // picks the static CRT while joltc keeps the DLL one.
+        config.define("USE_STATIC_MSVC_RUNTIME_LIBRARY", "OFF");
+        config.define("CMAKE_MSVC_RUNTIME_LIBRARY", cfg.crt);
     }
 
     // Native Android cross-compile setup. Without this, building
@@ -54,23 +283,23 @@ fn build_joltc() {
     // We translate cargo's target arch to NDK's ABI string and route
     // CMake through the NDK toolchain file. `ANDROID_PLATFORM=android-21`
     // is the same baseline most cargo-ndk users target.
-    if target_os == "android" {
+    if cfg.target_os == "android" {
         let android_ndk_home = env::var("ANDROID_NDK_HOME")
             .or_else(|_| env::var("ANDROID_NDK_ROOT"))
             .or_else(|_| env::var("ANDROID_NDK"))
-            .expect(
+            .context(
                 "Android cross-compile requires ANDROID_NDK_HOME (or ANDROID_NDK_ROOT / \
                  ANDROID_NDK) to point at the NDK install. Install via \
                  `nttld/setup-ndk@v1` in CI or the Android SDK manager locally.",
-            );
+            )?;
         let toolchain_file = format!("{android_ndk_home}/build/cmake/android.toolchain.cmake");
         config.define("CMAKE_TOOLCHAIN_FILE", &toolchain_file);
-        let android_abi = match target_arch.as_str() {
+        let android_abi = match cfg.target_arch.as_str() {
             "aarch64" => "arm64-v8a",
             "arm" => "armeabi-v7a",
             "x86" => "x86",
             "x86_64" => "x86_64",
-            _ => panic!("unsupported Android target arch: {target_arch}"),
+            arch => bail!("unsupported Android target arch: {arch}"),
         };
         config.define("ANDROID_ABI", android_abi);
         config.define("ANDROID_PLATFORM", "android-21");
@@ -80,110 +309,174 @@ fn build_joltc() {
         config.generator("Ninja");
     }
 
-    // Having IPO/LTO turned on breaks lld on Windows.
-    config.define("INTERPROCEDURAL_OPTIMIZATION", "OFF");
-
-    // Warnings when building Jolt or JoltC don't matter to users of joltc-sys.
-    config.define("ENABLE_ALL_WARNINGS", "OFF");
-
-    // These feature flags go through CMake and affect compilation of both Jolt
-    // and JoltC.
-    if cfg!(feature = "double-precision") {
-        config.define("DOUBLE_PRECISION", "ON");
-    }
-    if cfg!(feature = "object-layer-u32") {
-        config.define("OBJECT_LAYER_BITS", "32");
-    }
-
-    if cfg!(feature = "asserts") {
-        config.define("USE_ASSERTS", "ON");
-    }
-
-    // Pin JoltPhysics' floating-point flags to the cross-platform-
-    // deterministic settings JPH gates on the same-named CMake var
-    // (see Build/CMakeLists.txt + Jolt/Jolt.cmake). MSVC swaps
-    // /fp:fast → /fp:precise; Clang ≥14 adds -ffp-contract=off; x86
-    // disables FMADD. Required for cross-platform-deterministic
-    // builds (P2P-deterministic netcode, rollback-replayable sims).
-    // ~10% perf cost; mirrors rapier3d's `enhanced-determinism`.
-    if cfg!(feature = "cross-platform-deterministic") {
-        config.define("CROSS_PLATFORM_DETERMINISTIC", "ON");
-    }
-
-    let mut dst = config.build();
-
-    // Jolt and JoltC put libraries in the 'lib' subfolder. This goes against
-    // the docs of the cmake crate, but it's possible that it's just mishandling
-    // an output path and not account for the install target's configurability.
-    dst.push("lib");
-    println!("cargo:rustc-link-search=native={}", dst.display());
-
-    // On Fedora Workstation 42, it looks like Jolt puts libs in the "lib64"
-    // subfolder, so make sure to search there too.
-    dst.pop();
-    dst.push("lib64");
-    println!("cargo:rustc-link-search=native={}", dst.display());
-
-    // On macOS and Linux, we need to explicitly link against the C++ standard
-    // library here to avoid getting missing symbol errors from Jolt/JoltC.
-    if cfg!(target_os = "macos") {
-        println!("cargo:rustc-flags=-l dylib=c++");
-    }
-
-    if cfg!(target_os = "linux") {
-        println!("cargo:rustc-link-lib=dylib=stdc++");
-    }
+    let prefix = config.build();
+    write_manifest(&prefix, cfg)?;
+    Ok(prefix)
 }
 
-fn link() {
-    println!("cargo:rustc-link-lib=Jolt");
-    println!("cargo:rustc-link-lib=joltc");
+/// Writes the manifest into the prefix, only when its content changes.
+fn write_manifest(prefix: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
+    let path = prefix.join(MANIFEST_FILE);
+    let text = manifest_text(cfg);
+    if fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+        fs::write(&path, text).with_context(|| format!("cannot write {}", path.display()))?;
+    }
+    Ok(())
 }
 
-/// Generate build flags specifically for generating bindings.
-///
-/// This is redundant with Jolt and JoltC's CMake files, which do this mapping
-/// for us, but we're unable to leverage that config when running bindgen.
-fn build_flags() -> Vec<(&'static str, &'static str)> {
-    let mut flags = Vec::new();
+/// Validates a prebuilt prefix from `JOLTC_LIB_DIR` and returns it. Never runs CMake.
+fn use_prebuilt(dir: PathBuf, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
+    let header = dir.join("include").join("joltc.h");
+    let manifest = dir.join(MANIFEST_FILE);
+    let archives = [
+        dir.join("lib").join(cfg.archive_name(cfg.joltc_lib())),
+        dir.join("lib").join(cfg.archive_name("Jolt")),
+    ];
 
-    // Force the debug renderer on. In the future, we might want to tie this to
-    // a crate feature.
-    flags.push(("JPH_DEBUG_RENDERER", "ON"));
-
-    // It's important that these flags are never out of sync for Jolt and JoltC.
-    if cfg!(feature = "double-precision") {
-        flags.push(("JPC_DOUBLE_PRECISION", "ON"));
-        flags.push(("JPH_DOUBLE_PRECISION", "ON"));
+    let inputs: Vec<&PathBuf> = [&header, &manifest].into_iter().chain(&archives).collect();
+    for input in &inputs {
+        println!("cargo:rerun-if-changed={}", input.display());
+    }
+    // A configuration mismatch explains a missing archive (for example
+    // joltc_double without double precision), so it is reported first.
+    if manifest.is_file() {
+        check_manifest(&manifest, cfg)?;
+    }
+    let missing: Vec<String> = inputs
+        .iter()
+        .filter(|path| !path.is_file())
+        .map(|path| format!("  {}", path.display()))
+        .collect();
+    if !missing.is_empty() {
+        bail!(
+            "JOLTC_LIB_DIR={} is not a usable joltc-sys prefix; missing:\n{}",
+            dir.display(),
+            missing.join("\n")
+        );
     }
 
-    if cfg!(feature = "object-layer-u32") {
-        flags.push(("JPC_OBJECT_LAYER_BITS", "32"));
-        flags.push(("JPH_OBJECT_LAYER_BITS", "32"));
-    }
-
-    flags
+    check_header(&header)?;
+    Ok(dir)
 }
 
-fn generate_bindings(flags: &[(&'static str, &'static str)]) -> anyhow::Result<()> {
+/// Fails unless the prebuilt manifest equals the one this build would write.
+fn check_manifest(path: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
+    let text =
+        fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
+    let mut found = BTreeMap::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let (key, value) = line
+            .split_once('=')
+            .with_context(|| format!("{}: malformed line {line:?}", path.display()))?;
+        found.insert(key.trim().to_owned(), value.trim().to_owned());
+    }
+
+    let expected = manifest_entries(cfg);
+    let mut differences = Vec::new();
+    for (key, value) in &expected {
+        match found.remove(*key) {
+            Some(prebuilt) if prebuilt == *value => {}
+            Some(prebuilt) => {
+                differences.push(format!("  {key}: prebuilt={prebuilt} expected={value}"))
+            }
+            None => differences.push(format!("  {key}: prebuilt=<missing> expected={value}")),
+        }
+    }
+    for (key, prebuilt) in found {
+        differences.push(format!(
+            "  {key}: prebuilt={prebuilt} expected=<unknown key>"
+        ));
+    }
+
+    if !differences.is_empty() {
+        bail!(
+            "the prebuilt joltc in {} was built for a different configuration:\n{}\n\
+             Linking a mismatched native library is undefined behaviour at the FFI boundary. \
+             Rebuild the prefix for this configuration or unset JOLTC_LIB_DIR.",
+            path.display(),
+            differences.join("\n")
+        );
+    }
+    Ok(())
+}
+
+/// Fails if the prebuilt header differs from the vendored one, when the submodule is present.
+fn check_header(prebuilt: &Path) -> anyhow::Result<()> {
+    let vendored = manifest_dir()?
+        .join("vendor")
+        .join("joltc")
+        .join("include")
+        .join("joltc.h");
+    if !vendored.is_file() {
+        println!(
+            "cargo:warning=vendor/joltc is not checked out; the prebuilt joltc.h could not be cross-checked"
+        );
+        return Ok(());
+    }
+    println!("cargo:rerun-if-changed={}", vendored.display());
+    let read =
+        |path: &Path| fs::read(path).with_context(|| format!("cannot read {}", path.display()));
+    if read(prebuilt)? != read(&vendored)? {
+        bail!(
+            "{} differs from {}: the prebuilt prefix is from another joltc version. \
+             Rebuild it or unset JOLTC_LIB_DIR.",
+            prebuilt.display(),
+            vendored.display()
+        );
+    }
+    Ok(())
+}
+
+/// Links joltc and Jolt statically and exports the prefix to dependants.
+fn link(prefix: &Path, cfg: &NativeConfig) {
+    println!(
+        "cargo:rustc-link-search=native={}",
+        prefix.join("lib").display()
+    );
+    // joltc depends on Jolt, so it comes first for single-pass linkers.
+    println!("cargo:rustc-link-lib=static={}", cfg.joltc_lib());
+    println!("cargo:rustc-link-lib=static=Jolt");
+
+    match cfg.target_os.as_str() {
+        "macos" | "ios" => println!("cargo:rustc-link-lib=dylib=c++"),
+        "linux" => println!("cargo:rustc-link-lib=dylib=stdc++"),
+        _ => {}
+    }
+
+    println!("cargo:include={}", prefix.join("include").display());
+    println!("cargo:root={}", prefix.display());
+}
+
+/// Generates `OUT_DIR/bindings.rs` from `joltc.h`.
+fn generate_bindings(header: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
+    let include_dir = header.parent().context("joltc.h has no parent directory")?;
     let mut builder = bindgen::Builder::default()
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .header("JoltC/JoltC/JoltC.h")
-        .clang_arg("-IJoltC")
-        .allowlist_item("JPC_.*")
+        .header(header.display().to_string())
+        .clang_arg(format!("-I{}", include_dir.display()))
+        .allowlist_item("JPH_.*")
+        .allowlist_item("JobSystemThreadPoolConfig")
         .default_enum_style(bindgen::EnumVariation::Consts)
-        .prepend_enum_name(false);
+        .prepend_enum_name(false)
+        // The explicit rerun rules cover the header's sources; the header the
+        // CMake path binds lives in OUT_DIR, whose timestamps we do not control.
+        .parse_callbacks(Box::new(
+            bindgen::CargoCallbacks::new().rerun_on_header_files(false),
+        ));
 
-    for (key, value) in flags {
-        builder = builder.clang_arg(format!("-D{key}={value}"));
+    // The header's only ABI switch; JPH_DEBUG_RENDERER only affects joltc.cpp.
+    if cfg.double_precision {
+        builder = builder.clang_arg("-DJPH_DOUBLE_PRECISION");
+    }
+    for function in EXCLUDED_FUNCTIONS {
+        builder = builder.blocklist_function(function);
     }
 
     let bindings = builder
         .generate()
-        .context("failed to generate JoltC bindings")?;
-
-    let out_path = Path::new(&env::var("OUT_DIR").unwrap()).join("bindings.rs");
+        .context("failed to generate joltc bindings")?;
+    let out_path =
+        PathBuf::from(env::var_os("OUT_DIR").context("OUT_DIR is not set")?).join("bindings.rs");
     bindings
-        .write_to_file(out_path)
-        .context("Couldn't write bindings!")
+        .write_to_file(&out_path)
+        .with_context(|| format!("cannot write {}", out_path.display()))
 }

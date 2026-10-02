@@ -1,233 +1,193 @@
-use std::ffi::{c_uint, c_void, CStr, CString};
-use std::ptr;
+//! Shared setup for the raw binding tests: one-time `JPH_Init`, a world with
+//! table-based layers (no Rust callbacks are called from C++), and box helpers.
 
-// Everything prefixed with `JPC_` comes from the joltc_sys crate.
+// Each test file compiles this module on its own and uses a different subset.
+#![allow(dead_code)]
+
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+
 use joltc_sys::*;
 
-pub const OL_NON_MOVING: JPC_ObjectLayer = 0;
-pub const OL_MOVING: JPC_ObjectLayer = 1;
+pub const OL_NON_MOVING: JPH_ObjectLayer = 0;
+pub const OL_MOVING: JPH_ObjectLayer = 1;
+const OBJECT_LAYER_COUNT: u32 = 2;
 
-pub const BPL_NON_MOVING: JPC_BroadPhaseLayer = 0;
-pub const BPL_MOVING: JPC_BroadPhaseLayer = 1;
-pub const BPL_COUNT: JPC_BroadPhaseLayer = 2;
+pub const BPL_NON_MOVING: JPH_BroadPhaseLayer = 0;
+pub const BPL_MOVING: JPH_BroadPhaseLayer = 1;
+const BROAD_PHASE_LAYER_COUNT: u32 = 2;
 
-#[allow(unused_variables)]
-pub trait SmokeTest {
-    unsafe fn setup(system: *mut JPC_PhysicsSystem) -> Self;
-
-    unsafe fn post_update(&mut self, system: *mut JPC_PhysicsSystem) -> bool {
-        false
-    }
-
-    unsafe fn teardown(&mut self, system: *mut JPC_PhysicsSystem) {}
-}
-
-pub fn create_box(settings: &JPC_BoxShapeSettings) -> Result<*mut JPC_Shape, CString> {
-    let mut shape: *mut JPC_Shape = ptr::null_mut();
-    let mut err: *mut JPC_String = ptr::null_mut();
-
-    unsafe {
-        if JPC_BoxShapeSettings_Create(settings, &mut shape, &mut err) {
-            Ok(shape)
-        } else {
-            Err(CStr::from_ptr(JPC_String_c_str(err)).to_owned())
-        }
-    }
-}
-
-pub fn create_sphere(settings: &JPC_SphereShapeSettings) -> Result<*mut JPC_Shape, CString> {
-    let mut shape: *mut JPC_Shape = ptr::null_mut();
-    let mut err: *mut JPC_String = ptr::null_mut();
-
-    unsafe {
-        if JPC_SphereShapeSettings_Create(settings, &mut shape, &mut err) {
-            Ok(shape)
-        } else {
-            Err(CStr::from_ptr(JPC_String_c_str(err)).to_owned())
-        }
-    }
-}
-
-pub fn create_convex_hull(
-    settings: &JPC_ConvexHullShapeSettings,
-) -> Result<*mut JPC_Shape, CString> {
-    let mut shape: *mut JPC_Shape = ptr::null_mut();
-    let mut err: *mut JPC_String = ptr::null_mut();
-
-    unsafe {
-        if JPC_ConvexHullShapeSettings_Create(settings, &mut shape, &mut err) {
-            Ok(shape)
-        } else {
-            Err(CStr::from_ptr(JPC_String_c_str(err)).to_owned())
-        }
-    }
-}
-
-pub fn vec3(x: f32, y: f32, z: f32) -> JPC_Vec3 {
-    JPC_Vec3 { x, y, z, _w: z }
-}
-
-pub fn rvec3(x: Real, y: Real, z: Real) -> JPC_RVec3 {
-    JPC_RVec3 { x, y, z, _w: z }
-}
-
-pub fn vec4(x: f32, y: f32, z: f32, w: f32) -> JPC_Vec4 {
-    JPC_Vec4 { x, y, z, w }
-}
-
-// If 'double-precision' is set, there is padding in this struct
-#[allow(clippy::needless_update)]
-pub fn rmat44_identity() -> JPC_RMat44 {
-    unsafe {
-        JPC_RMat44 {
-            col: [
-                vec4(1.0, 0.0, 0.0, 0.0),
-                vec4(0.0, 1.0, 0.0, 0.0),
-                vec4(0.0, 0.0, 1.0, 0.0),
-            ],
-            col3: rvec3(0.0, 0.0, 0.0),
-            ..std::mem::zeroed()
-        }
-    }
-}
-
-pub fn rmat44_translation(col3: JPC_RVec3) -> JPC_RMat44 {
-    JPC_RMat44 {
-        col3,
-        ..rmat44_identity()
-    }
-}
-
-fn global_init() {
-    use std::sync::OnceLock;
-
-    static INITIALIZED: OnceLock<()> = OnceLock::new();
-
-    INITIALIZED.get_or_init(|| unsafe {
-        JPC_RegisterDefaultAllocator();
-        JPC_FactoryInit();
-        JPC_RegisterTypes();
+/// Calls `JPH_Init` once per process. `JPH_Shutdown` is never called because
+/// tests run on parallel threads.
+pub fn init() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        // SAFETY: `OnceLock` runs this exactly once per process, so the
+        // unsynchronised initialisation in `JPH_Init` never races.
+        let initialized = unsafe { JPH_Init() };
+        assert!(initialized, "JPH_Init failed");
     });
 }
 
-pub fn run_test<S: SmokeTest>() {
-    global_init();
+/// Serialises physics system creation and destruction, which joltc tracks in
+/// an unsynchronised global map.
+fn world_lock() -> MutexGuard<'static, ()> {
+    static WORLD: Mutex<()> = Mutex::new(());
+    WORLD.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
-    unsafe {
-        let temp_allocator = JPC_TempAllocatorImpl_new(10 * 1024 * 1024);
+/// A physics system with its own job system and temp allocator.
+pub struct TestWorld {
+    system: *mut JPH_PhysicsSystem,
+    job_system: *mut JPH_JobSystem,
+    temp_allocator: *mut JPH_TempAllocator,
+    // Last field: released after `Drop::drop` destroyed the system.
+    _guard: MutexGuard<'static, ()>,
+}
 
-        let job_system =
-            JPC_JobSystemThreadPool_new2(JPC_MAX_PHYSICS_JOBS as _, JPC_MAX_PHYSICS_BARRIERS as _);
+impl TestWorld {
+    /// Creates a world stepped by `worker_threads` Jolt worker threads.
+    pub fn new(worker_threads: i32) -> Self {
+        assert!(worker_threads > 0, "joltc maps 0 or less to automatic");
+        init();
+        let guard = world_lock();
 
-        let broad_phase_layer_interface = JPC_BroadPhaseLayerInterface_new(ptr::null(), BPL);
+        // SAFETY: Jolt is initialised and the world lock is held. Every
+        // pointer passed in comes from the matching `_Create` call just
+        // above it and is not destroyed before `JPH_PhysicsSystem_Create`,
+        // which takes ownership of the three layer tables.
+        let system = unsafe {
+            let pair_filter = JPH_ObjectLayerPairFilterTable_Create(OBJECT_LAYER_COUNT);
+            JPH_ObjectLayerPairFilterTable_EnableCollision(pair_filter, OL_NON_MOVING, OL_MOVING);
+            JPH_ObjectLayerPairFilterTable_EnableCollision(pair_filter, OL_MOVING, OL_MOVING);
 
-        let object_vs_broad_phase_layer_filter =
-            JPC_ObjectVsBroadPhaseLayerFilter_new(ptr::null_mut(), OVB);
-
-        let object_vs_object_layer_filter = JPC_ObjectLayerPairFilter_new(ptr::null_mut(), OVO);
-
-        let physics_system = JPC_PhysicsSystem_new();
-
-        let max_bodies = 1024;
-        let num_body_mutexes = 0;
-        let max_body_pairs = 1024;
-        let max_contact_constraints = 1024;
-
-        JPC_PhysicsSystem_Init(
-            physics_system,
-            max_bodies,
-            num_body_mutexes,
-            max_body_pairs,
-            max_contact_constraints,
-            broad_phase_layer_interface,
-            object_vs_broad_phase_layer_filter,
-            object_vs_object_layer_filter,
-        );
-
-        let mut test = S::setup(physics_system);
-
-        // TODO: register body activation listener
-        // TODO: register contact listener
-
-        // TODO: PhysicsSystem::OptimizeBroadPhase
-
-        let delta_time = 1.0 / 60.0;
-        let collision_steps = 1;
-
-        loop {
-            JPC_PhysicsSystem_Update(
-                physics_system,
-                delta_time,
-                collision_steps,
-                temp_allocator,
-                job_system.cast::<JPC_JobSystem>(),
+            let broad_phase = JPH_BroadPhaseLayerInterfaceTable_Create(
+                OBJECT_LAYER_COUNT,
+                BROAD_PHASE_LAYER_COUNT,
+            );
+            JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(
+                broad_phase,
+                OL_NON_MOVING,
+                BPL_NON_MOVING,
+            );
+            JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(
+                broad_phase,
+                OL_MOVING,
+                BPL_MOVING,
             );
 
-            if !test.post_update(physics_system) {
-                break;
-            }
+            let object_vs_broad_phase = JPH_ObjectVsBroadPhaseLayerFilterTable_Create(
+                broad_phase,
+                BROAD_PHASE_LAYER_COUNT,
+                pair_filter,
+                OBJECT_LAYER_COUNT,
+            );
+
+            let settings = JPH_PhysicsSystemSettings {
+                maxBodies: 1024,
+                maxBodyPairs: 1024,
+                maxContactConstraints: 1024,
+                broadPhaseLayerInterface: broad_phase,
+                objectLayerPairFilter: pair_filter,
+                objectVsBroadPhaseLayerFilter: object_vs_broad_phase,
+                ..std::mem::zeroed()
+            };
+            JPH_PhysicsSystem_Create(&settings)
+        };
+        assert!(!system.is_null(), "JPH_PhysicsSystem_Create failed");
+
+        let pool_config = JobSystemThreadPoolConfig {
+            // 0 selects Jolt's default job and barrier counts.
+            maxJobs: 0,
+            maxBarriers: 0,
+            numThreads: worker_threads,
+        };
+        // SAFETY: `pool_config` is a live local for the duration of the call.
+        let job_system = unsafe { JPH_JobSystemThreadPool_Create(&pool_config) };
+        // SAFETY: plain allocation with no preconditions besides `JPH_Init`.
+        let temp_allocator = unsafe { JPH_TempAllocator_Create(10 * 1024 * 1024) };
+
+        TestWorld {
+            system,
+            job_system,
+            temp_allocator,
+            _guard: guard,
         }
+    }
 
-        test.teardown(physics_system);
+    /// Advances the simulation by `dt` seconds with one collision step.
+    pub fn step(&self, dt: f32) {
+        // SAFETY: all three pointers come from `new` and live until `drop`.
+        let result = unsafe {
+            JPH_PhysicsSystem_Update2(self.system, dt, 1, self.temp_allocator, self.job_system)
+        };
+        assert_eq!(result, JPH_PhysicsUpdateError_None);
+    }
 
-        JPC_PhysicsSystem_delete(physics_system);
-        JPC_BroadPhaseLayerInterface_delete(broad_phase_layer_interface);
-        JPC_ObjectVsBroadPhaseLayerFilter_delete(object_vs_broad_phase_layer_filter);
-        JPC_ObjectLayerPairFilter_delete(object_vs_object_layer_filter);
-
-        JPC_JobSystemThreadPool_delete(job_system);
-        JPC_TempAllocatorImpl_delete(temp_allocator);
+    /// The system's locking body interface.
+    pub fn body_interface(&self) -> *mut JPH_BodyInterface {
+        // SAFETY: `system` comes from `new` and lives until `drop`.
+        unsafe { JPH_PhysicsSystem_GetBodyInterface(self.system) }
     }
 }
 
-unsafe extern "C" fn bpl_get_num_broad_phase_layers(_this: *const c_void) -> c_uint {
-    BPL_COUNT as _
-}
-
-unsafe extern "C" fn bpl_get_broad_phase_layer(
-    _this: *const c_void,
-    layer: JPC_ObjectLayer,
-) -> JPC_BroadPhaseLayer {
-    match layer {
-        OL_NON_MOVING => BPL_NON_MOVING,
-        OL_MOVING => BPL_MOVING,
-        _ => unreachable!(),
+impl Drop for TestWorld {
+    fn drop(&mut self) {
+        // SAFETY: the pointers come from `new` and are destroyed exactly once
+        // here, the system first because it uses the other two. The world
+        // lock is still held: `_guard` drops after this function.
+        unsafe {
+            JPH_PhysicsSystem_Destroy(self.system);
+            JPH_JobSystem_Destroy(self.job_system);
+            JPH_TempAllocator_Destroy(self.temp_allocator);
+        }
     }
 }
 
-const BPL: JPC_BroadPhaseLayerInterfaceFns = JPC_BroadPhaseLayerInterfaceFns {
-    GetNumBroadPhaseLayers: Some(bpl_get_num_broad_phase_layers as _),
-    GetBroadPhaseLayer: Some(bpl_get_broad_phase_layer as _),
-};
+pub fn vec3(x: f32, y: f32, z: f32) -> JPH_Vec3 {
+    JPH_Vec3 { x, y, z }
+}
 
-unsafe extern "C" fn ovb_should_collide(
-    _this: *const c_void,
-    layer1: JPC_ObjectLayer,
-    layer2: JPC_BroadPhaseLayer,
-) -> bool {
-    match layer1 {
-        OL_NON_MOVING => layer2 == BPL_MOVING,
-        OL_MOVING => true,
-        _ => unreachable!(),
+pub fn rvec3(x: Real, y: Real, z: Real) -> JPH_RVec3 {
+    JPH_RVec3 { x, y, z }
+}
+
+pub fn quat_identity() -> JPH_Quat {
+    JPH_Quat {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        w: 1.0,
     }
 }
 
-const OVB: JPC_ObjectVsBroadPhaseLayerFilterFns = JPC_ObjectVsBroadPhaseLayerFilterFns {
-    ShouldCollide: Some(ovb_should_collide as _),
-};
-
-unsafe extern "C" fn ovo_should_collide(
-    _this: *const c_void,
-    layer1: JPC_ObjectLayer,
-    layer2: JPC_ObjectLayer,
-) -> bool {
-    match layer1 {
-        OL_NON_MOVING => layer2 == OL_MOVING,
-        OL_MOVING => true,
-        _ => unreachable!(),
-    }
+/// Creates a box body, adds it to the world and returns its id.
+pub fn create_box(
+    body_interface: *mut JPH_BodyInterface,
+    half_extent: JPH_Vec3,
+    position: JPH_RVec3,
+    motion_type: JPH_MotionType,
+    layer: JPH_ObjectLayer,
+    activation: JPH_Activation,
+) -> JPH_BodyID {
+    let rotation = quat_identity();
+    // SAFETY: `body_interface` belongs to a live `TestWorld`; the vector and
+    // quaternion arguments are live locals. The shape is created holding one
+    // reference; the body takes its own, so releasing ours with
+    // `JPH_Shape_Destroy` keeps the shape alive for the body.
+    let body = unsafe {
+        let shape = JPH_BoxShape_Create(&half_extent, JPH_DEFAULT_CONVEX_RADIUS as f32);
+        let settings = JPH_BodyCreationSettings_Create3(
+            shape as *const JPH_Shape,
+            &position,
+            &rotation,
+            motion_type,
+            layer,
+        );
+        let body = JPH_BodyInterface_CreateAndAddBody(body_interface, settings, activation);
+        JPH_BodyCreationSettings_Destroy(settings);
+        JPH_Shape_Destroy(shape as *mut JPH_Shape);
+        body
+    };
+    assert_ne!(body, u32::MAX, "body creation failed");
+    body
 }
-
-const OVO: JPC_ObjectLayerPairFilterFns = JPC_ObjectLayerPairFilterFns {
-    ShouldCollide: Some(ovo_should_collide as _),
-};

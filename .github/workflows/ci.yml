@@ -1,57 +1,83 @@
-name: Test Suite
+name: CI
 
 on:
   push:
-    branches:
-      - main
-
   pull_request:
-    branches:
-      - main
 
 jobs:
-  test-suite:
+  test:
+    name: Windows MSVC (${{ matrix.features || 'default' }})
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
-        rust_version: [stable]
-        build_flags: ["", "--features double-precision", "--features object-layer-u32", "--all-features"]
-        exclude:
-          - os: ubuntu-latest
-
-    runs-on: ${{ matrix.os }}
-    name: Tests - ${{ matrix.os }} ${{ matrix.rust_version }} ${{ matrix.build_flags }}
-
+        features: ["", "cross-platform-deterministic"]
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTDOCFLAGS: -D warnings
+      FEATURE_ARGS: ${{ matrix.features && format('--features joltc-sys/{0}', matrix.features) || '' }}
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: 'recursive'
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
 
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ matrix.rust_version }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
-    - uses: swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.features || 'default' }}
 
-    - name: Rust Tests
-      run: |
-        cargo test --verbose --workspace ${{ matrix.build_flags }}
+      # The native cache key and the build.rs manifest both rely on these
+      # constants matching the submodule gitlinks.
+      - name: Check pinned commits
+        id: pins
+        run: |
+          joltc=$(git rev-parse HEAD:crates/joltc-sys/vendor/joltc)
+          jolt=$(git rev-parse HEAD:crates/joltc-sys/vendor/JoltPhysics)
+          grep -q "\"$joltc\"" crates/joltc-sys/build.rs || { echo "build.rs JOLTC_COMMIT differs from the gitlink $joltc"; exit 1; }
+          grep -q "\"$jolt\"" crates/joltc-sys/build.rs || { echo "build.rs JOLT_COMMIT differs from the gitlink $jolt"; exit 1; }
+          echo "joltc=$joltc" >> "$GITHUB_OUTPUT"
+          echo "jolt=$jolt" >> "$GITHUB_OUTPUT"
 
-  rustfmt:
+      - name: Restore native library
+        id: native
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/joltc-prefix
+          key: joltc-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.joltc }}-${{ steps.pins.outputs.jolt }}-${{ matrix.features || 'default' }}-${{ hashFiles('crates/joltc-sys/native/**', 'crates/joltc-sys/build.rs') }}
+
+      - name: Build native library
+        if: steps.native.outputs.cache-hit != 'true'
+        run: |
+          cargo build -p joltc-sys $FEATURE_ARGS
+          shopt -s nullglob
+          dirs=(target/debug/build/joltc-sys-*/out/joltc)
+          [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/joltc-prefix"
+          cp -r "${dirs[0]}/lib" "${dirs[0]}/include" "${dirs[0]}/joltc-sys-manifest.txt" "$RUNNER_TEMP/joltc-prefix/"
+
+      # Every later step links the cached prefix, so each run also exercises
+      # the JOLTC_LIB_DIR validation. A manifest mismatch means the cache key
+      # is wrong; fix the key rather than falling back to CMake.
+      - name: Use the native library
+        run: echo "JOLTC_LIB_DIR=$RUNNER_TEMP/joltc-prefix" >> "$GITHUB_ENV"
+
+      - run: cargo build --workspace --all-targets $FEATURE_ARGS
+      - run: cargo test --workspace $FEATURE_ARGS
+      - run: cargo clippy --workspace --all-targets $FEATURE_ARGS -- -D warnings
+      - run: cargo doc --workspace --no-deps $FEATURE_ARGS
+
+  fmt:
+    name: Formatting
     runs-on: ubuntu-latest
-    name: Code Formatting
-
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: stable
-        components: rustfmt
-
-    - name: Rustfmt
-      run: |
-        cargo fmt --all --check
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
