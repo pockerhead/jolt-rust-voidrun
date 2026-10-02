@@ -652,6 +652,15 @@ impl Shape {
         unsafe { JPH_Shape_MustBeStatic(self.as_ptr()) }
     }
 
+    /// The centre of mass in shape-local space, metres.
+    pub(crate) fn center_of_mass(&self) -> Vec3 {
+        let mut center = Vec3::ZERO.to_jph();
+        // SAFETY: the shape is live for the call; the getter only reads it, and `center` is a
+        // live local.
+        unsafe { JPH_Shape_GetCenterOfMass(self.as_ptr(), &mut center) };
+        Vec3::from_jph(center)
+    }
+
     /// This sphere or capsule with its radius grown by `by` metres; `Ok(None)` for every other
     /// shape type.
     ///
@@ -856,10 +865,15 @@ mod tests {
     }
 
     #[test]
-    fn static_only_is_read_from_jolt() {
+    fn static_only_and_center_of_mass_are_read_from_jolt() {
         assert!(!unit_box().must_be_static());
         let terrain = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default());
         assert!(terrain.unwrap().must_be_static());
+        assert_eq!(unit_box().center_of_mass(), Vec3::ZERO);
+        let unit_box = unit_box();
+        let pair =
+            Shape::new_compound(&[child(&unit_box, 0.0, 1), child(&unit_box, 2.0, 2)]).unwrap();
+        assert_eq!(pair.center_of_mass(), Vec3::new(1.0, 0.0, 0.0));
     }
 
     #[test]

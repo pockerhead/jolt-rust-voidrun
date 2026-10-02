@@ -606,3 +606,211 @@ fn shape_cast_rejects_invalid_input() {
         );
     }
 }
+
+// Collide shape.
+
+fn standing_capsule_at(shape: &Shape, x: Real, y: Real) -> CollideShape<'_> {
+    CollideShape::new(shape, RVec3::new(x, y, 0.0), Quat::IDENTITY)
+}
+
+#[test]
+fn collide_capsule_with_floor_reports_geometric_depth() {
+    let mut world = world(Vec3::ZERO, 1);
+    let floor = add_floor(&mut world);
+    let wall_shape = Shape::new_box(Vec3::new(1.0, 5.0, 5.0)).unwrap();
+    let wall = world
+        .create_body(
+            &wall_shape,
+            &BodySettings::new_static().position(RVec3::new(1.0, 5.0, 0.0)),
+        )
+        .unwrap();
+    let shape = capsule();
+
+    let hits = world
+        .collide_shape(&standing_capsule_at(&shape, -5.0, 1.0), &ALL)
+        .unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let hit = hits[0];
+    assert_eq!(hit.body, floor);
+    assert!(
+        (hit.penetration_depth - (CAPSULE_HALF_EXTENT - 1.0)).abs() < 1e-3,
+        "{hit:?}"
+    );
+    assert!(hit.normal.y > 0.99, "{hit:?}");
+
+    // The wall's face is at x = 0; the capsule reaches 0.1 into it from -X.
+    let x = -(RADIUS as Real) + 0.1;
+    let hits = world
+        .collide_shape(&standing_capsule_at(&shape, x, 2.0), &ALL)
+        .unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let hit = hits[0];
+    assert_eq!(hit.body, wall);
+    assert!((hit.penetration_depth - 0.1).abs() < 1e-3, "{hit:?}");
+    assert!(hit.normal.x < -0.99, "{hit:?}");
+}
+
+#[test]
+fn collide_ceiling_normal_points_down() {
+    let mut world = world(Vec3::ZERO, 1);
+    let ceiling = add_ceiling(&mut world);
+    let shape = capsule();
+    let y = 4.0 - CAPSULE_HALF_EXTENT as Real + 0.1;
+    let hits = world
+        .collide_shape(&standing_capsule_at(&shape, 0.0, y), &ALL)
+        .unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].body, ceiling);
+    assert!(hits[0].normal.y < -0.99, "{hits:?}");
+    assert!((hits[0].penetration_depth - 0.1).abs() < 1e-3, "{hits:?}");
+}
+
+#[test]
+fn max_separation_reports_negative_depth() {
+    let mut world = world(Vec3::ZERO, 1);
+    add_floor(&mut world);
+    let shape = capsule();
+    let hovering = standing_capsule_at(&shape, 0.0, CAPSULE_HALF_EXTENT as Real + 0.05);
+    assert_eq!(world.collide_shape(&hovering, &ALL), Ok(Vec::new()));
+    let near = hovering.max_separation_distance(0.1);
+    let hits = world.collide_shape(&near, &ALL).unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert!((hits[0].penetration_depth + 0.05).abs() < 1e-3, "{hits:?}");
+    assert!(hits[0].normal.y > 0.99, "{hits:?}");
+}
+
+#[test]
+fn collide_child_group_filter_and_excluded_body() {
+    let (mut world, [terrain, chunk, .., actor]) = five_layer_world();
+    let pillar = Shape::new_cylinder(1.5, 0.3).unwrap();
+    let block = Shape::new_box(Vec3::new(1.0, 1.0, 1.0)).unwrap();
+    let chunk_shape = Shape::new_compound(&[
+        child(&pillar, Vec3::new(0.5, 1.5, 0.0), Groups::FEATURE),
+        child(&block, Vec3::new(10.0, 1.0, 0.0), Groups::STRUCTURE),
+    ])
+    .unwrap();
+    let chunk_body = add_static_in(&mut world, &chunk_shape, RVec3::ZERO, chunk);
+    let shape = capsule();
+    let position = RVec3::new(0.0, 1.5, 0.0);
+    let own = world
+        .create_body(
+            &shape,
+            &BodySettings::new_kinematic()
+                .position(position)
+                .object_layer(actor),
+        )
+        .unwrap();
+    let query = CollideShape::new(&shape, position, Quat::IDENTITY);
+    let layers = [terrain, chunk, actor];
+    let controller = QueryFilter::new().object_layers(&layers).child_groups(
+        1 << Groups::TERRAIN | 1 << Groups::STRUCTURE | 1 << Groups::FEATURE | 1 << Groups::ACTOR,
+    );
+
+    let mut bodies: Vec<_> = world
+        .collide_shape(&query, &controller)
+        .unwrap()
+        .iter()
+        .map(|hit| hit.body)
+        .collect();
+    bodies.sort();
+    let mut expected = vec![chunk_body, own];
+    expected.sort();
+    assert_eq!(bodies, expected);
+
+    let hits = world
+        .collide_shape(&query, &controller.exclude_body(own))
+        .unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].body, chunk_body);
+    assert_eq!(hits[0].object_layer, chunk);
+    assert_eq!(
+        hits[0].compound_child.map(|c| c.user_data),
+        Some(Groups::FEATURE)
+    );
+    assert!(hits[0].normal.x < -0.99, "{hits:?}");
+
+    let without_features = controller
+        .child_groups(1 << Groups::TERRAIN | 1 << Groups::STRUCTURE | 1 << Groups::ACTOR)
+        .exclude_body(own);
+    assert_eq!(
+        world.collide_shape(&query, &without_features),
+        Ok(Vec::new())
+    );
+}
+
+#[test]
+fn collide_shape_rejects_invalid_input() {
+    let world = world(Vec3::ZERO, 1);
+    let shape = capsule();
+    let terrain = flat_height_field();
+    let invalid = [
+        standing_capsule_at(&shape, Real::NAN, 0.0),
+        CollideShape::new(&shape, RVec3::ZERO, Quat::from_xyzw(0.0, 0.0, 0.0, 2.0)),
+        standing_capsule_at(&shape, 0.0, 0.0).max_separation_distance(-0.1),
+        standing_capsule_at(&shape, 0.0, 0.0).max_separation_distance(f32::INFINITY),
+        CollideShape::new(&terrain, RVec3::ZERO, Quat::IDENTITY),
+    ];
+    for query in invalid {
+        assert!(
+            matches!(
+                world.collide_shape(&query, &ALL),
+                Err(QueryError::InvalidValue(_))
+            ),
+            "{query:?}"
+        );
+    }
+}
+
+#[test]
+fn compound_query_shape_is_placed_by_its_origin() {
+    let mut world = world(Vec3::ZERO, 1);
+    add_floor(&mut world);
+    // The compound's centre of mass is at x = 1, away from its origin.
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let pair = Shape::new_compound(&[
+        child(&unit_box, Vec3::ZERO, 0),
+        child(&unit_box, Vec3::new(2.0, 0.0, 0.0), 0),
+    ])
+    .unwrap();
+    let quarter_turn = quat_about(Vec3::new(0.0, 0.0, 1.0), 90.0_f32.to_radians());
+    // Rotated a quarter turn about Z, the second box sits 2 m above the first, whose bottom
+    // face reaches 0.1 into the floor.
+    let query = CollideShape::new(&pair, RVec3::new(0.0, 0.4, 0.0), quarter_turn);
+    let hits = world.collide_shape(&query, &ALL).unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert!((hits[0].penetration_depth - 0.1).abs() < 1e-3, "{hits:?}");
+    let cast = ShapeCast::new(&pair, RVec3::new(0.0, 2.0, 0.0), quarter_turn, down(4.0));
+    let hit = world.cast_shape(&cast, &ALL).unwrap().unwrap();
+    assert!((hit.distance - 1.5).abs() < 1e-3, "{hit:?}");
+}
+
+#[test]
+fn filtered_queries_run_in_parallel() {
+    let (mut world, [terrain, chunk, ..]) = five_layer_world();
+    porch_and_canopy(&mut world, terrain, chunk);
+    let ball = Shape::new_sphere(0.25).unwrap();
+    let layers = [terrain, chunk];
+    let ground = QueryFilter::new()
+        .object_layers(&layers)
+        .child_groups(1 << Groups::TERRAIN | 1 << Groups::STRUCTURE);
+    let run = |i: usize| {
+        let x = -3.0 + 0.012 * i as Real;
+        let ray = world
+            .cast_ray(down_from(x, 6.0, 0.5, 10.0), &ground)
+            .unwrap();
+        let cast = ShapeCast::new(&ball, RVec3::new(x, 6.0, 0.5), Quat::IDENTITY, down(10.0));
+        let cast = world.cast_shape(&cast, &ground).unwrap();
+        let overlap = CollideShape::new(&ball, RVec3::new(x, 1.1, 0.5), Quat::IDENTITY);
+        let overlap = world.collide_shape(&overlap, &ground).unwrap();
+        (ray, cast, overlap)
+    };
+    let expected: Vec<_> = (0..500).map(run).collect();
+    std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..8)
+            .map(|_| scope.spawn(|| (0..500).map(run).collect::<Vec<_>>()))
+            .collect();
+        for thread in threads {
+            assert!(thread.join().unwrap() == expected);
+        }
+    });
+}

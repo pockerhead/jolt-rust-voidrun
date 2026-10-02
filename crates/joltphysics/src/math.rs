@@ -76,6 +76,18 @@ impl Vec3 {
             self.scale(1.0 / length_squared.sqrt())
         }
     }
+
+    fn cross(self, other: Self) -> Self {
+        Self::new(
+            self.y * other.z - self.z * other.y,
+            self.z * other.x - self.x * other.z,
+            self.x * other.y - self.y * other.x,
+        )
+    }
+
+    fn add(self, other: Self) -> Self {
+        Self::new(self.x + other.x, self.y + other.y, self.z + other.z)
+    }
 }
 
 impl From<[f32; 3]> for Vec3 {
@@ -190,6 +202,13 @@ impl Quat {
     pub(crate) fn is_valid_rotation(&self) -> bool {
         self.is_finite() && self.is_normalized()
     }
+
+    /// `v` rotated by this unit quaternion: `v + 2w (q x v) + 2 q x (q x v)`.
+    pub(crate) fn rotate(self, v: Vec3) -> Vec3 {
+        let q = Vec3::new(self.x, self.y, self.z);
+        let t = q.cross(v).scale(2.0);
+        v.add(t.scale(self.w)).add(q.cross(t))
+    }
 }
 
 impl Default for Quat {
@@ -276,6 +295,18 @@ mod tests {
         assert!(Quat::IDENTITY.is_valid_rotation());
         assert!(!Quat::from_xyzw(f32::NAN, 0.0, 0.0, 1.0).is_valid_rotation());
         assert!(!Quat::from_xyzw(0.0, 0.0, 0.0, 2.0).is_valid_rotation());
+    }
+
+    #[test]
+    fn rotate_turns_x_into_minus_z_about_y() {
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        let quarter_turn_about_y = Quat::from_xyzw(0.0, half, 0.0, half);
+        let v = quarter_turn_about_y.rotate(Vec3::new(1.0, 0.0, 0.0));
+        assert!(v.x.abs() < 1e-6, "{v:?}");
+        assert!(v.y.abs() < 1e-6, "{v:?}");
+        assert!((v.z + 1.0).abs() < 1e-6, "{v:?}");
+        let w = Vec3::new(1.0, 2.0, 3.0);
+        assert_eq!(Quat::IDENTITY.rotate(w), w);
     }
 
     #[test]
