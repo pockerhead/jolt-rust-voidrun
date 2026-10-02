@@ -262,3 +262,59 @@ fn collision_layers_decide_which_bodies_touch() {
         assert!(y < -5.0, "actor {id:?} was stopped, y = {y}");
     }
 }
+
+/// What a box sliding over a compound of touching boxes shows: the largest angular speed and the
+/// largest vertical speed from tick 10 on (which skips the start's depenetration), and the final
+/// x. The scene is the first one of Jolt's `EnhancedInternalEdgeRemovalTest` sample.
+fn slide_over_compound(enhanced_internal_edge_removal: bool) -> (f32, f32, Real) {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let cell = Shape::new_box(Vec3::new(1.0, 1.0, 1.0)).unwrap();
+    let children: Vec<CompoundChild<'_>> = (-10..10)
+        .flat_map(|x| (-10..10).map(move |z| (x, z)))
+        .map(|(x, z)| CompoundChild {
+            shape: &cell,
+            position: Vec3::new(2.0 * x as f32, 0.0, 2.0 * z as f32),
+            rotation: Quat::IDENTITY,
+            user_data: 0,
+        })
+        .collect();
+    world
+        .create_body(
+            &Shape::new_compound(&children).unwrap(),
+            &BodySettings::new_static().position(RVec3::new(0.0, -1.0, 0.0)),
+        )
+        .unwrap();
+    let mover = world
+        .create_body(
+            &Shape::new_box(Vec3::new(2.0, 2.0, 2.0)).unwrap(),
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(-18.0, 1.9, 0.0))
+                .linear_velocity(Vec3::new(20.0, 0.0, 0.0))
+                .enhanced_internal_edge_removal(enhanced_internal_edge_removal),
+        )
+        .unwrap();
+    let (mut angular, mut vertical) = (0.0_f32, 0.0_f32);
+    for tick in 0..60 {
+        assert!(world.step(DT).unwrap().is_complete());
+        if tick >= 10 {
+            let body = world.body(mover).unwrap();
+            angular = angular.max(length(body.angular_velocity()));
+            vertical = vertical.max(body.linear_velocity().y.abs());
+        }
+    }
+    let x = world.body(mover).unwrap().position().x;
+    (angular, vertical, x)
+}
+
+/// Enhanced internal edge removal on a box sliding over the touching children of one static
+/// compound: without it the box catches on the children's internal edges and is thrown upward,
+/// with it it slides smoothly. Jolt removes internal edges only within one body's shape; seams between
+/// separate chunk bodies are covered by the walker's seam test.
+#[test]
+fn enhanced_internal_edge_removal_smooths_sliding_over_a_compound() {
+    let off = slide_over_compound(false);
+    let on = slide_over_compound(true);
+    // Measured largest vertical speeds: 7.02 m/s off, 0.00035 m/s on.
+    assert!(off.1 > 3.5, "off {off:?}, on {on:?}");
+    assert!(off.1 >= 3.0 * on.1, "off {off:?}, on {on:?}");
+}

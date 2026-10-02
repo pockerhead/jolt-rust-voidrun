@@ -294,9 +294,9 @@ impl BodySettings {
         self
     }
 
-    /// Whether Jolt removes ghost contacts of this body against internal edges of triangle
-    /// shapes (heightfields, meshes), Jolt's enhanced internal edge removal. Costs extra CPU per
-    /// contact. Default false.
+    /// Whether Jolt removes ghost contacts of this body against internal edges of one body's
+    /// shape: triangle shapes (heightfields, meshes) and touching children of a compound, Jolt's
+    /// enhanced internal edge removal. Costs extra CPU per contact. Default false.
     #[must_use]
     pub fn enhanced_internal_edge_removal(mut self, value: bool) -> Self {
         self.enhanced_internal_edge_removal = value;
