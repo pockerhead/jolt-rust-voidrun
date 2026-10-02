@@ -209,6 +209,52 @@ impl Quat {
         let t = q.cross(v).scale(2.0);
         v.add(t.scale(self.w)).add(q.cross(t))
     }
+
+    /// The position `p` rotated by this unit quaternion, with the same formula as
+    /// [`rotate`](Self::rotate) computed in [`Real`].
+    pub(crate) fn rotate_real(self, p: RVec3) -> RVec3 {
+        let [x, y, z, w] = [self.x, self.y, self.z, self.w].map(Real::from);
+        let cross = |a: [Real; 3], b: [Real; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let q = [x, y, z];
+        let v = [p.x, p.y, p.z];
+        let t = cross(q, v).map(|value| 2.0 * value);
+        let u = cross(q, t);
+        RVec3::new(
+            v[0] + w * t[0] + u[0],
+            v[1] + w * t[1] + u[1],
+            v[2] + w * t[2] + u[2],
+        )
+    }
+
+    /// The Hamilton product `self * rhs`: the rotation that applies `rhs` first, then `self`
+    /// (the order of Jolt's `Quat::operator*`).
+    pub(crate) fn product(self, rhs: Quat) -> Quat {
+        let (a, b) = (self, rhs);
+        Quat::from_xyzw(
+            a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+            a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+            a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+            a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+        )
+    }
+
+    /// This quaternion divided by its length. Non-finite when the length is zero or not
+    /// finite; callers check the result with `is_valid_rotation`.
+    pub(crate) fn normalized(self) -> Quat {
+        let length = (self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w).sqrt();
+        Quat::from_xyzw(
+            self.x / length,
+            self.y / length,
+            self.z / length,
+            self.w / length,
+        )
+    }
 }
 
 impl Default for Quat {
@@ -307,6 +353,65 @@ mod tests {
         assert!((v.z + 1.0).abs() < 1e-6, "{v:?}");
         let w = Vec3::new(1.0, 2.0, 3.0);
         assert_eq!(Quat::IDENTITY.rotate(w), w);
+    }
+
+    fn assert_quat_near(a: Quat, b: Quat, tolerance: f32) {
+        let (a, b): ([f32; 4], [f32; 4]) = (a.into(), b.into());
+        for (x, y) in a.into_iter().zip(b) {
+            assert!((x - y).abs() <= tolerance, "{a:?} vs {b:?}");
+        }
+    }
+
+    fn assert_vec_near(a: Vec3, b: Vec3, tolerance: f32) {
+        let (a, b): ([f32; 3], [f32; 3]) = (a.into(), b.into());
+        for (x, y) in a.into_iter().zip(b) {
+            assert!((x - y).abs() <= tolerance, "{a:?} vs {b:?}");
+        }
+    }
+
+    #[test]
+    fn product_composes_rotations() {
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        let quarter_turn_about_y = Quat::from_xyzw(0.0, half, 0.0, half);
+        let half_turn_about_y = Quat::from_xyzw(0.0, 1.0, 0.0, 0.0);
+        assert_quat_near(
+            quarter_turn_about_y.product(quarter_turn_about_y),
+            half_turn_about_y,
+            1e-6,
+        );
+
+        let a = Quat::from_xyzw(0.1, 0.2, 0.3, 0.9).normalized();
+        let b = Quat::from_xyzw(-0.4, 0.1, 0.5, 0.7).normalized();
+        let conjugate = Quat::from_xyzw(-a.x, -a.y, -a.z, a.w);
+        assert_quat_near(a.product(conjugate), Quat::IDENTITY, 1e-6);
+
+        let v = Vec3::new(1.5, -2.0, 0.25);
+        assert_vec_near(a.product(b).rotate(v), a.rotate(b.rotate(v)), 1e-5);
+    }
+
+    #[test]
+    fn rotate_real_matches_rotate() {
+        let q = Quat::from_xyzw(0.1, 0.2, 0.3, 0.9).normalized();
+        let v = Vec3::new(1.5, -2.0, 0.25);
+        let p = q.rotate_real(RVec3::new(1.5, -2.0, 0.25));
+        let expected = q.rotate(v);
+        for (actual, expected) in [(p.x, expected.x), (p.y, expected.y), (p.z, expected.z)] {
+            assert!(
+                (actual - Real::from(expected)).abs() <= 1e-5,
+                "{p:?} {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalized_divides_by_the_length() {
+        assert_eq!(
+            Quat::from_xyzw(0.0, 0.0, 0.0, 2.0).normalized(),
+            Quat::IDENTITY
+        );
+        assert!(!Quat::from_xyzw(0.0, 0.0, 0.0, 0.0)
+            .normalized()
+            .is_valid_rotation());
     }
 
     #[test]

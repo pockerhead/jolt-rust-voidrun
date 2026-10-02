@@ -52,6 +52,11 @@
 //! state: it decides the [`BodyId`]s. Results agree across platforms and compilers only with
 //! the `cross-platform-deterministic` feature.
 //!
+//! # Frame
+//! [`PhysicsWorld::rebase`] moves the whole world into a new frame (a floating origin) with one
+//! rotation and translation, without waking or putting to sleep any body. It must name every
+//! body of the world in a stable order.
+//!
 //! # Global state
 //! joltphysics calls `JPH_Init` once per process and never calls `JPH_Shutdown`. It also
 //! installs joltc's object-layer, body and shape filter procs once per process and owns them;
