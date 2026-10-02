@@ -42,14 +42,15 @@ pub fn step(world: &mut PhysicsWorld, ticks: usize) {
     }
 }
 
-/// Positions of eight cubes in two touching stacks of four, each layer shifted sideways so
-/// the stacks topple into each other.
+/// Positions of eight cubes in two side-by-side stacks of four, dropped from a small gap. Each
+/// layer is shifted 0.3 m along +x, which puts the centre of mass of the upper layers past the
+/// edge of the bottom cube, so both stacks topple, the left one into the right one.
 pub fn stacks_scene() -> Vec<RVec3> {
     let mut cubes = Vec::new();
     for column in 0..2 {
         for layer in 0..4 {
-            let x = column as Real + 0.2 * layer as Real;
-            let y = 0.5 + layer as Real;
+            let x = column as Real + 0.3 * layer as Real;
+            let y = 0.5 + 1.05 * layer as Real;
             cubes.push(RVec3::new(x, y, 0.0));
         }
     }
