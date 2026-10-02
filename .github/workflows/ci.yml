@@ -11,14 +11,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        features: ["", "cross-platform-deterministic", "double-precision"]
+        features: ["", "cross-platform-deterministic", "double-precision", "debug-renderer"]
+        # The debug renderer is a feature of the safe crate (it forwards to joltphysics-sys);
+        # enabling only the sys feature would leave the debug module and its tests unbuilt.
+        include:
+          - features: debug-renderer
+            feature_args: --features joltphysics/debug-renderer
     defaults:
       run:
         shell: bash
     env:
       CARGO_TERM_COLOR: always
       RUSTDOCFLAGS: -D warnings
-      FEATURE_ARGS: ${{ matrix.features && format('--features joltphysics-sys/{0}', matrix.features) || '' }}
+      FEATURE_ARGS: ${{ matrix.feature_args || (matrix.features && format('--features joltphysics-sys/{0}', matrix.features)) || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,7 +59,7 @@ jobs:
       - name: Build native library
         if: steps.native.outputs.cache-hit != 'true'
         run: |
-          cargo build -p joltphysics-sys $FEATURE_ARGS
+          cargo build --workspace $FEATURE_ARGS
           shopt -s nullglob
           dirs=(target/debug/build/joltphysics-sys-*/out/joltc)
           [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
@@ -66,6 +71,14 @@ jobs:
       # is wrong; fix the key rather than falling back to CMake.
       - name: Use the native library
         run: echo "JOLTC_LIB_DIR=$RUNNER_TEMP/joltc-prefix" >> "$GITHUB_ENV"
+
+      # Without the feature, neither Jolt nor joltc may contain the debug renderer.
+      - name: Debug renderer compiled only with its feature
+        run: |
+          present=no
+          if grep -q -a JPH_DebugRenderer_Create "$JOLTC_LIB_DIR"/lib/joltc*.lib && grep -q -a DrawGeometry@DebugRendererSimple "$JOLTC_LIB_DIR"/lib/Jolt.lib; then present=yes; fi
+          expected=no; [ "${{ matrix.features }}" = debug-renderer ] && expected=yes
+          [ "$present" = "$expected" ] || { echo "debug renderer present=$present expected=$expected"; exit 1; }
 
       - run: cargo build --workspace --all-targets $FEATURE_ARGS
       - run: cargo test --workspace $FEATURE_ARGS
