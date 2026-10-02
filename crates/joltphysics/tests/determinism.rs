@@ -119,6 +119,8 @@ const PLANET_RADIUS: f64 = 99.0;
 const ITEM_HALF_EXTENT: Vec3 = Vec3::new(0.35, 0.06, 0.04);
 /// Samples per side of the terrain heightfield.
 const TERRAIN_SAMPLES: u32 = 33;
+/// Convex radius of the chunk's boxes and cylinder, metres (Jolt's default).
+const CHILD_CONVEX_RADIUS: f32 = 0.05;
 
 type V = [f64; 3];
 
@@ -175,6 +177,7 @@ enum ChildKind {
 /// One authored child of the chunk's static compound.
 struct ChildSpec {
     kind: ChildKind,
+    convex_radius: f32,
     position: Vec3,
     rotation: Quat,
     group: u32,
@@ -191,6 +194,7 @@ fn chunk_children() -> [ChildSpec; 3] {
             },
             position: Vec3::new(3.0, 2.5, 0.0),
             rotation: Quat::IDENTITY,
+            convex_radius: CHILD_CONVEX_RADIUS,
             group: Groups::STRUCTURE,
         },
         ChildSpec {
@@ -199,6 +203,7 @@ fn chunk_children() -> [ChildSpec; 3] {
             },
             position: Vec3::new(-3.0, 2.6, 2.0),
             rotation: quat_about(Vec3::new(0.0, 0.0, 1.0), 20.0_f32.to_radians()),
+            convex_radius: CHILD_CONVEX_RADIUS,
             group: Groups::STRUCTURE,
         },
         // A pillar centred on world (-3, 3, 0) whose top is at y = 4: item 3 hits its edge.
@@ -209,6 +214,7 @@ fn chunk_children() -> [ChildSpec; 3] {
             },
             position: Vec3::new(0.0, 3.0, -3.0),
             rotation: Quat::IDENTITY,
+            convex_radius: CHILD_CONVEX_RADIUS,
             group: Groups::FEATURE,
         },
     ]
@@ -226,11 +232,14 @@ fn create_chunk(world: &mut PhysicsWorld, layer: ObjectLayer) -> Chunk {
     let shapes: Vec<Shape> = children
         .iter()
         .map(|child| match child.kind {
-            ChildKind::Box { half_extent } => Shape::new_box(half_extent).unwrap(),
+            ChildKind::Box { half_extent } => {
+                Shape::new_box_with_convex_radius(half_extent, child.convex_radius).unwrap()
+            }
             ChildKind::Cylinder {
                 half_height,
                 radius,
-            } => Shape::new_cylinder(half_height, radius).unwrap(),
+            } => Shape::new_cylinder_with_convex_radius(half_height, radius, child.convex_radius)
+                .unwrap(),
         })
         .collect();
     let compound_children: Vec<CompoundChild<'_>> = children
@@ -376,6 +385,27 @@ fn create_item(world: &mut PhysicsWorld, layer: ObjectLayer, item: &mut Item) {
     item.phase = Phase::Live(body);
 }
 
+/// The world-space bounds `(min, max)` of a live item: its box turned by the body's rotation,
+/// as Jolt's `AABox::Transformed` computes them.
+fn item_bounds(world: &PhysicsWorld, id: BodyId) -> (V, V) {
+    let body = world.body(id).unwrap();
+    let centre = real3(body.position());
+    let half = <[f32; 3]>::from(ITEM_HALF_EXTENT).map(f64::from);
+    let rotation = body.rotation();
+    let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+        .map(|axis| map_point(rotation, RVec3::ZERO, axis));
+    let reach: V = [0, 1, 2].map(|i| (0..3).map(|a| axes[a][i].abs() * half[a]).sum());
+    (
+        [0, 1, 2].map(|i| centre[i] - reach[i]),
+        [0, 1, 2].map(|i| centre[i] + reach[i]),
+    )
+}
+
+/// Whether two bounds overlap, touching included, as Jolt's `AABox::Overlaps`.
+fn overlap((a_min, a_max): (V, V), (b_min, b_max): (V, V)) -> bool {
+    (0..3).all(|i| a_min[i] <= b_max[i] && b_min[i] <= a_max[i])
+}
+
 fn put_u32(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
 }
@@ -421,6 +451,7 @@ fn record_shape(world: &PhysicsWorld, chunk: &Chunk, terrain: &Terrain, out: &mu
                 put_f32s(out, [half_height, radius]);
             }
         }
+        put_f32s(out, [child.convex_radius]);
         put_f32s(out, <[f32; 3]>::from(child.position));
         put_f32s(out, <[f32; 4]>::from(child.rotation));
         put_u32(out, child.group);
@@ -482,7 +513,7 @@ fn record_state(world: &PhysicsWorld, chunk: &Chunk, terrain: &Terrain, items: &
 ///
 /// Panics unless the run covers what the gate is for: every step complete, item 3 falling at
 /// the rebase in a reused body slot, all three items created, and an item removed at rest while
-/// another one is live, which wakes bodies around it.
+/// a live item's bounds overlap its own, so the removal's wake has a dynamic neighbour to find.
 fn run_chunk(worker_threads: u32, variant: &str) -> Digest {
     let (mut world, [terrain_layer, chunk_layer, item_layer]) = chunk_world(worker_threads);
     let mut items = items();
@@ -515,7 +546,7 @@ fn run_chunk(worker_threads: u32, variant: &str) -> Digest {
     };
     record(&world, &items, &mut digest);
 
-    let mut rested_beside_a_live_item = false;
+    let mut rested_touching_a_live_item = false;
     for tick in 1..=CHUNK_TICKS {
         for item in items.iter_mut() {
             if item.created_at == tick && item.phase == Phase::Pending {
@@ -579,12 +610,13 @@ fn run_chunk(worker_threads: u32, variant: &str) -> Digest {
             let Phase::Live(id) = items[slot].phase else {
                 unreachable!("only live items leave");
             };
-            let others_live = items
-                .iter()
-                .enumerate()
-                .any(|(other, item)| other != slot && matches!(item.phase, Phase::Live(_)));
-            if items[slot].reason == Reason::Rest && others_live {
-                rested_beside_a_live_item = true;
+            let bounds = item_bounds(&world, id);
+            let touches_a_live_item = items.iter().any(|item| match item.phase {
+                Phase::Live(other) => other != id && overlap(bounds, item_bounds(&world, other)),
+                _ => false,
+            });
+            if items[slot].reason == Reason::Rest && touches_a_live_item {
+                rested_touching_a_live_item = true;
             }
             let mut last_body = Vec::new();
             record_body(&world, id, &mut last_body);
@@ -601,8 +633,8 @@ fn run_chunk(worker_threads: u32, variant: &str) -> Digest {
         "an item was never created"
     );
     assert!(
-        rested_beside_a_live_item,
-        "no item came to rest while another one was live"
+        rested_touching_a_live_item,
+        "no item came to rest touching a live item"
     );
     digest
 }
@@ -732,6 +764,23 @@ fn digest_of(ticks: &[(&[u8], &[u8])]) -> Digest {
         tick.state.extend_from_slice(state);
     }
     digest
+}
+
+#[test]
+fn child_requests_are_parsed_or_rejected() {
+    assert_eq!(
+        parse_child_request("chunk,4,permuted"),
+        ("chunk".to_owned(), 4, "permuted".to_owned())
+    );
+    for (request, expected) in [
+        ("chunk", "has no threads field"),
+        ("chunk,4", "has no variant field"),
+        ("chunk,four,forward", "bad thread count"),
+    ] {
+        let panic = std::panic::catch_unwind(|| parse_child_request(request)).unwrap_err();
+        let message = panic.downcast_ref::<String>().unwrap();
+        assert!(message.contains(expected), "{request:?}: {message}");
+    }
 }
 
 #[test]

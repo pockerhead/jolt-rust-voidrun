@@ -196,9 +196,20 @@ pub fn assert_same(what: &str, a: &Digest, b: &Digest) {
 }
 
 /// The run this process is asked to do as a child, `(scenario, threads, variant)`; `None` when
-/// it is not a child.
+/// it is not a child. Panics on a request that is not Unicode or not well formed.
 pub fn child_request() -> Option<(String, u32, String)> {
-    let request = std::env::var(CHILD_ENV).ok()?;
+    match std::env::var(CHILD_ENV) {
+        Ok(request) => Some(parse_child_request(&request)),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(request)) => {
+            panic!("{CHILD_ENV}={request:?} is not Unicode")
+        }
+    }
+}
+
+/// Splits a [`CHILD_ENV`] value into `(scenario, threads, variant)`; panics, naming the
+/// request, when a field is missing or the thread count is not a number.
+pub fn parse_child_request(request: &str) -> (String, u32, String) {
     let mut fields = request.splitn(3, ',');
     let mut field = |name| {
         fields
@@ -212,7 +223,7 @@ pub fn child_request() -> Option<(String, u32, String)> {
     let threads = threads
         .parse()
         .unwrap_or_else(|_| panic!("{CHILD_ENV}={request:?}: bad thread count"));
-    Some((scenario, threads, variant))
+    (scenario, threads, variant)
 }
 
 /// Writes a child's digest where the parent reads it.
