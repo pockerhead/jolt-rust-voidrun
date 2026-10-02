@@ -1,6 +1,6 @@
 //! Collision shapes.
 
-use std::ptr::NonNull;
+use std::ptr::{null, NonNull};
 
 use joltphysics_sys::*;
 
@@ -83,6 +83,147 @@ fn is_positive(value: f32) -> bool {
 /// Finite and not negative.
 fn is_valid_convex_radius(value: f32) -> bool {
     value.is_finite() && value >= 0.0
+}
+
+/// Settings of [`Shape::new_height_field`] other than the samples. The defaults are Jolt's
+/// (`HeightFieldShapeSettings`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeightFieldSettings {
+    offset: Vec3,
+    scale: Vec3,
+    block_size: u32,
+    bits_per_sample: u32,
+    active_edge_cos_threshold_angle: f32,
+}
+
+impl Default for HeightFieldSettings {
+    fn default() -> Self {
+        Self {
+            offset: Vec3::ZERO,
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            block_size: 2,
+            bits_per_sample: 8,
+            active_edge_cos_threshold_angle: 0.996195,
+        }
+    }
+}
+
+impl HeightFieldSettings {
+    /// Shape-local position of sample (0, 0) at height 0, metres; finite. Default zero.
+    #[must_use]
+    pub fn offset(mut self, value: Vec3) -> Self {
+        self.offset = value;
+        self
+    }
+
+    /// Metres per sample step along X and Z, and the factor applied to the samples along Y;
+    /// each finite and positive. Default `(1, 1, 1)`.
+    #[must_use]
+    pub fn scale(mut self, value: Vec3) -> Self {
+        self.scale = value;
+        self
+    }
+
+    /// Side length of the square blocks Jolt groups samples into, in `2..=8`. Larger blocks use
+    /// less memory and make queries slower. Default 2.
+    #[must_use]
+    pub fn block_size(mut self, value: u32) -> Self {
+        self.block_size = value;
+        self
+    }
+
+    /// Bits Jolt stores per sample, in `1..=16`, each relative to the height range of its
+    /// block. More bits follow the samples more closely and use more memory. Default 8.
+    #[must_use]
+    pub fn bits_per_sample(mut self, value: u32) -> Self {
+        self.bits_per_sample = value;
+        self
+    }
+
+    /// Cosine of the angle between two triangles above which their shared edge counts as
+    /// active, in `[0, 1]`; concave edges are never active. Smaller values give more ghost
+    /// collisions with edges, larger ones slower depenetration (Jolt's wording). Default
+    /// `0.996195`, the cosine of 5 degrees.
+    #[must_use]
+    pub fn active_edge_cos_threshold_angle(mut self, value: f32) -> Self {
+        self.active_edge_cos_threshold_angle = value;
+        self
+    }
+
+    /// Checks the settings Jolt relies on before it looks at the samples and returns the
+    /// padded sample count; `sample_count` is at least 2.
+    fn validate_layout(&self, sample_count: u32) -> Result<u64, ShapeError> {
+        let invalid = |what| Err(ShapeError::InvalidSettings(what));
+        if !(2..=8).contains(&self.block_size) {
+            return invalid("block_size must be between 2 and 8");
+        }
+        if !(1..=16).contains(&self.bits_per_sample) {
+            return invalid("bits_per_sample must be between 1 and 16");
+        }
+        let threshold = self.active_edge_cos_threshold_angle;
+        if !(threshold.is_finite() && (0.0..=1.0).contains(&threshold)) {
+            return invalid("active_edge_cos_threshold_angle must be between 0 and 1");
+        }
+        let padded = padded_sample_count(sample_count, self.block_size);
+        if padded / u64::from(self.block_size) < 2 {
+            return invalid("sample_count must be larger than block_size");
+        }
+        // Jolt needs `2 * bits(padded - 1) + 1` sub-shape id bits, at most 32.
+        if padded > 32768 {
+            return invalid("sample_count is too large");
+        }
+        Ok(padded)
+    }
+
+    /// Checks that offset, scale and the field's extents are finite, given the padded sample
+    /// count and the range of the samples that are not holes.
+    fn validate_extents(&self, padded: u64, heights: Option<(f32, f32)>) -> Result<(), ShapeError> {
+        if !self.offset.is_finite() {
+            return Err(ShapeError::InvalidDimensions(
+                "height field offset must be finite",
+            ));
+        }
+        let scale = [self.scale.x, self.scale.y, self.scale.z];
+        if !scale.into_iter().all(is_positive) {
+            return Err(ShapeError::InvalidDimensions(
+                "height field scale must be finite and positive",
+            ));
+        }
+        let last = (padded - 1) as f32;
+        let far_x = self.offset.x + self.scale.x * last;
+        let far_z = self.offset.z + self.scale.z * last;
+        if !(far_x.is_finite() && far_z.is_finite()) {
+            return Err(ShapeError::InvalidDimensions(
+                "height field extent along x or z must be finite",
+            ));
+        }
+        if let Some((min, max)) = heights {
+            let (offset, scale) = (self.offset.y, self.scale.y);
+            if !((offset + scale * min).is_finite() && (offset + scale * max).is_finite()) {
+                return Err(ShapeError::InvalidDimensions(
+                    "height field extent along y must be finite",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `sample_count` rounded up to a multiple of `block_size`, as Jolt stores it.
+fn padded_sample_count(sample_count: u32, block_size: u32) -> u64 {
+    u64::from(sample_count).div_ceil(u64::from(block_size)) * u64::from(block_size)
+}
+
+/// Lowest and highest sample that is not a hole (`f32::MAX`, Jolt's `cNoCollisionValue`), or
+/// `None` when every sample is a hole.
+fn height_range(samples: &[f32]) -> Option<(f32, f32)> {
+    samples
+        .iter()
+        .filter(|&&sample| sample != f32::MAX)
+        .fold(None, |range, &sample| match range {
+            None => Some((sample, sample)),
+            Some((min, max)) => Some((sample.min(min), sample.max(max))),
+        })
 }
 
 impl Shape {
@@ -209,6 +350,128 @@ impl Shape {
         Self::from_raw(ptr.cast())
     }
 
+    /// A heightfield of `sample_count` x `sample_count` height samples, in metres before
+    /// scaling.
+    ///
+    /// # Layout
+    /// The surface passes through `offset + scale * (x, samples[y * n + x], y)` for `x, y` in
+    /// `0..n`, `n = sample_count`. `y` runs along +Z, so row `y` of `samples` holds the heights
+    /// at `z = offset.z + y * scale.z` (Jolt's row-major order). A column-major source
+    /// `heights[x * n + z]` must be transposed first:
+    ///
+    /// ```text
+    /// samples[z * n + x] = heights[x * n + z]
+    /// ```
+    ///
+    /// Each cell is split into two triangles along the diagonal from sample `(x, y)` to sample
+    /// `(x + 1, y + 1)`. A sample of `f32::MAX` is a hole: the cells touching it have no
+    /// collision. Every other sample must be finite.
+    ///
+    /// # Block size
+    /// Jolt rounds `n` up to a multiple of the block size and fills the extra rows and columns
+    /// with holes, so the cells touching them have no collision. With the default block size 2,
+    /// n = 33 is stored as 34 x 34 and the surface covers exactly the 32 x 32 cells given.
+    /// `n / block_size`, rounded up, must be at least 2.
+    ///
+    /// # Precision
+    /// Jolt first quantises the heights to 16 bits over the height range of the whole field,
+    /// then to [`HeightFieldSettings::bits_per_sample`] bits within the height range of each
+    /// block. [`height_field_position`](Self::height_field_position) reads back the stored
+    /// heights.
+    ///
+    /// # Static only
+    /// [`PhysicsWorld::create_body`](crate::PhysicsWorld::create_body) refuses heightfields for
+    /// dynamic and kinematic bodies.
+    pub fn new_height_field(
+        sample_count: u32,
+        samples: &[f32],
+        settings: &HeightFieldSettings,
+    ) -> Result<Self, ShapeError> {
+        if sample_count < 2 {
+            return Err(ShapeError::InvalidDimensions(
+                "sample_count must be at least 2",
+            ));
+        }
+        // Jolt divides by the block size before it checks it, so the settings are checked
+        // first.
+        let padded = settings.validate_layout(sample_count)?;
+        let count = sample_count as usize;
+        if count.checked_mul(count) != Some(samples.len()) {
+            return Err(ShapeError::InvalidDimensions(
+                "samples must hold sample_count^2 values",
+            ));
+        }
+        if !samples.iter().all(|sample| sample.is_finite()) {
+            return Err(ShapeError::InvalidDimensions(
+                "height samples must be finite",
+            ));
+        }
+        let heights = height_range(samples);
+        // Jolt quantises with `65534 / (max - min)`, so the range must be finite too.
+        if heights.is_some_and(|(min, max)| !(max - min).is_finite()) {
+            return Err(ShapeError::InvalidDimensions(
+                "height sample range must be finite",
+            ));
+        }
+        settings.validate_extents(padded, heights)?;
+        if !ensure_initialized() {
+            return Err(ShapeError::InitFailed);
+        }
+        let offset = settings.offset.to_jph();
+        let scale = settings.scale.to_jph();
+        // SAFETY: Jolt is initialised; `samples` holds `sample_count^2` floats, which Jolt
+        // copies, and `offset` and `scale` are live locals. Null material indices are allowed.
+        // The returned settings hold one reference, which the guard takes over.
+        let raw = unsafe {
+            JPH_HeightFieldShapeSettings_Create(
+                samples.as_ptr(),
+                &offset,
+                &scale,
+                sample_count,
+                null(),
+            )
+        };
+        let jolt_settings = ShapeSettings::from_raw(raw.cast())?;
+        let ptr = jolt_settings.as_ptr();
+        // SAFETY: the settings are live, owned by the guard and were created as heightfield
+        // settings; every value was validated above. The returned shape holds one reference,
+        // which `Self` takes over.
+        let shape = unsafe {
+            JPH_HeightFieldShapeSettings_SetBlockSize(ptr, settings.block_size);
+            JPH_HeightFieldShapeSettings_SetBitsPerSample(ptr, settings.bits_per_sample);
+            JPH_HeightFieldShapeSettings_SetActiveEdgeCosThresholdAngle(
+                ptr,
+                settings.active_edge_cos_threshold_angle,
+            );
+            JPH_HeightFieldShapeSettings_CreateShape(ptr)
+        };
+        Self::from_created(shape.cast())
+    }
+
+    /// The stored surface point of heightfield sample `(x, y)` in shape-local space, after
+    /// Jolt's quantisation. `None` when the shape is not a heightfield, when `(x, y)` lies
+    /// outside the stored (padded) grid, or when the sample is a hole, including the padding
+    /// Jolt adds.
+    pub fn height_field_position(&self, x: u32, y: u32) -> Option<Vec3> {
+        if self.sub_type() != JPH_ShapeSubType_HeightField {
+            return None;
+        }
+        let shape: *const JPH_HeightFieldShape = self.as_ptr().cast();
+        // SAFETY: the shape is live and a heightfield (checked above); the getter only reads it.
+        let sample_count = unsafe { JPH_HeightFieldShape_GetSampleCount(shape) };
+        if x >= sample_count || y >= sample_count {
+            return None;
+        }
+        // SAFETY: as above, and `x` and `y` are inside the stored grid, as Jolt asserts.
+        if unsafe { JPH_HeightFieldShape_IsNoCollision(shape, x, y) } {
+            return None;
+        }
+        let mut position = Vec3::ZERO.to_jph();
+        // SAFETY: as above; `position` is a live local.
+        unsafe { JPH_HeightFieldShape_GetPosition(shape, x, y, &mut position) };
+        Some(Vec3::from_jph(position))
+    }
+
     fn from_raw(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
         NonNull::new(ptr)
             .map(|ptr| Self { ptr })
@@ -228,7 +491,6 @@ impl Shape {
     }
 
     /// Jolt's concrete shape type.
-    #[cfg(test)]
     fn sub_type(&self) -> JPH_ShapeSubType {
         // SAFETY: the shape is live for the call; the getter only reads it.
         unsafe { JPH_Shape_GetSubType(self.as_ptr()) }
