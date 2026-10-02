@@ -18,3 +18,4 @@ pub use error::{ShapeError, StepError, WorldError};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use shape::Shape;
+pub use world::{PhysicsWorld, WorldSettings};
