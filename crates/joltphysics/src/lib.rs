@@ -7,7 +7,13 @@
 //! [`Shape`] and [`BodySettings`] and named by a [`BodyId`]. Shapes are boxes (with a
 //! configurable convex radius), spheres, Y-cylinders, Y-capsules, heightfields and compounds
 //! whose children carry their own pose and user data, and one shape may serve
-//! many bodies in many worlds. [`PhysicsWorld::cast_ray`] finds the closest body along a ray.
+//! many bodies in many worlds.
+//!
+//! Scene queries run on `&PhysicsWorld`: [`PhysicsWorld::cast_ray`] finds the closest body
+//! along a ray, [`PhysicsWorld::cast_shape`] the first obstacle a moving shape hits, and
+//! [`PhysicsWorld::collide_shape`] every obstacle a shape at a pose overlaps. Each takes a
+//! [`QueryFilter`] that selects object layers and compound-child groups and can skip one body.
+//! Every normal they report is the outward surface normal of the obstacle.
 //!
 //! ```
 //! use joltphysics::*;
@@ -47,7 +53,10 @@
 //! the `cross-platform-deterministic` feature.
 //!
 //! # Global state
-//! joltphysics calls `JPH_Init` once per process and never calls `JPH_Shutdown`.
+//! joltphysics calls `JPH_Init` once per process and never calls `JPH_Shutdown`. It also
+//! installs joltc's object-layer, body and shape filter procs once per process and owns them;
+//! code that uses `joltphysics-sys` directly must leave them alone (see its notes on the raw
+//! API).
 #![warn(
     missing_docs,
     unsafe_op_in_unsafe_fn,

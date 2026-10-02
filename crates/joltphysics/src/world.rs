@@ -199,8 +199,8 @@ impl WorldTag {
 /// independent and may be stepped on different threads at the same time.
 ///
 /// Bodies added one at a time leave the broad phase unoptimised, which makes queries slower
-/// until Jolt has rebuilt it during steps (Jolt docs, "Bodies"); an explicit broad-phase
-/// optimisation call comes with the scene-query API.
+/// until Jolt has rebuilt it during steps (Jolt docs, "Bodies"); see
+/// [`optimize_broad_phase`](Self::optimize_broad_phase).
 pub struct PhysicsWorld {
     // Field order is drop order. The system goes first, before the job system and allocator
     // its steps used, and deletes the layer tables it owns. The interface and query pointers
@@ -344,6 +344,21 @@ impl PhysicsWorld {
     pub fn body_count(&self) -> u32 {
         // SAFETY: the system is live; Jolt counts under its own body mutex.
         unsafe { JPH_PhysicsSystem_GetNumBodies(self.system.as_ptr()) }
+    }
+
+    /// Rebuilds the broad phase's trees for fast queries.
+    ///
+    /// Queries see bodies created, moved and removed through this API immediately, without a
+    /// step or a call to this method, and this method never changes which bodies a query finds.
+    /// Bodies added one by one (a batch of chunks, say) leave the trees unbalanced, which makes
+    /// queries slower until the next steps have rebuilt them; call this after such a batch to
+    /// make queries fast at once. It is the explicit refresh point of the world: call it at the
+    /// same point of every run, because it is part of the call history that determinism
+    /// depends on.
+    pub fn optimize_broad_phase(&mut self) {
+        // SAFETY: the system is live and borrowed mutably, so no query or body change runs
+        // meanwhile, as Jolt requires (`PhysicsSystem::OptimizeBroadPhase`).
+        unsafe { JPH_PhysicsSystem_OptimizeBroadPhase(self.system.as_ptr()) };
     }
 
     /// Advances the world by `delta_time` seconds in one collision step.

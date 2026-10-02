@@ -2,7 +2,8 @@
 //!
 //! Queries take `&PhysicsWorld` and may run on many threads at once while nobody steps the
 //! world. They see bodies created, moved and removed through this API immediately, without a
-//! step. Every query takes a [`QueryFilter`].
+//! step; [`PhysicsWorld::optimize_broad_phase`] only makes them faster after many bodies were
+//! added one by one. Every query takes a [`QueryFilter`].
 //!
 //! Units are metres. Every reported normal is the outward surface normal of the obstacle (the
 //! body that was hit) in world space: a floor below the query gives a normal pointing up, a

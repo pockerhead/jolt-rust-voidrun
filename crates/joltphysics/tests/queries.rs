@@ -1,4 +1,4 @@
-//! Scene queries: ray casts with normals and filters.
+//! Scene queries: ray casts, shape casts, collide shape, filters and broad-phase refresh.
 
 mod common;
 
@@ -813,4 +813,41 @@ fn filtered_queries_run_in_parallel() {
             assert!(thread.join().unwrap() == expected);
         }
     });
+}
+
+#[test]
+fn optimize_broad_phase_keeps_query_results() {
+    let mut world = world(Vec3::ZERO, 1);
+    let unit_box = Shape::new_box(Vec3::new(0.4, 0.4, 0.4)).unwrap();
+    for i in 0..200 {
+        let (x, z) = ((i % 20) as Real, (i / 20) as Real);
+        world
+            .create_body(
+                &unit_box,
+                &BodySettings::new_static().position(RVec3::new(x, 0.1 * x, z)),
+            )
+            .unwrap();
+    }
+    let ball = Shape::new_sphere(0.3).unwrap();
+    let queries = |world: &PhysicsWorld| {
+        let rays: Vec<_> = (0..50)
+            .map(|i| {
+                let x = 0.37 * i as Real;
+                let ray = down_from(x, 10.0, 0.21 * i as Real, 20.0);
+                world.cast_ray(ray, &ALL).unwrap()
+            })
+            .collect();
+        let casts: Vec<_> = (0..10)
+            .map(|i| {
+                let start = RVec3::new(1.9 * i as Real, 10.0, i as Real);
+                let cast = ShapeCast::new(&ball, start, Quat::IDENTITY, down(20.0));
+                world.cast_shape(&cast, &ALL).unwrap()
+            })
+            .collect();
+        (rays, casts)
+    };
+    let before = queries(&world);
+    assert!(before.0.iter().filter(|hit| hit.is_some()).count() > 10);
+    world.optimize_broad_phase();
+    assert!(queries(&world) == before);
 }
