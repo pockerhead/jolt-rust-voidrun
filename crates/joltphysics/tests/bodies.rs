@@ -141,6 +141,32 @@ fn pose_and_velocity_read_back_as_exact_bits() {
 }
 
 #[test]
+fn activation_decides_whether_a_pose_write_wakes_the_body() {
+    let mut world = world(Vec3::ZERO, 1);
+    let cube = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_dynamic().activation(Activation::DontActivate),
+        )
+        .unwrap();
+    assert!(!world.body(cube).unwrap().is_active());
+
+    let mut body = world.body_mut(cube).unwrap();
+    body.set_position(RVec3::new(1.0, 0.0, 0.0), Activation::DontActivate)
+        .unwrap();
+    body.set_position_and_rotation(
+        RVec3::new(2.0, 0.0, 0.0),
+        Quat::IDENTITY,
+        Activation::DontActivate,
+    )
+    .unwrap();
+    assert!(!body.is_active());
+    body.set_rotation(Quat::from_xyzw(0.0, 1.0, 0.0, 0.0), Activation::Activate)
+        .unwrap();
+    assert!(body.is_active());
+}
+
+#[test]
 fn sleeping_flag_is_readable() {
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
     let floor = add_floor(&mut world);

@@ -512,6 +512,11 @@ impl ExtendedUpdateSettings {
     }
 
     /// How high the character steps up when a step blocks it. Default `(0, 0.4, 0)`.
+    ///
+    /// The highest step climbed is not this length: a capsule of radius `r` climbs about
+    /// step-up + padding + `r (1 - cos 45°)`, so measure it. Jolt judges a step by the surface
+    /// normal at the contact, and on a box with sharp edges (convex radius 0) that is the top
+    /// face's normal, so walk stairs never climbs such a step.
     #[must_use]
     pub fn walk_stairs_step_up(mut self, value: Vec3) -> Self {
         self.walk_stairs_step_up = value;
@@ -1006,6 +1011,11 @@ impl PhysicsWorld {
     /// inner body was asked for and the world is full, and with
     /// [`CharacterError::TooManyCharacters`] when the world has run out of character ids.
     /// Nothing is created on failure.
+    ///
+    /// The new character knows no contacts and reports [`GroundState::InAir`] until its first
+    /// update or [`refresh_character_contacts`](Self::refresh_character_contacts). Refresh a
+    /// character that starts on the ground: stick to floor acts only when the character was
+    /// supported before the update.
     pub fn create_character(
         &mut self,
         settings: &CharacterSettings<'_>,

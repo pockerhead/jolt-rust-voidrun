@@ -52,5 +52,29 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   out of the native libraries without the feature.
 - A guide (`docs/guide.md`) with a headless example of a terrain, a chunk compound, an item, queries
   and a rebase, run as a doctest.
+- `joltphysics-sys` gains a C extension in joltc's naming (`native/joltc_ext`): a state recorder,
+  `JPH_CharacterVirtual_SaveState` and `_RestoreState`, and `JPH_CharacterVirtual_ExtendedUpdate2` and
+  `_RefreshContacts2`, which take explicit gravity, filters and temp allocator.
+- Virtual characters (Jolt `CharacterVirtual`) owned by the world: `PhysicsWorld::create_character`,
+  `update_character` (Jolt `ExtendedUpdate`: move by the velocity, stick to floor, walk stairs),
+  `refresh_character_contacts` and `remove_character`, configured by `CharacterSettings` and
+  `ExtendedUpdateSettings` with Jolt's defaults; invalid values are rejected with `CharacterError`.
+- Characters take up and rotation before every update, so they walk on a spherical planet with
+  radial up.
+- Character readout: ground state, normal, position, velocity and body, the compound child stood on,
+  and the active contacts with their body or character, layer, compound child group and normals.
+  Updates and refreshes take the same `QueryFilter` as queries.
+- A character can carry a kinematic inner body that bodies and queries see; `remove_body` refuses it
+  with `BodyError::OwnedByCharacter`, and it goes with its character.
+- Characters can collide with each other (`CharacterSettings::collide_with_characters`).
+- Each world numbers its characters from 1 in creation order (`CharacterId`), so contacts between
+  characters come in the same order in every run.
+- `CharacterRef::save_state` and `CharacterMut::restore_state` continue a character bit for bit in a
+  world rebuilt the same way, for chained replays.
+- `PhysicsWorld::rebase` moves characters with the bodies.
+- The determinism gate also runs the game's reference walker for 600 ticks with 1 and 4 worker
+  threads, and a leak gate covers characters.
+- The guide has a section on characters, with a character walking on a small planet run as a
+  doctest, and explains how a game builds its own autostep for steps with sharp edges.
 - Benchmarks against the game's budgets (`cargo bench -p joltphysics --bench budgets`, results in
   `docs/benchmarks.md`); the `character_cost` example moved into this bench.

@@ -47,8 +47,9 @@ typed errors.
 Features: `double-precision`, `cross-platform-deterministic` and `debug-renderer` forward to
 `joltphysics-sys`; `debug-renderer` also enables `PhysicsWorld::debug_lines`.
 
-Start with the [guide](docs/guide.md) (a terrain, a chunk compound, an item, queries and a rebase,
-run as a test), the crate docs (`cargo doc -p joltphysics --open`) and the `hello_world` example
+Start with the [guide](docs/guide.md) (a terrain, a chunk compound, an item, queries and a rebase;
+a character walking on a planet; both run as tests), the crate docs
+(`cargo doc -p joltphysics --open`) and the `hello_world` example
 (`cargo run -p joltphysics --example hello_world`).
 Timings against the game's budgets are in [docs/benchmarks.md](docs/benchmarks.md)
 (`cargo bench -p joltphysics --bench budgets`).
@@ -64,7 +65,7 @@ in `crates/joltphysics/src/`.
 | Collision layers | `CollisionLayers`, `ObjectLayer`, `BroadPhaseLayer` | `dynamics.rs`: `collision_layers_decide_which_bodies_touch`; `src/layers.rs`: `validate_rejects_inconsistent_tables` |
 | Several worlds, threads | `PhysicsWorld: Send + Sync`, `WorldSettings::worker_threads` | `dynamics.rs`: `two_worlds_side_by_side_do_not_interfere`, `worlds_step_in_parallel_threads`; `world.rs`: `world_and_shape_are_send_and_sync`, `world_is_readable_from_many_threads` |
 | Static, kinematic and dynamic bodies, ids | `BodySettings`, `create_body`, `BodyId` | `bodies.rs`: `ids_follow_insertion_order`, `foreign_and_stale_ids_are_rejected`, `invalid_body_settings_are_rejected`, `full_world_rejects_another_body` |
-| Pose and velocity, read and write | `BodyRef`, `BodyMut`, `Activation` | `bodies.rs`: `pose_and_velocity_read_back_as_exact_bits` |
+| Pose and velocity, read and write | `BodyRef`, `BodyMut`, `Activation` | `bodies.rs`: `pose_and_velocity_read_back_as_exact_bits`, `activation_decides_whether_a_pose_write_wakes_the_body` |
 | Forces, torque, reset | `BodyMut::add_force`, `add_force_at_point`, `add_torque`, `reset_forces` | `bodies.rs`: `forces`, `reset_forces_ignores_static_and_kinematic_bodies` |
 | Sleeping and active state | `BodyRef::is_sleeping`, `is_active` | `bodies.rs`: `sleeping_flag_is_readable` |
 | Removal wakes the bodies around it | `PhysicsWorld::remove_body` | `bodies.rs`: `removal_wakes_bodies_resting_on_it`, `removal_wakes_the_same_bodies_whether_or_not_the_broad_phase_was_optimized` |
@@ -81,21 +82,32 @@ in `crates/joltphysics/src/`.
 | Queries without a step, broad-phase optimisation | `PhysicsWorld::optimize_broad_phase` | `queries.rs`: `queries_see_created_moved_and_removed_bodies_without_a_step`, `optimize_broad_phase_keeps_query_results` |
 | Queries from many threads | queries on `&PhysicsWorld` | `queries.rs`: `filtered_queries_run_in_parallel`; `world.rs`: `rays_are_cast_from_many_threads` |
 | Floating origin | `PhysicsWorld::rebase` | `rebase.rs`: `resting_item_stays_across_a_rebase`, `sleeping_body_stays_asleep_across_a_rebase`, `drift_rebase_equals_the_scene_built_in_the_new_frame`, `rays_answer_the_same_across_a_rebase`, `invalid_rebase_changes_nothing` |
-| Same results for any thread count | (whole API) | `determinism.rs`: `stacks_digest_is_identical_across_thread_counts`, `chunk_digest_is_identical_across_thread_counts`, `permuted_insertion_order_fails_the_gate`; `crates/joltphysics-sys/tests/determinism.rs`: `digest_is_identical_across_thread_counts` |
+| Same results for any thread count | (whole API) | `determinism.rs`: `stacks_digest_is_identical_across_thread_counts`, `chunk_digest_is_identical_across_thread_counts`, `walker_digest_is_identical_across_thread_counts`, `permuted_insertion_order_fails_the_gate`; `crates/joltphysics-sys/tests/determinism.rs`: `digest_is_identical_across_thread_counts` |
 | Debug wireframe as line data (`debug-renderer`) | `PhysicsWorld::debug_lines`, `DebugLines`, `DebugLineSettings` | `debug_lines.rs`: `near_colliders_present_far_absent_terrain_present`, `line_cap_gives_exactly_the_cap_and_truncated`, `hidden_groups_vanish`, `compound_child_pose_applies_child_rotation_before_body_rotation`; `debug_lines_leaks.rs`; `crates/joltphysics-sys/tests/debug_renderer_bindings.rs` |
 | Leak gate for per-call joltc objects (Windows; bounded memory growth, catches only leaks above its threshold) | queries, rebase | `leaks.rs`: `per_call_joltc_objects_do_not_leak` |
-| Virtual character | `create_character`, `update_character`, `CharacterSettings` | `character.rs`: `a_character_lands_on_a_floor_and_reports_it`, `a_chained_replay_of_one_character_is_bit_exact`; `walker.rs`; `character_leaks.rs`; `crates/joltphysics-sys/tests/character_smoke.rs` |
-| Raw bindings | `joltphysics-sys` | `crates/joltphysics-sys/tests/smoke_test.rs`: `box_falls_onto_static_box`; layout checks at compile time in `crates/joltphysics-sys/src/layout.rs` |
-| Guide example | [docs/guide.md](docs/guide.md) | doctest `Guide` in `crates/joltphysics/src/lib.rs` (`cargo test -p joltphysics --doc`) |
+| Character settings with Jolt's defaults, validation | `PhysicsWorld::create_character`, `CharacterSettings`, `CharacterError` | `character.rs`: `invalid_settings_and_poses_are_rejected_without_side_effects`; `src/character.rs`: `default_settings_match_jolt` |
+| Character ids per world, removal | `CharacterId`, `character_ids`, `remove_character` | `character.rs`: `ids_count_from_one_are_never_reused_and_belong_to_their_world`, `removing_a_character_mid_run_leaves_the_others_sound` |
+| Character update: move by velocity, ground state and normal | `update_character`, `CharacterMut::set_linear_velocity`, `CharacterRef::ground_state`, `ground_normal`, `ground_body`, `GroundState` | `character.rs`: `a_character_lands_on_a_floor_and_reports_it`, `linear_velocity_round_trips_and_moves_a_free_character`; `src/character.rs`: `ground_states_convert_and_report_support` |
+| Stick to floor and walk stairs | `ExtendedUpdateSettings` | `character.rs`: `walk_stairs_climbs_a_step_that_stops_a_character_without_it`; `walker.rs`: `walking_down_a_30_degree_slope_has_no_hops` (stick to floor as the floor snap) |
+| Up and rotation per update (radial up) | `CharacterMut::set_up`, `set_rotation`, `set_position` | `character.rs`: `up_and_rotation_set_per_update_give_the_same_walk_in_another_frame`; `walker.rs`: `a_rotated_floor_far_from_the_anchor_keeps_the_path`, `a_chunk_seam_is_crossed` |
+| Character contacts: body, layer, compound child group, contact normal; filters | `CharacterRef::active_contacts`, `CharacterContact`, `contact_compound_child`, `contact_object_layer`, `QueryFilter` | `character.rs`: `a_character_lands_on_a_floor_and_reports_it`, `compound_children_report_their_group_and_filters_select_them` |
+| Inner body | `CharacterSettings::inner_body`, `InnerBody`, `is_inner_body`, `BodyError::OwnedByCharacter` | `character.rs`: `an_inner_body_is_a_body_of_the_world_owned_by_its_character`, `dropping_a_world_with_characters_releases_them` |
+| Collisions between characters | `CharacterSettings::collide_with_characters` | `character.rs`: `characters_that_collide_with_characters_keep_apart`, `removing_a_character_mid_run_leaves_the_others_sound` |
+| Character save and restore, chained replay | `CharacterRef::save_state`, `CharacterMut::restore_state`, `CharacterState` | `character.rs`: `a_chained_replay_of_one_character_is_bit_exact`, `a_chained_replay_of_colliding_characters_is_bit_exact`, `a_restored_state_saves_the_same_bytes`, `a_restored_state_moves_the_inner_body_with_the_character`; `crates/joltphysics-sys/tests/character_smoke.rs`: `character_lands_and_its_restored_state_continues_bit_for_bit` |
+| Characters across a rebase | `PhysicsWorld::rebase`, `refresh_character_contacts` | `character.rs`: `a_character_crosses_a_rebase_with_the_world` |
+| The game's near step on a radial planet (reference controller in test support, `tests/common/walker.rs`) | built on the rows above | `walker.rs`: `step_law_climbs_up_to_045_but_not_05`, `a_step_under_a_low_ceiling_is_not_taken`, `the_autostep_never_climbs_a_dynamic_body_in_the_filter`, `slope_law_climbs_30_degrees_and_slides_back_from_60`, `steep_slopes_always_bring_the_walker_down`, `a_buried_walker_is_put_back_on_the_terrain`, `an_overlapping_wall_pushes_the_walker_out`, `a_jump_reaches_the_ballistic_apex_and_lands`, `rising_into_a_ceiling_resets_vel_up`, `chained_near_step_replay_is_bit_exact` and the other tests in the file |
+| Leak gate for characters (Windows) | create, update, save and restore, remove | `character_leaks.rs`: `characters_do_not_leak` |
+| Raw bindings | `joltphysics-sys` | `crates/joltphysics-sys/tests/smoke_test.rs`: `box_falls_onto_static_box`; `crates/joltphysics-sys/tests/character_smoke.rs` (the extension's character functions): `character_lands_and_its_restored_state_continues_bit_for_bit`, `copying_no_bytes_accepts_a_null_buffer`; layout checks at compile time in `crates/joltphysics-sys/src/layout.rs` |
+| Guide examples (a world; a walking character) | [docs/guide.md](docs/guide.md) | doctests of `Guide` in `crates/joltphysics/src/lib.rs` (`cargo test -p joltphysics --doc`) |
 
 CI runs the test suite in four configurations: default, `cross-platform-deterministic`,
 `double-precision` and `debug-renderer`. The tests behind the `debug-renderer` feature run only in
 the last one.
 
 Not in the safe API yet (joltc exposes them, so `joltphysics-sys` has them): mesh and convex hull
-shapes, constraints and motors, vehicles, ragdolls and skeletons, soft bodies, and contact and
-activation listeners. Saving and restoring the state of bodies is in neither layer yet; only a
-character's state can be saved.
+shapes, constraints and motors, vehicles, ragdolls and skeletons, soft bodies, Jolt's rigid-body
+`Character`, and contact, activation and character contact listeners. Saving and restoring the
+state of bodies is in neither layer yet; only a character's state can be saved.
 
 ## Guarantees and limits
 - **Validation.** Values Jolt only checks with debug assertions (non-finite poses, non-unit
@@ -108,6 +120,16 @@ character's state can be saved.
   casts use at most 0.05 m of a convex radius. Heightfields cannot be query shapes, and only
   spheres and capsules take a shape-cast target distance. `collide_shape` hits come in no
   particular order.
+- **Characters.** A new character reports `InAir` until its first update or
+  `refresh_character_contacts`. Jolt's walk stairs and steep-slope test judge an obstacle by the
+  surface normal at the contact; on a box with sharp edges (convex radius 0) that is the top face's
+  normal, so walk stairs never climbs a sharp step, while a capsule creeps onto low sharp edges by
+  itself (up to about 0.37 m in the walker tests, measured on a sharp dynamic box).
+  The [guide](docs/guide.md#sharp-steps-and-the-games-own-autostep) shows the autostep a game builds
+  instead. With walk stairs on, the climbable height is not `walk_stairs_step_up` but about it
+  plus the padding plus `r (1 - cos 45°)` for a capsule of radius `r`. After a rotating rebase,
+  refresh each character's contacts before its next update. The game's controller
+  (`tests/common/walker.rs`) is test support, not API.
 - **Debug lines.** No level of detail: one capsule draws 6528 lines and one cylinder 768 at any
   distance, and each call builds a new Jolt debug renderer. Calls are serialized process-wide. A
   character is drawn only through its inner body.
@@ -122,8 +144,13 @@ What is guaranteed: on one machine, the same binary given the same calls in the 
 bit-identical body ids, poses, velocities and sleep flags for any `WorldSettings::worker_threads`
 (`worker_threads(n)` means n workers plus the thread that calls `step`). The call history includes the
 order of body creation and removal, which decides each `BodyId`'s index and sequence number, as well as
-rebases, `optimize_broad_phase`, forces and velocity writes. `remove_body` wakes the bodies whose exact
-bounds overlap the removed one, in id order, so it adds no hidden state.
+rebases, `optimize_broad_phase`, forces and velocity writes. Characters are covered too: each world
+numbers its characters from 1 in creation order (Jolt's default id comes from a process-wide
+counter and orders contacts between characters, so the world passes its own), and a character's
+contacts come in a deterministic order while `max_hits_exceeded` is false. `CharacterRef::save_state`
+and `CharacterMut::restore_state` continue a character bit for bit in a world rebuilt the same
+way, which a chained replay of the game's near step checks tick by tick. `remove_body` wakes the
+bodies whose exact bounds overlap the removed one, in id order, so it adds no hidden state.
 
 What is not guaranteed by default: equal results across compilers, compiler flags, operating systems or
 CPU architectures. The `cross-platform-deterministic` feature (off by default, roughly 8 % slower) builds
@@ -141,7 +168,8 @@ iteration order, time or thread identity into its calls.
 
 How it is checked: `cargo test -p joltphysics --test determinism` runs each scene in two child
 processes, with 1 and with 4 workers, records ticks 0 to 1000 of a chunk, terrain and item scene and
-requires them to match byte for byte; the same bodies created in another order must fail the gate. CI
+requires them to match byte for byte; the same bodies created in another order must fail the gate.
+A walker scene runs the game's reference controller for 600 ticks and is compared the same way. CI
 runs it in all four configurations.
 
 ## Building

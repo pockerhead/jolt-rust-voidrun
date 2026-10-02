@@ -546,6 +546,55 @@ fn linear_velocity_round_trips_and_moves_a_free_character() {
     assert_eq!(character.ground_state(), GroundState::InAir);
 }
 
+/// Walks a character from the origin along +x at 2 m/s for 45 ticks towards a 0.25 m step with
+/// Jolt's rounded box edges (face at x 1, top from x 1 to 4), with Jolt's walk stairs stepping
+/// up `step_up`; returns the final position.
+fn walk_at_a_step(step_up: f32) -> RVec3 {
+    let (mut world, _) = world_with_floor();
+    let step = Shape::new_box(Vec3::new(1.5, 0.125, 2.0)).unwrap();
+    world
+        .create_body(
+            &step,
+            &BodySettings::new_static().position(RVec3::new(2.5, 0.125, 0.0)),
+        )
+        .unwrap();
+    let shape = capsule();
+    let id = world
+        .create_character(&settings(&shape), RVec3::ZERO, Quat::IDENTITY)
+        .unwrap();
+    world
+        .refresh_character_contacts(id, &QueryFilter::new())
+        .unwrap();
+    let extended = ExtendedUpdateSettings::default()
+        .stick_to_floor_step_down(UP.scale_for_test(-0.5))
+        .walk_stairs_step_up(UP.scale_for_test(step_up));
+    for _ in 0..45 {
+        world
+            .character_mut(id)
+            .unwrap()
+            .set_linear_velocity(Vec3::new(2.0, -1.0, 0.0))
+            .unwrap();
+        world
+            .update_character(id, DT, GRAVITY, &extended, &QueryFilter::new())
+            .unwrap();
+    }
+    world.character(id).unwrap().position()
+}
+
+#[test]
+fn walk_stairs_climbs_a_step_that_stops_a_character_without_it() {
+    let climbed = walk_at_a_step(0.4);
+    assert!(
+        (climbed.y - 0.25).abs() < 0.01 && climbed.x > 1.0,
+        "on top of the step: {climbed:?}"
+    );
+    let stopped = walk_at_a_step(0.0);
+    assert!(
+        stopped.y.abs() < 0.01 && stopped.x < 1.0,
+        "in front of the step: {stopped:?}"
+    );
+}
+
 #[test]
 fn an_inner_body_is_a_body_of_the_world_owned_by_its_character() {
     let (mut world, floor) = world_with_floor();
