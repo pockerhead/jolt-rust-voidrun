@@ -3,6 +3,8 @@
 // Each test file compiles this module on its own and uses a different subset.
 #![allow(dead_code)]
 
+pub mod determinism;
+
 use joltphysics::*;
 
 pub const DT: f32 = 1.0 / 60.0;

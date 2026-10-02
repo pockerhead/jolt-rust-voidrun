@@ -3,37 +3,50 @@
 //! the order in which bodies are created must decide their ids.
 //!
 //! Each run happens in its own child process (this test binary, running the ignored
-//! `determinism_child` test), so no state leaks between runs.
+//! `determinism_child` test), so no state leaks between runs; see `common::determinism`.
 
 mod common;
 
-use std::path::Path;
-use std::process::Command;
-
+use common::determinism::*;
 use common::*;
 use joltphysics::*;
 
-const CHILD_ENV: &str = "JOLTPHYSICS_DIGEST_CHILD";
+/// Ticks of the stacks scene.
 const TICKS: usize = 120;
 
 /// Bytes recorded per body per tick by [`record_body`]: id, position, rotation, linear and
 /// angular velocity, and the sleeping flag.
 const BODY_RECORD_SIZE: usize = 4 + 3 * size_of::<Real>() + 4 * 4 + 3 * 4 + 3 * 4 + 1;
-/// Bodies in the scene: the floor and the cubes.
-fn body_count() -> usize {
+
+/// Bodies in the stacks scene: the floor and the cubes.
+fn stacks_body_count() -> usize {
     1 + stacks_scene().len()
 }
 
-/// Runs the stacks scene and returns its digest. Bodies are created in scene order (floor
-/// first), or in reverse for `"reversed"`, and always recorded in scene order. `"rebased"`
-/// creates them in scene order and moves the world into a tilted frame halfway through.
-fn run_scene(worker_threads: u32, order: &str) -> Vec<u8> {
+/// The rotation of the tilted rebases: 30 degrees about a tilted axis.
+fn tilted_rotation() -> Quat {
+    let axis = Vec3::new(1.0, 2.0, 0.5);
+    let axis = Vec3::new(
+        axis.x / length(axis),
+        axis.y / length(axis),
+        axis.z / length(axis),
+    );
+    quat_about(axis, 30.0_f32.to_radians())
+}
+
+/// The translation of the tilted rebases.
+fn tilted_translation() -> RVec3 {
+    RVec3::new(12.5, -3.0, 7.25)
+}
+
+/// Runs the stacks scene and returns one state record per step, of every body in scene order.
+/// Bodies are created in scene order (floor first), or in reverse for `"reversed"`.
+/// `"rebased"` creates them in scene order and moves the world into a tilted frame halfway
+/// through.
+fn run_stacks(worker_threads: u32, variant: &str) -> Digest {
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), worker_threads);
-    match order {
-        "forward" => {
-            let ids = build_stacks(&mut world);
-            run_digest(&mut world, &ids, TICKS)
-        }
+    let ids = match variant {
+        "forward" | "rebased" => build_stacks(&mut world),
         "reversed" => {
             let mut ids: Vec<BodyId> = stacks_scene()
                 .into_iter()
@@ -42,38 +55,30 @@ fn run_scene(worker_threads: u32, order: &str) -> Vec<u8> {
                 .collect();
             ids.push(add_floor(&mut world));
             ids.reverse();
-            run_digest(&mut world, &ids, TICKS)
+            ids
         }
-        "rebased" => {
-            let ids = build_stacks(&mut world);
-            let axis = Vec3::new(1.0, 2.0, 0.5);
-            let axis = Vec3::new(
-                axis.x / length(axis),
-                axis.y / length(axis),
-                axis.z / length(axis),
-            );
-            let rotation = quat_about(axis, 30.0_f32.to_radians());
-            let mut digest = Vec::new();
-            for tick in 0..TICKS {
-                if tick == TICKS / 2 {
-                    world
-                        .rebase(&ids, rotation, RVec3::new(12.5, -3.0, 7.25))
-                        .unwrap();
-                }
-                assert!(world.step(DT).unwrap().is_complete());
-                for &id in &ids {
-                    record_body(&world, id, &mut digest);
-                }
-            }
-            digest
+        variant => panic!("unknown stacks variant {variant}"),
+    };
+    let mut digest = Digest::new();
+    for tick in 0..TICKS {
+        if variant == "rebased" && tick == TICKS / 2 {
+            world
+                .rebase(&ids, tilted_rotation(), tilted_translation())
+                .unwrap();
         }
-        order => panic!("unknown order {order}"),
+        assert!(world.step(DT).unwrap().is_complete());
+        let record = digest.push();
+        for &id in &ids {
+            record_body(&world, id, &mut record.state);
+        }
     }
+    digest
 }
 
 /// The raw body ids of the first tick, in scene order.
-fn first_tick_ids(digest: &[u8]) -> Vec<u32> {
-    digest[..body_count() * BODY_RECORD_SIZE]
+fn first_tick_ids(digest: &Digest) -> Vec<u32> {
+    digest.ticks[0]
+        .state
         .as_chunks::<BODY_RECORD_SIZE>()
         .0
         .iter()
@@ -87,68 +92,141 @@ fn nth_body_id(n: usize) -> u32 {
 }
 
 #[test]
-#[ignore = "child process of digest_is_identical_across_thread_counts"]
+#[ignore = "child process of the determinism gates"]
 fn determinism_child() {
-    let Ok(request) = std::env::var(CHILD_ENV) else {
+    let Some((scenario, threads, variant)) = child_request() else {
         return;
     };
-    let mut parts = request.splitn(3, ',');
-    let threads: u32 = parts.next().unwrap().parse().unwrap();
-    let order = parts.next().unwrap();
-    let output = parts.next().unwrap();
-    std::fs::write(output, run_scene(threads, order)).unwrap();
+    let digest = match scenario.as_str() {
+        "stacks" => run_stacks(threads, &variant),
+        scenario => panic!("unknown scenario {scenario}"),
+    };
+    finish_child(&digest);
 }
 
-/// Runs the scene in a child process and returns its digest.
-fn digest_in_child(threads: u32, order: &str, output: &Path) -> Vec<u8> {
-    let status = Command::new(std::env::current_exe().unwrap())
-        .args([
-            "determinism_child",
-            "--exact",
-            "--ignored",
-            "--test-threads=1",
-        ])
-        .env(CHILD_ENV, format!("{threads},{order},{}", output.display()))
-        .status()
-        .unwrap();
-    assert!(status.success(), "child {threads},{order} failed: {status}");
-    std::fs::read(output).unwrap()
+fn stacks_in_child(threads: u32, variant: &str) -> Digest {
+    digest_in_child("determinism_child", "stacks", threads, variant)
 }
 
 #[test]
-fn digest_is_identical_across_thread_counts() {
-    let dir = std::env::temp_dir().join(format!("joltphysics-digest-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+fn stacks_digest_is_identical_across_thread_counts() {
+    let one_thread = stacks_in_child(1, "forward");
+    let four_threads = stacks_in_child(4, "forward");
+    let reversed = stacks_in_child(1, "reversed");
+    let rebased_one_thread = stacks_in_child(1, "rebased");
+    let rebased_four_threads = stacks_in_child(4, "rebased");
 
-    let one_thread = digest_in_child(1, "forward", &dir.join("a"));
-    let four_threads = digest_in_child(4, "forward", &dir.join("b"));
-    let reversed = digest_in_child(1, "reversed", &dir.join("c"));
-    let rebased_one_thread = digest_in_child(1, "rebased", &dir.join("d"));
-    let rebased_four_threads = digest_in_child(4, "rebased", &dir.join("e"));
-    std::fs::remove_dir_all(&dir).unwrap();
-
-    let tick_size = body_count() * BODY_RECORD_SIZE;
-    assert_eq!(one_thread.len(), TICKS * tick_size);
-    for (name, one, four) in [
-        ("", &one_thread, &four_threads),
-        ("rebased ", &rebased_one_thread, &rebased_four_threads),
-    ] {
-        if let Some(offset) = one.iter().zip(four).position(|(a, b)| a != b) {
-            panic!(
-                "{name}1-thread and 4-thread digests differ at byte {offset} (tick {})",
-                offset / tick_size
-            );
-        }
-        assert_eq!(one.len(), four.len());
-    }
+    assert_eq!(one_thread.ticks.len(), TICKS);
+    assert_eq!(
+        one_thread.ticks[0].state.len(),
+        stacks_body_count() * BODY_RECORD_SIZE
+    );
+    assert_same("stacks, 1 vs 4 worker threads", &one_thread, &four_threads);
+    assert_same(
+        "rebased stacks, 1 vs 4 worker threads",
+        &rebased_one_thread,
+        &rebased_four_threads,
+    );
     // The rebase happened: the rebased run leaves the forward run's frame.
-    assert_ne!(rebased_one_thread, one_thread);
+    assert!(first_divergence(&rebased_one_thread, &one_thread).is_some());
 
     // Insertion order is part of the state: reversing creation reverses the ids of the same
     // bodies, so the digest changes.
-    let created_forward: Vec<u32> = (0..body_count()).map(nth_body_id).collect();
-    let created_reversed: Vec<u32> = (0..body_count()).rev().map(nth_body_id).collect();
+    let created_forward: Vec<u32> = (0..stacks_body_count()).map(nth_body_id).collect();
+    let created_reversed: Vec<u32> = (0..stacks_body_count()).rev().map(nth_body_id).collect();
     assert_eq!(first_tick_ids(&one_thread), created_forward);
     assert_eq!(first_tick_ids(&reversed), created_reversed);
-    assert_ne!(one_thread, reversed);
+    assert!(first_divergence(&reversed, &one_thread).is_some());
+}
+
+/// A digest of `ticks` ticks whose sections hold the given bytes.
+fn digest_of(ticks: &[(&[u8], &[u8])]) -> Digest {
+    let mut digest = Digest::new();
+    for &(shape, state) in ticks {
+        let tick = digest.push();
+        tick.shape.extend_from_slice(shape);
+        tick.state.extend_from_slice(state);
+    }
+    digest
+}
+
+#[test]
+fn digest_encoding_round_trips() {
+    for digest in [
+        Digest::new(),
+        digest_of(&[(&[], &[])]),
+        digest_of(&[(&[1, 2, 3], &[]), (&[], &[4]), (&[5, 6], &[7, 8, 9])]),
+    ] {
+        assert_eq!(Digest::decode(&digest.encode()), Ok(digest));
+    }
+}
+
+#[test]
+fn digest_decoding_rejects_malformed_input() {
+    let bytes = digest_of(&[(&[1, 2, 3], &[4, 5])]).encode();
+    // Tick count 1, shape length 3: offsets 0 and 4; the shape bytes start at offset 8.
+    let truncated_length = &bytes[..6];
+    let truncated_section = &bytes[..9];
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    for (input, expected) in [
+        (truncated_length, "truncated length at offset 4"),
+        (truncated_section, "truncated section at offset 8"),
+        (&trailing[..], "1 trailing bytes at offset 17"),
+    ] {
+        assert_eq!(Digest::decode(input), Err(expected.to_owned()));
+    }
+}
+
+#[test]
+fn first_divergence_names_tick_section_and_byte() {
+    let base = digest_of(&[(&[1, 2], &[3, 4]), (&[5, 6], &[7, 8, 9])]);
+    assert_eq!(first_divergence(&base, &base.clone()), None);
+
+    let state = digest_of(&[(&[1, 2], &[3, 4]), (&[5, 6], &[7, 0, 9])]);
+    let expected = Divergence::Tick {
+        tick: 1,
+        section: Section::State,
+        byte: 1,
+    };
+    assert_eq!(first_divergence(&base, &state), Some(expected));
+    assert_eq!(expected.to_string(), "tick 1, state byte 1");
+
+    // The shape section of a tick is compared before its state section.
+    let shape_and_state = digest_of(&[(&[1, 2], &[3, 4]), (&[5, 0], &[0, 8, 9])]);
+    assert_eq!(
+        first_divergence(&base, &shape_and_state),
+        Some(Divergence::Tick {
+            tick: 1,
+            section: Section::Shape,
+            byte: 1,
+        })
+    );
+
+    let shorter = digest_of(&[(&[1, 2], &[3, 4]), (&[5, 6], &[7, 8])]);
+    assert_eq!(
+        first_divergence(&base, &shorter),
+        Some(Divergence::Tick {
+            tick: 1,
+            section: Section::State,
+            byte: 2,
+        })
+    );
+
+    let fewer_ticks = digest_of(&[(&[1, 2], &[3, 4])]);
+    let expected = Divergence::TickCount { a: 2, b: 1 };
+    assert_eq!(first_divergence(&base, &fewer_ticks), Some(expected));
+    assert_eq!(expected.to_string(), "tick counts 2 and 1");
+}
+
+#[test]
+fn assert_same_panics_with_the_divergence() {
+    let a = digest_of(&[(&[1], &[2])]);
+    let b = digest_of(&[(&[1], &[3])]);
+    assert_same("equal", &a, &a.clone());
+    let payload = std::panic::catch_unwind(|| assert_same("runs", &a, &b)).unwrap_err();
+    assert_eq!(
+        payload.downcast_ref::<String>().map(String::as_str),
+        Some("runs: digests diverge at tick 0, state byte 0")
+    );
 }
