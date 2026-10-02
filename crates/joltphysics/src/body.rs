@@ -7,6 +7,7 @@ use std::ptr::NonNull;
 
 use joltphysics_sys::*;
 
+use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyError, ObjectLayer, PhysicsWorld, Quat, RVec3, Shape, Vec3};
@@ -316,17 +317,17 @@ impl BodySettings {
         if !self.angular_velocity.is_finite() {
             return invalid("angular velocity must be finite");
         }
-        if !(self.friction.is_finite() && self.friction >= 0.0) {
+        if !is_finite_non_negative(self.friction) {
             return invalid("friction must be finite and not negative");
         }
-        if !(self.restitution.is_finite() && self.restitution >= 0.0) {
+        if !is_finite_non_negative(self.restitution) {
             return invalid("restitution must be finite and not negative");
         }
         if !self.gravity_factor.is_finite() {
             return invalid("gravity factor must be finite");
         }
         if let Some(mass) = self.mass {
-            if !(mass.is_finite() && mass > 0.0) {
+            if !is_finite_positive(mass) {
                 return invalid("mass must be finite and positive");
             }
         }

@@ -5,6 +5,7 @@ use std::ptr::{null, null_mut, NonNull};
 
 use joltphysics_sys::*;
 
+use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
 use crate::{Quat, ShapeError, Vec3};
@@ -162,14 +163,13 @@ unsafe fn height_field_settings(
     Ok(jolt_settings)
 }
 
-/// Finite and positive.
-fn is_positive(value: f32) -> bool {
-    value.is_finite() && value > 0.0
-}
-
-/// Finite and not negative.
-fn is_valid_convex_radius(value: f32) -> bool {
-    value.is_finite() && value >= 0.0
+/// Runs `JPH_Init` once, mapping failure to [`ShapeError::InitFailed`].
+fn initialize() -> Result<(), ShapeError> {
+    if ensure_initialized() {
+        Ok(())
+    } else {
+        Err(ShapeError::InitFailed)
+    }
 }
 
 /// Settings of [`Shape::new_height_field`] other than the samples. The defaults are Jolt's
@@ -271,7 +271,7 @@ impl HeightFieldSettings {
             ));
         }
         let scale = [self.scale.x, self.scale.y, self.scale.z];
-        if !scale.into_iter().all(is_positive) {
+        if !scale.into_iter().all(is_finite_positive) {
             return Err(ShapeError::InvalidDimensions(
                 "height field scale must be finite and positive",
             ));
@@ -337,19 +337,17 @@ impl Shape {
         convex_radius: f32,
     ) -> Result<Self, ShapeError> {
         let components = [half_extent.x, half_extent.y, half_extent.z];
-        if !components.into_iter().all(is_positive) {
+        if !components.into_iter().all(is_finite_positive) {
             return Err(ShapeError::InvalidDimensions(
                 "box half extents must be finite and positive",
             ));
         }
-        if !is_valid_convex_radius(convex_radius) {
+        if !is_finite_non_negative(convex_radius) {
             return Err(ShapeError::InvalidDimensions(
                 "convex radius must be finite and not negative",
             ));
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         let half_extent = half_extent.to_jph();
         // SAFETY: Jolt is initialised, `half_extent` is a live local and both inputs were
         // checked against Jolt's assertions. The returned box holds one reference, which
@@ -359,14 +357,12 @@ impl Shape {
 
     /// A sphere with the given radius in metres (finite and positive).
     pub fn new_sphere(radius: f32) -> Result<Self, ShapeError> {
-        if !is_positive(radius) {
+        if !is_finite_positive(radius) {
             return Err(ShapeError::InvalidDimensions(
                 "sphere radius must be finite and positive",
             ));
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         // SAFETY: Jolt is initialised. The returned sphere holds one reference, which `Self`
         // takes over.
         unsafe { Self::from_raw(JPH_SphereShape_Create(radius).cast()) }
@@ -392,19 +388,17 @@ impl Shape {
         radius: f32,
         convex_radius: f32,
     ) -> Result<Self, ShapeError> {
-        if !(is_positive(half_height) && is_positive(radius)) {
+        if !(is_finite_positive(half_height) && is_finite_positive(radius)) {
             return Err(ShapeError::InvalidDimensions(
                 "cylinder half height and radius must be finite and positive",
             ));
         }
-        if !is_valid_convex_radius(convex_radius) {
+        if !is_finite_non_negative(convex_radius) {
             return Err(ShapeError::InvalidDimensions(
                 "convex radius must be finite and not negative",
             ));
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         // `JPH_CylinderShape_Create` would ignore the convex radius (joltc passes 0), so the
         // cylinder is built through its settings.
         // SAFETY: Jolt is initialised; the returned settings hold one reference, which the
@@ -426,14 +420,12 @@ impl Shape {
     /// `2 * (half_height_of_cylinder + radius)` metres high in total. Both values must be finite
     /// and positive.
     pub fn new_capsule(half_height_of_cylinder: f32, radius: f32) -> Result<Self, ShapeError> {
-        if !(is_positive(half_height_of_cylinder) && is_positive(radius)) {
+        if !(is_finite_positive(half_height_of_cylinder) && is_finite_positive(radius)) {
             return Err(ShapeError::InvalidDimensions(
                 "capsule half height and radius must be finite and positive",
             ));
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         // SAFETY: Jolt is initialised and both values are positive, as Jolt asserts
         // (`CapsuleShape.h`). The returned capsule holds one reference, which `Self` takes
         // over.
@@ -504,9 +496,7 @@ impl Shape {
             ));
         }
         settings.validate_extents(padded, heights)?;
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         // SAFETY: Jolt is initialised and `samples` and `settings` were validated above.
         let jolt_settings = unsafe { height_field_settings(sample_count, samples, settings) }?;
         // SAFETY: the settings are live, owned by the guard and were created as heightfield
@@ -569,9 +559,7 @@ impl Shape {
                 return invalid("compound child rotation must be a finite unit quaternion");
             }
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         let single = children.len() == 1;
         // SAFETY: Jolt is initialised. The returned settings hold one reference, which the
         // guard takes over.
