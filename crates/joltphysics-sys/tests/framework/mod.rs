@@ -123,6 +123,11 @@ impl TestWorld {
         assert_eq!(result, JPH_PhysicsUpdateError_None);
     }
 
+    /// The physics system, owned by this world.
+    pub fn system(&self) -> *mut JPH_PhysicsSystem {
+        self.system
+    }
+
     /// The system's locking body interface.
     pub fn body_interface(&self) -> *mut JPH_BodyInterface {
         // SAFETY: `system` comes from `new` and lives until `drop`.

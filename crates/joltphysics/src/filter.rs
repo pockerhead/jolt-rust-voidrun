@@ -459,8 +459,9 @@ unsafe extern "C" fn shape_should_collide2(
 mod tests {
     use super::*;
     use crate::{
-        BodySettings, BroadPhaseLayer, CollideShape, CollisionLayers, CompoundChild, Quat, RVec3,
-        RayCast, Shape, ShapeCast, Vec3, WorldSettings,
+        BodySettings, BroadPhaseLayer, CharacterSettings, CollideShape, CollisionLayers,
+        CompoundChild, ExtendedUpdateSettings, Quat, RVec3, RayCast, Shape, ShapeCast, Vec3,
+        WorldSettings,
     };
 
     /// A filter callback that a test can make panic.
@@ -638,6 +639,96 @@ mod tests {
         for query in [Query::Ray, Query::ShapeCast, Query::Collide] {
             assert_eq!(found_body(&world, &filter, query, &ball), None, "{query:?}");
         }
+    }
+
+    #[test]
+    fn a_panic_in_a_filter_callback_resumes_after_a_character_update_or_refresh() {
+        let mut world = world();
+        let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        let floor = Shape::new_compound(&[
+            CompoundChild {
+                shape: &unit_box,
+                position: Vec3::new(0.0, -0.5, 0.0),
+                rotation: Quat::IDENTITY,
+                user_data: 1,
+            },
+            CompoundChild {
+                shape: &unit_box,
+                position: Vec3::new(3.0, -0.5, 0.0),
+                rotation: Quat::IDENTITY,
+                user_data: 2,
+            },
+        ])
+        .unwrap();
+        world
+            .create_body(&floor, &BodySettings::new_static())
+            .unwrap();
+        let ball = Shape::new_sphere(0.25).unwrap();
+        let excluded = world
+            .create_body(
+                &ball,
+                &BodySettings::new_static().position(RVec3::new(50.0, 0.0, 0.0)),
+            )
+            .unwrap();
+        let capsule = Shape::new_capsule(0.5, 0.3).unwrap();
+        let id = world
+            .create_character(
+                &CharacterSettings::new(&capsule).shape_offset(Vec3::new(0.0, 0.8, 0.0)),
+                RVec3::new(0.0, 0.05, 0.0),
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        let layers = [ObjectLayer::NON_MOVING];
+        let filter = QueryFilter::new()
+            .object_layers(&layers)
+            .child_groups(1 << 1)
+            .exclude_body(excluded);
+        let update = |world: &mut PhysicsWorld| {
+            world
+                .character_mut(id)
+                .unwrap()
+                .set_linear_velocity(Vec3::new(0.5, -1.0, 0.0))
+                .unwrap();
+            world.update_character(
+                id,
+                1.0 / 60.0,
+                Vec3::new(0.0, -9.81, 0.0),
+                &ExtendedUpdateSettings::default(),
+                &filter,
+            )
+        };
+
+        for callback in [Callback::ObjectLayer, Callback::Body, Callback::Shape2] {
+            INJECTED_PANIC.set(Some(callback));
+            let result = catch_unwind(AssertUnwindSafe(|| update(&mut world)));
+            INJECTED_PANIC.set(None);
+            let payload = result.expect_err("joltc returned and the panic resumed");
+            assert_eq!(
+                payload.downcast_ref::<String>().map(String::as_str),
+                Some(format!("injected {callback:?} panic").as_str()),
+            );
+            assert_eq!(update(&mut world), Ok(()), "after a {callback:?} panic");
+        }
+        // The same through a contact refresh, the other character call that runs the filters.
+        for callback in [Callback::ObjectLayer, Callback::Body, Callback::Shape2] {
+            INJECTED_PANIC.set(Some(callback));
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                world.refresh_character_contacts(id, &filter)
+            }));
+            INJECTED_PANIC.set(None);
+            let payload = result.expect_err("joltc returned and the panic resumed");
+            assert_eq!(
+                payload.downcast_ref::<String>().map(String::as_str),
+                Some(format!("injected {callback:?} panic").as_str()),
+            );
+            assert_eq!(
+                world.refresh_character_contacts(id, &filter),
+                Ok(()),
+                "after a {callback:?} panic"
+            );
+        }
+        // No body lock is left held: removing a body takes its write lock.
+        world.remove_body(excluded).unwrap();
     }
 
     #[test]

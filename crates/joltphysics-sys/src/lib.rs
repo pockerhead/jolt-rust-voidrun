@@ -1,7 +1,12 @@
 //! Unsafe bindings to [Jolt Physics] 5.6.0 through the [joltc] C wrapper.
 //!
-//! Everything here is `bindgen` output over joltc's `include/joltc.h` and keeps
-//! its `JPH_*` names. The safe API lives in the `joltphysics` crate.
+//! Everything here is `bindgen` output over joltc's `include/joltc.h` plus this
+//! fork's `native/joltc_ext/joltc_ext.h`, and keeps their `JPH_*` names. The
+//! extension adds functions in joltc's naming that are compiled into the joltc
+//! archive: a `JPH_StateRecorder`, `JPH_CharacterVirtual_SaveState` and
+//! `RestoreState`, and `JPH_CharacterVirtual_ExtendedUpdate2` and
+//! `RefreshContacts2` with explicit gravity, filters and temp allocator. The safe
+//! API lives in the `joltphysics` crate.
 //!
 //! # Features
 //! - `asserts`: compile Jolt with its debug assertions.
@@ -13,7 +18,8 @@
 //! By default the build script builds joltc and Jolt from the `vendor/` submodules with
 //! CMake, always in Release. Set `JOLTC_LIB_DIR` to an install prefix produced by an
 //! earlier build (`OUT_DIR/joltc`) to skip CMake: it holds `lib/` with the joltc and Jolt
-//! static libraries, `include/joltc.h` and `joltphysics-sys-manifest.txt`. A prefix is specific
+//! static libraries, `include/joltc.h`, `include/joltc_ext.h` and
+//! `joltphysics-sys-manifest.txt`. A prefix is specific
 //! to the target, the C runtime, the crate features and the pinned joltc and Jolt
 //! commits; the build script validates all of these against the manifest and refuses a
 //! mismatch.
@@ -30,6 +36,15 @@
 //!   systems from one thread at a time.
 //! - `JPH_PhysicsSystem_Update` uses one global temp allocator. Use
 //!   `JPH_PhysicsSystem_Update2` with a per-world `JPH_TempAllocator` instead.
+//! - joltc's `JPH_CharacterVirtual_Update`, `ExtendedUpdate`, `RefreshContacts`,
+//!   `WalkStairs`, `StickToFloor` and `SetShape` use joltc's one global temp
+//!   allocator and are not thread-safe. Use `JPH_CharacterVirtual_ExtendedUpdate2`
+//!   and `JPH_CharacterVirtual_RefreshContacts2` with a per-world allocator instead.
+//! - `JPH_CharacterVirtualSettings_Init` (and `JPH_CharacterSettings_Init`) create an
+//!   empty shape and its settings on every call, each holding a reference nobody
+//!   releases. Fill the settings field by field instead.
+//! - A recorder passed to `JPH_CharacterVirtual_RestoreState` must hold a complete
+//!   stream written by `JPH_CharacterVirtual_SaveState`.
 //! - `JPH_JobSystemThreadPool_Create` maps `numThreads <= 0` to "as many as there are
 //!   hardware threads", so pass a positive worker count when the count matters.
 //! - joltc's object-layer, body and shape filters (`JPH_ObjectLayerFilter_*`,

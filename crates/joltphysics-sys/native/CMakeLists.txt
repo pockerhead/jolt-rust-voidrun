@@ -1,6 +1,7 @@
 # Native part of joltphysics-sys: builds joltc and Jolt as static libraries from the
-# vendored submodules, compiles the C++ layout checks and installs a minimal
-# prefix (lib/ with both archives, include/joltc.h) for build.rs to link.
+# vendored submodules together with this fork's additions to joltc (joltc_ext/),
+# compiles the C++ layout checks and installs a minimal prefix (lib/ with both
+# archives, include/joltc.h and include/joltc_ext.h) for build.rs to link.
 
 # Jolt 5.6's Build/CMakeLists.txt requires 3.20.
 cmake_minimum_required(VERSION 3.20)
@@ -33,6 +34,11 @@ else()
     set(JOLTC_TARGET joltc)
 endif()
 
+# Functions this fork adds to joltc in joltc's naming; compiled into the joltc archive so they
+# share its compile definitions (precision, object layer bits, floating-point flags).
+target_sources(${JOLTC_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext.cpp)
+target_include_directories(${JOLTC_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext)
+
 # Compile-time checks that joltc's C mirrors match Jolt's C++ types. Linking the
 # targets brings in Jolt's public definitions (precision, object layer bits,
 # instruction set) and joltc's include directory. Part of ALL, so a failing
@@ -41,4 +47,4 @@ add_library(joltc_layout_checks OBJECT layout_checks.cpp)
 target_link_libraries(joltc_layout_checks PRIVATE ${JOLTC_TARGET} Jolt)
 
 install(TARGETS ${JOLTC_TARGET} Jolt ARCHIVE DESTINATION lib)
-install(FILES ${JOLTC_SOURCE_DIR}/include/joltc.h DESTINATION include)
+install(FILES ${JOLTC_SOURCE_DIR}/include/joltc.h ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext.h DESTINATION include)

@@ -7,7 +7,8 @@
 //! caller pulls towards a planet centre, created, coming to rest and removed under the game's
 //! item rules, and a tilted rebase in the middle, recorded for ticks 0 to 1000 with the static
 //! shapes and the body states of every tick. Creating the same bodies in another order must
-//! fail the gate.
+//! fail the gate. The walker scene runs the game's scripted near steps on a character, with three
+//! items dropped along its path, in the game's order of a tick: actors, items, step.
 //!
 //! Each run happens in its own child process (this test binary, running the ignored
 //! `determinism_child` test), so no state leaks between runs; see `common::determinism`.
@@ -15,6 +16,10 @@
 mod common;
 
 use common::determinism::*;
+use common::walker::{
+    add_walker, record_walker, rvec3, scale, script_scene, script_start, script_tick, up_at, v3,
+    vec3, Player,
+};
 use common::*;
 use joltphysics::*;
 
@@ -639,6 +644,54 @@ fn run_chunk(worker_threads: u32, variant: &str) -> Digest {
     digest
 }
 
+/// Ticks of the walker scene.
+const WALKER_TICKS: usize = 600;
+
+/// The walker scene: the scripted walker with three items dropped along its path. Per tick the
+/// walker moves, the items get their radial gravity, the world steps, and the walker's state
+/// and contacts and the items' states are recorded.
+fn run_walker(worker_threads: u32) -> Digest {
+    let (mut world, layers) = script_scene(worker_threads);
+    let walker = add_walker(&mut world, &layers, script_start());
+    let item_shape = Shape::new_box(ITEM_HALF_EXTENT).unwrap();
+    let items: Vec<BodyId> = [[-4.0, 2.0, 1.3], [-1.0, 2.5, 0.7], [0.5, 3.0, -1.2]]
+        .into_iter()
+        .map(|position| {
+            world
+                .create_body(
+                    &item_shape,
+                    &BodySettings::new_dynamic()
+                        .position(rvec3(position))
+                        .mass(ITEM_MASS)
+                        .friction(0.8)
+                        .restitution(0.1)
+                        .motion_quality(MotionQuality::LinearCast)
+                        .object_layer(layers.item),
+                )
+                .unwrap()
+        })
+        .collect();
+    let mut player = Player::new(&mut world, &walker);
+    let mut digest = Digest::new();
+    for tick in 0..WALKER_TICKS {
+        let out = script_tick(&mut world, &walker, &mut player, tick);
+        for &item in &items {
+            let position = v3(world.body(item).unwrap().position());
+            let gravity = vec3(scale(up_at(position), -f64::from(ITEM_MASS * GRAVITY)));
+            let mut body = world.body_mut(item).unwrap();
+            body.reset_forces();
+            body.add_force(gravity).unwrap();
+        }
+        assert!(world.step(DT).unwrap().is_complete());
+        let record = digest.push();
+        record_walker(&world, &walker, &out, &mut record.state);
+        for &item in &items {
+            record_body(&world, item, &mut record.state);
+        }
+    }
+    digest
+}
+
 #[test]
 #[ignore = "child process of the determinism gates"]
 fn determinism_child() {
@@ -648,6 +701,7 @@ fn determinism_child() {
     let digest = match scenario.as_str() {
         "stacks" => run_stacks(threads, &variant),
         "chunk" => run_chunk(threads, &variant),
+        "walker" => run_walker(threads),
         scenario => panic!("unknown scenario {scenario}"),
     };
     finish_child(&digest);
@@ -702,6 +756,18 @@ fn chunk_digest_is_identical_across_thread_counts() {
         assert!(!record.state.is_empty(), "tick {tick}: empty state record");
     }
     assert_same("chunk, 1 vs 4 worker threads", &one_thread, &four_threads);
+}
+
+fn walker_in_child(threads: u32) -> Digest {
+    digest_in_child("determinism_child", "walker", threads, "forward")
+}
+
+#[test]
+fn walker_digest_is_identical_across_thread_counts() {
+    let one_thread = walker_in_child(1);
+    let four_threads = walker_in_child(4);
+    assert_eq!(one_thread.ticks.len(), WALKER_TICKS);
+    assert_same("walker, 1 vs 4 worker threads", &one_thread, &four_threads);
 }
 
 /// Offset of the chunk's raw body id in a shape record: after the key (`u8`, `i32`, `i32`).

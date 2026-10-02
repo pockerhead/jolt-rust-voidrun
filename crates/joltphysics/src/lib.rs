@@ -40,6 +40,15 @@
 //! # }
 //! ```
 //!
+//! # Characters
+//! [`PhysicsWorld::create_character`] adds a virtual character (Jolt `CharacterVirtual`): a
+//! convex shape, usually a capsule, that [`PhysicsWorld::update_character`] moves by its velocity
+//! with collision queries, sliding along walls, stepping up stairs and sticking to the floor. Up
+//! and rotation can change every update, so the character works on a spherical planet. A
+//! character reports its [`GroundState`], ground normal and [`CharacterContact`]s, can carry a
+//! kinematic inner body and can collide with other characters. [`CharacterRef::save_state`] and
+//! [`CharacterMut::restore_state`] continue a character bit for bit, for replays.
+//!
 //! # Threads
 //! Changing a world, including [`PhysicsWorld::step`], takes `&mut PhysicsWorld`; reading it
 //! takes `&PhysicsWorld`. `PhysicsWorld` is `Send` and `Sync`, so many threads may read one
@@ -71,6 +80,7 @@
 )]
 
 mod body;
+mod character;
 mod error;
 mod filter;
 mod layers;
@@ -81,7 +91,11 @@ mod shape;
 mod world;
 
 pub use body::{Activation, BodyId, BodyMut, BodyRef, BodySettings, MotionQuality, MotionType};
-pub use error::{BodyError, QueryError, ShapeError, StepError, WorldError};
+pub use character::{
+    CharacterContact, CharacterId, CharacterMut, CharacterRef, CharacterSettings, CharacterState,
+    ExtendedUpdateSettings, GroundState, InnerBody,
+};
+pub use error::{BodyError, CharacterError, QueryError, ShapeError, StepError, WorldError};
 pub use filter::QueryFilter;
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use math::{Quat, RVec3, Real, Vec3};

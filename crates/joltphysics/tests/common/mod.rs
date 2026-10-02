@@ -4,6 +4,9 @@
 #![allow(dead_code)]
 
 pub mod determinism;
+#[cfg(windows)]
+pub mod memory;
+pub mod walker;
 
 use joltphysics::*;
 

@@ -1,10 +1,11 @@
 //! Builds joltc and Jolt (or validates a prebuilt copy), links them and
-//! generates the raw bindings over `joltc.h`.
+//! generates the raw bindings over `joltc.h` and the fork's `joltc_ext.h`.
 //!
 //! Two ways to get the native libraries:
 //! - by default, CMake builds `native/` from the `vendor/` submodules into
-//!   `OUT_DIR/joltc`, an install prefix with `lib/`, `include/joltc.h` and a
-//!   manifest describing everything that affects the ABI;
+//!   `OUT_DIR/joltc`, an install prefix with `lib/`, `include/joltc.h`,
+//!   `include/joltc_ext.h` and a manifest describing everything that affects
+//!   the ABI;
 //! - with `JOLTC_LIB_DIR` set, an already built prefix of that shape is used
 //!   after its manifest, archives and header are validated, and CMake is not
 //!   run at all.
@@ -22,6 +23,9 @@ const JOLTC_COMMIT: &str = "886e088675bae3a086f8318c7803f8ee962c2f2c";
 const JOLT_COMMIT: &str = "e77f175595e64cb44218cc9d9d56fc365ad0e36a";
 /// Jolt Physics release of [`JOLT_COMMIT`].
 const JOLT_VERSION: &str = "5.6.0";
+/// Revision of the fork's joltc additions in `native/joltc_ext/`. Bump it whenever
+/// anything there changes, so prebuilt prefixes built before the change are refused.
+const JOLTC_EXT_REVISION: &str = "2";
 /// Name of the manifest file in an install prefix.
 const MANIFEST_FILE: &str = "joltphysics-sys-manifest.txt";
 
@@ -119,6 +123,7 @@ fn manifest_entries(cfg: &NativeConfig) -> Vec<(&'static str, String)> {
     vec![
         ("format", "1".to_owned()),
         ("joltc_commit", JOLTC_COMMIT.to_owned()),
+        ("joltc_ext", JOLTC_EXT_REVISION.to_owned()),
         ("jolt_commit", JOLT_COMMIT.to_owned()),
         ("jolt_version", JOLT_VERSION.to_owned()),
         ("target", cfg.target.clone()),
@@ -168,7 +173,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     link(&prefix, &cfg);
-    generate_bindings(&prefix.join("include").join("joltc.h"), &cfg)
+    generate_bindings(&prefix.join("include").join("joltc_ext.h"), &cfg)
 }
 
 /// Builds the native prefix from the submodules with CMake and returns its path.
@@ -327,13 +332,17 @@ fn write_manifest(prefix: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
 /// Validates a prebuilt prefix from `JOLTC_LIB_DIR` and returns it. Never runs CMake.
 fn use_prebuilt(dir: PathBuf, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
     let header = dir.join("include").join("joltc.h");
+    let ext_header = dir.join("include").join("joltc_ext.h");
     let manifest = dir.join(MANIFEST_FILE);
     let archives = [
         dir.join("lib").join(cfg.archive_name(cfg.joltc_lib())),
         dir.join("lib").join(cfg.archive_name("Jolt")),
     ];
 
-    let inputs: Vec<&PathBuf> = [&header, &manifest].into_iter().chain(&archives).collect();
+    let inputs: Vec<&PathBuf> = [&header, &ext_header, &manifest]
+        .into_iter()
+        .chain(&archives)
+        .collect();
     for input in &inputs {
         println!("cargo:rerun-if-changed={}", input.display());
     }
@@ -356,6 +365,7 @@ fn use_prebuilt(dir: PathBuf, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
     }
 
     check_header(&header)?;
+    check_ext_header(&ext_header)?;
     Ok(dir)
 }
 
@@ -427,6 +437,26 @@ fn check_header(prebuilt: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Fails if the prebuilt `joltc_ext.h` differs from the one in `native/joltc_ext/`, which
+/// always ships with the crate.
+fn check_ext_header(prebuilt: &Path) -> anyhow::Result<()> {
+    let ours = manifest_dir()?
+        .join("native")
+        .join("joltc_ext")
+        .join("joltc_ext.h");
+    println!("cargo:rerun-if-changed={}", ours.display());
+    let read =
+        |path: &Path| fs::read(path).with_context(|| format!("cannot read {}", path.display()));
+    if read(prebuilt)? != read(&ours)? {
+        bail!(
+            "{} differs from {}: the prebuilt prefix is from another revision of the joltc              additions. Rebuild it or unset JOLTC_LIB_DIR.",
+            prebuilt.display(),
+            ours.display()
+        );
+    }
+    Ok(())
+}
+
 /// Links joltc and Jolt statically and exports the prefix to dependants.
 fn link(prefix: &Path, cfg: &NativeConfig) {
     println!(
@@ -447,9 +477,11 @@ fn link(prefix: &Path, cfg: &NativeConfig) {
     println!("cargo:root={}", prefix.display());
 }
 
-/// Generates `OUT_DIR/bindings.rs` from `joltc.h`.
+/// Generates `OUT_DIR/bindings.rs` from `joltc_ext.h`, which includes `joltc.h`.
 fn generate_bindings(header: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
-    let include_dir = header.parent().context("joltc.h has no parent directory")?;
+    let include_dir = header
+        .parent()
+        .context("joltc_ext.h has no parent directory")?;
     let mut builder = bindgen::Builder::default()
         .header(header.display().to_string())
         .clang_arg(format!("-I{}", include_dir.display()))
