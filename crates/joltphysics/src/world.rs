@@ -208,6 +208,7 @@ pub struct PhysicsWorld {
     temp_allocator: TempAllocator,
     pub(crate) body_interface: NonNull<JPH_BodyInterface>,
     pub(crate) body_lock_interface: NonNull<JPH_BodyLockInterface>,
+    pub(crate) narrow_phase_query: NonNull<JPH_NarrowPhaseQuery>,
     pub(crate) object_layer_count: u32,
     pub(crate) tag: WorldTag,
 }
@@ -216,9 +217,10 @@ pub struct PhysicsWorld {
 // needs `&mut self`, so the allocator and job system serve one `Update` at a time
 // (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access).
 unsafe impl Send for PhysicsWorld {}
-// SAFETY: every `&self` method only calls Jolt's locking body interface or read-only system
-// getters, which Jolt allows from several threads at once. Jolt forbids body access only while
-// `PhysicsSystem::Update` runs, and `step` needs `&mut self`
+// SAFETY: every `&self` method only calls Jolt's locking body interface, read-only system
+// getters, or Jolt's locking narrow-phase queries, which read bodies under body read locks and
+// the broad phase under its query lock. Jolt allows all of these from several threads at once.
+// Jolt forbids body access only while `PhysicsSystem::Update` runs, and `step` needs `&mut self`
 // (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access).
 unsafe impl Sync for PhysicsWorld {}
 
@@ -280,18 +282,22 @@ impl PhysicsWorld {
         // SAFETY: `system` is live and `gravity` is a live local.
         unsafe { JPH_PhysicsSystem_SetGravity(system.0.as_ptr(), &gravity) };
 
-        // SAFETY: `system` is live. Both interfaces live inside the Jolt system and stay valid
-        // as long as it does; the world stores them next to the system that owns them.
-        let (body_interface, body_lock_interface) = unsafe {
+        // SAFETY: `system` is live. The interfaces and the narrow-phase query live inside the
+        // Jolt system and stay valid as long as it does; the world stores them next to the
+        // system that owns them.
+        let (body_interface, body_lock_interface, narrow_phase_query) = unsafe {
             (
                 JPH_PhysicsSystem_GetBodyInterface(system.0.as_ptr()),
                 JPH_PhysicsSystem_GetBodyLockInterface(system.0.as_ptr()),
+                JPH_PhysicsSystem_GetNarrowPhaseQuery(system.0.as_ptr()),
             )
         };
         let body_interface =
             NonNull::new(body_interface).ok_or(WorldError::AllocationFailed("body interface"))?;
         let body_lock_interface = NonNull::new(body_lock_interface.cast_mut())
             .ok_or(WorldError::AllocationFailed("body lock interface"))?;
+        let narrow_phase_query = NonNull::new(narrow_phase_query.cast_mut())
+            .ok_or(WorldError::AllocationFailed("narrow phase query"))?;
 
         Ok(Self {
             system,
@@ -299,6 +305,7 @@ impl PhysicsWorld {
             temp_allocator,
             body_interface,
             body_lock_interface,
+            narrow_phase_query,
             object_layer_count: settings.layers.object_layer_count(),
             tag: WorldTag::next(),
         })

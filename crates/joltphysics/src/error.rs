@@ -62,6 +62,24 @@ impl fmt::Display for ShapeError {
 
 impl std::error::Error for ShapeError {}
 
+/// Why a scene query could not run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum QueryError {
+    /// A query input is out of range; the payload names it.
+    InvalidValue(&'static str),
+}
+
+impl fmt::Display for QueryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidValue(what) => write!(f, "invalid query value: {what}"),
+        }
+    }
+}
+
+impl std::error::Error for QueryError {}
+
 /// Why [`PhysicsWorld::step`](crate::PhysicsWorld::step) reported a problem.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

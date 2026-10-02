@@ -119,3 +119,46 @@ fn world_is_readable_from_many_threads() {
         }
     });
 }
+
+#[test]
+fn rays_are_cast_from_many_threads() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    add_floor(&mut world);
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    for i in 0..20 {
+        let position = RVec3::new(
+            (i % 5) as Real * 2.0 - 4.0,
+            0.5,
+            (i / 5) as Real * 2.0 - 3.0,
+        );
+        world
+            .create_body(&unit_box, &BodySettings::new_static().position(position))
+            .unwrap();
+    }
+    let rays: Vec<RayCast> = (0..100)
+        .map(|i| {
+            let x = (i % 10) as Real - 4.5;
+            let z = (i / 10) as Real - 4.5;
+            RayCast::new(RVec3::new(x, 5.0, z), Vec3::new(0.1, -10.0, 0.05))
+        })
+        .collect();
+    let cast_all = |world: &PhysicsWorld| -> Vec<(BodyId, u32)> {
+        rays.iter()
+            .map(|&ray| {
+                let hit = world
+                    .cast_ray(ray)
+                    .unwrap()
+                    .expect("every ray hits the floor");
+                (hit.body, hit.fraction.to_bits())
+            })
+            .collect()
+    };
+    let expected = cast_all(&world);
+    let shared = &world;
+    std::thread::scope(|scope| {
+        let casters: Vec<_> = (0..4).map(|_| scope.spawn(|| cast_all(shared))).collect();
+        for caster in casters {
+            assert_eq!(caster.join().unwrap(), expected);
+        }
+    });
+}

@@ -24,6 +24,25 @@ unsafe impl Send for Shape {}
 // immutable shape.
 unsafe impl Sync for Shape {}
 
+/// Jolt's `SubShapeID`: the path from a body's root shape to the leaf shape that was hit (a
+/// compound child, a heightfield triangle).
+///
+/// It is meaningful only together with the root shape it came from. Equal shapes built the same
+/// way give equal ids, so ids may be hashed and compared.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct SubShapeId(u32);
+
+impl SubShapeId {
+    pub(crate) fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    /// The id as Jolt stores it (`SubShapeID::GetValue`).
+    pub fn to_raw(self) -> u32 {
+        self.0
+    }
+}
+
 /// Owns a `JPH_ShapeSettings`: the one reference every `JPH_*ShapeSettings_Create` returns
 /// (joltc calls `AddRef` on the new settings).
 ///
