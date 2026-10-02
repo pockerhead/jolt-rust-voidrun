@@ -742,18 +742,20 @@ fn removing_a_character_mid_run_leaves_the_others_sound() {
         .all(|contact| contact.character.is_none()));
 }
 
-/// The scripted horizontal velocity of tick `tick`: walk, turn, stop, walk back.
+/// The scripted horizontal velocity of tick `tick`: walk, turn, stop, walk back. A character
+/// with a `phase` drifts towards the first one (created at z 0) and then lets it catch up, so
+/// colliding characters press on each other.
 fn scripted(tick: usize, phase: f32) -> Vec3 {
     match tick {
-        0..=39 => Vec3::new(2.0, 0.0, phase),
+        0..=39 => Vec3::new(2.0, 0.0, -phase),
         40..=69 => Vec3::new(0.0, 0.0, 2.0 - phase),
         70..=84 => Vec3::ZERO,
         _ => Vec3::new(-1.5, 0.0, 0.5),
     }
 }
 
-/// A contact as bits: body, character, sub-shape and contact normal.
-type ContactBits = (Option<u32>, Option<u32>, u32, [u32; 3]);
+/// A contact as bits: body, character, sub-shape, contact normal and whether it collided.
+type ContactBits = (Option<u32>, Option<u32>, u32, [u32; 3], bool);
 
 /// What a run records per tick, as bits.
 #[derive(Debug, PartialEq)]
@@ -784,6 +786,7 @@ fn record(world: &PhysicsWorld, id: CharacterId) -> Record {
                     contact.character.map(CharacterId::to_raw),
                     contact.sub_shape_id.to_raw(),
                     normal.map(f32::to_bits),
+                    contact.had_collision,
                 )
             })
             .collect(),
@@ -844,6 +847,25 @@ fn chained_replay_matches(count: usize) {
         replay_tick(&mut world, &ids, tick);
         continuous.push(ids.iter().map(|&id| record(&world, id)).collect::<Vec<_>>());
     }
+    if count > 1 {
+        // Every tick ends at a save, so the replay restores states that hold collisions between
+        // the characters.
+        let colliding = continuous
+            .iter()
+            .filter(|records| {
+                records.iter().any(|record| {
+                    record
+                        .contacts
+                        .iter()
+                        .any(|contact| contact.1.is_some() && contact.4)
+                })
+            })
+            .count();
+        assert!(
+            colliding >= 20,
+            "the characters collided in {colliding} ticks"
+        );
+    }
 
     let (world, ids) = replay_world(count, &shape);
     let mut states: Vec<CharacterState> = ids
@@ -895,6 +917,49 @@ fn a_restored_state_saves_the_same_bytes() {
         .restore_state(&state)
         .unwrap();
     assert_eq!(other.character(other_ids[0]).unwrap().save_state(), state);
+}
+
+/// The inner body's pose, as bits.
+fn inner_pose(world: &PhysicsWorld, id: CharacterId) -> (Vec<u64>, [u32; 4]) {
+    let inner = world.character(id).unwrap().inner_body().unwrap();
+    let body = world.body(inner).unwrap();
+    let rotation = body.rotation();
+    (
+        real3(body.position()).map(f64::to_bits).to_vec(),
+        [rotation.x, rotation.y, rotation.z, rotation.w].map(f32::to_bits),
+    )
+}
+
+#[test]
+fn a_restored_state_moves_the_inner_body_with_the_character() {
+    let shape = capsule();
+    let inner_shape = capsule();
+    let with_inner = settings(&shape).inner_body(Some(InnerBody {
+        shape: &inner_shape,
+        object_layer: ObjectLayer::MOVING,
+    }));
+    let start = RVec3::new(0.0, 0.3, 0.0);
+    let (mut world, _) = world_with_floor();
+    let id = world
+        .create_character(&with_inner, start, Quat::IDENTITY)
+        .unwrap();
+    for tick in 0..60 {
+        replay_tick(&mut world, &[id], tick);
+    }
+    let state = world.character(id).unwrap().save_state();
+
+    let (mut other, _) = world_with_floor();
+    let other_id = other
+        .create_character(&with_inner, start, Quat::IDENTITY)
+        .unwrap();
+    other
+        .character_mut(other_id)
+        .unwrap()
+        .restore_state(&state)
+        .unwrap();
+    // Before any update or step, the restored world's inner body stands where the original's
+    // does.
+    assert_eq!(inner_pose(&other, other_id), inner_pose(&world, id));
 }
 
 /// A rebase frame: a turn about `axis` and a translation.

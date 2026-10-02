@@ -960,7 +960,8 @@ impl CharacterMut<'_> {
     /// The result is meaningful when the worlds match: the same bodies with the same ids and the
     /// same character id and settings, as in a replay that rebuilds the world the same way. Ids
     /// in the state that do not resolve are harmless: Jolt checks every body id it looks up, and
-    /// the readers here tolerate any sub-shape id. The inner body is not moved.
+    /// the readers here tolerate any sub-shape id. The inner body is moved to the restored pose,
+    /// as [`set_position`](Self::set_position) moves it.
     pub fn restore_state(&mut self, state: &CharacterState) -> Result<(), CharacterError> {
         // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
         let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
@@ -969,7 +970,10 @@ impl CharacterMut<'_> {
         // SAFETY: the recorder is live and used by this thread only; `state.jolt` is readable
         // for its length. The bytes are a complete stream written by `SaveState` of this build
         // (`CharacterState` has no other constructor), so `RestoreState` reads exactly what was
-        // written. The world is borrowed mutably and owns the character; `up` is a live local.
+        // written. The world is borrowed mutably and owns the character; `up` and `position` are
+        // live locals. Jolt's `RestoreState` writes the pose members without moving the inner
+        // body; setting the restored position again moves it there through the locking body
+        // interface (`CharacterVirtual::SetPosition`), and this thread holds no body lock.
         let failed = unsafe {
             JPH_StateRecorder_WriteBytes(
                 recorder.as_ptr(),
@@ -979,6 +983,9 @@ impl CharacterMut<'_> {
             JPH_StateRecorder_Rewind(recorder.as_ptr());
             JPH_CharacterVirtual_RestoreState(self.ptr(), recorder.as_ptr());
             JPH_CharacterBase_SetUp(self.ptr().cast(), &up);
+            let mut position = RVec3::ZERO.to_jph();
+            JPH_CharacterVirtual_GetPosition(self.ptr(), &mut position);
+            JPH_CharacterVirtual_SetPosition(self.ptr(), &position);
             JPH_StateRecorder_IsFailed(recorder.as_ptr())
         };
         debug_assert!(!failed, "a saved character state failed to restore");
