@@ -15,6 +15,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use joltphysics_sys::*;
 
+use crate::math::is_finite_positive;
 use crate::owned::{JoltObject, Owned};
 use crate::{CollisionLayers, StepError, Vec3, WorldError};
 
@@ -226,6 +227,13 @@ unsafe impl Send for PhysicsWorld {}
 unsafe impl Sync for PhysicsWorld {}
 
 impl PhysicsWorld {
+    /// Largest time step [`step`](Self::step) accepts, in seconds, inclusive.
+    ///
+    /// A joltphysics guard against overflow-scale steps, which Jolt runs to NaN positions; not a
+    /// Jolt limit and not a stability guarantee. Jolt recommends steps of about 1/60 s, and
+    /// larger ones may tunnel or sag depending on the scene.
+    pub const MAX_DELTA_TIME: f32 = 1.0;
+
     /// Creates a world. Nothing is allocated when the settings are invalid.
     pub fn new(settings: WorldSettings) -> Result<Self, WorldError> {
         settings.validate()?;
@@ -338,12 +346,13 @@ impl PhysicsWorld {
 
     /// Advances the world by `delta_time` seconds in one collision step.
     ///
-    /// `delta_time` must be finite and positive, otherwise nothing happens and
+    /// `delta_time` must be finite, positive and at most
+    /// [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), otherwise nothing happens and
     /// [`StepError::InvalidDeltaTime`] is returned. Every other call advances the world and
     /// returns a [`StepReport`]; check [`StepReport::is_complete`] to learn whether Jolt
     /// dropped work because a fixed-size buffer was full.
     pub fn step(&mut self, delta_time: f32) -> Result<StepReport, StepError> {
-        if !(delta_time.is_finite() && delta_time > 0.0) {
+        if !(is_finite_positive(delta_time) && delta_time <= Self::MAX_DELTA_TIME) {
             return Err(StepError::InvalidDeltaTime);
         }
         // SAFETY: the system, temp allocator and job system are live and owned by this world;
