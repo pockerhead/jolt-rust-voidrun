@@ -153,7 +153,8 @@ impl PhysicsWorld {
     /// maximum separation distance, comes close to).
     ///
     /// See [`CollideShapeHit`] for the normal and depth conventions. Hits come in Jolt's
-    /// traversal order, which is the same for the same call history but not sorted.
+    /// traversal order, which is not sorted and which Jolt does not promise to keep across worker
+    /// thread counts; sort them (for example by body id and sub-shape id) when order matters.
     ///
     /// The position must be finite, the rotation a finite unit quaternion, the maximum
     /// separation distance finite and not negative, the shape not a heightfield, and the filter

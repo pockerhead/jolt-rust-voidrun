@@ -33,7 +33,9 @@ struct BoxSpec {
     activation: JPH_Activation,
 }
 
-/// The floor and 20 boxes in offset stacks that topple into each other.
+/// The floor and five columns of four boxes, 1.5 m apart. Each layer is shifted 0.15 m, less
+/// than the half extent, so the columns stand and settle as five independent islands that the
+/// job system may solve on different threads.
 fn scene() -> Vec<BoxSpec> {
     let mut specs = vec![BoxSpec {
         half_extent: vec3(100.0, 1.0, 100.0),
