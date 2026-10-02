@@ -114,6 +114,39 @@ impl Drop for ShapeSettings {
     }
 }
 
+/// Jolt heightfield settings holding `samples` and `settings`.
+///
+/// # Safety
+/// Jolt is initialised, `samples` holds `sample_count^2` finite values and `settings` passed
+/// `validate_layout(sample_count)` and `validate_extents`.
+unsafe fn height_field_settings(
+    sample_count: u32,
+    samples: &[f32],
+    settings: &HeightFieldSettings,
+) -> Result<ShapeSettings, ShapeError> {
+    let offset = settings.offset.to_jph();
+    let scale = settings.scale.to_jph();
+    // SAFETY: the caller guarantees initialisation and that `samples` holds `sample_count^2`
+    // floats, which Jolt copies; `offset` and `scale` are live locals. Null material indices
+    // are allowed. The returned settings hold one reference, which the guard takes over.
+    let raw = unsafe {
+        JPH_HeightFieldShapeSettings_Create(samples.as_ptr(), &offset, &scale, sample_count, null())
+    };
+    let jolt_settings = ShapeSettings::from_raw(raw.cast())?;
+    let ptr = jolt_settings.as_ptr();
+    // SAFETY: the settings are live, owned by the guard and were created as heightfield
+    // settings; the caller validated every value.
+    unsafe {
+        JPH_HeightFieldShapeSettings_SetBlockSize(ptr, settings.block_size);
+        JPH_HeightFieldShapeSettings_SetBitsPerSample(ptr, settings.bits_per_sample);
+        JPH_HeightFieldShapeSettings_SetActiveEdgeCosThresholdAngle(
+            ptr,
+            settings.active_edge_cos_threshold_angle,
+        );
+    }
+    Ok(jolt_settings)
+}
+
 /// Finite and positive.
 fn is_positive(value: f32) -> bool {
     value.is_finite() && value > 0.0
@@ -458,34 +491,11 @@ impl Shape {
         if !ensure_initialized() {
             return Err(ShapeError::InitFailed);
         }
-        let offset = settings.offset.to_jph();
-        let scale = settings.scale.to_jph();
-        // SAFETY: Jolt is initialised; `samples` holds `sample_count^2` floats, which Jolt
-        // copies, and `offset` and `scale` are live locals. Null material indices are allowed.
-        // The returned settings hold one reference, which the guard takes over.
-        let raw = unsafe {
-            JPH_HeightFieldShapeSettings_Create(
-                samples.as_ptr(),
-                &offset,
-                &scale,
-                sample_count,
-                null(),
-            )
-        };
-        let jolt_settings = ShapeSettings::from_raw(raw.cast())?;
-        let ptr = jolt_settings.as_ptr();
+        // SAFETY: Jolt is initialised and `samples` and `settings` were validated above.
+        let jolt_settings = unsafe { height_field_settings(sample_count, samples, settings) }?;
         // SAFETY: the settings are live, owned by the guard and were created as heightfield
-        // settings; every value was validated above. The returned shape holds one reference,
-        // which `Self` takes over.
-        let shape = unsafe {
-            JPH_HeightFieldShapeSettings_SetBlockSize(ptr, settings.block_size);
-            JPH_HeightFieldShapeSettings_SetBitsPerSample(ptr, settings.bits_per_sample);
-            JPH_HeightFieldShapeSettings_SetActiveEdgeCosThresholdAngle(
-                ptr,
-                settings.active_edge_cos_threshold_angle,
-            );
-            JPH_HeightFieldShapeSettings_CreateShape(ptr)
-        };
+        // settings. The returned shape holds one reference, which `Self` takes over.
+        let shape = unsafe { JPH_HeightFieldShapeSettings_CreateShape(jolt_settings.as_ptr()) };
         Self::from_created(shape.cast())
     }
 
@@ -776,6 +786,35 @@ mod tests {
             Shape::new_sphere(1.0).unwrap().sub_type(),
             JPH_ShapeSubType_Sphere
         );
+    }
+
+    #[test]
+    fn height_field_settings_reach_jolt() {
+        let settings = HeightFieldSettings::default()
+            .block_size(4)
+            .bits_per_sample(12)
+            .active_edge_cos_threshold_angle(0.5);
+        assert_ne!(settings, HeightFieldSettings::default());
+        let samples = [0.0; 81];
+        assert_eq!(settings.validate_layout(9), Ok(12));
+        assert!(ensure_initialized());
+        // SAFETY: Jolt is initialised and the inputs are valid (checked above).
+        let jolt_settings = unsafe { height_field_settings(9, &samples, &settings) }.unwrap();
+        let ptr = jolt_settings.as_ptr();
+        // SAFETY: the settings are live and were created as heightfield settings; getters only
+        // read them.
+        unsafe {
+            assert_eq!(JPH_HeightFieldShapeSettings_GetBlockSize(ptr), 4);
+            assert_eq!(JPH_HeightFieldShapeSettings_GetBitsPerSample(ptr), 12);
+            assert_eq!(
+                JPH_HeightFieldShapeSettings_GetActiveEdgeCosThresholdAngle(ptr),
+                0.5
+            );
+        }
+        let shape = Shape::new_height_field(9, &samples, &settings).unwrap();
+        // SAFETY: the shape is live and a heightfield; the getter only reads it.
+        let block_size = unsafe { JPH_HeightFieldShape_GetBlockSize(shape.as_ptr().cast()) };
+        assert_eq!(block_size, 4);
     }
 
     fn unit_box() -> Shape {

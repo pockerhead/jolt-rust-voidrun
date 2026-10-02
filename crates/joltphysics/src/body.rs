@@ -936,6 +936,26 @@ mod tests {
         assert_eq!(ours.object_layer, ObjectLayer::MOVING);
     }
 
+    #[test]
+    fn enhanced_internal_edge_removal_reaches_the_body() {
+        let mut world = PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+        let shape = Shape::new_sphere(0.5).unwrap();
+        for value in [true, false] {
+            let id = world
+                .create_body(
+                    &shape,
+                    &BodySettings::new_dynamic().enhanced_internal_edge_removal(value),
+                )
+                .unwrap();
+            let stored = with_locked_body(world.body_lock_interface, id, |body| {
+                // SAFETY: `body` is locked for the duration of the closure; the getter only
+                // reads it.
+                unsafe { JPH_Body_GetEnhancedInternalEdgeRemoval(body.as_ptr()) }
+            });
+            assert_eq!(stored, Some(value));
+        }
+    }
+
     /// Mass 1 with the inertia `R * diag(moments) * R^T`, `R` a rotation of 30 degrees about Z.
     fn rotated_inertia(moments: [f32; 3]) -> JPH_MassProperties {
         let (sin, cos) = 30.0_f32.to_radians().sin_cos();
