@@ -6,7 +6,7 @@ original authors; this fork adds to their work.
 | Layer | Project | Authors | Licence | Where it lives here |
 |---|---|---|---|---|
 | Physics engine | [Jolt Physics](https://github.com/jrouwe/JoltPhysics) 5.6 | Jorrit Rouwe and contributors | MIT | `crates/joltphysics-sys/vendor/JoltPhysics` (submodule, tag v5.6.0), built from source, unmodified |
-| C wrapper (current) | [joltc](https://github.com/amerkoleci/joltc) | Amer Koleci and contributors (the C layer of JoltPhysicsSharp, also used by LÖVR) | MIT | `crates/joltphysics-sys/vendor/joltc` (submodule, pinned commit), unmodified; input of `crates/joltphysics-sys` |
+| C wrapper (current) | [joltc](https://github.com/amerkoleci/joltc) | Amer Koleci and contributors (the C layer of JoltPhysicsSharp, also used by LÖVR) | MIT | `crates/joltphysics-sys/vendor/joltc` (submodule, pinned commit), unmodified; input of `crates/joltphysics-sys`. Functions this fork adds to joltc, in joltc's naming, live in `crates/joltphysics-sys/native/joltc_ext/` and are compiled into the same archive |
 | C wrapper (original) | [JoltC](https://github.com/SecondHalfGames/JoltC) | Second Half Games (made for their game *Meanwhile in Sector 80*) | MIT OR Apache-2.0 | the starting point of this fork; replaced because joltc already covers the character controller, heightfields, vehicles and ragdolls |
 | Rust bindings | [jolt-rust](https://github.com/SecondHalfGames/jolt-rust) (`joltc-sys`, `rolt`) | Second Half Games and contributors | MIT OR Apache-2.0 | this repository (fork of `main`); the crates are renamed `joltphysics-sys` and `joltphysics` |
 

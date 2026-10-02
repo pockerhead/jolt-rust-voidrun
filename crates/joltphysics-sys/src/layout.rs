@@ -80,6 +80,20 @@ const _: () = {
     assert!(offset_of!(JPH_ShapeCastResult, fraction) == 52);
     assert!(offset_of!(JPH_ShapeCastResult, isBackFaceHit) == 56);
 
+    assert!(size_of::<JPH_Plane>() == 16);
+    assert!(align_of::<JPH_Plane>() == 4);
+    assert!(offset_of!(JPH_Plane, normal) == 0);
+    assert!(offset_of!(JPH_Plane, distance) == 12);
+
+    assert!(size_of::<JPH_ExtendedUpdateSettings>() == 48);
+    assert!(align_of::<JPH_ExtendedUpdateSettings>() == 4);
+    assert!(offset_of!(JPH_ExtendedUpdateSettings, stickToFloorStepDown) == 0);
+    assert!(offset_of!(JPH_ExtendedUpdateSettings, walkStairsStepUp) == 12);
+    assert!(offset_of!(JPH_ExtendedUpdateSettings, walkStairsMinStepForward) == 24);
+    assert!(offset_of!(JPH_ExtendedUpdateSettings, walkStairsStepForwardTest) == 28);
+    assert!(offset_of!(JPH_ExtendedUpdateSettings, walkStairsCosAngleForwardContact) == 32);
+    assert!(offset_of!(JPH_ExtendedUpdateSettings, walkStairsStepDownExtra) == 36);
+
     assert!(size_of::<JobSystemThreadPoolConfig>() == 12);
     assert!(align_of::<JobSystemThreadPoolConfig>() == 4);
     assert!(offset_of!(JobSystemThreadPoolConfig, numThreads) == 8);
@@ -99,6 +113,7 @@ const _: () = {
     assert!(size_of::<JPH_ActiveEdgeMode>() == 4);
     assert!(size_of::<JPH_CollectFacesMode>() == 4);
     assert!(size_of::<JPH_CollisionCollectorType>() == 4);
+    assert!(size_of::<JPH_GroundState>() == 4);
 };
 
 #[cfg(feature = "double-precision")]
@@ -154,4 +169,81 @@ const _: () = {
     assert!(align_of::<JPH_ShapeFilter_Procs>() == 8);
     assert!(offset_of!(JPH_ShapeFilter_Procs, ShouldCollide) == 0);
     assert!(offset_of!(JPH_ShapeFilter_Procs, ShouldCollide2) == 8);
+
+    assert!(size_of::<JPH_CharacterBaseSettings>() == 48);
+    assert!(align_of::<JPH_CharacterBaseSettings>() == 8);
+    assert!(offset_of!(JPH_CharacterBaseSettings, up) == 0);
+    assert!(offset_of!(JPH_CharacterBaseSettings, supportingVolume) == 12);
+    assert!(offset_of!(JPH_CharacterBaseSettings, maxSlopeAngle) == 28);
+    assert!(offset_of!(JPH_CharacterBaseSettings, enhancedInternalEdgeRemoval) == 32);
+    assert!(offset_of!(JPH_CharacterBaseSettings, shape) == 40);
+
+    assert!(size_of::<JPH_CharacterVirtualSettings>() == 128);
+    assert!(align_of::<JPH_CharacterVirtualSettings>() == 8);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, base) == 0);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, ID) == 48);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, mass) == 52);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, maxStrength) == 56);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, shapeOffset) == 60);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, backFaceMode) == 72);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, predictiveContactDistance) == 76);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, maxCollisionIterations) == 80);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, maxConstraintIterations) == 84);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, minTimeRemaining) == 88);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, collisionTolerance) == 92);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, characterPadding) == 96);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, maxNumHits) == 100);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, hitReductionCosMaxAngle) == 104);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, penetrationRecoverySpeed) == 108);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, innerBodyShape) == 112);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, innerBodyIDOverride) == 120);
+    assert!(offset_of!(JPH_CharacterVirtualSettings, innerBodyLayer) == 124);
+
+    assert!(align_of::<JPH_CharacterContact>() == 8);
+    assert!(offset_of!(JPH_CharacterContact, hash) == 0);
+    assert!(offset_of!(JPH_CharacterContact, bodyB) == 8);
+    assert!(offset_of!(JPH_CharacterContact, characterIDB) == 12);
+    assert!(offset_of!(JPH_CharacterContact, subShapeIDB) == 16);
+};
+
+// The `JPH_CharacterContact` fields from its `JPH_RVec3` position on, whose size depends on
+// the precision.
+#[cfg(all(target_pointer_width = "64", feature = "double-precision"))]
+const _: () = {
+    assert!(size_of::<JPH_CharacterContact>() == 136);
+    assert!(offset_of!(JPH_CharacterContact, position) == 24);
+    assert!(offset_of!(JPH_CharacterContact, linearVelocity) == 48);
+    assert!(offset_of!(JPH_CharacterContact, contactNormal) == 60);
+    assert!(offset_of!(JPH_CharacterContact, surfaceNormal) == 72);
+    assert!(offset_of!(JPH_CharacterContact, distance) == 84);
+    assert!(offset_of!(JPH_CharacterContact, fraction) == 88);
+    assert!(offset_of!(JPH_CharacterContact, motionTypeB) == 92);
+    assert!(offset_of!(JPH_CharacterContact, isSensorB) == 96);
+    assert!(offset_of!(JPH_CharacterContact, characterB) == 104);
+    assert!(offset_of!(JPH_CharacterContact, userData) == 112);
+    assert!(offset_of!(JPH_CharacterContact, material) == 120);
+    assert!(offset_of!(JPH_CharacterContact, hadCollision) == 128);
+    assert!(offset_of!(JPH_CharacterContact, wasDiscarded) == 129);
+    assert!(offset_of!(JPH_CharacterContact, canPushCharacter) == 130);
+    assert!(offset_of!(JPH_CharacterContact, isBackFacingContact) == 131);
+};
+
+#[cfg(all(target_pointer_width = "64", not(feature = "double-precision")))]
+const _: () = {
+    assert!(size_of::<JPH_CharacterContact>() == 120);
+    assert!(offset_of!(JPH_CharacterContact, position) == 20);
+    assert!(offset_of!(JPH_CharacterContact, linearVelocity) == 32);
+    assert!(offset_of!(JPH_CharacterContact, contactNormal) == 44);
+    assert!(offset_of!(JPH_CharacterContact, surfaceNormal) == 56);
+    assert!(offset_of!(JPH_CharacterContact, distance) == 68);
+    assert!(offset_of!(JPH_CharacterContact, fraction) == 72);
+    assert!(offset_of!(JPH_CharacterContact, motionTypeB) == 76);
+    assert!(offset_of!(JPH_CharacterContact, isSensorB) == 80);
+    assert!(offset_of!(JPH_CharacterContact, characterB) == 88);
+    assert!(offset_of!(JPH_CharacterContact, userData) == 96);
+    assert!(offset_of!(JPH_CharacterContact, material) == 104);
+    assert!(offset_of!(JPH_CharacterContact, hadCollision) == 112);
+    assert!(offset_of!(JPH_CharacterContact, wasDiscarded) == 113);
+    assert!(offset_of!(JPH_CharacterContact, canPushCharacter) == 114);
+    assert!(offset_of!(JPH_CharacterContact, isBackFacingContact) == 115);
 };

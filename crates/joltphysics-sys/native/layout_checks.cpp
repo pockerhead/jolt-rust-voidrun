@@ -14,6 +14,7 @@
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Body/MotionQuality.h>
 #include <Jolt/Physics/Body/MotionType.h>
+#include <Jolt/Physics/Character/CharacterBase.h>
 #include <Jolt/Physics/Collision/ActiveEdgeMode.h>
 #include <Jolt/Physics/Collision/BackFaceMode.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
@@ -106,6 +107,19 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, bodyID2, 48);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, fraction, 52);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeCastResult, isBackFaceHit, 56);
 
+// Character values. joltc converts these field by field, so only the C ABI is
+// pinned here, not agreement with the C++ layout.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_Plane, 16, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_Plane, normal, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_Plane, distance, 12);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ExtendedUpdateSettings, 48, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ExtendedUpdateSettings, stickToFloorStepDown, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ExtendedUpdateSettings, walkStairsStepUp, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ExtendedUpdateSettings, walkStairsMinStepForward, 24);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ExtendedUpdateSettings, walkStairsStepForwardTest, 28);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ExtendedUpdateSettings, walkStairsCosAngleForwardContact, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ExtendedUpdateSettings, walkStairsStepDownExtra, 36);
+
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JobSystemThreadPoolConfig, 12, 4);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JobSystemThreadPoolConfig, numThreads, 8);
 
@@ -138,6 +152,73 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_BodyFilter_Procs, ShouldCollideLocked, 8);
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ShapeFilter_Procs, 16, 8);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeFilter_Procs, ShouldCollide, 0);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeFilter_Procs, ShouldCollide2, 8);
+
+// Character settings and contacts, which hold pointers. joltc converts these
+// field by field, so only the C ABI is pinned here.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_CharacterBaseSettings, 48, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterBaseSettings, up, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterBaseSettings, supportingVolume, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterBaseSettings, maxSlopeAngle, 28);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterBaseSettings, enhancedInternalEdgeRemoval, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterBaseSettings, shape, 40);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_CharacterVirtualSettings, 128, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, ID, 48);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, mass, 52);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, maxStrength, 56);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, shapeOffset, 60);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, backFaceMode, 72);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, predictiveContactDistance, 76);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, maxCollisionIterations, 80);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, maxConstraintIterations, 84);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, minTimeRemaining, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, collisionTolerance, 92);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, characterPadding, 96);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, maxNumHits, 100);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, hitReductionCosMaxAngle, 104);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, penetrationRecoverySpeed, 108);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, innerBodyShape, 112);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, innerBodyIDOverride, 120);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, innerBodyLayer, 124);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, hash, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, bodyB, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, characterIDB, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, subShapeIDB, 16);
+#ifdef JPH_DOUBLE_PRECISION
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_CharacterContact, 136, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, position, 24);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, linearVelocity, 48);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, contactNormal, 60);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, surfaceNormal, 72);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, distance, 84);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, fraction, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, motionTypeB, 92);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, isSensorB, 96);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, characterB, 104);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, userData, 112);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, material, 120);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, hadCollision, 128);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, wasDiscarded, 129);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, canPushCharacter, 130);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, isBackFacingContact, 131);
+#else
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_CharacterContact, 120, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, position, 20);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, linearVelocity, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, contactNormal, 44);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, surfaceNormal, 56);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, distance, 68);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, fraction, 72);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, motionTypeB, 76);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, isSensorB, 80);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, characterB, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, userData, 96);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, material, 104);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, hadCollision, 112);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, wasDiscarded, 113);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, canPushCharacter, 114);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, isBackFacingContact, 115);
+#endif
 #endif
 
 // joltc copies JPH_Mat4 to and from JPH::Mat44 with memcpy, so the sizes must
@@ -169,6 +250,7 @@ static_assert(sizeof(JPH_BackFaceMode) == 4, "JPH_BackFaceMode: unexpected size"
 static_assert(sizeof(JPH_ActiveEdgeMode) == 4, "JPH_ActiveEdgeMode: unexpected size");
 static_assert(sizeof(JPH_CollectFacesMode) == 4, "JPH_CollectFacesMode: unexpected size");
 static_assert(sizeof(JPH_CollisionCollectorType) == 4, "JPH_CollisionCollectorType: unexpected size");
+static_assert(sizeof(JPH_GroundState) == 4, "JPH_GroundState: unexpected size");
 
 static_assert(int(JPH_MotionType_Static) == int(JPH::EMotionType::Static), "JPH_MotionType_Static");
 static_assert(int(JPH_MotionType_Kinematic) == int(JPH::EMotionType::Kinematic), "JPH_MotionType_Kinematic");
@@ -213,3 +295,9 @@ static_assert(int(JPH_ActiveEdgeMode_CollideOnlyWithActive) == int(JPH::EActiveE
 static_assert(int(JPH_ActiveEdgeMode_CollideWithAll) == int(JPH::EActiveEdgeMode::CollideWithAll), "JPH_ActiveEdgeMode_CollideWithAll");
 static_assert(int(JPH_CollectFacesMode_CollectFaces) == int(JPH::ECollectFacesMode::CollectFaces), "JPH_CollectFacesMode_CollectFaces");
 static_assert(int(JPH_CollectFacesMode_NoFaces) == int(JPH::ECollectFacesMode::NoFaces), "JPH_CollectFacesMode_NoFaces");
+
+// Jolt declares EGroundState as a uint8 enum; joltc casts it to the 4-byte C value.
+static_assert(int(JPH_GroundState_OnGround) == int(JPH::CharacterBase::EGroundState::OnGround), "JPH_GroundState_OnGround");
+static_assert(int(JPH_GroundState_OnSteepGround) == int(JPH::CharacterBase::EGroundState::OnSteepGround), "JPH_GroundState_OnSteepGround");
+static_assert(int(JPH_GroundState_NotSupported) == int(JPH::CharacterBase::EGroundState::NotSupported), "JPH_GroundState_NotSupported");
+static_assert(int(JPH_GroundState_InAir) == int(JPH::CharacterBase::EGroundState::InAir), "JPH_GroundState_InAir");
