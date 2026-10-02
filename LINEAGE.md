@@ -5,18 +5,18 @@ original authors; this fork adds to their work.
 
 | Layer | Project | Authors | Licence | Where it lives here |
 |---|---|---|---|---|
-| Physics engine | [Jolt Physics](https://github.com/jrouwe/JoltPhysics) 5.6 | Jorrit Rouwe and contributors | MIT | `crates/joltc-sys/vendor/JoltPhysics` (submodule, tag v5.6.0), built from source, unmodified |
-| C wrapper (current) | [joltc](https://github.com/amerkoleci/joltc) | Amer Koleci and contributors (the C layer of JoltPhysicsSharp, also used by LÖVR) | MIT | `crates/joltc-sys/vendor/joltc` (submodule, pinned commit), unmodified; input of `crates/joltc-sys` |
+| Physics engine | [Jolt Physics](https://github.com/jrouwe/JoltPhysics) 5.6 | Jorrit Rouwe and contributors | MIT | `crates/joltphysics-sys/vendor/JoltPhysics` (submodule, tag v5.6.0), built from source, unmodified |
+| C wrapper (current) | [joltc](https://github.com/amerkoleci/joltc) | Amer Koleci and contributors (the C layer of JoltPhysicsSharp, also used by LÖVR) | MIT | `crates/joltphysics-sys/vendor/joltc` (submodule, pinned commit), unmodified; input of `crates/joltphysics-sys` |
 | C wrapper (original) | [JoltC](https://github.com/SecondHalfGames/JoltC) | Second Half Games (made for their game *Meanwhile in Sector 80*) | MIT OR Apache-2.0 | the starting point of this fork; replaced because joltc already covers the character controller, heightfields, vehicles and ragdolls |
-| Rust bindings | [jolt-rust](https://github.com/SecondHalfGames/jolt-rust) (`joltc-sys`, `rolt`) | Second Half Games and contributors | MIT OR Apache-2.0 | this repository (fork of `main`) |
+| Rust bindings | [jolt-rust](https://github.com/SecondHalfGames/jolt-rust) (`joltc-sys`, `rolt`) | Second Half Games and contributors | MIT OR Apache-2.0 | this repository (fork of `main`); the crates are renamed `joltphysics-sys` and `joltphysics` |
 
 ## Design we inherit
 - JoltC's soundness rules: opaque handles for C++ types with unspecified layout, layout-asserted mirrors
   for FFI-compatible types, Jolt's `RefTarget` ownership conventions. We keep these rules on top of
   joltc and add layout assertions where it does not have them, without modifying joltc:
-  `crates/joltc-sys/native/layout_checks.cpp` (C++ side) and `crates/joltc-sys/src/layout.rs` (Rust side).
+  `crates/joltphysics-sys/native/layout_checks.cpp` (C++ side) and `crates/joltphysics-sys/src/layout.rs` (Rust side).
 - joltc's breadth: one flat C header covering most of Jolt.
-- jolt-rust's split into raw `joltc-sys` and the ergonomic `rolt`, and its build: CMake through the
+- jolt-rust's split into raw `joltc-sys` and the ergonomic `rolt` (here `joltphysics-sys` and `joltphysics`), and its build: CMake through the
   `cmake` crate, always in Release, now with `bindgen` over joltc's `joltc.h`.
 
 ## What this fork adds
