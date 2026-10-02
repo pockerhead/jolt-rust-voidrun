@@ -102,6 +102,18 @@ pub fn length(v: Vec3) -> f32 {
     (v.x * v.x + v.y * v.y + v.z * v.z).sqrt()
 }
 
+/// Largest linear speed, m/s, of a body that counts as calm under the game's item rest rule.
+pub const CALM_SPEED: f32 = 0.05;
+/// Largest angular speed, rad/s, of a body that counts as calm under the game's item rest rule.
+pub const CALM_ANGULAR_SPEED: f32 = 0.1;
+
+/// Whether `body` is calm under the game's item rest rule: both its linear and its angular
+/// speed are below their limits.
+pub fn is_calm(body: &BodyRef<'_>) -> bool {
+    length(body.linear_velocity()) < CALM_SPEED
+        && length(body.angular_velocity()) < CALM_ANGULAR_SPEED
+}
+
 /// The rotation by `angle` radians about the unit vector `axis`.
 pub fn quat_about(axis: Vec3, angle: f32) -> Quat {
     let (sin, cos) = (angle / 2.0).sin_cos();

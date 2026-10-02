@@ -379,10 +379,11 @@ fn free_item(offset: RVec3, item_y: Real) -> Scene {
 /// Asserts that the item rests on the terrain, sunk into it no deeper than the slop.
 fn assert_on_the_ground(tag: &str, tick: usize, scene: &Scene) {
     let item = scene.item();
-    let speed = scene.item_speed();
     assert!(
-        speed < 0.05,
-        "{tag}, tick {tick}: the item is not at rest, speed {speed}"
+        is_calm(&item),
+        "{tag}, tick {tick}: the item is not at rest, speed {}, angular speed {}",
+        length(item.linear_velocity()),
+        length(item.angular_velocity())
     );
     let shape = Shape::new_box(Vec3::new(0.35, 0.06, 0.04)).unwrap();
     let query =
