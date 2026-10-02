@@ -170,6 +170,44 @@ fn height_field_33_builds_and_matches_samples_at_nodes() {
 }
 
 #[test]
+fn height_field_with_larger_blocks_matches_samples_at_nodes() {
+    const N: u32 = 33;
+    let height = |x: u32, y: u32| 0.06 * x as f32 - 0.04 * y as f32 + 0.002 * (x * y) as f32;
+    let samples: Vec<f32> = (0..N)
+        .flat_map(|y| (0..N).map(move |x| height(x, y)))
+        .collect();
+    // n = 33 is padded to 36 with block size 4 and to 40 with block size 8.
+    for (block_size, padded) in [(4, 36), (8, 40)] {
+        let settings = HeightFieldSettings::default()
+            .block_size(block_size)
+            .bits_per_sample(16);
+        let shape = Shape::new_height_field(N, &samples, &settings).unwrap();
+        for y in 0..N {
+            for x in 0..N {
+                let p = shape.height_field_position(x, y).expect("a stored node");
+                assert!(
+                    (p.y - height(x, y)).abs() <= 1.0e-4,
+                    "block {block_size}, node ({x}, {y}): {} vs {}",
+                    p.y,
+                    height(x, y)
+                );
+            }
+        }
+        for padding in N..=padded {
+            assert_eq!(shape.height_field_position(padding, 0), None);
+            assert_eq!(shape.height_field_position(0, padding), None);
+        }
+        let mut world = world(Vec3::ZERO, 1);
+        add_static(&mut world, &shape, RVec3::new(0.0, 0.0, 0.0));
+        assert!(
+            surface_height(&world, 31.5, 31.5).is_some(),
+            "cell (31, 31)"
+        );
+        assert!(surface_height(&world, 32.5, 16.0).is_none(), "padding cell");
+    }
+}
+
+#[test]
 fn height_field_cell_diagonal_runs_from_x_y_to_x1_y1() {
     let mut samples = vec![0.0; 9];
     samples[3 + 1] = 1.0;
@@ -213,6 +251,43 @@ fn invalid_height_fields_are_rejected() {
         (3, with_samples(&[(4, f32::INFINITY)]), defaults()),
         (3, with_samples(&[(0, -3.0e38), (4, 3.0e38)]), defaults()),
         (3, flat.clone(), defaults().scale(Vec3::new(0.0, 1.0, 1.0))),
+        (
+            3,
+            flat.clone(),
+            defaults().scale(Vec3::new(1.0, f32::NAN, 1.0)),
+        ),
+        (3, flat.clone(), defaults().scale(Vec3::new(1.0, 1.0, -1.0))),
+        (
+            3,
+            flat.clone(),
+            defaults().offset(Vec3::new(f32::NAN, 0.0, 0.0)),
+        ),
+        (
+            3,
+            flat.clone(),
+            defaults().offset(Vec3::new(0.0, 0.0, f32::INFINITY)),
+        ),
+        // Finite offset and scale whose far edge along x is not.
+        (
+            3,
+            flat.clone(),
+            defaults().scale(Vec3::new(3.0e38, 1.0, 1.0)),
+        ),
+        (
+            3,
+            flat.clone(),
+            defaults()
+                .offset(Vec3::new(0.0, 0.0, -3.0e38))
+                .scale(Vec3::new(1.0, 1.0, 3.0e38)),
+        ),
+        // Finite offset and scale whose highest point is not.
+        (
+            3,
+            with_samples(&[(4, 2.0)]),
+            defaults()
+                .offset(Vec3::new(0.0, 3.0e38, 0.0))
+                .scale(Vec3::new(1.0, 3.0e38, 1.0)),
+        ),
     ];
     for (count, samples, settings) in dimension_cases {
         let result = Shape::new_height_field(count, &samples, &settings);
@@ -277,6 +352,28 @@ fn static_only_shapes_are_rejected_for_moving_bodies() {
     assert_eq!(world.body_count(), 0);
     assert!(world
         .create_body(&shape, &BodySettings::new_static())
+        .is_ok());
+}
+
+#[test]
+fn compounds_containing_a_height_field_are_static_only() {
+    let terrain = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
+    let block = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let compound = Shape::new_compound(&[
+        child(&block, Vec3::new(0.0, 1.0, 0.0), Quat::IDENTITY, 1),
+        child(&terrain, Vec3::ZERO, Quat::IDENTITY, 2),
+    ])
+    .unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    for settings in [BodySettings::new_dynamic(), BodySettings::new_kinematic()] {
+        assert!(matches!(
+            world.create_body(&compound, &settings),
+            Err(BodyError::InvalidValue(_))
+        ));
+    }
+    assert_eq!(world.body_count(), 0);
+    assert!(world
+        .create_body(&compound, &BodySettings::new_static())
         .is_ok());
 }
 
