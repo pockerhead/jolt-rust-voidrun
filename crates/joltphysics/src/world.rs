@@ -15,9 +15,12 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use joltphysics_sys::*;
 
+use crate::body::with_locked_body;
 use crate::math::is_finite_positive;
 use crate::owned::{JoltObject, Owned};
-use crate::{CollisionLayers, StepError, Vec3, WorldError};
+use crate::{
+    BodyError, BodyId, CollisionLayers, MotionType, Quat, RVec3, StepError, Vec3, WorldError,
+};
 
 /// Runs `JPH_Init` once per process and returns whether it succeeded. joltphysics never calls
 /// `JPH_Shutdown`: Jolt's global state lives as long as the process.
@@ -228,6 +231,75 @@ unsafe impl Send for PhysicsWorld {}
 // interface and write only state on that query's stack.
 unsafe impl Sync for PhysicsWorld {}
 
+/// One body's pose and velocities in a frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BodyFrameState {
+    position: RVec3,
+    rotation: Quat,
+    linear_velocity: Vec3,
+    angular_velocity: Vec3,
+}
+
+/// The rigid change of frame of a rebase: `p -> rotation * p + translation`.
+#[derive(Clone, Copy, Debug)]
+struct FrameChange {
+    rotation: Quat,
+    translation: RVec3,
+}
+
+impl FrameChange {
+    fn rotates(&self) -> bool {
+        self.rotation != Quat::IDENTITY
+    }
+
+    fn is_noop(&self) -> bool {
+        !self.rotates() && self.translation == RVec3::ZERO
+    }
+
+    /// A direction or velocity in the new frame; unchanged, bit for bit, without rotation.
+    fn vector(&self, v: Vec3) -> Vec3 {
+        if self.rotates() {
+            self.rotation.rotate(v)
+        } else {
+            v
+        }
+    }
+
+    fn point(&self, p: RVec3) -> RVec3 {
+        let p = if self.rotates() {
+            self.rotation.rotate_real(p)
+        } else {
+            p
+        };
+        RVec3::new(
+            p.x + self.translation.x,
+            p.y + self.translation.y,
+            p.z + self.translation.z,
+        )
+    }
+
+    /// `state` in the new frame, or `None` when a value would not be finite or the rotation
+    /// not a valid unit quaternion: the rule every pose and velocity setter applies.
+    fn body(&self, state: BodyFrameState) -> Option<BodyFrameState> {
+        let rotation = if self.rotates() {
+            self.rotation.product(state.rotation).normalized()
+        } else {
+            state.rotation
+        };
+        let new = BodyFrameState {
+            position: self.point(state.position),
+            rotation,
+            linear_velocity: self.vector(state.linear_velocity),
+            angular_velocity: self.vector(state.angular_velocity),
+        };
+        let valid = new.position.is_finite()
+            && new.rotation.is_valid_rotation()
+            && new.linear_velocity.is_finite()
+            && new.angular_velocity.is_finite();
+        valid.then_some(new)
+    }
+}
+
 impl PhysicsWorld {
     /// Largest time step [`step`](Self::step) accepts, in seconds, inclusive.
     ///
@@ -361,6 +433,122 @@ impl PhysicsWorld {
         unsafe { JPH_PhysicsSystem_OptimizeBroadPhase(self.system.as_ptr()) };
     }
 
+    /// Moves the whole world into a new frame: one rigid change of coordinates, for a floating
+    /// origin.
+    ///
+    /// Every body origin `p` becomes `rotation * p + translation` (metres), every body rotation
+    /// `q` becomes `rotation * q`, linear and angular velocities `v` become `rotation * v`
+    /// (m/s, rad/s), and so does the world's gravity.
+    ///
+    /// `bodies_in_key_order` must name every body of the world exactly once, in the caller's
+    /// stable key order, which is the order the poses are written in; otherwise
+    /// [`BodyError::InvalidValue`], [`BodyError::WrongWorld`] or [`BodyError::NotFound`] is
+    /// returned. `rotation` must be a finite unit quaternion and `translation` finite, and no
+    /// new pose, velocity or gravity may overflow; otherwise [`BodyError::InvalidValue`] is
+    /// returned. Every check runs before the first write, so an error leaves the world
+    /// unchanged.
+    ///
+    /// No body is woken or put to sleep. An identity `rotation` leaves rotations, velocities
+    /// and gravity untouched, bit for bit; an identity rotation with a zero translation changes
+    /// nothing. Awake bodies restart Jolt's sleep timer, as for every pose change, so they may
+    /// fall asleep later than without the rebase.
+    ///
+    /// Forces and torques added since the last step are not rotated: rebase between steps,
+    /// before adding the tick's forces. Queries see the new poses at once;
+    /// [`optimize_broad_phase`](Self::optimize_broad_phase) afterwards is optional and only
+    /// makes queries faster until the next step. Jolt caches contacts relative to the bodies,
+    /// so bodies at rest keep their contacts on the next step.
+    pub fn rebase(
+        &mut self,
+        bodies_in_key_order: &[BodyId],
+        rotation: Quat,
+        translation: RVec3,
+    ) -> Result<(), BodyError> {
+        let invalid = |what| Err(BodyError::InvalidValue(what));
+        if !rotation.is_valid_rotation() {
+            return invalid("rebase rotation must be a finite unit quaternion");
+        }
+        if !translation.is_finite() {
+            return invalid("rebase translation must be finite");
+        }
+        let frame = FrameChange {
+            rotation,
+            translation,
+        };
+
+        let mut changes = Vec::with_capacity(bodies_in_key_order.len());
+        for &id in bodies_in_key_order {
+            let body = self.body(id)?;
+            let old = BodyFrameState {
+                position: body.position(),
+                rotation: body.rotation(),
+                linear_velocity: body.linear_velocity(),
+                angular_velocity: body.angular_velocity(),
+            };
+            let Some(new) = frame.body(old) else {
+                return invalid("rebase would give a body a non-finite pose or velocity");
+            };
+            changes.push((id, body.motion_type(), old, new));
+        }
+        let mut raw_ids: Vec<u32> = bodies_in_key_order.iter().map(|id| id.to_raw()).collect();
+        raw_ids.sort_unstable();
+        if raw_ids.windows(2).any(|pair| pair[0] == pair[1]) {
+            return invalid("rebase body list names a body twice");
+        }
+        if bodies_in_key_order.len() != self.body_count() as usize {
+            return invalid("rebase body list must name every body of the world");
+        }
+        let gravity = frame.vector(self.gravity());
+        if !gravity.is_finite() {
+            return invalid("rebase would give the world a non-finite gravity");
+        }
+        if frame.is_noop() {
+            return Ok(());
+        }
+
+        for (id, motion_type, old, new) in changes {
+            let position = new.position.to_jph();
+            let rotation = new.rotation.to_jph();
+            // SAFETY: the body interface belongs to this live world, borrowed mutably; the
+            // checks above found `id` in this world and `&mut self` keeps it there. `position`
+            // and `rotation` are live locals, finite and a unit quaternion. This thread holds no
+            // body lock.
+            unsafe {
+                JPH_BodyInterface_SetPositionAndRotation(
+                    self.body_interface.as_ptr(),
+                    id.to_raw(),
+                    &position,
+                    &rotation,
+                    JPH_Activation_DontActivate,
+                )
+            };
+            let moving = old.linear_velocity != Vec3::ZERO || old.angular_velocity != Vec3::ZERO;
+            if frame.rotates() && motion_type != MotionType::Static && moving {
+                let linear = new.linear_velocity.to_jph();
+                let angular = new.angular_velocity.to_jph();
+                // `id` resolves (checked above), so the closure runs.
+                with_locked_body(self.body_lock_interface, id, |body| {
+                    // SAFETY: `body` is locked for writing for the duration of the closure and
+                    // is not static, as Jolt's velocity setters assert. The clamped setters
+                    // write the motion properties only and never activate the body.
+                    // `linear` and `angular` are live locals.
+                    unsafe {
+                        if !JPH_Body_IsStatic(body.as_ptr()) {
+                            JPH_Body_SetLinearVelocityClamped(body.as_ptr(), &linear);
+                            JPH_Body_SetAngularVelocityClamped(body.as_ptr(), &angular);
+                        }
+                    }
+                });
+            }
+        }
+        if frame.rotates() {
+            let gravity = gravity.to_jph();
+            // SAFETY: the system is live and borrowed mutably; `gravity` is a live local.
+            unsafe { JPH_PhysicsSystem_SetGravity(self.system.as_ptr(), &gravity) };
+        }
+        Ok(())
+    }
+
     /// Advances the world by `delta_time` seconds in one collision step.
     ///
     /// `delta_time` must be finite, positive and at most
@@ -420,6 +608,7 @@ impl StepReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Real;
 
     #[test]
     fn any_full_buffer_makes_a_report_incomplete() {
@@ -445,6 +634,67 @@ mod tests {
         ] {
             assert!(!report.is_complete(), "{report:?}");
         }
+    }
+
+    fn moving_state() -> BodyFrameState {
+        BodyFrameState {
+            position: RVec3::new(1.0, 0.0, 0.0),
+            rotation: Quat::from_xyzw(0.0, 0.0, 0.6, 0.8),
+            linear_velocity: Vec3::new(1.0, 0.0, 0.0),
+            angular_velocity: Vec3::new(1.0, 0.0, 0.0),
+        }
+    }
+
+    #[test]
+    fn translation_only_frame_change_keeps_rotation_and_velocity_bits() {
+        let frame = FrameChange {
+            rotation: Quat::IDENTITY,
+            translation: RVec3::new(1.0, 2.0, 3.0),
+        };
+        let state = moving_state();
+        let moved = frame.body(state).unwrap();
+        assert_eq!(moved.position, RVec3::new(2.0, 2.0, 3.0));
+        let bits = |q: Quat| <[f32; 4]>::from(q).map(f32::to_bits);
+        assert_eq!(bits(moved.rotation), bits(state.rotation));
+        assert_eq!(moved.linear_velocity, state.linear_velocity);
+        assert_eq!(moved.angular_velocity, state.angular_velocity);
+    }
+
+    #[test]
+    fn quarter_turn_about_y_maps_x_to_minus_z() {
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        let frame = FrameChange {
+            rotation: Quat::from_xyzw(0.0, half, 0.0, half),
+            translation: RVec3::ZERO,
+        };
+        let moved = frame.body(moving_state()).unwrap();
+        let p = moved.position;
+        let near =
+            |a: [f32; 3]| (a[0].abs() < 1e-6) && (a[1].abs() < 1e-6) && ((a[2] + 1.0).abs() < 1e-6);
+        assert!(p.x.abs() < 1e-6 && p.y.abs() < 1e-6, "{moved:?}");
+        assert!((p.z + 1.0).abs() < 1e-6, "{moved:?}");
+        assert!(near(moved.linear_velocity.into()), "{moved:?}");
+        assert!(near(moved.angular_velocity.into()), "{moved:?}");
+        assert!(moved.rotation.is_valid_rotation(), "{moved:?}");
+    }
+
+    #[test]
+    fn frame_change_rejects_overflow_and_nan() {
+        let frame = FrameChange {
+            rotation: Quat::IDENTITY,
+            translation: RVec3::new(Real::MAX, 0.0, 0.0),
+        };
+        let mut state = moving_state();
+        state.position.x = Real::MAX / 2.0;
+        assert_eq!(frame.body(state), None);
+
+        let frame = FrameChange {
+            rotation: Quat::IDENTITY,
+            translation: RVec3::ZERO,
+        };
+        let mut state = moving_state();
+        state.linear_velocity.y = f32::NAN;
+        assert_eq!(frame.body(state), None);
     }
 
     #[test]

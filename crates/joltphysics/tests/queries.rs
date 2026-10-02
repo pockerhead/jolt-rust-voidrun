@@ -489,6 +489,22 @@ fn target_distance_stops_short() {
 }
 
 #[test]
+fn target_distance_at_the_bound_gives_a_finite_depth() {
+    let mut world = world(Vec3::ZERO, 1);
+    add_floor(&mut world);
+    let shape = capsule();
+    let gap = 0.01155;
+    let near = RVec3::new(0.0, (CAPSULE_HALF_EXTENT + gap) as Real, 0.0);
+    let cast = ShapeCast::new(&shape, near, Quat::IDENTITY, down(2.0))
+        .target_distance(ShapeCast::MAX_TARGET_DISTANCE);
+    let hit = world.cast_shape(&cast, &ALL).unwrap().expect("the floor");
+    assert_eq!(hit.fraction, 0.0);
+    assert!(hit.penetration_depth.is_finite(), "{hit:?}");
+    assert!((hit.penetration_depth + gap).abs() < 1e-3, "{hit:?}");
+    assert!(hit.normal.y > 0.99, "{hit:?}");
+}
+
+#[test]
 fn inflated_cast_matches_a_larger_capsule() {
     let mut world = world(Vec3::ZERO, 1);
     add_floor(&mut world);
@@ -594,6 +610,10 @@ fn shape_cast_rejects_invalid_input() {
         ShapeCast::new(&shape, start, Quat::IDENTITY, Vec3::new(f32::NAN, 0.0, 0.0)),
         ShapeCast::new(&shape, start, Quat::IDENTITY, down(1.0)).target_distance(-0.1),
         ShapeCast::new(&shape, start, Quat::IDENTITY, down(1.0)).target_distance(f32::NAN),
+        ShapeCast::new(&shape, start, Quat::IDENTITY, down(1.0)).target_distance(1.0e30),
+        ShapeCast::new(&shape, start, Quat::IDENTITY, down(1.0)).target_distance(f32::MAX),
+        ShapeCast::new(&shape, start, Quat::IDENTITY, down(1.0))
+            .target_distance(ShapeCast::MAX_TARGET_DISTANCE.next_up()),
         ShapeCast::new(&terrain, start, Quat::IDENTITY, down(1.0)),
     ];
     for cast in invalid {

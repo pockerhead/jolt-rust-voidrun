@@ -619,7 +619,7 @@ impl JoltObject for JPH_BodyLockMultiWrite {
 ///
 /// The body pointer never leaves `f`. `f` must not call the body interface for the same body:
 /// Jolt's body mutexes are not recursive.
-fn with_locked_body<R>(
+pub(crate) fn with_locked_body<R>(
     lock_interface: NonNull<JPH_BodyLockInterface>,
     id: BodyId,
     f: impl FnOnce(NonNull<JPH_Body>) -> R,
