@@ -194,3 +194,71 @@ fn worlds_step_in_parallel_threads() {
         assert_eq!(digest, sequential);
     }
 }
+
+/// The game's five layers: items collide with every layer, nothing else collides. Items and
+/// actors are dropped onto terrain, structure and feature floors and onto a kinematic actor;
+/// items land, actors fall through.
+#[test]
+fn collision_layers_decide_which_bodies_touch() {
+    let mut layers = CollisionLayers::new(2);
+    let terrain = layers.add_object_layer(BroadPhaseLayer::NON_MOVING);
+    let structure = layers.add_object_layer(BroadPhaseLayer::NON_MOVING);
+    let feature = layers.add_object_layer(BroadPhaseLayer::NON_MOVING);
+    let item = layers.add_object_layer(BroadPhaseLayer::MOVING);
+    let actor = layers.add_object_layer(BroadPhaseLayer::MOVING);
+    for other in [terrain, structure, feature, item, actor] {
+        layers.enable_collision(item, other);
+    }
+    let mut world = PhysicsWorld::new(
+        WorldSettings::default()
+            .gravity(Vec3::new(0.0, -9.81, 0.0))
+            .layers(layers),
+    )
+    .unwrap();
+
+    let floor = Shape::new_box(Vec3::new(1.5, 0.5, 1.5)).unwrap();
+    let cube = Shape::new_box(Vec3::new(0.25, 0.25, 0.25)).unwrap();
+    let mut add = |shape: &Shape, settings: BodySettings, x: Real, y: Real, z: Real| {
+        world
+            .create_body(shape, &settings.position(RVec3::new(x, y, z)))
+            .unwrap()
+    };
+    let mut landing = Vec::new();
+    let mut falling = Vec::new();
+    let floors = [
+        (BodySettings::new_static(), terrain),
+        (BodySettings::new_static(), structure),
+        (BodySettings::new_static(), feature),
+        (BodySettings::new_kinematic(), actor),
+    ];
+    for (i, (settings, layer)) in floors.into_iter().enumerate() {
+        let x = 10.0 * i as Real;
+        add(&floor, settings.object_layer(layer), x, -0.5, 0.0);
+        let dynamic = BodySettings::new_dynamic();
+        landing.push(add(&cube, dynamic.clone().object_layer(item), x, 0.5, -0.5));
+        falling.push(add(&cube, dynamic.object_layer(actor), x, 0.5, 0.5));
+    }
+    let stacked = add(
+        &cube,
+        BodySettings::new_dynamic().object_layer(item),
+        0.0,
+        1.2,
+        -0.5,
+    );
+
+    step(&mut world, 120);
+
+    for id in landing {
+        let y = world.body(id).unwrap().position().y;
+        assert!(y > 0.1, "item {id:?} fell through, y = {y}");
+    }
+    let y = world.body(stacked).unwrap().position().y;
+    assert!(
+        y > 0.6,
+        "the upper item fell through the lower one, y = {y}"
+    );
+    for id in falling {
+        let y = world.body(id).unwrap().position().y;
+        assert!(y < -5.0, "actor {id:?} was stopped, y = {y}");
+    }
+}

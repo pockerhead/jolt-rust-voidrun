@@ -338,21 +338,18 @@ mod tests {
         assert!(invalid(&unknown_pair));
     }
 
-    /// Structures, terrain, items, actors and features: items collide with the first four,
-    /// actors with structures and terrain.
+    /// Structures, terrain, items, actors and features: items collide with every layer,
+    /// nothing else collides.
     fn five_layers() -> CollisionLayers {
         let mut layers = CollisionLayers::new(2);
         let structures = layers.add_object_layer(BroadPhaseLayer::NON_MOVING);
         let terrain = layers.add_object_layer(BroadPhaseLayer::NON_MOVING);
         let items = layers.add_object_layer(BroadPhaseLayer::MOVING);
         let actors = layers.add_object_layer(BroadPhaseLayer::MOVING);
-        let _features = layers.add_object_layer(BroadPhaseLayer::NON_MOVING);
-        for other in [structures, terrain, items, actors] {
+        let features = layers.add_object_layer(BroadPhaseLayer::NON_MOVING);
+        for other in [structures, terrain, items, actors, features] {
             layers.enable_collision(items, other);
         }
-        layers
-            .enable_collision(actors, structures)
-            .enable_collision(actors, terrain);
         layers
     }
 
