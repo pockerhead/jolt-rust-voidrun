@@ -1,6 +1,6 @@
 //! Safe Rust API for [Jolt Physics](https://github.com/jrouwe/JoltPhysics) over the
 //! [joltc](https://github.com/amerkoleci/joltc) raw layer in
-//! [`joltphysics-sys`](https://docs.rs/joltphysics-sys).
+//! [`joltphysics-sys`](https://github.com/pockerhead/jolt-rust-voidrun/tree/main/crates/joltphysics-sys).
 //!
 //! A [`PhysicsWorld`] owns a Jolt physics system with its collision layers
 //! ([`CollisionLayers`]), its own job system and temp allocator. Bodies are created from a
@@ -113,3 +113,8 @@ pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{CollideShape, CollideShapeHit, RayCast, RayHit, ShapeCast, ShapeCastHit};
 pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
 pub use world::{PhysicsWorld, StepReport, WorldSettings};
+
+/// The repository's guide, `docs/guide.md`, whose example runs as a doctest.
+#[cfg(doctest)]
+#[doc = include_str!("../../../docs/guide.md")]
+pub struct Guide;

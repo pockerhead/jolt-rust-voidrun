@@ -19,7 +19,7 @@ pub struct Shape(Owned<JPH_Shape>);
 
 // SAFETY: Jolt shapes are immutable after construction and `RefTarget` counts references
 // atomically, so a shape may be used and released from any thread
-// (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html#memory-management).
+// (https://jrouwe.github.io/JoltPhysicsDocs/5.6.0/index.html#memory-management).
 unsafe impl Send for Shape {}
 // SAFETY: as for `Send`; `&Shape` only lets bodies take further references and read the
 // immutable shape.

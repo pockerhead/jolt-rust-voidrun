@@ -3,7 +3,7 @@
 //! Every body lives in one object layer. Each object layer maps to one broad-phase layer, the
 //! coarse tree the broad phase keeps its bodies in. Two bodies can only collide when their
 //! object layers are enabled as a pair. See Jolt's documentation on collision detection:
-//! <https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html#collision-detection>.
+//! <https://jrouwe.github.io/JoltPhysicsDocs/5.6.0/index.html#collision-detection>.
 
 use joltphysics_sys::*;
 
