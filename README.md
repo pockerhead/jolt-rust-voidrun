@@ -67,9 +67,9 @@ in `crates/joltphysics/src/`.
 | Sleeping and active state | `BodyRef::is_sleeping`, `is_active`, `Activation` | `bodies.rs`: `sleeping_flag_is_readable` |
 | Removal wakes the bodies around it | `PhysicsWorld::remove_body` | `bodies.rs`: `removal_wakes_bodies_resting_on_it`, `removal_wakes_the_same_bodies_whether_or_not_the_broad_phase_was_optimized` |
 | Mass override, continuous collision, gravity factor | `BodySettings::mass`, `motion_quality`, `gravity_factor` | `bodies.rs`: `mass_too_small_to_invert_is_rejected`; `dynamics.rs`: `linear_cast_body_does_not_tunnel_through_thin_static`, `item_settles_under_caller_radial_gravity` |
-| Enhanced internal edge removal | `BodySettings::enhanced_internal_edge_removal` | `src/body.rs`: `enhanced_internal_edge_removal_reaches_the_body` |
+| Enhanced internal edge removal (setting passed to Jolt; its effect on contacts is not tested) | `BodySettings::enhanced_internal_edge_removal` | `src/body.rs`: `enhanced_internal_edge_removal_reaches_the_body` (reads the flag back from the Jolt body) |
 | Box, sphere, Y-cylinder, Y-capsule, convex radius | `Shape::new_box`, `new_box_with_convex_radius`, `new_sphere`, `new_cylinder`, `new_capsule` | `shapes.rs`: `sharp_box_edge_ray_hits_the_exact_corner`, `convex_radius_rounds_box_edges_for_contacts`; `src/shape.rs`: `cylinder_and_capsule_dimensions_reach_jolt`, `invalid_dimensions_are_rejected` |
-| Heightfield (n = 33, holes, block size, active edges) | `Shape::new_height_field`, `HeightFieldSettings` | `shapes.rs`: `height_field_33_builds_and_matches_samples_at_nodes`, `height_field_rising_along_z_matches_analytic_surface`, `height_field_of_holes_has_no_collision`, `height_field_with_custom_active_edge_threshold_builds`, `static_only_shapes_are_rejected_for_moving_bodies` |
+| Heightfield (n = 33, holes, block size; active-edge threshold passed to Jolt, its effect on contacts not tested) | `Shape::new_height_field`, `HeightFieldSettings` | `shapes.rs`: `height_field_33_builds_and_matches_samples_at_nodes`, `height_field_rising_along_z_matches_analytic_surface`, `height_field_of_holes_has_no_collision`, `height_field_with_custom_active_edge_threshold_builds`, `static_only_shapes_are_rejected_for_moving_bodies` |
 | Compound with per-child pose and user data | `Shape::new_compound`, `CompoundChild`, `CompoundSubShape` | `shapes.rs`: `compound_children_report_their_user_data`, `child_pose_is_applied`, `single_child_compound_keeps_its_user_data` |
 | Shapes shared between bodies and worlds | `Shape` | `shapes.rs`: `shapes_are_shared_across_bodies_and_worlds`; `bodies.rs`: `shape_can_be_dropped_after_body_creation` |
 | Ray cast | `PhysicsWorld::cast_ray`, `RayCast`, `RayHit` | `queries.rs`: `ray_hits_chunk_and_terrain_from_twenty_metres`, `ray_starting_inside_hits_at_exactly_zero`, `ray_normals_point_out_of_the_hit_surface`; `shapes.rs`: `height_field_is_hit_from_below` |
@@ -81,13 +81,14 @@ in `crates/joltphysics/src/`.
 | Floating origin | `PhysicsWorld::rebase` | `rebase.rs`: `resting_item_stays_across_a_rebase`, `sleeping_body_stays_asleep_across_a_rebase`, `drift_rebase_equals_the_scene_built_in_the_new_frame`, `rays_answer_the_same_across_a_rebase`, `invalid_rebase_changes_nothing` |
 | Same results for any thread count | (whole API) | `determinism.rs`: `stacks_digest_is_identical_across_thread_counts`, `chunk_digest_is_identical_across_thread_counts`, `permuted_insertion_order_fails_the_gate`; `crates/joltphysics-sys/tests/determinism.rs`: `digest_is_identical_across_thread_counts` |
 | Debug wireframe as line data (`debug-renderer`) | `PhysicsWorld::debug_lines`, `DebugLines`, `DebugLineSettings` | `debug_lines.rs`: `near_colliders_present_far_absent_terrain_present`, `line_cap_gives_exactly_the_cap_and_truncated`, `hidden_groups_vanish`, `compound_child_pose_applies_child_rotation_before_body_rotation`; `debug_lines_leaks.rs`; `crates/joltphysics-sys/tests/debug_renderer_bindings.rs` |
-| No leaks of per-call joltc objects (Windows) | queries, rebase | `leaks.rs`: `per_call_joltc_objects_do_not_leak` |
+| Leak gate for per-call joltc objects (Windows; bounded memory growth, catches only leaks above its threshold) | queries, rebase | `leaks.rs`: `per_call_joltc_objects_do_not_leak` |
 | Virtual character | `create_character`, `update_character`, `CharacterSettings` | `character.rs`: `a_character_lands_on_a_floor_and_reports_it`, `a_chained_replay_of_one_character_is_bit_exact`; `walker.rs`; `character_leaks.rs`; `crates/joltphysics-sys/tests/character_smoke.rs` |
 | Raw bindings | `joltphysics-sys` | `crates/joltphysics-sys/tests/smoke_test.rs`: `box_falls_onto_static_box`; layout checks at compile time in `crates/joltphysics-sys/src/layout.rs` |
 | Guide example | [docs/guide.md](docs/guide.md) | doctest `Guide` in `crates/joltphysics/src/lib.rs` (`cargo test -p joltphysics --doc`) |
 
-CI runs every test above in four configurations: default, `cross-platform-deterministic`,
-`double-precision` and `debug-renderer`.
+CI runs the test suite in four configurations: default, `cross-platform-deterministic`,
+`double-precision` and `debug-renderer`. The tests behind the `debug-renderer` feature run only in
+the last one.
 
 Not in the safe API yet (joltc exposes them, so `joltphysics-sys` has them): mesh and convex hull
 shapes, constraints and motors, vehicles, ragdolls and skeletons, soft bodies, and contact and
@@ -152,8 +153,8 @@ cargo test --workspace              # everything, headless
 cargo test -p joltphysics --features debug-renderer   # with the debug wireframe
 ```
 
-The first build compiles joltc and Jolt with CMake, always in Release. Later builds reuse it; only a change to the native sources, the pinned commits or a feature reruns
-CMake. Run one cargo process at a time on a shared machine: the C++ build is heavy. On Windows a
+The first build compiles joltc and Jolt with CMake, always in Release. Later builds of the same target and profile reuse it; a change to the native sources, the pinned
+commits, a feature or `build.rs` reruns CMake. Run one cargo process at a time on a shared machine: the C++ build is heavy. On Windows a
 very long `CARGO_TARGET_DIR` can make the CMake configure step fail (path length limit).
 
 ### Prebuilt native library

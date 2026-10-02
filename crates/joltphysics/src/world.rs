@@ -238,13 +238,13 @@ pub struct PhysicsWorld {
 // SAFETY: the physics system, job system, temp allocator, characters and character collision
 // set have no thread affinity. `step` and the character updates need `&mut self`, so the
 // allocator and job system serve one call at a time
-// (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access).
+// (https://jrouwe.github.io/JoltPhysicsDocs/5.6.0/index.html#multi-threaded-access).
 unsafe impl Send for PhysicsWorld {}
 // SAFETY: every `&self` method only calls Jolt's locking body interface, read-only system
 // getters, or Jolt's locking narrow-phase queries, which read bodies under body read locks and
 // the broad phase under its query lock. Jolt allows all of these from several threads at once.
 // Jolt forbids body access only while `PhysicsSystem::Update` runs, and `step` needs `&mut self`
-// (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access). Query filter
+// (https://jrouwe.github.io/JoltPhysicsDocs/5.6.0/index.html#multi-threaded-access). Query filter
 // and result callbacks run on the querying thread, read the world only through the locking body
 // interface and write only state on that query's stack. Character reads through `&self` are
 // joltc getters over const Jolt members (`GetPosition`, `GetGroundState`,
