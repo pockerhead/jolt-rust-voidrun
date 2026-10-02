@@ -1,5 +1,5 @@
-//! Moving the world into a new frame: dropped items fall, rest and land the same with and
-//! without a rebase, queries answer the same, and nothing wakes or changes on a no-op or an
+//! Moving the world into a new frame: dropped items fall and rest the same with and without a
+//! rebase and land on the ground after one, queries answer the same, and nothing wakes or changes on a no-op or an
 //! invalid rebase.
 //!
 //! Every scenario runs twice with the same calls, A without and B with a rebase, and compares
@@ -169,7 +169,6 @@ const GRAVITY: f32 = 9.8;
 const PLANET_RADIUS: f64 = 99.0;
 /// Height of the terrain surface above the scene origin.
 const SURFACE: f64 = 2.0;
-const ITEM_HALF_HEIGHT: f64 = 0.06;
 
 /// A dropped item over a heightfield terrain and a chunk, in a five-layer world with no world
 /// gravity: the item is pulled towards `centre` by the caller every tick.
@@ -268,6 +267,27 @@ fn scene(offset: RVec3, item_y: Real) -> Scene {
     }
 }
 
+/// How far B's item is from A's item mapped through `frame`: position, rotation angle, linear
+/// and angular velocity.
+fn differences(a: &Scene, b: &Scene, frame: &Frame) -> [f64; 4] {
+    let (a, b) = (a.item(), b.item());
+    [
+        norm(sub(
+            real3(b.position()),
+            frame.map_point_f64(real3(a.position())),
+        )),
+        angle_between(b.rotation(), frame.map_rotation(a.rotation())),
+        norm(sub(
+            vec3(b.linear_velocity()),
+            frame.map_vector_f64(vec3(a.linear_velocity())),
+        )),
+        norm(sub(
+            vec3(b.angular_velocity()),
+            frame.map_vector_f64(vec3(a.angular_velocity())),
+        )),
+    ]
+}
+
 /// Asserts that B's item equals A's item mapped through `frame`.
 fn assert_matches(
     tag: &str,
@@ -278,20 +298,7 @@ fn assert_matches(
     tolerances: [f64; 2],
 ) {
     let [position_tolerance, velocity_tolerance] = tolerances;
-    let (a, b) = (a.item(), b.item());
-    let position = norm(sub(
-        real3(b.position()),
-        frame.map_point_f64(real3(a.position())),
-    ));
-    let angle = angle_between(b.rotation(), frame.map_rotation(a.rotation()));
-    let linear = norm(sub(
-        vec3(b.linear_velocity()),
-        frame.map_vector_f64(vec3(a.linear_velocity())),
-    ));
-    let angular = norm(sub(
-        vec3(b.angular_velocity()),
-        frame.map_vector_f64(vec3(a.angular_velocity())),
-    ));
+    let [position, angle, linear, angular] = differences(a, b, frame);
     let context = format!(
         "{tag}, tick {tick}: dpos {position:e}, angle {angle:e}, dv {linear:e}, dw {angular:e}"
     );
@@ -349,30 +356,133 @@ fn resting_item_stays_across_a_rebase() {
     }
 }
 
+/// The tick after which the landing scenarios rebase, with the item in mid-air.
+const LANDING_REBASE_TICK: usize = 30;
+/// Ticks the item gets to come to rest after its first contact.
+const SETTLE_TICKS: usize = 120;
+/// Ticks at the end of the settling window in which the item must stay at rest.
+const REST_TICKS: usize = 30;
+/// Jolt's default `PhysicsSettings::mPenetrationSlop`, which joltphysics does not change: a
+/// resting contact may sink this deep by design.
+const PENETRATION_SLOP: f32 = 0.02;
+
+/// The scene without terrain and chunk: an item with nothing to hit.
+fn free_item(offset: RVec3, item_y: Real) -> Scene {
+    let mut scene = scene(offset, item_y);
+    scene.world.remove_body(scene.terrain).unwrap();
+    scene.world.remove_body(scene.chunk).unwrap();
+    scene
+}
+
+/// Asserts that the item rests on the terrain, sunk into it no deeper than the slop.
+fn assert_on_the_ground(tag: &str, tick: usize, scene: &Scene) {
+    let item = scene.item();
+    let speed = scene.item_speed();
+    assert!(
+        speed < 0.05,
+        "{tag}, tick {tick}: the item is not at rest, speed {speed}"
+    );
+    let shape = Shape::new_box(Vec3::new(0.35, 0.06, 0.04)).unwrap();
+    let query =
+        CollideShape::new(&shape, item.position(), item.rotation()).max_separation_distance(0.01);
+    let hits = scene
+        .world
+        .collide_shape(&query, &QueryFilter::new().exclude_body(scene.item))
+        .unwrap();
+    let depth = hits
+        .iter()
+        .filter(|hit| hit.body == scene.terrain)
+        .map(|hit| hit.penetration_depth)
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        depth > -0.01,
+        "{tag}, tick {tick}: the item is not on the terrain"
+    );
+    assert!(
+        depth <= PENETRATION_SLOP,
+        "{tag}, tick {tick}: the item sinks {depth} m into the terrain"
+    );
+}
+
+/// Translation-only rebases add no error of their own: the rebased run equals, bit for bit,
+/// the same scene built directly in the new frame.
+#[test]
+fn drift_rebase_equals_the_scene_built_in_the_new_frame() {
+    let frame = Frame::drift();
+    let offset = RVec3::new(444.0, 0.0, 0.0);
+    let mut rebased = scene(offset, HIGH);
+    let mut built_there = scene(frame.map_point(offset), HIGH);
+    for _ in 0..LANDING_REBASE_TICK {
+        rebased.tick();
+        built_there.tick();
+    }
+    rebased.rebase(&frame);
+    assert_eq!(rebased.centre, built_there.centre);
+    for tick in LANDING_REBASE_TICK..=LANDING_REBASE_TICK + 180 {
+        if tick > LANDING_REBASE_TICK {
+            rebased.tick();
+            built_there.tick();
+        }
+        assert!(
+            digest(&rebased.world, &rebased.ids())
+                == digest(&built_there.world, &built_there.ids()),
+            "tick {tick}: the rebased scene differs from the scene built in the new frame"
+        );
+    }
+}
+
+/// An item rebased in mid-air falls like the unrebased one until it first touches the ground;
+/// the flat impact of the thin box is chaotic, so afterwards both runs only have to land and
+/// come to rest on the terrain.
 #[test]
 fn landing_after_a_rebase_matches_the_unrebased_run() {
     for (tag, frame, offset) in frames() {
         let mut a = scene(offset, HIGH);
         let mut b = scene(offset, HIGH);
-        for _ in 0..30 {
+        let mut free = free_item(offset, HIGH);
+        for _ in 0..LANDING_REBASE_TICK {
             a.tick();
             b.tick();
+            free.tick();
         }
         b.rebase(&frame);
-        for tick in 31..=210 {
+        assert_matches(tag, LANDING_REBASE_TICK, &a, &b, &frame, [1e-3, 5e-3]);
+
+        // Until its first contact, A's item moves exactly like an item with nothing to hit.
+        let mut tick = LANDING_REBASE_TICK;
+        let first_contact = loop {
+            tick += 1;
             a.tick();
             b.tick();
+            free.tick();
+            if digest(&a.world, &[a.item]) != digest(&free.world, &[free.item]) {
+                break tick;
+            }
             assert_matches(tag, tick, &a, &b, &frame, [1e-3, 5e-3]);
-        }
-        let speed = b.item_speed();
-        let height = b.item_radius() - (PLANET_RADIUS + ITEM_HALF_HEIGHT);
+            assert!(tick < 300, "{tag}: the item never touches the ground");
+        };
         assert!(
-            speed < 0.05,
-            "{tag}: the item has not landed, speed {speed}"
+            first_contact > LANDING_REBASE_TICK + 30,
+            "{tag}: first contact at tick {first_contact}, too close to the rebase"
         );
-        assert!(
-            height.abs() < 0.05,
-            "{tag}: the item is not on the surface, {height}"
+
+        let mut divergence = [0.0_f64; 4];
+        for tick in first_contact..=first_contact + SETTLE_TICKS {
+            if tick > first_contact {
+                a.tick();
+                b.tick();
+            }
+            for (worst, now) in divergence.iter_mut().zip(differences(&a, &b, &frame)) {
+                *worst = worst.max(now);
+            }
+            if tick > first_contact + SETTLE_TICKS - REST_TICKS {
+                assert_on_the_ground(&format!("{tag}, unrebased"), tick, &a);
+                assert_on_the_ground(&format!("{tag}, rebased"), tick, &b);
+            }
+        }
+        let [position, angle, linear, angular] = divergence;
+        println!(
+            "{tag}: first contact at tick {first_contact}; largest divergence after it: dpos {position:e}, angle {angle:e}, dv {linear:e}, dw {angular:e}"
         );
     }
 }
