@@ -26,7 +26,7 @@ use crate::{BodyError, ObjectLayer, PhysicsWorld, Quat, RVec3, Shape, Vec3};
 pub struct BodyId {
     // Declared first, so ids order by Jolt's id before the world.
     raw: u32,
-    world: WorldTag,
+    pub(crate) world: WorldTag,
 }
 
 impl BodyId {
@@ -637,6 +637,40 @@ fn with_locked_body<R>(
     // SAFETY: `lock` is live and holds exactly one id, at index 0. Jolt returns null unless
     // index and sequence number both match a live body (`BodyManager::TryGetBody`).
     let body = NonNull::new(unsafe { JPH_BodyLockMultiWrite_GetBody(lock.as_ptr(), 0) })?;
+    Some(f(body))
+}
+
+/// A body read lock. Destroying it deletes Jolt's `BodyLockMultiRead`, which unlocks the
+/// bodies, and frees the joltc wrapper; as an `Owned` it is released also while unwinding.
+impl JoltObject for JPH_BodyLockMultiRead {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: the owner owns the lock (trait contract), which is released exactly once here.
+        unsafe { JPH_BodyLockMultiRead_Destroy(ptr) };
+    }
+}
+
+/// Runs `f` with the body locked for reading; `None` if the id no longer resolves.
+///
+/// The body pointer never leaves `f`, and `f` only reads through it. `f` must not lock the same
+/// body for writing.
+pub(crate) fn with_read_locked_body<R>(
+    lock_interface: NonNull<JPH_BodyLockInterface>,
+    id: BodyId,
+    f: impl FnOnce(NonNull<JPH_Body>) -> R,
+) -> Option<R> {
+    let raw = id.raw;
+    // SAFETY: the lock interface belongs to a live world. joltc copies the one id into the
+    // lock object, so `raw` only has to live for the call. The handle takes over the lock.
+    let lock = unsafe {
+        Owned::from_raw(JPH_BodyLockInterface_LockMultiRead(
+            lock_interface.as_ptr(),
+            &raw,
+            1,
+        ))
+    }?;
+    // SAFETY: `lock` is live and holds exactly one id, at index 0. Jolt returns null unless
+    // index and sequence number both match a live body (`BodyManager::TryGetBody`).
+    let body = NonNull::new(unsafe { JPH_BodyLockMultiRead_GetBody(lock.as_ptr(), 0) }.cast_mut())?;
     Some(f(body))
 }
 

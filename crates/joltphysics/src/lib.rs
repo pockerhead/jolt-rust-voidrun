@@ -57,6 +57,7 @@
 
 mod body;
 mod error;
+mod filter;
 mod layers;
 mod math;
 mod owned;
@@ -66,6 +67,7 @@ mod world;
 
 pub use body::{Activation, BodyId, BodyMut, BodyRef, BodySettings, MotionQuality, MotionType};
 pub use error::{BodyError, QueryError, ShapeError, StepError, WorldError};
+pub use filter::QueryFilter;
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{RayCast, RayHit};

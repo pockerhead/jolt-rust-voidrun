@@ -223,7 +223,9 @@ unsafe impl Send for PhysicsWorld {}
 // getters, or Jolt's locking narrow-phase queries, which read bodies under body read locks and
 // the broad phase under its query lock. Jolt allows all of these from several threads at once.
 // Jolt forbids body access only while `PhysicsSystem::Update` runs, and `step` needs `&mut self`
-// (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access).
+// (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access). Query filter
+// and result callbacks run on the querying thread, read the world only through the locking body
+// interface and write only state on that query's stack.
 unsafe impl Sync for PhysicsWorld {}
 
 impl PhysicsWorld {

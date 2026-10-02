@@ -54,6 +54,14 @@ impl Vec3 {
     pub(crate) fn is_finite(&self) -> bool {
         self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
     }
+
+    pub(crate) fn dot(self, other: Self) -> f32 {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
+
+    pub(crate) fn length(self) -> f32 {
+        self.dot(self).sqrt()
+    }
 }
 
 impl From<[f32; 3]> for Vec3 {
