@@ -739,6 +739,51 @@ fn collide_child_group_filter_and_excluded_body() {
 }
 
 #[test]
+fn nested_compound_group_governs_shape_casts_and_collide() {
+    let mut world = world(Vec3::ZERO, 1);
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let inner = Shape::new_compound(&[
+        child(&unit_box, Vec3::new(-0.5, 0.0, 0.0), Groups::FEATURE),
+        child(&unit_box, Vec3::new(0.5, 0.0, 0.0), Groups::FEATURE),
+    ])
+    .unwrap();
+    let outer = Shape::new_compound(&[
+        child(&inner, Vec3::ZERO, Groups::STRUCTURE),
+        child(&unit_box, Vec3::new(4.0, 0.0, 0.0), Groups::FEATURE),
+    ])
+    .unwrap();
+    world
+        .create_body(&outer, &BodySettings::new_static())
+        .unwrap();
+    let structure = QueryFilter::new().child_groups(1 << Groups::STRUCTURE);
+    let feature = QueryFilter::new().child_groups(1 << Groups::FEATURE);
+    let top_level_structure = Some(CompoundSubShape {
+        index: 0,
+        user_data: Groups::STRUCTURE,
+    });
+    let ball = Shape::new_sphere(0.25).unwrap();
+
+    let cast = ShapeCast::new(&ball, RVec3::new(0.5, 5.0, 0.0), Quat::IDENTITY, down(10.0));
+    let hit = world
+        .cast_shape(&cast, &structure)
+        .unwrap()
+        .expect("the top-level group governs the nested children");
+    assert_eq!(hit.compound_child, top_level_structure);
+    assert!((hit.point.y - 0.5).abs() < 1e-3, "{hit:?}");
+    assert_eq!(world.cast_shape(&cast, &feature), Ok(None));
+
+    let overlapping = CollideShape::new(&ball, RVec3::new(0.5, 0.6, 0.0), Quat::IDENTITY);
+    let hits = world.collide_shape(&overlapping, &structure).unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].compound_child, top_level_structure);
+    assert!((hits[0].penetration_depth - 0.15).abs() < 1e-3, "{hits:?}");
+    assert_eq!(world.collide_shape(&overlapping, &feature), Ok(Vec::new()));
+
+    let beside = CollideShape::new(&ball, RVec3::new(4.0, 0.6, 0.0), Quat::IDENTITY);
+    assert_eq!(world.collide_shape(&beside, &feature).unwrap().len(), 1);
+}
+
+#[test]
 fn collide_shape_rejects_invalid_input() {
     let world = world(Vec3::ZERO, 1);
     let shape = capsule();
