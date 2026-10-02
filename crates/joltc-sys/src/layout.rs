@@ -26,10 +26,12 @@ const _: () = {
 
     assert!(size_of::<JPH_AABox>() == 24);
     assert!(align_of::<JPH_AABox>() == 4);
+    assert!(offset_of!(JPH_AABox, min) == 0);
     assert!(offset_of!(JPH_AABox, max) == 12);
 
     assert!(size_of::<JPH_MassProperties>() == 68);
     assert!(align_of::<JPH_MassProperties>() == 4);
+    assert!(offset_of!(JPH_MassProperties, mass) == 0);
     assert!(offset_of!(JPH_MassProperties, inertia) == 4);
 
     assert!(size_of::<JobSystemThreadPoolConfig>() == 12);
