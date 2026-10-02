@@ -86,14 +86,19 @@ impl std::error::Error for QueryError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StepError {
-    /// The time step is not finite or not positive.
+    /// The time step is not finite, not positive, or above
+    /// [`PhysicsWorld::MAX_DELTA_TIME`](crate::PhysicsWorld::MAX_DELTA_TIME).
     InvalidDeltaTime,
 }
 
 impl fmt::Display for StepError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidDeltaTime => f.write_str("the time step must be finite and positive"),
+            Self::InvalidDeltaTime => write!(
+                f,
+                "the time step must be finite, positive and at most {} s",
+                crate::PhysicsWorld::MAX_DELTA_TIME
+            ),
         }
     }
 }

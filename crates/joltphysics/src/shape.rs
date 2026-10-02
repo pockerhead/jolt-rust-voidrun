@@ -5,6 +5,8 @@ use std::ptr::{null, null_mut, NonNull};
 
 use joltphysics_sys::*;
 
+use crate::math::{is_finite_non_negative, is_finite_positive};
+use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
 use crate::{Quat, ShapeError, Vec3};
 
@@ -13,9 +15,7 @@ use crate::{Quat, ShapeError, Vec3};
 /// Owns one Jolt reference. Every body created from it holds its own reference, so the shape
 /// may be dropped while bodies use it. Jolt shapes cannot change after construction, so one
 /// shape may serve any number of bodies in any number of worlds.
-pub struct Shape {
-    ptr: NonNull<JPH_Shape>,
-}
+pub struct Shape(Owned<JPH_Shape>);
 
 // SAFETY: Jolt shapes are immutable after construction and `RefTarget` counts references
 // atomically, so a shape may be used and released from any thread
@@ -89,11 +89,27 @@ pub struct CompoundSubShape {
 /// cached `ShapeResult` reference. A shape returned by a `*_CreateShape` or `*_Create` call
 /// carries its own reference (joltc calls `AddRef` before returning it), so the caller keeps
 /// exactly one reference to the shape.
-struct ShapeSettings(NonNull<JPH_ShapeSettings>);
+struct ShapeSettings(Owned<JPH_ShapeSettings>);
+
+/// Shape settings, of which the owner holds one Jolt reference.
+impl JoltObject for JPH_ShapeSettings {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: the owner holds one reference to the settings (trait contract), released here
+        // once. Shapes created from them hold their own, and another Jolt object may still
+        // hold further ones, so joltc only calls `Release`, never `delete`.
+        unsafe { JPH_ShapeSettings_Destroy(ptr) };
+    }
+}
 
 impl ShapeSettings {
-    fn from_raw(ptr: *mut JPH_ShapeSettings) -> Result<Self, ShapeError> {
-        NonNull::new(ptr)
+    /// Takes over settings returned by a `JPH_*ShapeSettings_Create` call.
+    ///
+    /// # Safety
+    /// `ptr` is null or points to live shape settings holding one reference that the caller
+    /// hands over.
+    unsafe fn from_raw(ptr: *mut JPH_ShapeSettings) -> Result<Self, ShapeError> {
+        // SAFETY: the caller hands over one reference to live settings, or null.
+        unsafe { Owned::from_raw(ptr) }
             .map(Self)
             .ok_or(ShapeError::AllocationFailed)
     }
@@ -103,14 +119,6 @@ impl ShapeSettings {
     /// convention joltc itself uses, so the caller picks the type the settings were created as.
     fn as_ptr<T>(&self) -> *mut T {
         self.0.as_ptr().cast()
-    }
-}
-
-impl Drop for ShapeSettings {
-    fn drop(&mut self) {
-        // SAFETY: this value owns exactly one reference to the settings, released here once.
-        // Shapes created from them hold their own references.
-        unsafe { JPH_ShapeSettings_Destroy(self.0.as_ptr()) };
     }
 }
 
@@ -129,10 +137,18 @@ unsafe fn height_field_settings(
     // SAFETY: the caller guarantees initialisation and that `samples` holds `sample_count^2`
     // floats, which Jolt copies; `offset` and `scale` are live locals. Null material indices
     // are allowed. The returned settings hold one reference, which the guard takes over.
-    let raw = unsafe {
-        JPH_HeightFieldShapeSettings_Create(samples.as_ptr(), &offset, &scale, sample_count, null())
-    };
-    let jolt_settings = ShapeSettings::from_raw(raw.cast())?;
+    let jolt_settings = unsafe {
+        ShapeSettings::from_raw(
+            JPH_HeightFieldShapeSettings_Create(
+                samples.as_ptr(),
+                &offset,
+                &scale,
+                sample_count,
+                null(),
+            )
+            .cast(),
+        )
+    }?;
     let ptr = jolt_settings.as_ptr();
     // SAFETY: the settings are live, owned by the guard and were created as heightfield
     // settings; the caller validated every value.
@@ -147,14 +163,13 @@ unsafe fn height_field_settings(
     Ok(jolt_settings)
 }
 
-/// Finite and positive.
-fn is_positive(value: f32) -> bool {
-    value.is_finite() && value > 0.0
-}
-
-/// Finite and not negative.
-fn is_valid_convex_radius(value: f32) -> bool {
-    value.is_finite() && value >= 0.0
+/// Runs `JPH_Init` once, mapping failure to [`ShapeError::InitFailed`].
+fn initialize() -> Result<(), ShapeError> {
+    if ensure_initialized() {
+        Ok(())
+    } else {
+        Err(ShapeError::InitFailed)
+    }
 }
 
 /// Settings of [`Shape::new_height_field`] other than the samples. The defaults are Jolt's
@@ -256,7 +271,7 @@ impl HeightFieldSettings {
             ));
         }
         let scale = [self.scale.x, self.scale.y, self.scale.z];
-        if !scale.into_iter().all(is_positive) {
+        if !scale.into_iter().all(is_finite_positive) {
             return Err(ShapeError::InvalidDimensions(
                 "height field scale must be finite and positive",
             ));
@@ -322,41 +337,35 @@ impl Shape {
         convex_radius: f32,
     ) -> Result<Self, ShapeError> {
         let components = [half_extent.x, half_extent.y, half_extent.z];
-        if !components.into_iter().all(is_positive) {
+        if !components.into_iter().all(is_finite_positive) {
             return Err(ShapeError::InvalidDimensions(
                 "box half extents must be finite and positive",
             ));
         }
-        if !is_valid_convex_radius(convex_radius) {
+        if !is_finite_non_negative(convex_radius) {
             return Err(ShapeError::InvalidDimensions(
                 "convex radius must be finite and not negative",
             ));
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         let half_extent = half_extent.to_jph();
         // SAFETY: Jolt is initialised, `half_extent` is a live local and both inputs were
         // checked against Jolt's assertions. The returned box holds one reference, which
         // `Self` takes over.
-        let ptr = unsafe { JPH_BoxShape_Create(&half_extent, convex_radius) };
-        Self::from_raw(ptr.cast())
+        unsafe { Self::from_raw(JPH_BoxShape_Create(&half_extent, convex_radius).cast()) }
     }
 
     /// A sphere with the given radius in metres (finite and positive).
     pub fn new_sphere(radius: f32) -> Result<Self, ShapeError> {
-        if !is_positive(radius) {
+        if !is_finite_positive(radius) {
             return Err(ShapeError::InvalidDimensions(
                 "sphere radius must be finite and positive",
             ));
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         // SAFETY: Jolt is initialised. The returned sphere holds one reference, which `Self`
         // takes over.
-        let ptr = unsafe { JPH_SphereShape_Create(radius) };
-        Self::from_raw(ptr.cast())
+        unsafe { Self::from_raw(JPH_SphereShape_Create(radius).cast()) }
     }
 
     /// A cylinder along the local Y axis, centred on the origin, `2 * half_height` metres high,
@@ -379,29 +388,31 @@ impl Shape {
         radius: f32,
         convex_radius: f32,
     ) -> Result<Self, ShapeError> {
-        if !(is_positive(half_height) && is_positive(radius)) {
+        if !(is_finite_positive(half_height) && is_finite_positive(radius)) {
             return Err(ShapeError::InvalidDimensions(
                 "cylinder half height and radius must be finite and positive",
             ));
         }
-        if !is_valid_convex_radius(convex_radius) {
+        if !is_finite_non_negative(convex_radius) {
             return Err(ShapeError::InvalidDimensions(
                 "convex radius must be finite and not negative",
             ));
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         // `JPH_CylinderShape_Create` would ignore the convex radius (joltc passes 0), so the
         // cylinder is built through its settings.
         // SAFETY: Jolt is initialised; the returned settings hold one reference, which the
         // guard takes over.
-        let raw = unsafe { JPH_CylinderShapeSettings_Create(half_height, radius, convex_radius) };
-        let settings = ShapeSettings::from_raw(raw.cast())?;
+        let settings = unsafe {
+            ShapeSettings::from_raw(
+                JPH_CylinderShapeSettings_Create(half_height, radius, convex_radius).cast(),
+            )
+        }?;
         // SAFETY: the settings are live, owned by the guard and were created as cylinder
         // settings. The returned shape holds one reference, which `Self` takes over.
-        let ptr = unsafe { JPH_CylinderShapeSettings_CreateShape(settings.as_ptr()) };
-        Self::from_created(ptr.cast())
+        unsafe {
+            Self::from_created(JPH_CylinderShapeSettings_CreateShape(settings.as_ptr()).cast())
+        }
     }
 
     /// A capsule along the local Y axis, centred on the origin: a cylinder
@@ -409,19 +420,16 @@ impl Shape {
     /// `2 * (half_height_of_cylinder + radius)` metres high in total. Both values must be finite
     /// and positive.
     pub fn new_capsule(half_height_of_cylinder: f32, radius: f32) -> Result<Self, ShapeError> {
-        if !(is_positive(half_height_of_cylinder) && is_positive(radius)) {
+        if !(is_finite_positive(half_height_of_cylinder) && is_finite_positive(radius)) {
             return Err(ShapeError::InvalidDimensions(
                 "capsule half height and radius must be finite and positive",
             ));
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         // SAFETY: Jolt is initialised and both values are positive, as Jolt asserts
         // (`CapsuleShape.h`). The returned capsule holds one reference, which `Self` takes
         // over.
-        let ptr = unsafe { JPH_CapsuleShape_Create(half_height_of_cylinder, radius) };
-        Self::from_raw(ptr.cast())
+        unsafe { Self::from_raw(JPH_CapsuleShape_Create(half_height_of_cylinder, radius).cast()) }
     }
 
     /// A heightfield of `sample_count` x `sample_count` height samples, in metres before
@@ -488,15 +496,16 @@ impl Shape {
             ));
         }
         settings.validate_extents(padded, heights)?;
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         // SAFETY: Jolt is initialised and `samples` and `settings` were validated above.
         let jolt_settings = unsafe { height_field_settings(sample_count, samples, settings) }?;
         // SAFETY: the settings are live, owned by the guard and were created as heightfield
         // settings. The returned shape holds one reference, which `Self` takes over.
-        let shape = unsafe { JPH_HeightFieldShapeSettings_CreateShape(jolt_settings.as_ptr()) };
-        Self::from_created(shape.cast())
+        unsafe {
+            Self::from_created(
+                JPH_HeightFieldShapeSettings_CreateShape(jolt_settings.as_ptr()).cast(),
+            )
+        }
     }
 
     /// The stored surface point of heightfield sample `(x, y)` in shape-local space, after
@@ -550,20 +559,17 @@ impl Shape {
                 return invalid("compound child rotation must be a finite unit quaternion");
             }
         }
-        if !ensure_initialized() {
-            return Err(ShapeError::InitFailed);
-        }
+        initialize()?;
         let single = children.len() == 1;
         // SAFETY: Jolt is initialised. The returned settings hold one reference, which the
         // guard takes over.
-        let raw: *mut JPH_ShapeSettings = unsafe {
-            if single {
+        let settings = unsafe {
+            ShapeSettings::from_raw(if single {
                 JPH_MutableCompoundShapeSettings_Create().cast()
             } else {
                 JPH_StaticCompoundShapeSettings_Create().cast()
-            }
-        };
-        let settings = ShapeSettings::from_raw(raw)?;
+            })
+        }?;
         for child in children {
             let position = child.position.to_jph();
             let rotation = child.rotation.to_jph();
@@ -585,14 +591,13 @@ impl Shape {
         // Both calls run Jolt's `Create` and return a shape holding one reference, which `Self`
         // takes over; null means Jolt refused the settings (for example a hierarchy that needs
         // more than 32 sub-shape id bits).
-        let ptr: *mut JPH_Shape = unsafe {
-            if single {
+        unsafe {
+            Self::from_created(if single {
                 JPH_MutableCompoundShape_Create(settings.as_ptr()).cast()
             } else {
                 JPH_StaticCompoundShape_Create(settings.as_ptr()).cast()
-            }
-        };
-        Self::from_created(ptr)
+            })
+        }
     }
 
     /// The child of this compound that `id` leads to.
@@ -603,25 +608,35 @@ impl Shape {
     /// from.
     pub fn compound_sub_shape(&self, id: SubShapeId) -> Option<CompoundSubShape> {
         // SAFETY: `self` keeps the shape alive for the call.
-        unsafe { compound_sub_shape_of(self.ptr, id) }
+        unsafe { compound_sub_shape_of(self.0.as_non_null(), id) }
     }
 
-    fn from_raw(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
-        NonNull::new(ptr)
-            .map(|ptr| Self { ptr })
+    /// Takes over a shape returned by a shape `Create` call, where null means joltc could not
+    /// create it.
+    ///
+    /// # Safety
+    /// `ptr` is null or a live shape holding one reference that the caller hands over.
+    unsafe fn from_raw(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
+        // SAFETY: the caller hands over one reference to a live shape, or null.
+        unsafe { Owned::from_raw(ptr) }
+            .map(Self)
             .ok_or(ShapeError::AllocationFailed)
     }
 
     /// Takes over a shape returned by a settings `Create` call, where null means Jolt refused
     /// the settings.
-    fn from_created(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
-        NonNull::new(ptr)
-            .map(|ptr| Self { ptr })
+    ///
+    /// # Safety
+    /// `ptr` is null or a live shape holding one reference that the caller hands over.
+    unsafe fn from_created(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
+        // SAFETY: the caller hands over one reference to a live shape, or null.
+        unsafe { Owned::from_raw(ptr) }
+            .map(Self)
             .ok_or(ShapeError::Rejected)
     }
 
     pub(crate) fn as_ptr(&self) -> *const JPH_Shape {
-        self.ptr.as_ptr()
+        self.0.as_ptr()
     }
 
     /// Jolt's concrete shape type.
@@ -682,10 +697,14 @@ pub(crate) unsafe fn compound_sub_shape_of(
     Some(CompoundSubShape { index, user_data })
 }
 
-impl Drop for Shape {
-    fn drop(&mut self) {
-        // SAFETY: `self` owns exactly one reference, released here once. Bodies keep their own.
-        unsafe { JPH_Shape_Destroy(self.ptr.as_ptr()) };
+/// A shape, of which the owner holds one Jolt reference: joltc returns created shapes holding
+/// one reference, and `JPH_Shape_Destroy` releases it. Bodies, body creation settings and
+/// compounds hold their own.
+impl JoltObject for JPH_Shape {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: the owner holds one reference to the shape (trait contract), released here
+        // once. Bodies, creation settings and compounds keep their own.
+        unsafe { JPH_Shape_Destroy(ptr) };
     }
 }
 

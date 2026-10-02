@@ -15,6 +15,8 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use joltphysics_sys::*;
 
+use crate::math::is_finite_positive;
+use crate::owned::{JoltObject, Owned};
 use crate::{CollisionLayers, StepError, Vec3, WorldError};
 
 /// Runs `JPH_Init` once per process and returns whether it succeeded. joltphysics never calls
@@ -144,38 +146,36 @@ impl WorldSettings {
     }
 }
 
-/// Owns a `JPH_TempAllocator`.
-struct TempAllocator(NonNull<JPH_TempAllocator>);
-
-impl Drop for TempAllocator {
-    fn drop(&mut self) {
-        // SAFETY: this value owns the allocator; the system that used it is gone or never
-        // existed (field order in `PhysicsWorld`).
-        unsafe { JPH_TempAllocator_Destroy(self.0.as_ptr()) };
+/// A world's temp allocator, owned by the world.
+impl JoltObject for JPH_TempAllocator {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: the owner owns the allocator (trait contract); the system that used it is
+        // gone or never existed (field order in `PhysicsWorld`).
+        unsafe { JPH_TempAllocator_Destroy(ptr) };
     }
 }
 
-/// Owns a `JPH_JobSystem` and its worker threads.
-struct JobSystem(NonNull<JPH_JobSystem>);
-
-impl Drop for JobSystem {
-    fn drop(&mut self) {
-        // SAFETY: this value owns the job system, and no step is running (`step` borrows the
-        // world mutably). Destroying it joins the worker threads.
-        unsafe { JPH_JobSystem_Destroy(self.0.as_ptr()) };
+/// A world's job system and its worker threads, owned by the world.
+impl JoltObject for JPH_JobSystem {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: the owner owns the job system (trait contract), and no step is running
+        // (`step` borrows the world mutably). Destroying it joins the worker threads.
+        unsafe { JPH_JobSystem_Destroy(ptr) };
     }
 }
 
-/// Owns a `JPH_PhysicsSystem`, and through it its bodies, their shape references and the
-/// three layer tables passed to `JPH_PhysicsSystem_Create`.
-struct System(NonNull<JPH_PhysicsSystem>);
-
-impl Drop for System {
-    fn drop(&mut self) {
+/// A physics system, owned by its world. Destroying it also deletes its bodies with their
+/// shape references and the three layer objects passed to `JPH_PhysicsSystem_Create`
+/// (joltc's `JPH_PhysicsSystem_Destroy`).
+///
+/// Destroying takes the globals lock, so an `Owned<JPH_PhysicsSystem>` must never be dropped
+/// while that lock is held: the mutex is not reentrant.
+impl JoltObject for JPH_PhysicsSystem {
+    unsafe fn destroy(ptr: *mut Self) {
         let _globals = lock_joltc_globals();
-        // SAFETY: this value owns the system and the globals lock is held, so no other thread
-        // writes joltc's system map. Nothing borrows the system any more.
-        unsafe { JPH_PhysicsSystem_Destroy(self.0.as_ptr()) };
+        // SAFETY: the owner owns the system (trait contract) and the globals lock is held, so
+        // no other thread writes joltc's system map. Nothing borrows the system any more.
+        unsafe { JPH_PhysicsSystem_Destroy(ptr) };
     }
 }
 
@@ -202,10 +202,12 @@ impl WorldTag {
 /// until Jolt has rebuilt it during steps (Jolt docs, "Bodies"); an explicit broad-phase
 /// optimisation call comes with the scene-query API.
 pub struct PhysicsWorld {
-    // Field order is drop order: the system goes before the job system and allocator it used.
-    system: System,
-    job_system: JobSystem,
-    temp_allocator: TempAllocator,
+    // Field order is drop order. The system goes first, before the job system and allocator
+    // its steps used, and deletes the layer tables it owns. The interface and query pointers
+    // after them are borrowed from the system and have no destructor.
+    system: Owned<JPH_PhysicsSystem>,
+    job_system: Owned<JPH_JobSystem>,
+    temp_allocator: Owned<JPH_TempAllocator>,
     pub(crate) body_interface: NonNull<JPH_BodyInterface>,
     pub(crate) body_lock_interface: NonNull<JPH_BodyLockInterface>,
     pub(crate) narrow_phase_query: NonNull<JPH_NarrowPhaseQuery>,
@@ -225,6 +227,13 @@ unsafe impl Send for PhysicsWorld {}
 unsafe impl Sync for PhysicsWorld {}
 
 impl PhysicsWorld {
+    /// Largest time step [`step`](Self::step) accepts, in seconds, inclusive.
+    ///
+    /// A joltphysics guard against overflow-scale steps, which Jolt runs to NaN positions; not a
+    /// Jolt limit and not a stability guarantee. Jolt recommends steps of about 1/60 s, and
+    /// larger ones may tunnel or sag depending on the scene.
+    pub const MAX_DELTA_TIME: f32 = 1.0;
+
     /// Creates a world. Nothing is allocated when the settings are invalid.
     pub fn new(settings: WorldSettings) -> Result<Self, WorldError> {
         settings.validate()?;
@@ -232,10 +241,10 @@ impl PhysicsWorld {
             return Err(WorldError::InitFailed);
         }
 
-        // SAFETY: Jolt is initialised; the size is positive (`validate`).
+        // SAFETY: Jolt is initialised; the size is positive (`validate`). The handle takes over
+        // the returned allocator.
         let temp_allocator =
-            NonNull::new(unsafe { JPH_TempAllocator_Create(settings.temp_allocator_size) })
-                .map(TempAllocator)
+            unsafe { Owned::from_raw(JPH_TempAllocator_Create(settings.temp_allocator_size)) }
                 .ok_or(WorldError::AllocationFailed("temp allocator"))?;
 
         let config = JobSystemThreadPoolConfig {
@@ -246,9 +255,9 @@ impl PhysicsWorld {
             numThreads: settings.worker_threads as i32,
         };
         // SAFETY: Jolt is initialised; `config` is a live local. Zero job and barrier limits
-        // select Jolt's `cMaxPhysicsJobs` and `cMaxPhysicsBarriers`.
-        let job_system = NonNull::new(unsafe { JPH_JobSystemThreadPool_Create(&config) })
-            .map(JobSystem)
+        // select Jolt's `cMaxPhysicsJobs` and `cMaxPhysicsBarriers`. The handle takes over the
+        // returned job system.
+        let job_system = unsafe { Owned::from_raw(JPH_JobSystemThreadPool_Create(&config)) }
             .ok_or(WorldError::AllocationFailed("job system"))?;
 
         // SAFETY: Jolt is initialised and `validate` checked the layers.
@@ -267,29 +276,27 @@ impl PhysicsWorld {
         let system = {
             let _globals = lock_joltc_globals();
             // SAFETY: Jolt is initialised, the globals lock is held, and the three tables are
-            // live and consistent. On success the system owns the tables.
-            NonNull::new(unsafe { JPH_PhysicsSystem_Create(&system_settings) })
+            // live and consistent. On success the system owns the tables and the handle owns the
+            // system.
+            unsafe { Owned::from_raw(JPH_PhysicsSystem_Create(&system_settings)) }
         };
-        let system = match system {
-            Some(system) => {
-                tables.forget();
-                System(system)
-            }
-            None => return Err(WorldError::AllocationFailed("physics system")),
+        let Some(system) = system else {
+            return Err(WorldError::AllocationFailed("physics system"));
         };
+        tables.forget();
 
         let gravity = settings.gravity.to_jph();
         // SAFETY: `system` is live and `gravity` is a live local.
-        unsafe { JPH_PhysicsSystem_SetGravity(system.0.as_ptr(), &gravity) };
+        unsafe { JPH_PhysicsSystem_SetGravity(system.as_ptr(), &gravity) };
 
         // SAFETY: `system` is live. The interfaces and the narrow-phase query live inside the
         // Jolt system and stay valid as long as it does; the world stores them next to the
         // system that owns them.
         let (body_interface, body_lock_interface, narrow_phase_query) = unsafe {
             (
-                JPH_PhysicsSystem_GetBodyInterface(system.0.as_ptr()),
-                JPH_PhysicsSystem_GetBodyLockInterface(system.0.as_ptr()),
-                JPH_PhysicsSystem_GetNarrowPhaseQuery(system.0.as_ptr()),
+                JPH_PhysicsSystem_GetBodyInterface(system.as_ptr()),
+                JPH_PhysicsSystem_GetBodyLockInterface(system.as_ptr()),
+                JPH_PhysicsSystem_GetNarrowPhaseQuery(system.as_ptr()),
             )
         };
         let body_interface =
@@ -316,7 +323,7 @@ impl PhysicsWorld {
         let mut gravity = Vec3::ZERO.to_jph();
         // SAFETY: the system is live; reading gravity does not change it, and writes need
         // `&mut self`. `gravity` is a live local.
-        unsafe { JPH_PhysicsSystem_GetGravity(self.system.0.as_ptr(), &mut gravity) };
+        unsafe { JPH_PhysicsSystem_GetGravity(self.system.as_ptr(), &mut gravity) };
         Vec3::from_jph(gravity)
     }
 
@@ -327,35 +334,36 @@ impl PhysicsWorld {
         }
         let gravity = gravity.to_jph();
         // SAFETY: the system is live and borrowed mutably; `gravity` is a live local.
-        unsafe { JPH_PhysicsSystem_SetGravity(self.system.0.as_ptr(), &gravity) };
+        unsafe { JPH_PhysicsSystem_SetGravity(self.system.as_ptr(), &gravity) };
         Ok(())
     }
 
     /// Number of bodies in the world.
     pub fn body_count(&self) -> u32 {
         // SAFETY: the system is live; Jolt counts under its own body mutex.
-        unsafe { JPH_PhysicsSystem_GetNumBodies(self.system.0.as_ptr()) }
+        unsafe { JPH_PhysicsSystem_GetNumBodies(self.system.as_ptr()) }
     }
 
     /// Advances the world by `delta_time` seconds in one collision step.
     ///
-    /// `delta_time` must be finite and positive, otherwise nothing happens and
+    /// `delta_time` must be finite, positive and at most
+    /// [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), otherwise nothing happens and
     /// [`StepError::InvalidDeltaTime`] is returned. Every other call advances the world and
     /// returns a [`StepReport`]; check [`StepReport::is_complete`] to learn whether Jolt
     /// dropped work because a fixed-size buffer was full.
     pub fn step(&mut self, delta_time: f32) -> Result<StepReport, StepError> {
-        if !(delta_time.is_finite() && delta_time > 0.0) {
+        if !(is_finite_positive(delta_time) && delta_time <= Self::MAX_DELTA_TIME) {
             return Err(StepError::InvalidDeltaTime);
         }
         // SAFETY: the system, temp allocator and job system are live and owned by this world;
         // `&mut self` guarantees no other call uses them or touches a body during the update.
         let errors = unsafe {
             JPH_PhysicsSystem_Update2(
-                self.system.0.as_ptr(),
+                self.system.as_ptr(),
                 delta_time,
                 1,
-                self.temp_allocator.0.as_ptr(),
-                self.job_system.0.as_ptr(),
+                self.temp_allocator.as_ptr(),
+                self.job_system.as_ptr(),
             )
         };
         Ok(StepReport {

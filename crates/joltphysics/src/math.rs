@@ -9,6 +9,16 @@ use joltphysics_sys::{JPH_Quat, JPH_RVec3, JPH_Vec3};
 /// Scalar type of world positions: `f64` with the `double-precision` feature, `f32` otherwise.
 pub use joltphysics_sys::Real;
 
+/// Whether `value` is finite and positive.
+pub(crate) fn is_finite_positive(value: f32) -> bool {
+    value.is_finite() && value > 0.0
+}
+
+/// Whether `value` is finite and not negative.
+pub(crate) fn is_finite_non_negative(value: f32) -> bool {
+    value.is_finite() && value >= 0.0
+}
+
 /// A 3D vector of `f32`, used for directions, velocities, forces and extents.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec3 {

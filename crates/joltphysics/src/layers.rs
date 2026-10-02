@@ -5,10 +5,9 @@
 //! object layers are enabled as a pair. See Jolt's documentation on collision detection:
 //! <https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html#collision-detection>.
 
-use std::ptr::NonNull;
-
 use joltphysics_sys::*;
 
+use crate::owned::{JoltObject, Owned};
 use crate::WorldError;
 
 /// The object layer of a body: which other bodies it can collide with.
@@ -141,27 +140,34 @@ impl CollisionLayers {
         let object_layers = self.object_layer_count();
         let broad_phase_layers = u32::from(self.broad_phase_layer_count);
 
-        // SAFETY: Jolt is initialised (caller contract); the table takes only a count.
+        // SAFETY: Jolt is initialised (caller contract); the table takes only a count. The
+        // handle takes over the returned object.
         let pair_filter =
-            PairFilter::new(unsafe { JPH_ObjectLayerPairFilterTable_Create(object_layers) })?;
+            unsafe { Owned::from_raw(JPH_ObjectLayerPairFilterTable_Create(object_layers)) }
+                .ok_or(WorldError::AllocationFailed("object layer pair filter"))?;
         for &(a, b) in &self.pairs {
             // SAFETY: `pair_filter` is live, and `validate` checked both layers are below the
             // count the table was created with.
             unsafe {
-                JPH_ObjectLayerPairFilterTable_EnableCollision(pair_filter.0.as_ptr(), a.0, b.0)
+                JPH_ObjectLayerPairFilterTable_EnableCollision(pair_filter.as_ptr(), a.0, b.0)
             };
         }
 
-        // SAFETY: Jolt is initialised (caller contract); the table takes only counts.
-        let broad_phase = BroadPhaseInterface::new(unsafe {
-            JPH_BroadPhaseLayerInterfaceTable_Create(object_layers, broad_phase_layers)
-        })?;
+        // SAFETY: Jolt is initialised (caller contract); the table takes only counts. The handle
+        // takes over the returned object.
+        let broad_phase = unsafe {
+            Owned::from_raw(JPH_BroadPhaseLayerInterfaceTable_Create(
+                object_layers,
+                broad_phase_layers,
+            ))
+        }
+        .ok_or(WorldError::AllocationFailed("broad-phase layer interface"))?;
         for (object_layer, broad_phase_layer) in (0..).zip(&self.broad_phase_of) {
             // SAFETY: `broad_phase` is live; both indices are within the counts it was created
             // with (`validate`).
             unsafe {
                 JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(
-                    broad_phase.0.as_ptr(),
+                    broad_phase.as_ptr(),
                     object_layer,
                     broad_phase_layer.0,
                 )
@@ -170,15 +176,18 @@ impl CollisionLayers {
 
         // SAFETY: both tables are live and fully mapped with the counts passed here. Jolt reads
         // them in the constructor and keeps no reference to either
-        // (`ObjectVsBroadPhaseLayerFilterTable.h`).
-        let object_vs_broad_phase = ObjectVsBroadPhaseFilter::new(unsafe {
-            JPH_ObjectVsBroadPhaseLayerFilterTable_Create(
-                broad_phase.0.as_ptr(),
+        // (`ObjectVsBroadPhaseLayerFilterTable.h`). The handle takes over the returned object.
+        let object_vs_broad_phase = unsafe {
+            Owned::from_raw(JPH_ObjectVsBroadPhaseLayerFilterTable_Create(
+                broad_phase.as_ptr(),
                 broad_phase_layers,
-                pair_filter.0.as_ptr(),
+                pair_filter.as_ptr(),
                 object_layers,
-            )
-        })?;
+            ))
+        }
+        .ok_or(WorldError::AllocationFailed(
+            "object vs broad-phase layer filter",
+        ))?;
 
         Ok(LayerTables {
             broad_phase,
@@ -209,9 +218,9 @@ impl Default for CollisionLayers {
 /// `JPH_PhysicsSystem_Destroy` deletes them, so the caller calls
 /// [`forget`](Self::forget).
 pub(crate) struct LayerTables {
-    broad_phase: BroadPhaseInterface,
-    pair_filter: PairFilter,
-    object_vs_broad_phase: ObjectVsBroadPhaseFilter,
+    broad_phase: Owned<JPH_BroadPhaseLayerInterface>,
+    pair_filter: Owned<JPH_ObjectLayerPairFilter>,
+    object_vs_broad_phase: Owned<JPH_ObjectVsBroadPhaseLayerFilter>,
 }
 
 impl LayerTables {
@@ -225,71 +234,52 @@ impl LayerTables {
         *mut JPH_ObjectVsBroadPhaseLayerFilter,
     ) {
         (
-            self.broad_phase.0.as_ptr(),
-            self.pair_filter.0.as_ptr(),
-            self.object_vs_broad_phase.0.as_ptr(),
+            self.broad_phase.as_ptr(),
+            self.pair_filter.as_ptr(),
+            self.object_vs_broad_phase.as_ptr(),
         )
     }
 
-    /// Gives up ownership without destroying anything, once a physics system owns the tables.
+    /// Gives up ownership without destroying anything. Call only after
+    /// `JPH_PhysicsSystem_Create` returned a system built from these tables;
+    /// `JPH_PhysicsSystem_Destroy` deletes them later.
     pub(crate) fn forget(self) {
-        std::mem::forget(self);
+        let Self {
+            broad_phase,
+            pair_filter,
+            object_vs_broad_phase,
+        } = self;
+        // The system already holds these pointers.
+        broad_phase.into_raw();
+        pair_filter.into_raw();
+        object_vs_broad_phase.into_raw();
     }
 }
 
-/// Owns a `JPH_ObjectLayerPairFilter`.
-struct PairFilter(NonNull<JPH_ObjectLayerPairFilter>);
-
-impl PairFilter {
-    fn new(ptr: *mut JPH_ObjectLayerPairFilter) -> Result<Self, WorldError> {
-        NonNull::new(ptr)
-            .map(Self)
-            .ok_or(WorldError::AllocationFailed("object layer pair filter"))
+/// A layer pair table, owned by `LayerTables` until a physics system takes it over.
+impl JoltObject for JPH_ObjectLayerPairFilter {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: the owner owns the filter (trait contract) and no physics system references
+        // it: a system that takes it over gets it through `LayerTables::forget`, which never
+        // destroys.
+        unsafe { JPH_ObjectLayerPairFilter_Destroy(ptr) };
     }
 }
 
-impl Drop for PairFilter {
-    fn drop(&mut self) {
-        // SAFETY: this value owns the filter, which no physics system references.
-        unsafe { JPH_ObjectLayerPairFilter_Destroy(self.0.as_ptr()) };
+/// A broad-phase layer table, owned by `LayerTables` until a physics system takes it over.
+impl JoltObject for JPH_BroadPhaseLayerInterface {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: as for `JPH_ObjectLayerPairFilter`.
+        unsafe { JPH_BroadPhaseLayerInterface_Destroy(ptr) };
     }
 }
 
-/// Owns a `JPH_BroadPhaseLayerInterface`.
-struct BroadPhaseInterface(NonNull<JPH_BroadPhaseLayerInterface>);
-
-impl BroadPhaseInterface {
-    fn new(ptr: *mut JPH_BroadPhaseLayerInterface) -> Result<Self, WorldError> {
-        NonNull::new(ptr)
-            .map(Self)
-            .ok_or(WorldError::AllocationFailed("broad-phase layer interface"))
-    }
-}
-
-impl Drop for BroadPhaseInterface {
-    fn drop(&mut self) {
-        // SAFETY: this value owns the interface, which no physics system references.
-        unsafe { JPH_BroadPhaseLayerInterface_Destroy(self.0.as_ptr()) };
-    }
-}
-
-/// Owns a `JPH_ObjectVsBroadPhaseLayerFilter`.
-struct ObjectVsBroadPhaseFilter(NonNull<JPH_ObjectVsBroadPhaseLayerFilter>);
-
-impl ObjectVsBroadPhaseFilter {
-    fn new(ptr: *mut JPH_ObjectVsBroadPhaseLayerFilter) -> Result<Self, WorldError> {
-        NonNull::new(ptr)
-            .map(Self)
-            .ok_or(WorldError::AllocationFailed(
-                "object vs broad-phase layer filter",
-            ))
-    }
-}
-
-impl Drop for ObjectVsBroadPhaseFilter {
-    fn drop(&mut self) {
-        // SAFETY: this value owns the filter, which no physics system references.
-        unsafe { JPH_ObjectVsBroadPhaseLayerFilter_Destroy(self.0.as_ptr()) };
+/// An object vs broad-phase layer table, owned by `LayerTables` until a physics system takes
+/// it over.
+impl JoltObject for JPH_ObjectVsBroadPhaseLayerFilter {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: as for `JPH_ObjectLayerPairFilter`.
+        unsafe { JPH_ObjectVsBroadPhaseLayerFilter_Destroy(ptr) };
     }
 }
 
