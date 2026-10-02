@@ -80,39 +80,20 @@ impl fmt::Display for QueryError {
 
 impl std::error::Error for QueryError {}
 
-/// Why [`PhysicsWorld::step`](crate::PhysicsWorld::step) reported a problem.
+/// Why [`PhysicsWorld::step`](crate::PhysicsWorld::step) rejected the call. The world did not
+/// advance. A step that ran but dropped work is reported in its
+/// [`StepReport`](crate::StepReport) instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StepError {
-    /// The time step is not finite or not positive. The world did not advance.
+    /// The time step is not finite or not positive.
     InvalidDeltaTime,
-    /// The step ran, but Jolt dropped work because a fixed-size buffer was full; the flags say
-    /// which. The world has advanced. Raise the matching [`WorldSettings`](crate::WorldSettings)
-    /// limit if this happens.
-    CacheFull {
-        /// The contact manifold cache was full (`max_body_pairs` related).
-        manifold_cache: bool,
-        /// The body pair cache was full (`max_body_pairs`).
-        body_pair_cache: bool,
-        /// The contact constraint buffer was full (`max_contact_constraints`).
-        contact_constraints: bool,
-    },
 }
 
 impl fmt::Display for StepError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidDeltaTime => f.write_str("the time step must be finite and positive"),
-            Self::CacheFull {
-                manifold_cache,
-                body_pair_cache,
-                contact_constraints,
-            } => write!(
-                f,
-                "the step dropped work: manifold cache full: {manifold_cache}, \
-                 body pair cache full: {body_pair_cache}, \
-                 contact constraints full: {contact_constraints}"
-            ),
         }
     }
 }

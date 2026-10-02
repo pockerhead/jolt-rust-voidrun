@@ -23,7 +23,7 @@ fn world_and_shape_are_send_and_sync() {
 fn default_world_steps() {
     let mut world = PhysicsWorld::new(WorldSettings::default()).unwrap();
     for _ in 0..10 {
-        assert_eq!(world.step(1.0 / 60.0), Ok(()));
+        assert!(world.step(1.0 / 60.0).unwrap().is_complete());
     }
     assert_eq!(world.body_count(), 0);
 }
@@ -63,7 +63,7 @@ fn gravity_round_trips_including_zero() {
     for gravity in [Vec3::ZERO, Vec3::new(0.1, -9.81, 3.5)] {
         let mut world = PhysicsWorld::new(WorldSettings::default().gravity(gravity)).unwrap();
         assert_eq!(bits(world.gravity()), bits(gravity));
-        world.step(1.0 / 60.0).unwrap();
+        assert!(world.step(1.0 / 60.0).unwrap().is_complete());
 
         let other = Vec3::new(-1.25, 0.0, 7.0);
         world.set_gravity(other).unwrap();
@@ -76,10 +76,61 @@ fn gravity_round_trips_including_zero() {
 
 #[test]
 fn step_rejects_bad_delta_time() {
-    let mut world = PhysicsWorld::new(WorldSettings::default()).unwrap();
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let cube = add_cube(&mut world, RVec3::new(0.0, 2.0, 0.0));
+    let mut before = Vec::new();
+    record_body(&world, cube, &mut before);
     for dt in [0.0, -0.0, -1.0 / 60.0, f32::NAN, f32::INFINITY] {
         assert_eq!(world.step(dt), Err(StepError::InvalidDeltaTime));
+        let mut after = Vec::new();
+        record_body(&world, cube, &mut after);
+        assert_eq!(after, before, "the world advanced with dt = {dt}");
     }
+}
+
+/// A floor with a row of resting cubes, each touching only the floor, and one cube falling
+/// from above. Returns the falling cube.
+fn crowded_floor(world: &mut PhysicsWorld) -> BodyId {
+    add_floor(world);
+    for i in 0..16 {
+        add_cube(world, RVec3::new(i as Real * 2.0 - 15.0, 0.5, 0.0));
+    }
+    add_cube(world, RVec3::new(0.0, 10.0, 5.0))
+}
+
+/// Steps until a report is incomplete and returns it, checking that the falling cube moved
+/// during that incomplete step.
+fn step_until_incomplete(world: &mut PhysicsWorld, falling: BodyId) -> StepReport {
+    for _ in 0..30 {
+        let before = world.body(falling).unwrap().position().y;
+        let report = world.step(DT).unwrap();
+        if !report.is_complete() {
+            assert!(world.body(falling).unwrap().position().y < before);
+            return report;
+        }
+    }
+    panic!("no step overflowed a buffer");
+}
+
+#[test]
+fn full_contact_constraint_buffer_is_reported_and_the_world_advances() {
+    let mut world = PhysicsWorld::new(WorldSettings::default().max_contact_constraints(1)).unwrap();
+    let falling = crowded_floor(&mut world);
+    let report = step_until_incomplete(&mut world, falling);
+    assert!(report.contact_constraints_full, "{report:?}");
+}
+
+#[test]
+fn full_body_pair_cache_is_reported_and_the_world_advances() {
+    let mut world = PhysicsWorld::new(
+        WorldSettings::default()
+            .max_body_pairs(1)
+            .max_contact_constraints(1),
+    )
+    .unwrap();
+    let falling = crowded_floor(&mut world);
+    let report = step_until_incomplete(&mut world, falling);
+    assert!(report.body_pair_cache_full, "{report:?}");
 }
 
 #[test]
@@ -90,7 +141,7 @@ fn worlds_are_created_and_dropped_from_many_threads() {
                 for _ in 0..25 {
                     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
                     let id = add_cube(&mut world, RVec3::new(0.0, 2.0, 0.0));
-                    world.step(DT).unwrap();
+                    assert!(world.step(DT).unwrap().is_complete());
                     assert!(world.body(id).unwrap().position().y < 2.0);
                 }
             });

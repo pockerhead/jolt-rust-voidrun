@@ -38,7 +38,7 @@ pub fn add_cube(world: &mut PhysicsWorld, position: RVec3) -> BodyId {
 
 pub fn step(world: &mut PhysicsWorld, ticks: usize) {
     for _ in 0..ticks {
-        world.step(DT).unwrap();
+        assert!(world.step(DT).unwrap().is_complete());
     }
 }
 
@@ -88,7 +88,7 @@ pub fn record_body(world: &PhysicsWorld, id: BodyId, digest: &mut Vec<u8>) {
 pub fn run_digest(world: &mut PhysicsWorld, ids: &[BodyId], ticks: usize) -> Vec<u8> {
     let mut digest = Vec::new();
     for _ in 0..ticks {
-        world.step(DT).unwrap();
+        assert!(world.step(DT).unwrap().is_complete());
         for &id in ids {
             record_body(world, id, &mut digest);
         }

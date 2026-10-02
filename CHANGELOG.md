@@ -21,3 +21,8 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - `joltphysics` is a new safe API on the joltc raw layer: a physics world with collision layers, box and
   sphere shapes and rigid bodies, with a headless `hello_world` example.
 - CI on GitHub Actions (Windows MSVC: build, test, clippy, docs, formatting) with a cached native build.
+- `PhysicsWorld::step` returns `Result<StepReport, StepError>`. `Err` now means the step was rejected and
+  the world did not advance (`StepError::InvalidDeltaTime`); a step that ran but dropped contacts because
+  a fixed-size Jolt buffer was full returns `Ok` with the matching `StepReport` flag set
+  (`StepReport::is_complete` is false). `StepError::CacheFull` is gone. The rule for the safe API: `Err`
+  means nothing happened; anything that happened but was degraded is reported in the `Ok` value.
