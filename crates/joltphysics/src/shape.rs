@@ -1,11 +1,12 @@
 //! Collision shapes.
 
-use std::ptr::{null, NonNull};
+use std::fmt;
+use std::ptr::{null, null_mut, NonNull};
 
 use joltphysics_sys::*;
 
 use crate::world::ensure_initialized;
-use crate::{ShapeError, Vec3};
+use crate::{Quat, ShapeError, Vec3};
 
 /// A collision shape that bodies are created from.
 ///
@@ -41,6 +42,44 @@ impl SubShapeId {
     pub fn to_raw(self) -> u32 {
         self.0
     }
+}
+
+/// One child of a compound shape, for [`Shape::new_compound`].
+///
+/// The pose is relative to the compound's origin (Jolt `CompoundShapeSettings::AddShape`).
+/// `user_data` is free for the caller, for example a collision group. It belongs to the
+/// compound child, not to the leaf shape (Jolt `CompoundShape::SubShape::mUserData`), so one
+/// leaf [`Shape`] may serve several children with different values.
+#[derive(Clone, Copy)]
+pub struct CompoundChild<'a> {
+    /// The child's shape.
+    pub shape: &'a Shape,
+    /// Position of the child's origin in the compound, metres; finite.
+    pub position: Vec3,
+    /// Rotation of the child in the compound; a finite unit quaternion.
+    pub rotation: Quat,
+    /// The caller's value for this child, readable from hits.
+    pub user_data: u32,
+}
+
+impl fmt::Debug for CompoundChild<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompoundChild")
+            .field("position", &self.position)
+            .field("rotation", &self.rotation)
+            .field("user_data", &self.user_data)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The compound child a [`SubShapeId`] leads to, from [`Shape::compound_sub_shape`] or
+/// [`PhysicsWorld::compound_sub_shape`](crate::PhysicsWorld::compound_sub_shape).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CompoundSubShape {
+    /// Position of the child in the `children` slice given to [`Shape::new_compound`].
+    pub index: u32,
+    /// The child's [`CompoundChild::user_data`].
+    pub user_data: u32,
 }
 
 /// Owns a `JPH_ShapeSettings`: the one reference every `JPH_*ShapeSettings_Create` returns
@@ -472,6 +511,89 @@ impl Shape {
         Some(Vec3::from_jph(position))
     }
 
+    /// A compound of `children`, each with its own pose and user data.
+    ///
+    /// The children may be dropped afterwards: the compound holds its own references. Child
+    /// order is part of the shape and so of a deterministic state. Jolt moves the compound's
+    /// centre of mass to the children's mass-weighted centre, so body positions of compounds
+    /// read back through arithmetic.
+    ///
+    /// Two or more children make a Jolt `StaticCompoundShape`. A single child makes a
+    /// `MutableCompoundShape`, because Jolt's static compound replaces a lone child by the
+    /// child itself (or a `RotatedTranslatedShape`) and drops its user data
+    /// (`StaticCompoundShape.cpp`); joltphysics never changes it after construction.
+    pub fn new_compound(children: &[CompoundChild<'_>]) -> Result<Self, ShapeError> {
+        let invalid = |what| Err(ShapeError::InvalidSettings(what));
+        if children.is_empty() {
+            return invalid("a compound needs at least one child");
+        }
+        if u32::try_from(children.len()).is_err() {
+            return invalid("a compound has at most u32::MAX children");
+        }
+        for child in children {
+            if !child.position.is_finite() {
+                return invalid("compound child position must be finite");
+            }
+            if !(child.rotation.is_finite() && child.rotation.is_normalized()) {
+                return invalid("compound child rotation must be a finite unit quaternion");
+            }
+        }
+        if !ensure_initialized() {
+            return Err(ShapeError::InitFailed);
+        }
+        let single = children.len() == 1;
+        // SAFETY: Jolt is initialised. The returned settings hold one reference, which the
+        // guard takes over.
+        let raw: *mut JPH_ShapeSettings = unsafe {
+            if single {
+                JPH_MutableCompoundShapeSettings_Create().cast()
+            } else {
+                JPH_StaticCompoundShapeSettings_Create().cast()
+            }
+        };
+        let settings = ShapeSettings::from_raw(raw)?;
+        for child in children {
+            let position = child.position.to_jph();
+            let rotation = child.rotation.to_jph();
+            // SAFETY: the settings are live and owned by the guard; both compound settings
+            // types derive from `CompoundShapeSettings` with single inheritance. The child shape
+            // is live, and the settings store their own `RefConst` to it. `position` and
+            // `rotation` are live locals.
+            unsafe {
+                JPH_CompoundShapeSettings_AddShape2(
+                    settings.as_ptr(),
+                    &position,
+                    &rotation,
+                    child.shape.as_ptr(),
+                    child.user_data,
+                );
+            }
+        }
+        // SAFETY: the settings are live, owned by the guard and of the type each call expects.
+        // Both calls run Jolt's `Create` and return a shape holding one reference, which `Self`
+        // takes over; null means Jolt refused the settings (for example a hierarchy that needs
+        // more than 32 sub-shape id bits).
+        let ptr: *mut JPH_Shape = unsafe {
+            if single {
+                JPH_MutableCompoundShape_Create(settings.as_ptr()).cast()
+            } else {
+                JPH_StaticCompoundShape_Create(settings.as_ptr()).cast()
+            }
+        };
+        Self::from_created(ptr)
+    }
+
+    /// The child of this compound that `id` leads to.
+    ///
+    /// `None` for shapes that are not compounds. Only the root level is decoded, so `id` may be
+    /// a hit's full path or a partial path below this shape. An id that came from another
+    /// shape gives `None` or an arbitrary valid child: the bits cannot prove where they came
+    /// from.
+    pub fn compound_sub_shape(&self, id: SubShapeId) -> Option<CompoundSubShape> {
+        // SAFETY: `self` keeps the shape alive for the call.
+        unsafe { compound_sub_shape_of(self.ptr, id) }
+    }
+
     fn from_raw(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
         NonNull::new(ptr)
             .map(|ptr| Self { ptr })
@@ -495,6 +617,57 @@ impl Shape {
         // SAFETY: the shape is live for the call; the getter only reads it.
         unsafe { JPH_Shape_GetSubType(self.as_ptr()) }
     }
+}
+
+/// The child of the compound `root` that `id` leads to; `None` unless `root` is a compound and
+/// `id` names one of its children.
+///
+/// # Safety
+/// `root` points to a live shape for the duration of the call.
+pub(crate) unsafe fn compound_sub_shape_of(
+    root: NonNull<JPH_Shape>,
+    id: SubShapeId,
+) -> Option<CompoundSubShape> {
+    let root = root.as_ptr();
+    // SAFETY: `root` is live (caller contract); the getter only reads it.
+    let sub_type = unsafe { JPH_Shape_GetSubType(root) };
+    if sub_type != JPH_ShapeSubType_StaticCompound && sub_type != JPH_ShapeSubType_MutableCompound {
+        return None;
+    }
+    let compound: *const JPH_CompoundShape = root.cast();
+    // SAFETY: `root` is live and a compound (checked above); the getter only reads it.
+    let count = unsafe { JPH_CompoundShape_GetNumSubShapes(compound) };
+    if count == 0 {
+        return None;
+    }
+    // Jolt `CompoundShape::GetSubShapeIDBits`: enough bits for the indices `0..count`.
+    let bits = 32 - (count - 1).leading_zeros();
+    let mask = ((1_u64 << bits) - 1) as u32;
+    // Rejecting out-of-range indices here keeps Jolt's index assertion unreachable.
+    if id.to_raw() & mask >= count {
+        return None;
+    }
+    let mut remainder: JPH_SubShapeID = 0;
+    // SAFETY: as above; `remainder` is a live local and the index is in range.
+    let index =
+        unsafe { JPH_CompoundShape_GetSubShapeIndexFromID(compound, id.to_raw(), &mut remainder) };
+    // Jolt indexes its child array without a check in `GetSubShape`.
+    if index >= count {
+        return None;
+    }
+    let mut user_data = 0;
+    // SAFETY: as above, `index < count`, and joltc writes only the outputs that are not null.
+    unsafe {
+        JPH_CompoundShape_GetSubShape(
+            compound,
+            index,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut user_data,
+        );
+    }
+    Some(CompoundSubShape { index, user_data })
 }
 
 impl Drop for Shape {
@@ -601,5 +774,54 @@ mod tests {
             Shape::new_sphere(1.0).unwrap().sub_type(),
             JPH_ShapeSubType_Sphere
         );
+    }
+
+    fn unit_box() -> Shape {
+        Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap()
+    }
+
+    fn child(shape: &Shape, x: f32, user_data: u32) -> CompoundChild<'_> {
+        CompoundChild {
+            shape,
+            position: Vec3::new(x, 0.0, 0.0),
+            rotation: Quat::IDENTITY,
+            user_data,
+        }
+    }
+
+    #[test]
+    fn compound_subtypes_depend_on_the_child_count() {
+        let unit_box = unit_box();
+        let single = Shape::new_compound(&[child(&unit_box, 1.0, 7)]).unwrap();
+        assert_eq!(single.sub_type(), JPH_ShapeSubType_MutableCompound);
+        let pair =
+            Shape::new_compound(&[child(&unit_box, 0.0, 1), child(&unit_box, 2.0, 2)]).unwrap();
+        assert_eq!(pair.sub_type(), JPH_ShapeSubType_StaticCompound);
+    }
+
+    #[test]
+    fn out_of_range_sub_shape_ids_are_rejected() {
+        let unit_box = unit_box();
+        let children = [
+            child(&unit_box, 0.0, 10),
+            child(&unit_box, 2.0, 11),
+            child(&unit_box, 4.0, 12),
+        ];
+        let compound = Shape::new_compound(&children).unwrap();
+        // Three children need two bits; the remaining bits are the path below the child.
+        for index in 0..3 {
+            let id = SubShapeId::new(0xffff_fffc | index);
+            assert_eq!(
+                compound.compound_sub_shape(id),
+                Some(CompoundSubShape {
+                    index,
+                    user_data: 10 + index
+                })
+            );
+        }
+        for raw in [3, 7, u32::MAX] {
+            assert_eq!(compound.compound_sub_shape(SubShapeId::new(raw)), None);
+        }
+        assert_eq!(unit_box.compound_sub_shape(SubShapeId::new(0)), None);
     }
 }

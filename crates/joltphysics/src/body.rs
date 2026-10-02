@@ -528,7 +528,7 @@ impl PhysicsWorld {
     }
 
     /// `Ok` if `id` names a body that is in this world now.
-    fn check(&self, id: BodyId) -> Result<(), BodyError> {
+    pub(crate) fn check(&self, id: BodyId) -> Result<(), BodyError> {
         if id.world != self.tag {
             return Err(BodyError::WrongWorld(id));
         }

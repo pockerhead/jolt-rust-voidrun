@@ -99,3 +99,9 @@ pub fn run_digest(world: &mut PhysicsWorld, ids: &[BodyId], ticks: usize) -> Vec
 pub fn length(v: Vec3) -> f32 {
     (v.x * v.x + v.y * v.y + v.z * v.z).sqrt()
 }
+
+/// The rotation by `angle` radians about the unit vector `axis`.
+pub fn quat_about(axis: Vec3, angle: f32) -> Quat {
+    let (sin, cos) = (angle / 2.0).sin_cos();
+    Quat::from_xyzw(axis.x * sin, axis.y * sin, axis.z * sin, cos)
+}

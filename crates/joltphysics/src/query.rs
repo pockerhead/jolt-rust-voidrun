@@ -3,11 +3,14 @@
 //! Queries take `&PhysicsWorld`, see bodies as soon as they are created (no step is needed),
 //! and may run on many threads at once while nobody steps the world.
 
-use std::ptr::null;
+use std::ptr::{null, NonNull};
 
 use joltphysics_sys::*;
 
-use crate::{BodyId, PhysicsWorld, QueryError, RVec3, Real, SubShapeId, Vec3};
+use crate::shape::compound_sub_shape_of;
+use crate::{
+    BodyError, BodyId, CompoundSubShape, PhysicsWorld, QueryError, RVec3, Real, SubShapeId, Vec3,
+};
 
 /// A ray from `origin` along `direction`. The direction's length is the ray's length; hits
 /// report the fraction along it, in `[0, 1]`.
@@ -41,7 +44,8 @@ impl RayCast {
 /// There is no surface normal yet. Convex shapes are solid: a ray that starts inside one hits
 /// it at fraction 0. Triangle back faces are hit, so a heightfield is hit from below too, as
 /// Jolt documents for this query (`NarrowPhaseQuery.h`). No filters apply: every body in every
-/// layer is considered.
+/// layer is considered. To read the user data of the compound child that was hit, pass `body`
+/// and `sub_shape_id` to [`PhysicsWorld::compound_sub_shape`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct RayHit {
@@ -94,5 +98,29 @@ impl PhysicsWorld {
             fraction: hit.fraction,
             sub_shape_id: SubShapeId::new(hit.subShapeID2),
         }))
+    }
+
+    /// The compound child of `body`'s shape that `id` leads to, as
+    /// [`Shape::compound_sub_shape`](crate::Shape::compound_sub_shape) does for the body's
+    /// shape: `Ok(None)` when the body's shape is not a compound or `id` names none of its
+    /// children.
+    pub fn compound_sub_shape(
+        &self,
+        body: BodyId,
+        id: SubShapeId,
+    ) -> Result<Option<CompoundSubShape>, BodyError> {
+        self.check(body)?;
+        // SAFETY: the body interface belongs to this live world. joltc returns the pointer
+        // after releasing the temporary `RefConst<Shape>` it got from `BodyInterface::GetShape`,
+        // so only the body's own shape reference keeps the shape alive. The body cannot be
+        // removed (that needs `&mut self`) and its shape cannot be replaced while `&self` is
+        // borrowed. Adding a shape setter that works through `&self` requires revisiting this.
+        let shape =
+            unsafe { JPH_BodyInterface_GetShape(self.body_interface.as_ptr(), body.to_raw()) };
+        let Some(shape) = NonNull::new(shape.cast_mut()) else {
+            return Ok(None);
+        };
+        // SAFETY: `shape` stays alive for the call, as argued above.
+        Ok(unsafe { compound_sub_shape_of(shape, id) })
     }
 }

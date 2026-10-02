@@ -311,3 +311,240 @@ fn height_field_with_custom_active_edge_threshold_builds() {
         "the ball stays above the surface: {position:?}"
     );
 }
+
+const X_AXIS: Vec3 = Vec3::new(1.0, 0.0, 0.0);
+const Z_AXIS: Vec3 = Vec3::new(0.0, 0.0, 1.0);
+
+fn child(shape: &Shape, position: Vec3, rotation: Quat, user_data: u32) -> CompoundChild<'_> {
+    CompoundChild {
+        shape,
+        position,
+        rotation,
+        user_data,
+    }
+}
+
+/// The closest hit of a downward ray from `y = 20` at `(x, z)` and the world height it hits.
+fn hit_below(world: &PhysicsWorld, x: Real, z: Real) -> (RayHit, Real) {
+    let ray = down_from(x, 20.0, z, 40.0);
+    let hit = world.cast_ray(ray).unwrap().expect("something is hit");
+    (hit, ray.point_at(hit.fraction).y)
+}
+
+#[test]
+fn compound_children_report_their_user_data() {
+    let block = Shape::new_box(Vec3::new(1.0, 0.5, 1.0)).unwrap();
+    let pillar = Shape::new_cylinder(1.0, 0.5).unwrap();
+    let compound = Shape::new_compound(&[
+        child(&block, Vec3::new(-3.0, 0.0, 0.0), Quat::IDENTITY, 2),
+        child(
+            &pillar,
+            Vec3::new(3.0, 0.0, 0.0),
+            quat_about(X_AXIS, 30.0_f32.to_radians()),
+            3,
+        ),
+    ])
+    .unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    let body = add_static(&mut world, &compound, RVec3::new(10.0, 1.0, -4.0));
+
+    let (hit, y) = hit_below(&world, 7.0, -4.0);
+    assert_eq!(hit.body, body);
+    assert_eq!(
+        world.compound_sub_shape(hit.body, hit.sub_shape_id),
+        Ok(Some(CompoundSubShape {
+            index: 0,
+            user_data: 2
+        }))
+    );
+    assert!((y - 1.5).abs() <= 1.0e-5, "box top at {y}");
+
+    let (hit, y) = hit_below(&world, 13.0, -4.0);
+    assert_eq!(hit.body, body);
+    assert_eq!(
+        world.compound_sub_shape(hit.body, hit.sub_shape_id),
+        Ok(Some(CompoundSubShape {
+            index: 1,
+            user_data: 3
+        }))
+    );
+    // The tilted cylinder's highest rim point is at 1 + cos 30 + 0.5 sin 30 = 2.116.
+    assert!(y > 1.0 && y < 2.2, "cylinder hit at {y}");
+}
+
+#[test]
+fn compound_child_order_is_insertion_order() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let user_data = [14, 10, 13, 11, 12];
+    let children: Vec<_> = user_data
+        .iter()
+        .enumerate()
+        .map(|(i, &value)| {
+            child(
+                &unit_box,
+                Vec3::new(4.0 * i as f32, 0.0, 0.0),
+                Quat::IDENTITY,
+                value,
+            )
+        })
+        .collect();
+    let compound = Shape::new_compound(&children).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &compound, RVec3::new(0.0, 0.0, 0.0));
+    for (i, &value) in user_data.iter().enumerate() {
+        let (hit, _) = hit_below(&world, 4.0 * i as Real, 0.0);
+        assert_eq!(
+            world.compound_sub_shape(hit.body, hit.sub_shape_id),
+            Ok(Some(CompoundSubShape {
+                index: i as u32,
+                user_data: value
+            }))
+        );
+    }
+}
+
+#[test]
+fn single_child_compound_keeps_its_user_data() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let rotation = quat_about(Z_AXIS, 45.0_f32.to_radians());
+    let compound = Shape::new_compound(&[child(&unit_box, Vec3::ZERO, rotation, 7)]).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &compound, RVec3::new(0.0, 0.0, 0.0));
+    let (hit, y) = hit_below(&world, 0.0, 0.0);
+    assert_eq!(
+        world.compound_sub_shape(hit.body, hit.sub_shape_id),
+        Ok(Some(CompoundSubShape {
+            index: 0,
+            user_data: 7
+        }))
+    );
+    // The top edge of the tilted box lies at 0.5 * sqrt(2).
+    assert!((y - 0.5 * Real::sqrt(2.0)).abs() <= 1.0e-4, "hit at {y}");
+}
+
+#[test]
+fn child_pose_is_applied() {
+    let slab = Shape::new_box(Vec3::new(1.0, 0.25, 0.5)).unwrap();
+    let rotation = quat_about(X_AXIS, 90.0_f32.to_radians());
+    let compound =
+        Shape::new_compound(&[child(&slab, Vec3::new(0.0, 2.0, 0.0), rotation, 0)]).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &compound, RVec3::new(0.0, 0.0, 0.0));
+    // The rotation turns the z extent upright.
+    let (_, y) = hit_below(&world, 0.0, 0.0);
+    assert!((y - 2.5).abs() <= 1.0e-5, "hit at {y}");
+}
+
+#[test]
+fn non_compound_hits_have_no_sub_shape() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let terrain = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &unit_box, RVec3::new(0.0, 0.0, 0.0));
+    add_static(&mut world, &terrain, RVec3::new(10.0, 0.0, 0.0));
+    for x in [0.0, 11.0] {
+        let (hit, _) = hit_below(&world, x, 0.5);
+        assert_eq!(
+            world.compound_sub_shape(hit.body, hit.sub_shape_id),
+            Ok(None)
+        );
+    }
+    let (hit, _) = hit_below(&world, 0.0, 0.0);
+    assert_eq!(unit_box.compound_sub_shape(hit.sub_shape_id), None);
+}
+
+#[test]
+fn sub_shape_ids_of_other_shapes_never_name_a_missing_child() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let children: Vec<_> = (0..3)
+        .map(|i| {
+            child(
+                &unit_box,
+                Vec3::new(2.0 * i as f32, 0.0, 0.0),
+                Quat::IDENTITY,
+                i,
+            )
+        })
+        .collect();
+    let compound = Shape::new_compound(&children).unwrap();
+    let terrain = Shape::new_height_field(5, &[0.0; 25], &HeightFieldSettings::default()).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &terrain, RVec3::new(-20.0, 0.0, -20.0));
+    // Heightfield triangle ids decoded as if they came from the compound.
+    for (x, z) in [
+        (-19.5, -19.5),
+        (-17.25, -18.75),
+        (-16.5, -16.5),
+        (-18.1, -16.2),
+    ] {
+        let (hit, _) = hit_below(&world, x, z);
+        let resolved = compound.compound_sub_shape(hit.sub_shape_id);
+        assert!(resolved.is_none_or(|child| child.index < 3), "{resolved:?}");
+    }
+}
+
+#[test]
+fn foreign_body_is_rejected_by_compound_sub_shape() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let compound = Shape::new_compound(&[child(&unit_box, Vec3::ZERO, Quat::IDENTITY, 1)]).unwrap();
+    let mut first = world(Vec3::ZERO, 1);
+    let second = world(Vec3::ZERO, 1);
+    add_static(&mut first, &compound, RVec3::new(0.0, 0.0, 0.0));
+    let (hit, _) = hit_below(&first, 0.0, 0.0);
+    assert_eq!(
+        second.compound_sub_shape(hit.body, hit.sub_shape_id),
+        Err(BodyError::WrongWorld(hit.body))
+    );
+}
+
+#[test]
+fn empty_or_invalid_compounds_are_rejected() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let invalid = [
+        Shape::new_compound(&[]),
+        Shape::new_compound(&[child(
+            &unit_box,
+            Vec3::new(f32::NAN, 0.0, 0.0),
+            Quat::IDENTITY,
+            0,
+        )]),
+        Shape::new_compound(&[child(
+            &unit_box,
+            Vec3::ZERO,
+            Quat::from_xyzw(0.0, 0.0, 0.0, 2.0),
+            0,
+        )]),
+    ];
+    for result in invalid {
+        assert!(matches!(result, Err(ShapeError::InvalidSettings(_))));
+    }
+}
+
+#[test]
+fn dynamic_compound_with_rotated_child_is_accepted() {
+    let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let compound = Shape::new_compound(&[
+        child(&unit_box, Vec3::ZERO, Quat::IDENTITY, 0),
+        child(
+            &unit_box,
+            Vec3::new(1.0, 0.5, 0.0),
+            quat_about(Z_AXIS, 30.0_f32.to_radians()),
+            1,
+        ),
+    ])
+    .unwrap();
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    add_floor(&mut world);
+    let body = world
+        .create_body(
+            &compound,
+            &BodySettings::new_dynamic().position(RVec3::new(0.0, 3.0, 0.0)),
+        )
+        .unwrap();
+    step(&mut world, 60);
+    let body = world.body(body).unwrap();
+    let position: [Real; 3] = body.position().into();
+    assert!(position.iter().all(|value| value.is_finite()));
+    assert!(length(body.linear_velocity()).is_finite());
+    assert!(length(body.angular_velocity()).is_finite());
+}
