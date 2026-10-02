@@ -37,13 +37,14 @@ pub const REST_HEIGHT: f32 = RADIUS + PADDING;
 /// and the shape offset is `CENTRE_UP` along the character's Y, so the lower sphere centre sits
 /// `PADDING + CENTRE_UP - HALF_HEIGHT` above the position.
 pub const ORIGIN_ABOVE_POSITION: f32 = PADDING + CENTRE_UP - HALF_HEIGHT;
-/// Walk-stairs step-up height, metres. Chosen by measurement, not by the game's 0.45 autostep:
-/// Jolt treats an edge whose contact normal is within the max slope as walkable floor
-/// (`CharacterVirtual.cpp`, the surface normal is replaced by the contact normal when that points
-/// more upward), so the rounded capsule bottom climbs about `RADIUS * (1 - cos 45°) + PADDING`
-/// above the step-up height. `max_climbable_block` in `tests/walker.rs` measures the highest
-/// block this value climbs; see the step-law test for the numbers.
-pub const STEP_UP: f32 = 0.33;
+/// The game's autostep (spec D.1): the highest step the walker climbs, above its feet, metres.
+pub const STEP_HEIGHT: f32 = 0.45;
+/// Free room the walker needs on top of a step before it climbs it, metres (spec D.1).
+pub const STEP_MIN_WIDTH: f32 = 0.5;
+/// How far the walker moves forward onto a step it climbs, at least, metres. The lower sphere
+/// must end up over the step's edge so that the edge supports it: from the padding distance in
+/// front of the face that takes `(RADIUS + PADDING) * (1 - sin 45°)` = 0.123 m.
+pub const STEP_FORWARD: f32 = 0.15;
 
 pub type V3 = [f64; 3];
 
@@ -223,14 +224,8 @@ pub fn sloped(c: f64, tan: f64) -> Shape {
 }
 
 /// A static chunk compound holding one box of half extents `half` at `centre` in the anchor
-/// frame, tilted by `tilt_z` radians about Z, with the structure group as its user data.
-///
-/// The box keeps Jolt's default convex radius (0.05) instead of the game's sharp edges. With a
-/// sharp box CharacterVirtual creeps up the box's top edge while it presses into it: the
-/// penetrating edge contact reports the top face as its surface normal, which reads as walkable,
-/// and penetration recovery pushes along the tilted contact normal. Measured: a 0.3 m sharp
-/// block is climbed without stairs, and a 0.5 m one with a 0.34 m step-up; with the default
-/// radius neither happens.
+/// frame, tilted by `tilt_z` radians about Z, with the structure group as its user data. The box
+/// is sharp (convex radius 0), as the game's structures are (spec B).
 pub fn structure_box(
     world: &mut PhysicsWorld,
     layers: &Layers,
@@ -238,7 +233,7 @@ pub fn structure_box(
     half: V3,
     tilt_z: f32,
 ) -> BodyId {
-    let block = Shape::new_box(vec3(half)).unwrap();
+    let block = Shape::new_box_with_convex_radius(vec3(half), 0.0).unwrap();
     let chunk = Shape::new_compound(&[CompoundChild {
         shape: &block,
         position: Vec3::ZERO,
@@ -273,8 +268,8 @@ pub struct Walker {
     pub id: CharacterId,
     pub actor: BodyId,
     pub layers: Layers,
-    /// Walk-stairs step-up height, metres; `STEP_UP` unless a test measures another.
-    pub step_up: f32,
+    /// Autostep height, metres; `STEP_HEIGHT` unless a test measures another.
+    pub step_height: f32,
 }
 
 /// The character settings of the game's controller (spec D.1).
@@ -342,7 +337,7 @@ pub fn add_walker(world: &mut PhysicsWorld, layers: &Layers, origin: V3) -> Walk
         id,
         actor,
         layers: *layers,
-        step_up: STEP_UP,
+        step_height: STEP_HEIGHT,
     };
     // A new character knows no ground; the game's walkers have been updated before their first
     // near step, so the fixture finds the ground once here.
@@ -477,7 +472,8 @@ pub fn near_step(world: &mut PhysicsWorld, walker: &Walker, input: NearInput) ->
         .set_linear_velocity(vec3(velocity))
         .unwrap();
 
-    // 4. Move; 5. the floor snap is Jolt's stick to floor, only after support and not rising.
+    // 4. Move, with Jolt's walk stairs off (see `autostep`); 5. the floor snap is Jolt's stick to
+    // floor, only after support and not rising.
     let snap = if grounded_prev && vel_up <= 0.0 {
         scale(up, -f64::from(SNAP))
     } else {
@@ -485,8 +481,7 @@ pub fn near_step(world: &mut PhysicsWorld, walker: &Walker, input: NearInput) ->
     };
     let extended = ExtendedUpdateSettings::default()
         .stick_to_floor_step_down(vec3(snap))
-        .walk_stairs_step_up(vec3(scale(up, f64::from(walker.step_up))))
-        .walk_stairs_step_down_extra(Vec3::ZERO);
+        .walk_stairs_step_up(Vec3::ZERO);
     world
         .update_character(
             walker.id,
@@ -521,6 +516,13 @@ pub fn near_step(world: &mut PhysicsWorld, walker: &Walker, input: NearInput) ->
             normal: contact.contact_normal,
         });
 
+    // The game's autostep, for a walker on the ground that a steep obstacle held back.
+    let stepped = grounded_prev
+        && vel_up <= 0.0
+        && walking
+        && autostep(world, walker, &filter, up, input.desired, old, &contacts);
+    let character = world.character(walker.id).unwrap();
+
     // 6 and 7. Rising is airborne; steep terrain is a wall that the walker slides down, while a
     // steep structure contact (a step edge) still holds it.
     let ground = character.ground_state();
@@ -533,7 +535,8 @@ pub fn near_step(world: &mut PhysicsWorld, walker: &Walker, input: NearInput) ->
     let on_terrain = ground_layer == Some(walker.layers.terrain);
     let sliding = ground == GroundState::OnSteepGround && on_terrain;
     let grounded = vel_up <= 0.0
-        && (ground == GroundState::OnGround
+        && (stepped
+            || ground == GroundState::OnGround
             || (ground == GroundState::OnSteepGround && !on_terrain));
 
     // 8. vel_up carry.
@@ -561,6 +564,109 @@ pub fn near_step(world: &mut PhysicsWorld, walker: &Walker, input: NearInput) ->
         blocker,
         recovered,
     }
+}
+
+/// The game's autostep (spec D.1) after a move that a steep obstacle held back: when the room
+/// `STEP_MIN_WIDTH` ahead at `step_height` above the feet is free and has a walkable top below
+/// it, the walker is put down on the step, `max(remaining step, STEP_FORWARD)` further on.
+/// Returns whether it stepped.
+///
+/// Jolt's own walk stairs is not used for this: it judges a step by the surface normal at the
+/// contact, and a capsule pressing on the face of a sharp box touches it at the box's top edge,
+/// where `BoxShape::GetSurfaceNormal` returns the top face's normal. Jolt then never sees the
+/// step, and lifts the walker onto edges it must not climb. The casts here judge by the contact
+/// normal, which is the geometry's own.
+fn autostep(
+    world: &mut PhysicsWorld,
+    walker: &Walker,
+    filter: &QueryFilter<'_>,
+    up: V3,
+    desired: V3,
+    start: V3,
+    contacts: &[CharacterContact],
+) -> bool {
+    let cos_45 = std::f64::consts::FRAC_1_SQRT_2;
+    let wanted = norm(desired);
+    let along = scale(desired, 1.0 / wanted);
+    let here = origin(world, walker);
+    let achieved = dot(sub(here, start), along).max(0.0);
+    if achieved + 1e-4 >= wanted {
+        return false;
+    }
+    // Step towards the steep obstacle pushed against most directly, as Jolt's walk stairs does
+    // (contacts more than 75° off the walking direction do not count).
+    let mut direction = None;
+    let mut best = 75.0_f64.to_radians().cos();
+    for contact in contacts {
+        let solid = contact.had_collision
+            && !contact.was_discarded
+            && !contact.is_sensor
+            && contact.motion_type != MotionType::Dynamic;
+        let normal = f3(contact.contact_normal);
+        let normal_up = dot(normal, up);
+        let inward = sub(scale(up, normal_up), normal);
+        let length = norm(inward);
+        if !solid || normal_up >= cos_45 || length < 1e-6 {
+            continue;
+        }
+        let inward = scale(inward, 1.0 / length);
+        if dot(inward, along) > best {
+            best = dot(inward, along);
+            direction = Some(inward);
+        }
+    }
+    let Some(direction) = direction else {
+        return false;
+    };
+
+    let capsule = capsule();
+    let rotation = from_y_to(up);
+    let centre = |o: V3| rvec3(add(o, scale(up, f64::from(CENTRE_UP))));
+    let cast = |from: V3, by: V3, padded: bool| {
+        let query = ShapeCast::new(&capsule, centre(from), rotation, vec3(by));
+        let query = if padded {
+            query.target_distance(PADDING)
+        } else {
+            query
+        };
+        world.cast_shape(&query, filter).unwrap()
+    };
+    let walkable = |hit: &ShapeCastHit| {
+        dot(f3(hit.normal), up) >= cos_45
+            && world.body(hit.body).unwrap().motion_type() != MotionType::Dynamic
+    };
+    // Lifted so that the padded capsule's bottom, at the ground when resting, clears a top
+    // `step_height` above the feet. The head room is tested with the bare capsule, which keeps
+    // its padding from the walls beside it.
+    let lift = f64::from(walker.step_height + PADDING);
+    if cast(here, scale(up, lift + f64::from(PADDING)), false).is_some() {
+        return false;
+    }
+    let raised = add(here, scale(up, lift));
+    if cast(raised, scale(direction, f64::from(STEP_MIN_WIDTH)), true).is_some() {
+        return false;
+    }
+    let room = add(raised, scale(direction, f64::from(STEP_MIN_WIDTH)));
+    match cast(room, scale(up, -lift), true) {
+        Some(top) if walkable(&top) => {}
+        _ => return false,
+    }
+    let forward = (wanted - achieved).max(f64::from(STEP_FORWARD));
+    let ahead = add(raised, scale(direction, forward));
+    let Some(landing) = cast(ahead, scale(up, -lift), true).filter(|hit| walkable(hit)) else {
+        return false;
+    };
+    let landed = sub(ahead, scale(up, f64::from(landing.distance)));
+    if dot(sub(landed, here), up) <= 1e-4 {
+        return false;
+    }
+    world
+        .character_mut(walker.id)
+        .unwrap()
+        .set_position(position_for(landed, up))
+        .unwrap();
+    world.refresh_character_contacts(walker.id, filter).unwrap();
+    true
 }
 
 /// The group the fixture keeps in `layer`, for bodies that are not compounds.

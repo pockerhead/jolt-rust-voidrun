@@ -165,7 +165,7 @@ fn a_walker_lands_on_a_floor_box() {
 
 /// Walks at 2 m/s from 1 m before a block of `height` (above the ground at its face) for 120
 /// ticks; returns the last output and the x of the block's face.
-fn walk_into_block(height: f64, step_up: f32) -> (NearOutput, f64) {
+fn walk_into_block(height: f64, step_height: f32) -> (NearOutput, f64) {
     let (mut world, layers) = fixture_world(1);
     flat_chunk(&mut world, &layers, 0.0);
     let face = 1.0 + f64::from(RADIUS);
@@ -178,7 +178,7 @@ fn walk_into_block(height: f64, step_up: f32) -> (NearOutput, f64) {
         0.0,
     );
     let mut walker = add_walker(&mut world, &layers, resting_at(0.0, 0.0));
-    walker.step_up = step_up;
+    walker.step_height = step_height;
     let outputs = run(&mut world, &walker, 120, walking([1.0, 0.0, 0.0], SPEED));
     (*outputs.last().unwrap(), face)
 }
@@ -188,12 +188,12 @@ fn climbed(out: &NearOutput, height: f64, face: f64) -> bool {
     out.pos[1] - f64::from(RADIUS) > flat_ground(face, 0.0) + height - 0.05
 }
 
-/// The highest block, to 1 mm, that a walker with walk-stairs step-up `step_up` climbs.
-fn max_climbable_block(step_up: f32) -> f64 {
+/// The highest block, to 1 mm, that a walker with autostep height `step_height` climbs.
+fn max_climbable_block(step_height: f32) -> f64 {
     let (mut low, mut high) = (0.0, 1.5);
     while high - low > 1e-3 {
         let mid = 0.5 * (low + high);
-        let (out, face) = walk_into_block(mid, step_up);
+        let (out, face) = walk_into_block(mid, step_height);
         if climbed(&out, mid, face) {
             low = mid;
         } else {
@@ -203,20 +203,20 @@ fn max_climbable_block(step_up: f32) -> f64 {
     low
 }
 
-/// G.4 #12, the step law: 0.4 m and 0.45 m are climbed, 0.5 m is not, and the walker stops more
-/// than 0.3 m before the face.
+/// G.4 #12, the step law, on a sharp block: 0.4 m and 0.45 m are climbed, 0.5 m is not, and the
+/// walker stops more than 0.3 m before the face.
 ///
-/// Jolt's step-up is not the game's autostep height: the rounded capsule bottom climbs an edge
-/// whose contact normal is within 45° of up on its own, so the highest block climbed is about the
-/// step-up plus 0.14 m. `STEP_UP` 0.33 was chosen by measuring that height (0.47 m here).
+/// The block's height is taken at its face; the walker's feet are 0.02 m (padding) above the
+/// ground, which on the planet lies 5 mm higher where the walker stands, so the autostep's
+/// 0.45 m above the feet climbs blocks up to about 0.475 m.
 #[test]
 fn step_law_climbs_up_to_045_but_not_05() {
     for height in [0.40, 0.45] {
-        let (out, face) = walk_into_block(height, STEP_UP);
+        let (out, face) = walk_into_block(height, STEP_HEIGHT);
         assert!(climbed(&out, height, face), "{height}: {out:?}");
         assert!(out.grounded, "{height}");
     }
-    let (out, face) = walk_into_block(0.5, STEP_UP);
+    let (out, face) = walk_into_block(0.5, STEP_HEIGHT);
     assert!(!climbed(&out, 0.5, face), "{out:?}");
     assert!(
         face - out.pos[0] > 0.3,
@@ -225,7 +225,7 @@ fn step_law_climbs_up_to_045_but_not_05() {
     );
     assert_eq!(out.blocker.and_then(|b| b.group), Some(Groups::STRUCTURE));
 
-    let highest = max_climbable_block(STEP_UP);
+    let highest = max_climbable_block(STEP_HEIGHT);
     assert!((0.45..0.5).contains(&highest), "climbs up to {highest}");
 }
 
@@ -403,7 +403,7 @@ fn a_rotated_floor_far_from_the_anchor_keeps_the_path() {
     let (mut world, layers) = fixture_world(1);
     let angle = 1.0;
     let (centre, rotation) = chunk_pose(angle);
-    let floor = Shape::new_box(Vec3::new(8.0, 0.5, 8.0)).unwrap();
+    let floor = Shape::new_box_with_convex_radius(Vec3::new(8.0, 0.5, 8.0), 0.0).unwrap();
     let floor_centre = sub(v3(centre), scale(up_at(v3(centre)), 0.5));
     world
         .create_body(
@@ -446,20 +446,24 @@ fn steep_terrain_slides_and_gentle_terrain_holds() {
     let mut positions = vec![origin(&world, &walker)];
     let outputs = run(&mut world, &walker, 40, still);
     positions.extend(outputs.iter().map(|out| out.pos));
-    let mut last_step = 0.0;
-    for (tick, (out, pair)) in outputs.iter().zip(positions.windows(2)).enumerate() {
+    let downhill: Vec<f64> = positions
+        .windows(2)
+        .map(|pair| pair[0][0] - pair[1][0])
+        .collect();
+    for (tick, out) in outputs.iter().enumerate() {
         assert!(!out.grounded && out.sliding, "tick {tick}: {out:?}");
-        let downhill = pair[0][0] - pair[1][0];
-        assert!(
-            downhill >= last_step - 1e-4,
-            "tick {tick}: {downhill} after {last_step}"
-        );
-        last_step = downhill;
-        if tick == 30 {
-            assert!(downhill > 0.02, "tick {tick}: {downhill}");
-            assert!(out.vel_up < -1.0, "tick {tick}: {}", out.vel_up);
-        }
     }
+    for (tick, pair) in downhill.windows(2).enumerate() {
+        assert!(
+            pair[1] >= pair[0],
+            "tick {}: {} after {}",
+            tick + 1,
+            pair[1],
+            pair[0]
+        );
+    }
+    assert!(downhill[30] > 0.02, "tick 30: {}", downhill[30]);
+    assert!(outputs[30].vel_up < -1.0, "tick 30: {}", outputs[30].vel_up);
 
     let tan30 = 30.0_f64.to_radians().tan();
     let (mut world, layers) = slope_scene(tan30);
