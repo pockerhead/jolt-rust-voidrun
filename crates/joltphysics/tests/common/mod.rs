@@ -105,3 +105,54 @@ pub fn quat_about(axis: Vec3, angle: f32) -> Quat {
     let (sin, cos) = (angle / 2.0).sin_cos();
     Quat::from_xyzw(axis.x * sin, axis.y * sin, axis.z * sin, cos)
 }
+
+/// The game's collision groups, stored as compound child user data.
+pub struct Groups;
+
+impl Groups {
+    pub const TERRAIN: u32 = 1;
+    pub const STRUCTURE: u32 = 2;
+    pub const FEATURE: u32 = 3;
+    pub const ITEM: u32 = 4;
+    pub const ACTOR: u32 = 5;
+}
+
+/// A world with one object layer per group, in the order terrain, chunk (structure and feature
+/// compounds), feature, item, actor. Queries ignore which layer pairs collide.
+pub fn five_layer_world() -> (PhysicsWorld, [ObjectLayer; 5]) {
+    let mut layers = CollisionLayers::new(2);
+    let fixed = BroadPhaseLayer::new(0);
+    let moving = BroadPhaseLayer::new(1);
+    let terrain = layers.add_object_layer(fixed);
+    let chunk = layers.add_object_layer(fixed);
+    let feature = layers.add_object_layer(fixed);
+    let item = layers.add_object_layer(moving);
+    let actor = layers.add_object_layer(moving);
+    layers.enable_collision(item, terrain);
+    let world =
+        PhysicsWorld::new(WorldSettings::default().gravity(Vec3::ZERO).layers(layers)).unwrap();
+    (world, [terrain, chunk, feature, item, actor])
+}
+
+/// A flat 33 x 33 heightfield at y = 0 covering x and z in `[-16, 16]` around its body's origin.
+pub fn flat_height_field() -> Shape {
+    let settings = HeightFieldSettings::default().offset(Vec3::new(-16.0, 0.0, -16.0));
+    Shape::new_height_field(33, &[0.0; 33 * 33], &settings).unwrap()
+}
+
+/// A static body of `shape` at `position` in `layer`.
+pub fn add_static_in(
+    world: &mut PhysicsWorld,
+    shape: &Shape,
+    position: RVec3,
+    layer: ObjectLayer,
+) -> BodyId {
+    world
+        .create_body(
+            shape,
+            &BodySettings::new_static()
+                .position(position)
+                .object_layer(layer),
+        )
+        .unwrap()
+}

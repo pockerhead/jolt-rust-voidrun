@@ -223,7 +223,7 @@ fn rays_are_cast_from_many_threads() {
         rays.iter()
             .map(|&ray| {
                 let hit = world
-                    .cast_ray(ray)
+                    .cast_ray(ray, &QueryFilter::new())
                     .unwrap()
                     .expect("every ray hits the floor");
                 (hit.body, hit.fraction.to_bits())

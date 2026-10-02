@@ -54,6 +54,40 @@ impl Vec3 {
     pub(crate) fn is_finite(&self) -> bool {
         self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
     }
+
+    pub(crate) fn dot(self, other: Self) -> f32 {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
+
+    pub(crate) fn length(self) -> f32 {
+        self.dot(self).sqrt()
+    }
+
+    pub(crate) fn scale(self, factor: f32) -> Self {
+        Self::new(self.x * factor, self.y * factor, self.z * factor)
+    }
+
+    /// The unit vector along `self`, or zero when `self` is too short to have a direction.
+    pub(crate) fn normalized_or_zero(self) -> Self {
+        let length_squared = self.dot(self);
+        if length_squared <= 1.0e-12 {
+            Self::ZERO
+        } else {
+            self.scale(1.0 / length_squared.sqrt())
+        }
+    }
+
+    fn cross(self, other: Self) -> Self {
+        Self::new(
+            self.y * other.z - self.z * other.y,
+            self.z * other.x - self.x * other.z,
+            self.x * other.y - self.y * other.x,
+        )
+    }
+
+    fn add(self, other: Self) -> Self {
+        Self::new(self.x + other.x, self.y + other.y, self.z + other.z)
+    }
 }
 
 impl From<[f32; 3]> for Vec3 {
@@ -162,6 +196,19 @@ impl Quat {
         let length_squared = self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w;
         (length_squared - 1.0).abs() <= 1.0e-5
     }
+
+    /// Whether this is a finite unit quaternion, within Jolt's tolerance: what Jolt expects of
+    /// every rotation.
+    pub(crate) fn is_valid_rotation(&self) -> bool {
+        self.is_finite() && self.is_normalized()
+    }
+
+    /// `v` rotated by this unit quaternion: `v + 2w (q x v) + 2 q x (q x v)`.
+    pub(crate) fn rotate(self, v: Vec3) -> Vec3 {
+        let q = Vec3::new(self.x, self.y, self.z);
+        let t = q.cross(v).scale(2.0);
+        v.add(t.scale(self.w)).add(q.cross(t))
+    }
 }
 
 impl Default for Quat {
@@ -241,5 +288,35 @@ mod tests {
         assert!(Quat::from_xyzw(0.0, half, 0.0, half).is_normalized());
         assert!(Quat::from_xyzw(0.5, 0.5, 0.5, 0.5).is_normalized());
         assert!(!Quat::from_xyzw(0.0, 0.0, 0.0, 2.0).is_normalized());
+    }
+
+    #[test]
+    fn valid_rotations_are_finite_unit_quaternions() {
+        assert!(Quat::IDENTITY.is_valid_rotation());
+        assert!(!Quat::from_xyzw(f32::NAN, 0.0, 0.0, 1.0).is_valid_rotation());
+        assert!(!Quat::from_xyzw(0.0, 0.0, 0.0, 2.0).is_valid_rotation());
+    }
+
+    #[test]
+    fn rotate_turns_x_into_minus_z_about_y() {
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        let quarter_turn_about_y = Quat::from_xyzw(0.0, half, 0.0, half);
+        let v = quarter_turn_about_y.rotate(Vec3::new(1.0, 0.0, 0.0));
+        assert!(v.x.abs() < 1e-6, "{v:?}");
+        assert!(v.y.abs() < 1e-6, "{v:?}");
+        assert!((v.z + 1.0).abs() < 1e-6, "{v:?}");
+        let w = Vec3::new(1.0, 2.0, 3.0);
+        assert_eq!(Quat::IDENTITY.rotate(w), w);
+    }
+
+    #[test]
+    fn vector_helpers() {
+        let v = Vec3::new(3.0, 0.0, 4.0);
+        assert_eq!(v.dot(Vec3::new(1.0, 1.0, 1.0)), 7.0);
+        assert_eq!(v.length(), 5.0);
+        assert_eq!(v.scale(2.0), Vec3::new(6.0, 0.0, 8.0));
+        assert_eq!(v.normalized_or_zero(), Vec3::new(0.6, 0.0, 0.8));
+        assert_eq!(Vec3::ZERO.normalized_or_zero(), Vec3::ZERO);
+        assert_eq!(Vec3::new(1e-7, 0.0, 0.0).normalized_or_zero(), Vec3::ZERO);
     }
 }
