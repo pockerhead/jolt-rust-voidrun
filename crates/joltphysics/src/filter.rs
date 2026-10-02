@@ -642,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn a_panic_in_a_filter_callback_resumes_after_a_character_update() {
+    fn a_panic_in_a_filter_callback_resumes_after_a_character_update_or_refresh() {
         let mut world = world();
         let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
         let floor = Shape::new_compound(&[
@@ -708,6 +708,24 @@ mod tests {
                 Some(format!("injected {callback:?} panic").as_str()),
             );
             assert_eq!(update(&mut world), Ok(()), "after a {callback:?} panic");
+        }
+        // The same through a contact refresh, the other character call that runs the filters.
+        for callback in [Callback::ObjectLayer, Callback::Body, Callback::Shape2] {
+            INJECTED_PANIC.set(Some(callback));
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                world.refresh_character_contacts(id, &filter)
+            }));
+            INJECTED_PANIC.set(None);
+            let payload = result.expect_err("joltc returned and the panic resumed");
+            assert_eq!(
+                payload.downcast_ref::<String>().map(String::as_str),
+                Some(format!("injected {callback:?} panic").as_str()),
+            );
+            assert_eq!(
+                world.refresh_character_contacts(id, &filter),
+                Ok(()),
+                "after a {callback:?} panic"
+            );
         }
         // No body lock is left held: removing a body takes its write lock.
         world.remove_body(excluded).unwrap();
