@@ -343,7 +343,12 @@ fn height_field_of_holes_has_no_collision() {
 fn static_only_shapes_are_rejected_for_moving_bodies() {
     let shape = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
     let mut world = world(Vec3::ZERO, 1);
-    for settings in [BodySettings::new_dynamic(), BodySettings::new_kinematic()] {
+    // An explicit mass passes the mass check, which a bare heightfield (zero mass) would fail
+    // with the same error, so only the static-only check can reject these.
+    for settings in [
+        BodySettings::new_dynamic().mass(1.0),
+        BodySettings::new_kinematic().mass(1.0),
+    ] {
         assert!(matches!(
             world.create_body(&shape, &settings),
             Err(BodyError::InvalidValue(_))
