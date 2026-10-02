@@ -249,9 +249,10 @@ impl BodySettings {
         self
     }
 
-    /// Overrides the mass in kg (finite and positive). The inertia is computed from the shape
-    /// and scaled to this mass (Jolt `EOverrideMassProperties::CalculateInertia`). By default
-    /// Jolt computes mass and inertia from the shape with a density of 1000 kg/m³.
+    /// Overrides the mass in kg (finite, positive and large enough that Jolt can invert it and
+    /// the scaled inertia; [`PhysicsWorld::create_body`] checks this). The inertia is computed
+    /// from the shape and scaled to this mass (Jolt `EOverrideMassProperties::CalculateInertia`).
+    /// By default Jolt computes mass and inertia from the shape with a density of 1000 kg/m³.
     #[must_use]
     pub fn mass(mut self, value: f32) -> Self {
         self.mass = Some(value);
@@ -321,6 +322,60 @@ impl BodySettings {
     }
 }
 
+/// Zero mass and a zero inertia tensor.
+const ZERO_MASS_PROPERTIES: JPH_MassProperties = JPH_MassProperties {
+    mass: 0.0,
+    inertia: JPH_Mat4 {
+        column: [JPH_Vec4 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
+        }; 4],
+    },
+};
+
+/// The mass and inertia Jolt gives a body made from `shape` (Jolt
+/// `BodyCreationSettings::GetMassProperties` with the default inertia multiplier): the shape's
+/// own, scaled to `mass` when it is overridden.
+fn mass_properties(shape: &Shape, mass: Option<f32>) -> JPH_MassProperties {
+    let mut properties = ZERO_MASS_PROPERTIES;
+    // SAFETY: `shape` is live for the call; `properties` is a live local that joltc overwrites.
+    unsafe { JPH_Shape_GetMassProperties(shape.as_ptr(), &mut properties) };
+    if let Some(mass) = mass {
+        // SAFETY: `properties` is a live local that joltc reads and overwrites.
+        unsafe { JPH_MassProperties_ScaleToMass(&mut properties, mass) };
+    }
+    properties
+}
+
+/// Whether Jolt's `MotionProperties::SetMassProperties` derives a finite inverse mass and
+/// inverse inertia from `properties`. A tiny mass, or a shape whose computed mass or inertia
+/// underflows, would otherwise give infinite inverses and turn the first force into NaN.
+fn has_finite_inverse(properties: &JPH_MassProperties) -> bool {
+    let inverse_mass = 1.0 / properties.mass;
+    // When the inertia is near zero Jolt uses the inertia of a unit sphere, 2.5 / mass.
+    if !(properties.mass > 0.0 && inverse_mass.is_finite() && (2.5 * inverse_mass).is_finite()) {
+        return false;
+    }
+    let [x, y, z, _] = properties.inertia.column;
+    let tensor = [x.x, x.y, x.z, y.x, y.y, y.z, z.x, z.y, z.z];
+    if !tensor.iter().all(|value| value.is_finite()) {
+        return false;
+    }
+    debug_assert!(
+        [x.y, x.z, y.x, y.z, z.x, z.y]
+            .iter()
+            .all(|&value| value == 0.0),
+        "box and sphere inertia is diagonal; rotated inertia needs Jolt's eigen decomposition here"
+    );
+    // A diagonal tensor is its own principal decomposition (Jolt `EigenValueSymmetric`).
+    let diagonal = [x.x, y.y, z.z];
+    let length_sq: f32 = diagonal.iter().map(|value| value * value).sum();
+    // Jolt `Vec3::IsNearZero` (squared length at most 1e-12) selects the unit-sphere fallback.
+    length_sq <= 1.0e-12 || diagonal.iter().all(|value| (1.0 / value).is_finite())
+}
+
 /// Owns a `JPH_BodyCreationSettings`, which holds its own reference to the shape.
 struct CreationSettings(NonNull<JPH_BodyCreationSettings>);
 
@@ -369,14 +424,7 @@ impl CreationSettings {
             // Jolt ignores the inertia with `CalculateInertia` (`BodyCreationSettings.cpp`).
             let mass_properties = JPH_MassProperties {
                 mass,
-                inertia: JPH_Mat4 {
-                    column: [JPH_Vec4 {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.0,
-                        w: 0.0,
-                    }; 4],
-                },
+                ..ZERO_MASS_PROPERTIES
             };
             // SAFETY: `ptr` is live; `mass_properties` is a live local that joltc copies.
             unsafe {
@@ -397,12 +445,25 @@ const INVALID_BODY_ID: JPH_BodyID = 0xffff_ffff;
 impl PhysicsWorld {
     /// Creates a body from `shape` and adds it to the world. The body keeps its own reference
     /// to the shape, so `shape` may be dropped afterwards.
+    ///
+    /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, including a
+    /// dynamic or kinematic body whose mass (overridden, or computed from a tiny shape) is too
+    /// small for Jolt to invert.
     pub fn create_body(
         &mut self,
         shape: &Shape,
         settings: &BodySettings,
     ) -> Result<BodyId, BodyError> {
         settings.validate(self.object_layer_count)?;
+        // Jolt computes mass properties for every body that is not static
+        // (`BodyCreationSettings::HasMassProperties`).
+        if settings.motion_type != MotionType::Static
+            && !has_finite_inverse(&mass_properties(shape, settings.mass))
+        {
+            return Err(BodyError::InvalidValue(
+                "mass and shape give an infinite inverse mass or inertia",
+            ));
+        }
         let creation = CreationSettings::new(shape, settings)?;
         // SAFETY: the body interface belongs to this live world, borrowed mutably; `creation`
         // is a fully set up settings object whose layer exists in this world.

@@ -13,6 +13,8 @@ fn bits3(v: Vec3) -> [u32; 3] {
     <[f32; 3]>::from(v).map(f32::to_bits)
 }
 
+// `Real` is already `f64` with the `double-precision` feature.
+#[allow(clippy::useless_conversion)]
 fn bits_r3(v: RVec3) -> [u64; 3] {
     <[Real; 3]>::from(v).map(|c| f64::from(c).to_bits())
 }
@@ -355,4 +357,67 @@ fn shape_can_be_dropped_after_body_creation() {
         (0.45..0.55).contains(&y),
         "the sphere rests on the floor, y = {y}"
     );
+}
+
+#[test]
+fn mass_too_small_to_invert_is_rejected() {
+    let mut world = world(Vec3::ZERO, 1);
+    let cube = cube_shape();
+    let tiny_sphere = Shape::new_sphere(1e-20).unwrap();
+    // Its inertia about the long axis underflows to zero while the other two do not.
+    let needle = Shape::new_box(Vec3::new(1e10, 1e-17, 1e-17)).unwrap();
+    let rejected = [
+        (&cube, BodySettings::new_dynamic().mass(f32::from_bits(1))),
+        (&cube, BodySettings::new_dynamic().mass(1e-39)),
+        (&tiny_sphere, BodySettings::new_dynamic()),
+        (&tiny_sphere, BodySettings::new_kinematic()),
+        (&needle, BodySettings::new_dynamic()),
+    ];
+    for (shape, settings) in &rejected {
+        assert!(
+            matches!(
+                world.create_body(shape, settings),
+                Err(BodyError::InvalidValue(_))
+            ),
+            "{settings:?} was accepted"
+        );
+    }
+    assert_eq!(world.body_count(), 0);
+
+    // Static bodies have no mass, so any shape is fine.
+    let wall = world
+        .create_body(&tiny_sphere, &BodySettings::new_static())
+        .unwrap();
+    assert_eq!(wall.to_raw(), 1 << 23, "rejected bodies used no id");
+
+    let light = world
+        .create_body(&cube, &BodySettings::new_dynamic().mass(1e-6))
+        .unwrap();
+    let mut body = world.body_mut(light).unwrap();
+    body.add_force(Vec3::new(1.0, 0.0, 0.0)).unwrap();
+    body.add_torque(Vec3::new(0.0, 1e-6, 0.0)).unwrap();
+    world.step(DT).unwrap();
+    let body = world.body(light).unwrap();
+    for value in [body.linear_velocity(), body.angular_velocity()] {
+        assert!(
+            value.x.is_finite() && value.y.is_finite() && value.z.is_finite(),
+            "{value:?}"
+        );
+    }
+}
+
+#[test]
+fn full_world_rejects_another_body() {
+    let mut world = PhysicsWorld::new(WorldSettings::default().max_bodies(1)).unwrap();
+    let shape = cube_shape();
+    let position = RVec3::new(1.0, 2.0, 3.0);
+    let first = world
+        .create_body(&shape, &BodySettings::new_static().position(position))
+        .unwrap();
+    assert_eq!(
+        world.create_body(&shape, &BodySettings::new_dynamic()),
+        Err(BodyError::TooManyBodies)
+    );
+    assert_eq!(world.body_count(), 1);
+    assert_eq!(world.body(first).unwrap().position(), position);
 }
