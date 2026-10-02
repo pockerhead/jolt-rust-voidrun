@@ -278,11 +278,12 @@ impl Shape {
     /// radius in metres (finite and not negative).
     ///
     /// Jolt shrinks the box by the convex radius and inflates it again, so the faces stay where
-    /// they are while edges and corners are rounded by the radius for contacts and shape casts.
-    /// Jolt clamps the radius to the smallest half extent (`BoxShape.h`). A radius of 0 gives
-    /// sharp edges; collision detection is then somewhat slower, because Jolt falls back to
-    /// EPA more often. Ray casts always see the sharp box, whatever the radius
-    /// (`BoxShape::CastRay` tests the half extents only).
+    /// they are while edges and corners are rounded for contacts and shape casts. Jolt clamps
+    /// the radius to the smallest half extent (`BoxShape.h`), and contacts and shape casts use
+    /// at most 0.05 m of it (`ScaleHelpers::ScaleConvexRadius` caps it at Jolt's default), so a
+    /// larger radius collides like 0.05. A radius of 0 gives sharp edges; collision detection
+    /// is then somewhat slower, because Jolt falls back to EPA more often. Ray casts always see
+    /// the sharp box, whatever the radius (`BoxShape::CastRay` tests the half extents only).
     pub fn new_box_with_convex_radius(
         half_extent: Vec3,
         convex_radius: f32,
@@ -337,8 +338,9 @@ impl Shape {
     /// A cylinder along the local Y axis, centred on the origin, `2 * half_height` metres high.
     ///
     /// Half height and radius must be finite and positive, the convex radius finite and not
-    /// negative. Like a box's, the convex radius rounds the edges for contacts; Jolt clamps it
-    /// to `min(half_height, radius)` (`CylinderShape.cpp`).
+    /// negative. Like a box's, the convex radius rounds the edges for contacts and shape casts;
+    /// Jolt clamps it to `min(half_height, radius)` (`CylinderShape.cpp`) and uses at most
+    /// 0.05 m of it there (`ScaleHelpers::ScaleConvexRadius`).
     pub fn new_cylinder_with_convex_radius(
         half_height: f32,
         radius: f32,
