@@ -618,14 +618,35 @@ impl PhysicsWorld {
     /// which bodies it reports depends on that history (Jolt docs, "Deterministic Simulation").
     /// Here it only proposes candidates; each is kept only when its exact bounds overlap.
     fn wake_bodies_overlapping(&mut self, bounds: &JPH_AABox) {
+        let candidates = self.broad_phase_bodies(bounds);
+        let woken = self.overlapping_movable_bodies(bounds, &candidates);
+        if woken.is_empty() {
+            return;
+        }
+        // SAFETY: the body interface belongs to this live world, borrowed mutably; `woken` holds
+        // `woken.len()` ids and lives for the call. This thread holds no body lock:
+        // `overlapping_movable_bodies` has released its locks, which `ActivateBodies` takes
+        // again (Jolt's body mutexes are not recursive).
+        unsafe {
+            JPH_BodyInterface_ActivateBodies(
+                self.body_interface.as_ptr(),
+                woken.as_ptr(),
+                woken.len() as u32,
+            );
+        }
+    }
+
+    /// The ids of the bodies whose broad-phase bounds overlap `bounds`, sorted and without
+    /// duplicates. The broad phase may keep widened bounds, so callers check exact bounds.
+    pub(crate) fn broad_phase_bodies(&self, bounds: &JPH_AABox) -> Vec<JPH_BodyID> {
         let mut hits = BroadPhaseHits {
             ids: Vec::with_capacity(self.body_count() as usize),
             panic: None,
         };
-        // SAFETY: the broad-phase query belongs to this live world, borrowed mutably, so no
-        // step runs. `bounds` is live for the call. `hits` is a live local that only the
-        // collector touches during the call, as the `BroadPhaseHits` it expects. Null filters
-        // select joltc's accept-all defaults.
+        // SAFETY: the broad-phase query belongs to this live world; a step needs
+        // `&mut PhysicsWorld`, so none runs during this `&self` call. `bounds` is live for the
+        // call. `hits` is a live local that only the collector touches during the call, as the
+        // `BroadPhaseHits` it expects. Null filters select joltc's accept-all defaults.
         unsafe {
             JPH_BroadPhaseQuery_CollideAABox(
                 self.broad_phase_query.as_ptr(),
@@ -643,21 +664,7 @@ impl PhysicsWorld {
         // Jolt's `BodyID::operator<` compares the raw value.
         candidates.sort_unstable();
         candidates.dedup();
-        let woken = self.overlapping_movable_bodies(bounds, &candidates);
-        if woken.is_empty() {
-            return;
-        }
-        // SAFETY: the body interface belongs to this live world, borrowed mutably; `woken` holds
-        // `woken.len()` ids and lives for the call. This thread holds no body lock:
-        // `overlapping_movable_bodies` has released its locks, which `ActivateBodies` takes
-        // again (Jolt's body mutexes are not recursive).
-        unsafe {
-            JPH_BodyInterface_ActivateBodies(
-                self.body_interface.as_ptr(),
-                woken.as_ptr(),
-                woken.len() as u32,
-            );
-        }
+        candidates
     }
 
     /// Those of the sorted `candidates` that are non-static bodies whose world bounds overlap
@@ -710,7 +717,7 @@ impl PhysicsWorld {
     }
 }
 
-/// What the broad-phase collector of [`PhysicsWorld::remove_body`] gathers.
+/// What the broad-phase collector of `PhysicsWorld::broad_phase_bodies` gathers.
 struct BroadPhaseHits {
     /// Candidate ids, at most as many as the capacity reserved before the query.
     ids: Vec<JPH_BodyID>,
@@ -723,12 +730,12 @@ const KEEP_COLLECTING: f32 = f32::MAX;
 /// Jolt's `CollisionCollectorTraitsCollideShape::ShouldEarlyOutFraction`: stop the query.
 const STOP_COLLECTING: f32 = -f32::MAX;
 
-/// Broad-phase collector of [`PhysicsWorld::remove_body`]: records each candidate id without
-/// allocating and never lets a panic unwind into joltc.
+/// Broad-phase collector of `PhysicsWorld::broad_phase_bodies`: records each candidate id
+/// without allocating and never lets a panic unwind into joltc.
 ///
 /// # Safety
 /// Called only by joltc during the `JPH_BroadPhaseQuery_CollideAABox` call of
-/// `wake_bodies_overlapping`, with that call's live `*mut BroadPhaseHits` as `user_data`, which
+/// `broad_phase_bodies`, with that call's live `*mut BroadPhaseHits` as `user_data`, which
 /// nothing else accesses during the call.
 unsafe extern "C" fn collect_broad_phase_hit(user_data: *mut c_void, body: JPH_BodyID) -> f32 {
     // SAFETY: guaranteed by the caller (function contract); this is the only reference to the

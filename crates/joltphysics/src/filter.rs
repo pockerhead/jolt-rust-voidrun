@@ -109,9 +109,21 @@ impl<'a> QueryFilter<'a> {
     }
 
     /// Whether a compound child with `user_data` is in the group mask, if one is set.
-    fn keeps_group(&self, user_data: u32) -> bool {
+    pub(crate) fn keeps_group(&self, user_data: u32) -> bool {
         self.child_groups
             .is_none_or(|mask| user_data < 32 && mask & (1 << user_data) != 0)
+    }
+
+    /// Whether a body in `layer` is in the selected object layers, if any are set.
+    pub(crate) fn keeps_object_layer(&self, layer: ObjectLayer) -> bool {
+        self.object_layers
+            .is_none_or(|layers| layers.contains(&layer))
+    }
+
+    /// Whether `body` is not the excluded body.
+    pub(crate) fn keeps_body(&self, body: BodyId) -> bool {
+        self.excluded_body
+            .is_none_or(|excluded| excluded.to_raw() != body.to_raw())
     }
 }
 
@@ -388,10 +400,7 @@ unsafe extern "C" fn object_layer_should_collide(
     state.guarded(false, || {
         #[cfg(test)]
         tests::panic_if_injected(tests::Callback::ObjectLayer);
-        state
-            .filter
-            .object_layers
-            .is_none_or(|layers| layers.contains(&ObjectLayer::new(layer)))
+        state.filter.keeps_object_layer(ObjectLayer::new(layer))
     })
 }
 
@@ -406,10 +415,7 @@ unsafe extern "C" fn body_should_collide(user_data: *mut c_void, body: JPH_BodyI
     state.guarded(false, || {
         #[cfg(test)]
         tests::panic_if_injected(tests::Callback::Body);
-        state
-            .filter
-            .excluded_body
-            .is_none_or(|excluded| excluded.to_raw() != body)
+        state.filter.keeps_body(BodyId::new(body, state.world.tag))
     })
 }
 
