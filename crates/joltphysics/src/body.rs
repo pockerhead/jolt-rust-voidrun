@@ -594,8 +594,10 @@ fn with_locked_body<R>(
 /// Not `Send` or `Sync`; share the world instead.
 ///
 /// Positions read back with the same bits they were set with when the shape's centre of mass
-/// is at its origin (boxes, spheres). Jolt stores the centre-of-mass position, so for other
-/// shapes the body position involves arithmetic.
+/// is at its origin (boxes, spheres, capsules, cylinders), except that the sign of a zero
+/// component is not kept: `-0.0` may read back as `+0.0`, because Jolt stores
+/// `position + rotation * centre_of_mass`. For other shapes, compounds in particular, the
+/// position involves arithmetic.
 pub struct BodyRef<'w> {
     body_interface: NonNull<JPH_BodyInterface>,
     id: BodyId,
