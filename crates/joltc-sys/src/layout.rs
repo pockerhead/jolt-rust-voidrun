@@ -24,6 +24,16 @@ const _: () = {
     assert!(align_of::<JPH_Mat4>() == 4);
     assert!(offset_of!(JPH_Mat4, column) == 0);
 
+    assert!(size_of::<JPH_AABox>() == 24);
+    assert!(align_of::<JPH_AABox>() == 4);
+    assert!(offset_of!(JPH_AABox, min) == 0);
+    assert!(offset_of!(JPH_AABox, max) == 12);
+
+    assert!(size_of::<JPH_MassProperties>() == 68);
+    assert!(align_of::<JPH_MassProperties>() == 4);
+    assert!(offset_of!(JPH_MassProperties, mass) == 0);
+    assert!(offset_of!(JPH_MassProperties, inertia) == 4);
+
     assert!(size_of::<JobSystemThreadPoolConfig>() == 12);
     assert!(align_of::<JobSystemThreadPoolConfig>() == 4);
     assert!(offset_of!(JobSystemThreadPoolConfig, numThreads) == 8);
@@ -35,6 +45,8 @@ const _: () = {
     assert!(size_of::<JPH_MotionType>() == 4);
     assert!(size_of::<JPH_Activation>() == 4);
     assert!(size_of::<JPH_PhysicsUpdateError>() == 4);
+    assert!(size_of::<JPH_MotionQuality>() == 4);
+    assert!(size_of::<JPH_OverrideMassProperties>() == 4);
 };
 
 #[cfg(feature = "double-precision")]

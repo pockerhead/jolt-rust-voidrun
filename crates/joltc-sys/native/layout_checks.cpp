@@ -10,7 +10,9 @@
 #include <Jolt/Jolt.h>
 
 #include <Jolt/Math/Mat44.h>
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyID.h>
+#include <Jolt/Physics/Body/MotionQuality.h>
 #include <Jolt/Physics/Body/MotionType.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
@@ -30,7 +32,7 @@
 #define JOLTC_SYS_ASSERT_OFFSET(T, field, offset)                              \
     static_assert(offsetof(T, field) == (offset), #T "." #field ": unexpected offset")
 
-// C ABI value structs passed by the raw tests.
+// C ABI value structs passed by the raw tests and rolt.
 JOLTC_SYS_ASSERT_LAYOUT(JPH_Vec3, 12, 4);
 JOLTC_SYS_ASSERT_OFFSET(JPH_Vec3, z, 8);
 JOLTC_SYS_ASSERT_LAYOUT(JPH_Vec4, 16, 4);
@@ -49,6 +51,15 @@ JOLTC_SYS_ASSERT_OFFSET(JPH_RMat4, column3, 48);
 static_assert(std::is_same_v<JPH_RVec3, JPH_Vec3>, "JPH_RVec3 is JPH_Vec3 in single precision");
 static_assert(std::is_same_v<JPH_RMat4, JPH_Mat4>, "JPH_RMat4 is JPH_Mat4 in single precision");
 #endif
+
+// joltc converts JPH_AABox and JPH_MassProperties field by field, so they have
+// no C++ layout to compare against.
+JOLTC_SYS_ASSERT_LAYOUT(JPH_AABox, 24, 4);
+JOLTC_SYS_ASSERT_OFFSET(JPH_AABox, min, 0);
+JOLTC_SYS_ASSERT_OFFSET(JPH_AABox, max, 12);
+JOLTC_SYS_ASSERT_LAYOUT(JPH_MassProperties, 68, 4);
+JOLTC_SYS_ASSERT_OFFSET(JPH_MassProperties, mass, 0);
+JOLTC_SYS_ASSERT_OFFSET(JPH_MassProperties, inertia, 4);
 
 JOLTC_SYS_ASSERT_LAYOUT(JobSystemThreadPoolConfig, 12, 4);
 JOLTC_SYS_ASSERT_OFFSET(JobSystemThreadPoolConfig, numThreads, 8);
@@ -81,6 +92,8 @@ static_assert(sizeof(JPH_BroadPhaseLayer) == sizeof(JPH::BroadPhaseLayer::Type),
 static_assert(sizeof(JPH_MotionType) == 4, "JPH_MotionType: unexpected size");
 static_assert(sizeof(JPH_Activation) == 4, "JPH_Activation: unexpected size");
 static_assert(sizeof(JPH_PhysicsUpdateError) == 4, "JPH_PhysicsUpdateError: unexpected size");
+static_assert(sizeof(JPH_MotionQuality) == 4, "JPH_MotionQuality: unexpected size");
+static_assert(sizeof(JPH_OverrideMassProperties) == 4, "JPH_OverrideMassProperties: unexpected size");
 
 static_assert(int(JPH_MotionType_Static) == int(JPH::EMotionType::Static), "JPH_MotionType_Static");
 static_assert(int(JPH_MotionType_Kinematic) == int(JPH::EMotionType::Kinematic), "JPH_MotionType_Kinematic");
@@ -96,3 +109,14 @@ static_assert(int(JPH_PhysicsUpdateError_BodyPairCacheFull) == int(JPH::EPhysics
               "JPH_PhysicsUpdateError_BodyPairCacheFull");
 static_assert(int(JPH_PhysicsUpdateError_ContactConstraintsFull) == int(JPH::EPhysicsUpdateError::ContactConstraintsFull),
               "JPH_PhysicsUpdateError_ContactConstraintsFull");
+
+// Jolt declares these as uint8 enums; joltc casts the 4-byte C values.
+static_assert(int(JPH_MotionQuality_Discrete) == int(JPH::EMotionQuality::Discrete), "JPH_MotionQuality_Discrete");
+static_assert(int(JPH_MotionQuality_LinearCast) == int(JPH::EMotionQuality::LinearCast), "JPH_MotionQuality_LinearCast");
+
+static_assert(int(JPH_OverrideMassProperties_CalculateMassAndInertia) == int(JPH::EOverrideMassProperties::CalculateMassAndInertia),
+              "JPH_OverrideMassProperties_CalculateMassAndInertia");
+static_assert(int(JPH_OverrideMassProperties_CalculateInertia) == int(JPH::EOverrideMassProperties::CalculateInertia),
+              "JPH_OverrideMassProperties_CalculateInertia");
+static_assert(int(JPH_OverrideMassProperties_MassAndInertiaProvided) == int(JPH::EOverrideMassProperties::MassAndInertiaProvided),
+              "JPH_OverrideMassProperties_MassAndInertiaProvided");
