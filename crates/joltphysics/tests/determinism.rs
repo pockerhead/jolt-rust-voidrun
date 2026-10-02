@@ -13,7 +13,7 @@ use std::process::Command;
 use common::*;
 use joltphysics::*;
 
-const CHILD_ENV: &str = "ROLT_DIGEST_CHILD";
+const CHILD_ENV: &str = "JOLTPHYSICS_DIGEST_CHILD";
 const TICKS: usize = 120;
 
 /// Bytes recorded per body per tick by [`record_body`]: id, position, rotation, linear and

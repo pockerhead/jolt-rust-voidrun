@@ -18,5 +18,6 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - Removed the `object-layer-u32` feature: joltc always uses 32-bit object layers.
 - `JOLTC_LIB_DIR` links a prebuilt native library and skips CMake; the prefix is validated against a
   manifest. Rust-only changes no longer rerun CMake.
-- `joltphysics` is empty and the `hello-world` examples are removed until the new safe API lands.
+- `joltphysics` is a new safe API on the joltc raw layer: a physics world with collision layers, box and
+  sphere shapes and rigid bodies, with a headless `hello_world` example.
 - CI on GitHub Actions (Windows MSVC: build, test, clippy, docs, formatting) with a cached native build.

@@ -13,7 +13,7 @@ use std::process::Command;
 use framework::*;
 use joltphysics_sys::*;
 
-const CHILD_ENV: &str = "JOLTC_SYS_DIGEST_CHILD";
+const CHILD_ENV: &str = "JOLTPHYSICS_SYS_DIGEST_CHILD";
 const TICKS: usize = 120;
 const COLUMNS: usize = 5;
 const LAYERS: usize = 4;

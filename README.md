@@ -22,8 +22,9 @@ Features:
 - `cross-platform-deterministic`: Build Jolt with its cross-platform deterministic floating point settings.
 
 ### `joltphysics` — safe Rust API
-The safe API is being rebuilt on the joltc raw layer. The current version has no public items; use
-`joltphysics-sys` directly in the meantime.
+A physics world with configurable collision layers, box and sphere shapes, and rigid bodies with poses,
+velocities, forces and sleeping. See `crates/joltphysics/examples/hello_world.rs`
+(`cargo run -p joltphysics --example hello_world`).
 
 Features:
 - `double-precision`: Forwards to `joltphysics-sys/double-precision`
