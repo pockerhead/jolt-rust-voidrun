@@ -156,6 +156,8 @@ impl Scene {
     }
 
     /// Positions after each of `ticks` updates, as bits, and the saved state after the last.
+    // `Real` is already `f64` with the `double-precision` feature.
+    #[allow(clippy::useless_conversion)]
     fn run(&self, ticks: usize) -> (Vec<[u64; 3]>, Vec<u8>) {
         let positions = (0..ticks)
             .map(|_| {
