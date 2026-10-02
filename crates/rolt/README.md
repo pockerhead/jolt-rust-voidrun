@@ -1,7 +1,7 @@
 # `rolt` — safe Rust API for Jolt Physics
-The safe API over [joltc-sys](../joltc-sys) is being rebuilt on the [joltc] raw layer
-(Jolt Physics 5.6). This version contains no public items; use `joltc-sys` directly in the
-meantime.
+The safe API over [joltc-sys](../joltc-sys), built on the [joltc] raw layer (Jolt Physics
+5.6). It offers a physics world with configurable collision layers, box and sphere shapes, and
+rigid bodies with poses, velocities, forces and sleeping.
 
 ## Features
 - `double-precision`: forwards to `joltc-sys/double-precision`

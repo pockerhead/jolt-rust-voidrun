@@ -1,5 +1,15 @@
-//! Safe Rust API for [Jolt Physics](https://github.com/jrouwe/JoltPhysics).
-//!
-//! The safe Rust API over [`joltc-sys`](https://docs.rs/joltc-sys) is being rebuilt on the
-//! [joltc](https://github.com/amerkoleci/joltc) raw layer. This version contains no public
-//! items; use `joltc-sys` directly in the meantime.
+//! Safe Rust API for [Jolt Physics](https://github.com/jrouwe/JoltPhysics) over the
+//! [joltc](https://github.com/amerkoleci/joltc) raw layer in
+//! [`joltc-sys`](https://docs.rs/joltc-sys).
+#![warn(
+    missing_docs,
+    unsafe_op_in_unsafe_fn,
+    clippy::undocumented_unsafe_blocks,
+    clippy::missing_safety_doc
+)]
+
+mod error;
+mod math;
+
+pub use error::{ShapeError, StepError, WorldError};
+pub use math::{Quat, RVec3, Real, Vec3};
