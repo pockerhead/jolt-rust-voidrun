@@ -555,7 +555,7 @@ impl Shape {
             if !child.position.is_finite() {
                 return invalid("compound child position must be finite");
             }
-            if !(child.rotation.is_finite() && child.rotation.is_normalized()) {
+            if !child.rotation.is_valid_rotation() {
                 return invalid("compound child rotation must be a finite unit quaternion");
             }
         }

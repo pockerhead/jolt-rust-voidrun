@@ -162,6 +162,12 @@ impl Quat {
         let length_squared = self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w;
         (length_squared - 1.0).abs() <= 1.0e-5
     }
+
+    /// Whether this is a finite unit quaternion, within Jolt's tolerance: what Jolt expects of
+    /// every rotation.
+    pub(crate) fn is_valid_rotation(&self) -> bool {
+        self.is_finite() && self.is_normalized()
+    }
 }
 
 impl Default for Quat {
@@ -241,5 +247,12 @@ mod tests {
         assert!(Quat::from_xyzw(0.0, half, 0.0, half).is_normalized());
         assert!(Quat::from_xyzw(0.5, 0.5, 0.5, 0.5).is_normalized());
         assert!(!Quat::from_xyzw(0.0, 0.0, 0.0, 2.0).is_normalized());
+    }
+
+    #[test]
+    fn valid_rotations_are_finite_unit_quaternions() {
+        assert!(Quat::IDENTITY.is_valid_rotation());
+        assert!(!Quat::from_xyzw(f32::NAN, 0.0, 0.0, 1.0).is_valid_rotation());
+        assert!(!Quat::from_xyzw(0.0, 0.0, 0.0, 2.0).is_valid_rotation());
     }
 }

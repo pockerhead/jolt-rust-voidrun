@@ -308,7 +308,7 @@ impl BodySettings {
         if !self.position.is_finite() {
             return invalid("position must be finite");
         }
-        if !(self.rotation.is_finite() && self.rotation.is_normalized()) {
+        if !self.rotation.is_valid_rotation() {
             return invalid("rotation must be a finite unit quaternion");
         }
         if !self.linear_velocity.is_finite() {
@@ -775,7 +775,7 @@ impl BodyMut<'_> {
         activation: Activation,
     ) -> Result<(), BodyError> {
         require(
-            rotation.is_finite() && rotation.is_normalized(),
+            rotation.is_valid_rotation(),
             "rotation must be a finite unit quaternion",
         )?;
         let mut rotation = rotation.to_jph();
@@ -800,7 +800,7 @@ impl BodyMut<'_> {
     ) -> Result<(), BodyError> {
         require(position.is_finite(), "position must be finite")?;
         require(
-            rotation.is_finite() && rotation.is_normalized(),
+            rotation.is_valid_rotation(),
             "rotation must be a finite unit quaternion",
         )?;
         let position = position.to_jph();
