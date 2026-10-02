@@ -52,3 +52,5 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   out of the native libraries without the feature.
 - A guide (`docs/guide.md`) with a headless example of a terrain, a chunk compound, an item, queries
   and a rebase, run as a doctest.
+- Benchmarks against the game's budgets (`cargo bench -p joltphysics --bench budgets`, results in
+  `docs/benchmarks.md`); the `character_cost` example moved into this bench.

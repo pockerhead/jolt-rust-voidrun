@@ -270,6 +270,9 @@ pub struct Walker {
     pub layers: Layers,
     /// Autostep height, metres; `STEP_HEIGHT` unless a test measures another.
     pub step_height: f32,
+    /// Whether the controller also sees the item layer (dynamic bodies). The game's controller
+    /// mask has no item group; tests set this to show what happens otherwise.
+    pub items_in_filter: bool,
 }
 
 /// The character settings of the game's controller (spec D.1).
@@ -338,6 +341,7 @@ pub fn add_walker(world: &mut PhysicsWorld, layers: &Layers, origin: V3) -> Walk
         actor,
         layers: *layers,
         step_height: STEP_HEIGHT,
+        items_in_filter: false,
     };
     // A new character knows no ground; the game's walkers have been updated before their first
     // near step, so the fixture finds the ground once here.
@@ -390,7 +394,11 @@ pub struct NearOutput {
 
 /// The controller's query filter: terrain, chunk compounds (structures and features) and actors,
 /// without the walker's own actor capsule.
-pub fn controller_filter<'a>(walker: &Walker, layers: &'a [ObjectLayer; 3]) -> QueryFilter<'a> {
+///
+/// Items are not in the game's filter. With the item layer added, the autostep still never steps
+/// onto a dynamic body (it skips dynamic contacts and dynamic tops), but `CharacterVirtual` itself
+/// climbs a low dynamic edge: it creeps onto a sharp dynamic box up to about 0.37 m.
+pub fn controller_filter<'a>(walker: &Walker, layers: &'a [ObjectLayer]) -> QueryFilter<'a> {
     QueryFilter::new()
         .object_layers(layers)
         .child_groups(1 << Groups::STRUCTURE | 1 << Groups::FEATURE | 1 << Groups::ACTOR)
@@ -418,8 +426,10 @@ pub fn near_step(world: &mut PhysicsWorld, walker: &Walker, input: NearInput) ->
         walker.layers.terrain,
         walker.layers.chunk,
         walker.layers.actor,
+        walker.layers.item,
     ];
-    let filter = controller_filter(walker, &layers);
+    let seen = if walker.items_in_filter { 4 } else { 3 };
+    let filter = controller_filter(walker, &layers[..seen]);
     let mut vel_up = input.vel_up;
     let mut grounded_prev = input.grounded_prev;
 

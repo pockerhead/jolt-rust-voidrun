@@ -423,6 +423,90 @@ fn height_field_with_custom_active_edge_threshold_builds() {
     );
 }
 
+/// A static 33 x 33 heightfield at the origin with a convex 4 degree crease along x = 0: both
+/// sides fall away from it at 2 degrees, so every cell is planar. Sample `ix` lies at
+/// `x = ix - 16`.
+fn gentle_ridge_world(settings: HeightFieldSettings) -> PhysicsWorld {
+    let fall = 2.0_f32.to_radians().tan();
+    let samples: Vec<f32> = (0..33)
+        .flat_map(|_| (0..33).map(move |ix| -fall * (ix as f32 - 16.0).abs()))
+        .collect();
+    let settings = settings
+        .offset(Vec3::new(-16.0, 0.0, -16.0))
+        .bits_per_sample(16);
+    let shape = Shape::new_height_field(33, &samples, &settings).unwrap();
+    let mut world = world(Vec3::ZERO, 1);
+    add_static(&mut world, &shape, RVec3::ZERO);
+    world
+}
+
+/// Every hit of a sphere of radius 0.5 centred at `centre`.
+fn sphere_hits(world: &PhysicsWorld, centre: [f32; 3]) -> Vec<CollideShapeHit> {
+    let sphere = Shape::new_sphere(0.5).unwrap();
+    let [x, y, z] = centre.map(Real::from);
+    world
+        .collide_shape(
+            &CollideShape::new(&sphere, RVec3::new(x, y, z), Quat::IDENTITY),
+            &QueryFilter::new(),
+        )
+        .unwrap()
+}
+
+/// The active-edge threshold decides whether a contact on a crease uses the triangle's normal
+/// or the direction from the crease to the other shape. Jolt marks an edge active when the
+/// angle between its two triangles exceeds the threshold (`ActiveEdges::IsEdgeActive`), and
+/// the sphere-vs-triangle narrow phase replaces the contact normal by the triangle normal when
+/// the closest feature is an inactive edge. Body contacts, CharacterVirtual and `collide_shape`
+/// share this narrow phase.
+///
+/// A sphere resting on a 4 degree ridge, its closest feature the crease: with the default
+/// 5 degree threshold the crease is inactive and each hit has its triangle's normal, tilted
+/// 2 degrees; with a 3 degree threshold the crease is active and the normal points straight up
+/// to the sphere. A sphere on a face, away from every edge, gets the same normal either way.
+#[test]
+fn active_edge_threshold_decides_the_normal_on_a_gentle_ridge() {
+    let sin2 = 2.0_f32.to_radians().sin();
+    let default = gentle_ridge_world(HeightFieldSettings::default());
+    let active = gentle_ridge_world(
+        HeightFieldSettings::default().active_edge_cos_threshold_angle(3.0_f32.to_radians().cos()),
+    );
+
+    // Centred over the crease between sample rows 16 and 17, overlapping it by 0.05.
+    let crease = [0.0, 0.45, 0.5];
+    for (world, name) in [(&default, "5 degrees"), (&active, "3 degrees")] {
+        let hits = sphere_hits(world, crease);
+        assert!(!hits.is_empty(), "{name}: no hit");
+        for hit in &hits {
+            let on_body: [Real; 3] = hit.point_on_body.into();
+            assert!(on_body[0].abs() < 1e-3, "{name}: {hit:?}");
+        }
+    }
+    for hit in sphere_hits(&default, crease) {
+        assert!(hit.normal.x.abs() > 0.02, "{hit:?}");
+        assert!(hit.normal.y > 0.99, "{hit:?}");
+    }
+    for hit in sphere_hits(&active, crease) {
+        assert!(hit.normal.x.abs() < 1e-3, "{hit:?}");
+        assert!(hit.normal.y > 0.9999, "{hit:?}");
+    }
+
+    // 0.48 above the centroid of the triangle (-1, 0), (0, 1), (0, 0), along its normal.
+    let fall = 2.0_f32.to_radians().tan();
+    let length = (fall * fall + 1.0).sqrt();
+    let normal = [-fall / length, 1.0 / length, 0.0];
+    let centroid = [-1.0 / 3.0, -fall / 3.0, 1.0 / 3.0];
+    let face = [0, 1, 2].map(|i| centroid[i] + 0.48 * normal[i]);
+    let on_default = sphere_hits(&default, face);
+    let on_active = sphere_hits(&active, face);
+    assert_eq!(on_default.len(), 1, "{on_default:?}");
+    assert_eq!(on_active.len(), 1, "{on_active:?}");
+    let (a, b) = (on_default[0].normal, on_active[0].normal);
+    for (p, q) in [(a.x, b.x), (a.y, b.y), (a.z, b.z)] {
+        assert!((p - q).abs() < 1e-5, "{a:?} vs {b:?}");
+    }
+    assert!((a.x + sin2).abs() < 2e-3, "{a:?}");
+}
+
 const X_AXIS: Vec3 = Vec3::new(1.0, 0.0, 0.0);
 const Z_AXIS: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
