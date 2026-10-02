@@ -1,5 +1,6 @@
 //! Same-machine determinism witness: the per-tick state of a scene must be
-//! bit-identical whether Jolt steps it with 1 or 4 worker threads.
+//! bit-identical whether Jolt steps it with 1 or 4 worker threads, and the
+//! order in which bodies are created must decide their BodyIDs.
 //!
 //! Each run happens in its own child process (this test binary, running the
 //! ignored `determinism_child` test), so no state leaks between runs.
@@ -57,7 +58,9 @@ fn scene() -> Vec<BoxSpec> {
     specs
 }
 
-/// Runs the scene and returns the little-endian state of every body after every tick.
+/// Runs the scene and returns the little-endian state of every body after
+/// every tick. Bodies are created in scene order, or in reverse when
+/// `reversed`, and always recorded in scene order.
 fn run_scene(worker_threads: i32, reversed: bool) -> Vec<u8> {
     let world = TestWorld::new(worker_threads);
     let bodies = world.body_interface();
@@ -66,7 +69,7 @@ fn run_scene(worker_threads: i32, reversed: bool) -> Vec<u8> {
     if reversed {
         specs.reverse();
     }
-    let ids: Vec<JPH_BodyID> = specs
+    let mut ids: Vec<JPH_BodyID> = specs
         .iter()
         .map(|spec| {
             create_box(
@@ -79,6 +82,9 @@ fn run_scene(worker_threads: i32, reversed: bool) -> Vec<u8> {
             )
         })
         .collect();
+    if reversed {
+        ids.reverse();
+    }
 
     let mut digest = Vec::with_capacity(TICKS * BODY_COUNT * BODY_RECORD_SIZE);
     for _ in 0..TICKS {
@@ -122,6 +128,20 @@ fn record_body(bodies: *mut JPH_BodyInterface, id: JPH_BodyID, digest: &mut Vec<
         digest.extend_from_slice(&value.to_bits().to_le_bytes());
     }
     digest.push(u8::from(active));
+}
+
+/// The BodyIDs of the first tick, in scene order.
+fn first_tick_ids(digest: &[u8]) -> Vec<JPH_BodyID> {
+    digest[..BODY_COUNT * BODY_RECORD_SIZE]
+        .chunks_exact(BODY_RECORD_SIZE)
+        .map(|record| JPH_BodyID::from_le_bytes(record[..4].try_into().unwrap()))
+        .collect()
+}
+
+/// The BodyID Jolt gives the `n`-th body added to a fresh system: index `n`
+/// in the low 23 bits and sequence number 1 above them (Jolt `BodyID.h`).
+fn nth_body_id(n: usize) -> JPH_BodyID {
+    (1 << 23) | n as JPH_BodyID
 }
 
 #[test]
@@ -178,6 +198,10 @@ fn digest_is_identical_across_thread_counts() {
     }
     assert_eq!(one_thread.len(), four_threads.len());
 
-    // Insertion order is part of the state, so a different order must show up.
-    assert_ne!(one_thread, reversed);
+    // Insertion order is part of the state: the n-th created body gets the
+    // n-th BodyID, so reversing creation reverses the IDs of the same bodies.
+    let created_forward: Vec<JPH_BodyID> = (0..BODY_COUNT).map(nth_body_id).collect();
+    let created_reversed: Vec<JPH_BodyID> = (0..BODY_COUNT).rev().map(nth_body_id).collect();
+    assert_eq!(first_tick_ids(&one_thread), created_forward);
+    assert_eq!(first_tick_ids(&reversed), created_reversed);
 }
