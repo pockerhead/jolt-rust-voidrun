@@ -98,13 +98,14 @@ fn crowded_floor(world: &mut PhysicsWorld) -> BodyId {
     add_cube(world, RVec3::new(0.0, 10.0, 5.0))
 }
 
-/// Steps until a report is incomplete and returns it, checking that the falling cube moved.
+/// Steps until a report is incomplete and returns it, checking that the falling cube moved
+/// during that incomplete step.
 fn step_until_incomplete(world: &mut PhysicsWorld, falling: BodyId) -> StepReport {
-    let start = world.body(falling).unwrap().position().y;
     for _ in 0..30 {
+        let before = world.body(falling).unwrap().position().y;
         let report = world.step(DT).unwrap();
         if !report.is_complete() {
-            assert!(world.body(falling).unwrap().position().y < start);
+            assert!(world.body(falling).unwrap().position().y < before);
             return report;
         }
     }
@@ -130,6 +131,8 @@ fn full_body_pair_cache_is_reported_and_the_world_advances() {
     let falling = crowded_floor(&mut world);
     let report = step_until_incomplete(&mut world, falling);
     assert!(report.body_pair_cache_full, "{report:?}");
+    // Jolt's manifold cache allocates from the same buffer as the body pair cache.
+    assert!(report.manifold_cache_full, "{report:?}");
 }
 
 #[test]
