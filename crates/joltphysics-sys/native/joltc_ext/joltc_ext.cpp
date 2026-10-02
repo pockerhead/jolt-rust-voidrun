@@ -114,7 +114,10 @@ size_t JPH_StateRecorder_GetDataSize(JPH_StateRecorder* recorder)
 void JPH_StateRecorder_CopyData(JPH_StateRecorder* recorder, void* data, size_t size)
 {
 	std::string recorded = AsStateRecorder(recorder)->GetData();
-	memcpy(data, recorded.data(), std::min(size, recorded.size()));
+	size_t count = std::min(size, recorded.size());
+	if (count == 0)
+		return; // data may be null then, and memcpy needs valid pointers even for no bytes
+	memcpy(data, recorded.data(), count);
 }
 
 bool JPH_StateRecorder_IsFailed(const JPH_StateRecorder* recorder)

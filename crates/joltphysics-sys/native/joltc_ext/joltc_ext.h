@@ -15,7 +15,7 @@ JPH_CAPI void JPH_StateRecorder_Destroy(JPH_StateRecorder* recorder);
 JPH_CAPI void JPH_StateRecorder_Rewind(JPH_StateRecorder* recorder);
 JPH_CAPI void JPH_StateRecorder_WriteBytes(JPH_StateRecorder* recorder, const void* data, size_t size);
 JPH_CAPI size_t JPH_StateRecorder_GetDataSize(JPH_StateRecorder* recorder);
-/* Copies min(size, data size) bytes of the recorded data to data. */
+/* Copies min(size, data size) bytes of the recorded data to data, which may be null when that is 0. */
 JPH_CAPI void JPH_StateRecorder_CopyData(JPH_StateRecorder* recorder, void* data, size_t size);
 JPH_CAPI bool JPH_StateRecorder_IsFailed(const JPH_StateRecorder* recorder);
 

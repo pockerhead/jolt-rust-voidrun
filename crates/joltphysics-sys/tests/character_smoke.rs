@@ -202,3 +202,18 @@ fn character_lands_and_its_restored_state_continues_bit_for_bit() {
     assert_eq!(scene.save(), saved, "a restored state saves the same bytes");
     assert_eq!(scene.run(10), continued);
 }
+
+#[test]
+fn copying_no_bytes_accepts_a_null_buffer() {
+    let _world = TestWorld::new(1);
+    // SAFETY: Jolt is initialised (the world exists); the recorder is destroyed before
+    // returning. An empty recorder copies no bytes, which allows a null buffer.
+    unsafe {
+        let recorder = JPH_StateRecorder_Create();
+        assert_eq!(JPH_StateRecorder_GetDataSize(recorder), 0);
+        JPH_StateRecorder_CopyData(recorder, std::ptr::null_mut(), 0);
+        JPH_StateRecorder_CopyData(recorder, std::ptr::null_mut(), 16);
+        assert!(!JPH_StateRecorder_IsFailed(recorder));
+        JPH_StateRecorder_Destroy(recorder);
+    }
+}
