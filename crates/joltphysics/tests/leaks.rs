@@ -1,6 +1,9 @@
-//! A leak gate for the joltc objects joltphysics creates per call: the three query filters, the
-//! inflated shape of a shape cast with a target distance, and the body write lock a rebase
-//! takes for every moving body.
+//! A leak gate for the joltc objects joltphysics creates per call: the three query filters and
+//! the inflated shape of a shape cast with a target distance, created every round (100 000
+//! measured rounds against a 4 MiB threshold), and the body write lock a rebase takes for every
+//! moving body. Rebases run only every 100th round, about 1000 times, so a per-rebase leak below
+//! about 4 KiB, a leaked body lock included, stays under the threshold; the gate catches only
+//! larger ones.
 //!
 //! It measures the private bytes of the process (Windows `K32GetProcessMemoryInfo`), because
 //! these objects are allocated by C++, which a Rust global allocator does not see. The file
@@ -120,6 +123,8 @@ fn per_call_joltc_objects_do_not_leak() {
             hits += world.collide_shape(&overlap, &filter).unwrap().len();
             if i % 100 == 0 {
                 // A real, small turn that the next rebase undoes, so the scene stays in place.
+                // Only about 1000 rebases run, too few to catch a leak below about 4 KiB each,
+                // such as a body lock.
                 let angle = if rebases % 2 == 0 { 0.1 } else { -0.1 };
                 world
                     .rebase(&ids, turn_about_y(angle), RVec3::ZERO)
