@@ -413,6 +413,7 @@ fn check_header(prebuilt: &Path) -> anyhow::Result<()> {
         );
         return Ok(());
     }
+    println!("cargo:rerun-if-changed={}", vendored.display());
     let read =
         |path: &Path| fs::read(path).with_context(|| format!("cannot read {}", path.display()));
     if read(prebuilt)? != read(&vendored)? {
