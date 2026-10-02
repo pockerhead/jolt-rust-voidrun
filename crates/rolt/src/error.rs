@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use crate::{BodyId, ObjectLayer};
+
 /// Why a [`PhysicsWorld`](crate::PhysicsWorld) could not be created or changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -92,3 +94,42 @@ impl fmt::Display for StepError {
 }
 
 impl std::error::Error for StepError {}
+
+/// Why a body operation failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BodyError {
+    /// The id names no body in this world: it was removed, or its index was reused.
+    NotFound(BodyId),
+    /// The id belongs to another world.
+    WrongWorld(BodyId),
+    /// The object layer does not exist in this world's collision layers.
+    UnknownObjectLayer(ObjectLayer),
+    /// A value is out of range; the payload names it.
+    InvalidValue(&'static str),
+    /// The world already holds its maximum number of bodies.
+    TooManyBodies,
+    /// joltc returned null when creating the body settings.
+    AllocationFailed,
+}
+
+impl fmt::Display for BodyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound(id) => write!(f, "no body {id:?} in this world"),
+            Self::WrongWorld(id) => write!(f, "body {id:?} belongs to another world"),
+            Self::UnknownObjectLayer(layer) => {
+                write!(
+                    f,
+                    "object layer {} does not exist in this world",
+                    layer.get()
+                )
+            }
+            Self::InvalidValue(what) => write!(f, "invalid body value: {what}"),
+            Self::TooManyBodies => f.write_str("the world is full"),
+            Self::AllocationFailed => f.write_str("could not create the body settings"),
+        }
+    }
+}
+
+impl std::error::Error for BodyError {}

@@ -1,5 +1,8 @@
-//! World lifetime, settings validation, gravity and stepping.
+//! World lifetime, settings validation, gravity, stepping and threads.
 
+mod common;
+
+use common::*;
 use rolt::*;
 
 fn assert_send_sync<T: Send + Sync>() {}
@@ -8,6 +11,7 @@ fn assert_send_sync<T: Send + Sync>() {}
 fn world_and_shape_are_send_and_sync() {
     assert_send_sync::<PhysicsWorld>();
     assert_send_sync::<Shape>();
+    assert_send_sync::<BodyId>();
 }
 
 #[test]
@@ -69,4 +73,47 @@ fn step_rejects_bad_delta_time() {
     for dt in [0.0, -0.0, -1.0 / 60.0, f32::NAN, f32::INFINITY] {
         assert_eq!(world.step(dt), Err(StepError::InvalidDeltaTime));
     }
+}
+
+#[test]
+fn worlds_are_created_and_dropped_from_many_threads() {
+    std::thread::scope(|scope| {
+        for _ in 0..4 {
+            scope.spawn(|| {
+                for _ in 0..25 {
+                    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+                    let id = add_cube(&mut world, RVec3::new(0.0, 2.0, 0.0));
+                    world.step(DT).unwrap();
+                    assert!(world.body(id).unwrap().position().y < 2.0);
+                }
+            });
+        }
+    });
+}
+
+#[test]
+fn world_is_readable_from_many_threads() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 2);
+    let ids = build_stacks(&mut world);
+    step(&mut world, 30);
+
+    let read_all = |world: &PhysicsWorld| {
+        let mut digest = Vec::new();
+        for &id in &ids {
+            record_body(world, id, &mut digest);
+        }
+        digest
+    };
+    let expected = read_all(&world);
+    let shared = &world;
+    std::thread::scope(|scope| {
+        let readers: Vec<_> = (0..4)
+            .map(|_| scope.spawn(|| (0..50).map(|_| read_all(shared)).collect::<Vec<_>>()))
+            .collect();
+        for reader in readers {
+            for digest in reader.join().unwrap() {
+                assert_eq!(digest, expected);
+            }
+        }
+    });
 }

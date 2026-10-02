@@ -1,0 +1,358 @@
+//! Body ids, creation, access, removal and forces.
+
+mod common;
+
+use common::*;
+use rolt::*;
+
+fn cube_shape() -> Shape {
+    Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap()
+}
+
+fn bits3(v: Vec3) -> [u32; 3] {
+    <[f32; 3]>::from(v).map(f32::to_bits)
+}
+
+fn bits_r3(v: RVec3) -> [u64; 3] {
+    <[Real; 3]>::from(v).map(|c| f64::from(c).to_bits())
+}
+
+fn bits4(q: Quat) -> [u32; 4] {
+    <[f32; 4]>::from(q).map(f32::to_bits)
+}
+
+/// Creates three cubes, removes the second and creates one more; returns the four ids.
+fn id_history(world: &mut PhysicsWorld) -> [BodyId; 4] {
+    let a = add_cube(world, RVec3::new(0.0, 0.0, 0.0));
+    let b = add_cube(world, RVec3::new(3.0, 0.0, 0.0));
+    let c = add_cube(world, RVec3::new(6.0, 0.0, 0.0));
+    world.remove_body(b).unwrap();
+    let d = add_cube(world, RVec3::new(9.0, 0.0, 0.0));
+    [a, b, c, d]
+}
+
+#[test]
+fn ids_follow_insertion_order() {
+    let mut first = world(Vec3::ZERO, 1);
+    let ids = id_history(&mut first);
+    let [a, b, c, d] = ids;
+
+    for (n, id) in (0u32..).zip([a, b, c]) {
+        assert_eq!(id.index(), n);
+        assert_eq!(id.sequence(), 1);
+        assert_eq!(id.to_raw(), (1 << 23) | n);
+    }
+    assert_eq!(d.index(), 1, "the freed index is reused");
+    assert_eq!(d.sequence(), 2);
+    assert_eq!(d.to_raw(), (2 << 23) | 1);
+    assert_ne!(b, d);
+
+    let mut second = world(Vec3::ZERO, 1);
+    let second_ids = id_history(&mut second);
+    for (mine, theirs) in ids.iter().zip(&second_ids) {
+        assert_eq!(mine.to_raw(), theirs.to_raw());
+        assert_ne!(mine, theirs, "ids of different worlds are different");
+    }
+}
+
+#[test]
+fn foreign_and_stale_ids_are_rejected() {
+    let mut a = world(Vec3::ZERO, 1);
+    let mut b = world(Vec3::ZERO, 1);
+    let in_a = add_cube(&mut a, RVec3::new(0.0, 0.0, 0.0));
+    let in_b = add_cube(&mut b, RVec3::new(0.0, 0.0, 0.0));
+    assert_eq!(in_a.to_raw(), in_b.to_raw());
+
+    assert!(!b.contains(in_a));
+    assert_eq!(b.body(in_a).err(), Some(BodyError::WrongWorld(in_a)));
+    assert_eq!(b.body_mut(in_a).err(), Some(BodyError::WrongWorld(in_a)));
+    assert_eq!(b.remove_body(in_a), Err(BodyError::WrongWorld(in_a)));
+    assert_eq!(b.body_count(), 1);
+
+    a.remove_body(in_a).unwrap();
+    assert_eq!(a.body_count(), 0);
+    assert!(!a.contains(in_a));
+    assert_eq!(a.body(in_a).err(), Some(BodyError::NotFound(in_a)));
+    assert_eq!(a.body_mut(in_a).err(), Some(BodyError::NotFound(in_a)));
+    assert_eq!(a.remove_body(in_a), Err(BodyError::NotFound(in_a)));
+
+    // The new body takes the old index; the old id must still not resolve to it.
+    let reused = add_cube(&mut a, RVec3::new(1.0, 2.0, 3.0));
+    assert_eq!(reused.index(), in_a.index());
+    assert!(!a.contains(in_a));
+    assert_eq!(a.body(in_a).err(), Some(BodyError::NotFound(in_a)));
+    assert_eq!(a.remove_body(in_a), Err(BodyError::NotFound(in_a)));
+    assert!(a.contains(reused));
+    assert_eq!(
+        a.body(reused).unwrap().position(),
+        RVec3::new(1.0, 2.0, 3.0)
+    );
+    assert_eq!(a.body_count(), 1);
+}
+
+#[test]
+fn pose_and_velocity_read_back_as_exact_bits() {
+    let mut world = world(Vec3::ZERO, 1);
+    let position = RVec3::new(1.25, 3.1, -2.7);
+    let rotation = Quat::from_xyzw(0.5, -0.5, 0.5, 0.5);
+    let linear = Vec3::new(0.3, -1.7, 2.9);
+    let angular = Vec3::new(-0.11, 0.7, 1.3);
+
+    let id = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_dynamic()
+                .position(position)
+                .rotation(rotation)
+                .linear_velocity(linear)
+                .angular_velocity(angular),
+        )
+        .unwrap();
+    let body = world.body(id).unwrap();
+    assert_eq!(bits_r3(body.position()), bits_r3(position));
+    assert_eq!(bits4(body.rotation()), bits4(rotation));
+    assert_eq!(bits3(body.linear_velocity()), bits3(linear));
+    assert_eq!(bits3(body.angular_velocity()), bits3(angular));
+    assert_eq!(body.motion_type(), MotionType::Dynamic);
+
+    let half = std::f32::consts::FRAC_1_SQRT_2;
+    let position = RVec3::new(-7.3, 0.9, 11.1);
+    let rotation = Quat::from_xyzw(0.0, half, 0.0, half);
+    let linear = Vec3::new(-4.1, 0.2, 0.01);
+    let angular = Vec3::new(2.3, -0.4, 0.6);
+    let mut body = world.body_mut(id).unwrap();
+    body.set_position(position, Activation::Activate).unwrap();
+    body.set_rotation(rotation, Activation::Activate).unwrap();
+    body.set_linear_velocity(linear).unwrap();
+    body.set_angular_velocity(angular).unwrap();
+    assert_eq!(bits_r3(body.position()), bits_r3(position));
+    assert_eq!(bits4(body.rotation()), bits4(rotation));
+    assert_eq!(bits3(body.linear_velocity()), bits3(linear));
+    assert_eq!(bits3(body.angular_velocity()), bits3(angular));
+
+    let position = RVec3::new(0.7, -0.3, 5.5);
+    let rotation = Quat::from_xyzw(-0.5, -0.5, -0.5, 0.5);
+    body.set_position_and_rotation(position, rotation, Activation::DontActivate)
+        .unwrap();
+    assert_eq!(bits_r3(body.position()), bits_r3(position));
+    assert_eq!(bits4(body.rotation()), bits4(rotation));
+}
+
+#[test]
+fn sleeping_flag_is_readable() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let floor = add_floor(&mut world);
+    let sleeper = add_cube(&mut world, RVec3::new(0.0, 0.5, 0.0));
+    let insomniac = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(5.0, 0.5, 0.0))
+                .allow_sleeping(false),
+        )
+        .unwrap();
+
+    let floor_body = world.body(floor).unwrap();
+    assert!(!floor_body.is_sleeping());
+    assert!(!floor_body.is_active());
+    assert!(world.body(sleeper).unwrap().is_active());
+
+    let mut slept = false;
+    for _ in 0..180 {
+        world.step(DT).unwrap();
+        slept |= world.body(sleeper).unwrap().is_sleeping();
+        assert!(!world.body(insomniac).unwrap().is_sleeping());
+    }
+    assert!(slept, "the resting cube never fell asleep");
+    assert!(world.body(sleeper).unwrap().is_sleeping());
+    assert!(!world.body(floor).unwrap().is_sleeping());
+}
+
+#[test]
+fn removal_wakes_bodies_resting_on_it() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    add_floor(&mut world);
+    let bottom = add_cube(&mut world, RVec3::new(0.0, 0.5, 0.0));
+    let top = add_cube(&mut world, RVec3::new(0.0, 1.5, 0.0));
+
+    let mut ticks = 0;
+    while !(world.body(bottom).unwrap().is_sleeping() && world.body(top).unwrap().is_sleeping()) {
+        world.step(DT).unwrap();
+        ticks += 1;
+        assert!(ticks < 600, "the stack never fell asleep");
+    }
+
+    world.remove_body(bottom).unwrap();
+    assert!(world.body(top).unwrap().is_active());
+}
+
+#[test]
+fn invalid_body_settings_are_rejected() {
+    let mut world = world(Vec3::ZERO, 1);
+    let shape = cube_shape();
+    let layer = ObjectLayer::new(2);
+    assert_eq!(
+        world.create_body(&shape, &BodySettings::new_dynamic().object_layer(layer)),
+        Err(BodyError::UnknownObjectLayer(layer))
+    );
+    let invalid = [
+        BodySettings::new_dynamic().position(RVec3::new(0.0, Real::NAN, 0.0)),
+        BodySettings::new_dynamic().rotation(Quat::from_xyzw(0.0, 0.0, 0.0, 2.0)),
+        BodySettings::new_dynamic().rotation(Quat::from_xyzw(f32::NAN, 0.0, 0.0, 1.0)),
+        BodySettings::new_dynamic().linear_velocity(Vec3::new(f32::INFINITY, 0.0, 0.0)),
+        BodySettings::new_dynamic().angular_velocity(Vec3::new(0.0, f32::NAN, 0.0)),
+        BodySettings::new_dynamic().mass(0.0),
+        BodySettings::new_dynamic().mass(f32::NAN),
+        BodySettings::new_dynamic().friction(-0.1),
+        BodySettings::new_dynamic().restitution(f32::NAN),
+        BodySettings::new_dynamic().gravity_factor(f32::INFINITY),
+    ];
+    for settings in &invalid {
+        assert!(
+            matches!(
+                world.create_body(&shape, settings),
+                Err(BodyError::InvalidValue(_))
+            ),
+            "{settings:?} was accepted"
+        );
+    }
+    assert_eq!(world.body_count(), 0);
+
+    let position = RVec3::new(1.0, 2.0, 3.0);
+    let id = world
+        .create_body(&shape, &BodySettings::new_dynamic().position(position))
+        .unwrap();
+    let nan = Vec3::new(f32::NAN, 0.0, 0.0);
+    let not_unit = Quat::from_xyzw(0.0, 0.0, 0.0, 0.5);
+    let mut body = world.body_mut(id).unwrap();
+    assert!(body
+        .set_position(RVec3::new(Real::NAN, 0.0, 0.0), Activation::Activate)
+        .is_err());
+    assert!(body.set_rotation(not_unit, Activation::Activate).is_err());
+    assert!(body
+        .set_position_and_rotation(position, not_unit, Activation::Activate)
+        .is_err());
+    assert!(body.set_linear_velocity(nan).is_err());
+    assert!(body.set_angular_velocity(nan).is_err());
+    assert!(body.add_force(nan).is_err());
+    assert!(body.add_force_at_point(nan, position).is_err());
+    assert!(body
+        .add_force_at_point(Vec3::ZERO, RVec3::new(0.0, Real::INFINITY, 0.0))
+        .is_err());
+    assert!(body.add_torque(nan).is_err());
+
+    assert_eq!(body.position(), position);
+    assert_eq!(body.rotation(), Quat::IDENTITY);
+    assert_eq!(body.linear_velocity(), Vec3::ZERO);
+    assert_eq!(body.angular_velocity(), Vec3::ZERO);
+    world.step(DT).unwrap();
+    let body = world.body(id).unwrap();
+    assert_eq!(body.linear_velocity(), Vec3::ZERO, "no force was applied");
+    assert_eq!(body.angular_velocity(), Vec3::ZERO, "no torque was applied");
+}
+
+#[test]
+fn forces() {
+    const MASS: f32 = 2.5;
+    // Jolt's default linear damping, applied after the force: v *= 1 - c * dt.
+    const LINEAR_DAMPING: f32 = 0.05;
+    let mut world = world(Vec3::ZERO, 1);
+    let shape = cube_shape();
+    let heavy = BodySettings::new_dynamic().mass(MASS);
+    let at_x = |x| heavy.clone().position(RVec3::new(x, 0.0, 0.0));
+    let pushed = world.create_body(&shape, &heavy).unwrap();
+    let spun = world.create_body(&shape, &at_x(5.0)).unwrap();
+    let twisted = world.create_body(&shape, &at_x(10.0)).unwrap();
+    let reset = world.create_body(&shape, &at_x(15.0)).unwrap();
+
+    let force = Vec3::new(10.0, 0.0, -4.0);
+    world.body_mut(pushed).unwrap().add_force(force).unwrap();
+    world
+        .body_mut(spun)
+        .unwrap()
+        .add_force_at_point(Vec3::new(10.0, 0.0, 0.0), RVec3::new(5.0, 0.5, 0.0))
+        .unwrap();
+    world
+        .body_mut(twisted)
+        .unwrap()
+        .add_torque(Vec3::new(0.0, 3.0, 0.0))
+        .unwrap();
+    let mut body = world.body_mut(reset).unwrap();
+    body.add_force(force).unwrap();
+    body.add_torque(Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    body.reset_forces();
+    world.step(DT).unwrap();
+
+    let velocity = world.body(pushed).unwrap().linear_velocity();
+    for (actual, f) in [
+        (velocity.x, force.x),
+        (velocity.y, force.y),
+        (velocity.z, force.z),
+    ] {
+        let expected = f / MASS * DT * (1.0 - LINEAR_DAMPING * DT);
+        assert!(
+            (actual - expected).abs() <= 1e-5 * expected.abs(),
+            "velocity {actual}, expected {expected}"
+        );
+    }
+
+    let spun = world.body(spun).unwrap();
+    assert!(spun.linear_velocity().x > 0.0);
+    assert!(
+        spun.angular_velocity().z < 0.0,
+        "a force along +x above the centre turns the body about -z"
+    );
+    assert!(world.body(twisted).unwrap().angular_velocity().y > 0.0);
+
+    let reset = world.body(reset).unwrap();
+    assert_eq!(bits3(reset.linear_velocity()), [0; 3]);
+    assert_eq!(bits3(reset.angular_velocity()), [0; 3]);
+}
+
+#[test]
+fn reset_forces_ignores_static_and_kinematic_bodies() {
+    let mut world = world(Vec3::ZERO, 1);
+    let shape = cube_shape();
+    let floor = world
+        .create_body(&shape, &BodySettings::new_static())
+        .unwrap();
+    let velocity = Vec3::new(1.0, 0.0, 0.0);
+    let kinematic = world
+        .create_body(
+            &shape,
+            &BodySettings::new_kinematic()
+                .position(RVec3::new(5.0, 0.0, 0.0))
+                .linear_velocity(velocity),
+        )
+        .unwrap();
+    world.body_mut(floor).unwrap().reset_forces();
+    world.body_mut(kinematic).unwrap().reset_forces();
+    world.step(DT).unwrap();
+
+    let kinematic = world.body(kinematic).unwrap();
+    assert_eq!(kinematic.linear_velocity(), velocity);
+    assert_eq!(kinematic.motion_type(), MotionType::Kinematic);
+    assert!(kinematic.position().x > 5.0);
+    assert_eq!(world.body(floor).unwrap().position(), RVec3::ZERO);
+}
+
+#[test]
+fn shape_can_be_dropped_after_body_creation() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    add_floor(&mut world);
+    let id = {
+        let shape = Shape::new_sphere(0.5).unwrap();
+        world
+            .create_body(
+                &shape,
+                &BodySettings::new_dynamic().position(RVec3::new(0.0, 2.0, 0.0)),
+            )
+            .unwrap()
+    };
+    step(&mut world, 120);
+    let y = world.body(id).unwrap().position().y;
+    assert!(
+        (0.45..0.55).contains(&y),
+        "the sphere rests on the floor, y = {y}"
+    );
+}
