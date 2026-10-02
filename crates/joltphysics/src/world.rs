@@ -368,7 +368,10 @@ mod tests {
     #[test]
     fn worker_thread_bounds_are_validated() {
         for valid in [1, WorldSettings::MAX_WORKER_THREADS] {
-            assert_eq!(WorldSettings::default().worker_threads(valid).validate(), Ok(()));
+            assert_eq!(
+                WorldSettings::default().worker_threads(valid).validate(),
+                Ok(())
+            );
         }
         for invalid in [0, WorldSettings::MAX_WORKER_THREADS + 1, u32::MAX] {
             assert!(matches!(
