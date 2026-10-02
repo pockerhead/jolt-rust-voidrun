@@ -48,14 +48,12 @@ Layers, bottom to top:
 - **Data over constants for tuning**, laws as constants: physical tuning numbers belong to the caller,
   the binding exposes settings structs with Jolt's defaults.
 
-## Docs travel with the code
-Every change that adds or changes public behaviour updates, in the same branch:
-- rustdoc on every public item it touches (what it does, units, conventions such as normal direction, panics/errors, a short example where it helps);
-- `README.md` when the feature list, build steps or guarantees change (the feature table states what is bound and tested);
-- `CHANGELOG.md` under `Unreleased` (one line per user-visible change);
-- `LINEAGE.md` when a new upstream source is taken in.
-
-Docs that describe something the code no longer does are a bug.
+## Documentation
+- Rustdoc is part of the code: every public item a change adds or alters gets its doc comment in the same
+  change (what it does, units, conventions such as normal direction, errors, a short example where it helps).
+- `README.md` (feature table, build steps, guarantees), `CHANGELOG.md` and guides are brought up to date in a
+  closing documentation step at the end of each body of work, against the code as it then is.
+- Docs that describe something the code no longer does are a bug.
 
 ## Build and test
 Requirements: a C++ toolchain (MSVC on Windows), CMake ≥ 3.16, LLVM/libclang for `bindgen`.
@@ -78,7 +76,7 @@ One cargo process at a time on shared machines: the C++ build is heavy.
 - Ref-counted Jolt objects: who owns the reference, who releases it.
 - Tests are headless, deterministic, and cover the behaviour, not just compilation.
 - `cargo clippy -D warnings` and `cargo fmt --check` are clean.
-- Rustdoc, README feature table and CHANGELOG match the change; `cargo doc --no-deps` builds without warnings.
+- Public items touched have rustdoc; `cargo doc --no-deps` builds without warnings.
 
 ## Commits
 Plain messages that say what changed and why. No AI attribution lines.
