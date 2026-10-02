@@ -59,7 +59,7 @@ fn item_settles_under_caller_radial_gravity() {
             towards_centre.z * pull,
         ))
         .unwrap();
-        world.step(DT).unwrap();
+        assert!(world.step(DT).unwrap().is_complete());
 
         let body = world.body(item).unwrap();
         if tick == 40 {
@@ -139,8 +139,8 @@ fn two_worlds_side_by_side_do_not_interfere() {
     let mut digest_a = Vec::new();
     let mut digest_b = Vec::new();
     for tick in 0..SIDE_BY_SIDE_TICKS {
-        a.step(DT).unwrap();
-        b.step(DT).unwrap();
+        assert!(a.step(DT).unwrap().is_complete());
+        assert!(b.step(DT).unwrap().is_complete());
         let (before_a, before_b) = (digest_a.len(), digest_b.len());
         for (&id_a, &id_b) in ids_a.iter().zip(&ids_b) {
             record_body(&a, id_a, &mut digest_a);

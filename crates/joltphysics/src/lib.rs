@@ -26,7 +26,8 @@
 //! )?;
 //!
 //! for _ in 0..60 {
-//!     world.step(1.0 / 60.0)?;
+//!     let report = world.step(1.0 / 60.0)?;
+//!     assert!(report.is_complete());
 //! }
 //! assert!(world.body(ball)?.position().y < 2.0);
 //! # Ok(())
@@ -68,4 +69,4 @@ pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{RayCast, RayHit};
 pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
-pub use world::{PhysicsWorld, WorldSettings};
+pub use world::{PhysicsWorld, StepReport, WorldSettings};

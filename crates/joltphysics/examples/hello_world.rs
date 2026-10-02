@@ -23,7 +23,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
 
     for tick in 1..=120 {
-        world.step(1.0 / 60.0)?;
+        // An `Err` means the step was rejected; a full Jolt buffer is reported in the `Ok` value.
+        let report = world.step(1.0 / 60.0)?;
+        if !report.is_complete() {
+            eprintln!("tick {tick:3}: Jolt dropped contacts: {report:?}");
+        }
         if tick % 20 == 0 {
             let body = world.body(sphere)?;
             let position = body.position();

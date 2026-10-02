@@ -161,7 +161,7 @@ fn sleeping_flag_is_readable() {
 
     let mut slept = false;
     for _ in 0..180 {
-        world.step(DT).unwrap();
+        assert!(world.step(DT).unwrap().is_complete());
         slept |= world.body(sleeper).unwrap().is_sleeping();
         assert!(!world.body(insomniac).unwrap().is_sleeping());
     }
@@ -179,7 +179,7 @@ fn removal_wakes_bodies_resting_on_it() {
 
     let mut ticks = 0;
     while !(world.body(bottom).unwrap().is_sleeping() && world.body(top).unwrap().is_sleeping()) {
-        world.step(DT).unwrap();
+        assert!(world.step(DT).unwrap().is_complete());
         ticks += 1;
         assert!(ticks < 600, "the stack never fell asleep");
     }
@@ -247,7 +247,7 @@ fn invalid_body_settings_are_rejected() {
     assert_eq!(body.rotation(), Quat::IDENTITY);
     assert_eq!(body.linear_velocity(), Vec3::ZERO);
     assert_eq!(body.angular_velocity(), Vec3::ZERO);
-    world.step(DT).unwrap();
+    assert!(world.step(DT).unwrap().is_complete());
     let body = world.body(id).unwrap();
     assert_eq!(body.linear_velocity(), Vec3::ZERO, "no force was applied");
     assert_eq!(body.angular_velocity(), Vec3::ZERO, "no torque was applied");
@@ -283,7 +283,7 @@ fn forces() {
     body.add_force(force).unwrap();
     body.add_torque(Vec3::new(1.0, 2.0, 3.0)).unwrap();
     body.reset_forces();
-    world.step(DT).unwrap();
+    assert!(world.step(DT).unwrap().is_complete());
 
     let velocity = world.body(pushed).unwrap().linear_velocity();
     for (actual, f) in [
@@ -329,7 +329,7 @@ fn reset_forces_ignores_static_and_kinematic_bodies() {
         .unwrap();
     world.body_mut(floor).unwrap().reset_forces();
     world.body_mut(kinematic).unwrap().reset_forces();
-    world.step(DT).unwrap();
+    assert!(world.step(DT).unwrap().is_complete());
 
     let kinematic = world.body(kinematic).unwrap();
     assert_eq!(kinematic.linear_velocity(), velocity);
@@ -396,7 +396,7 @@ fn mass_too_small_to_invert_is_rejected() {
     let mut body = world.body_mut(light).unwrap();
     body.add_force(Vec3::new(1.0, 0.0, 0.0)).unwrap();
     body.add_torque(Vec3::new(0.0, 1e-6, 0.0)).unwrap();
-    world.step(DT).unwrap();
+    assert!(world.step(DT).unwrap().is_complete());
     let body = world.body(light).unwrap();
     for value in [body.linear_velocity(), body.angular_velocity()] {
         assert!(

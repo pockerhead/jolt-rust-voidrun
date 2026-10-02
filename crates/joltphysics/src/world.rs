@@ -340,9 +340,10 @@ impl PhysicsWorld {
     /// Advances the world by `delta_time` seconds in one collision step.
     ///
     /// `delta_time` must be finite and positive, otherwise nothing happens and
-    /// [`StepError::InvalidDeltaTime`] is returned. [`StepError::CacheFull`] means the step
-    /// ran but dropped work; the world has advanced.
-    pub fn step(&mut self, delta_time: f32) -> Result<(), StepError> {
+    /// [`StepError::InvalidDeltaTime`] is returned. Every other call advances the world and
+    /// returns a [`StepReport`]; check [`StepReport::is_complete`] to learn whether Jolt
+    /// dropped work because a fixed-size buffer was full.
+    pub fn step(&mut self, delta_time: f32) -> Result<StepReport, StepError> {
         if !(delta_time.is_finite() && delta_time > 0.0) {
             return Err(StepError::InvalidDeltaTime);
         }
@@ -357,14 +358,37 @@ impl PhysicsWorld {
                 self.job_system.0.as_ptr(),
             )
         };
-        if errors == JPH_PhysicsUpdateError_None {
-            return Ok(());
-        }
-        Err(StepError::CacheFull {
-            manifold_cache: errors & JPH_PhysicsUpdateError_ManifoldCacheFull != 0,
-            body_pair_cache: errors & JPH_PhysicsUpdateError_BodyPairCacheFull != 0,
-            contact_constraints: errors & JPH_PhysicsUpdateError_ContactConstraintsFull != 0,
+        Ok(StepReport {
+            manifold_cache_full: errors & JPH_PhysicsUpdateError_ManifoldCacheFull != 0,
+            body_pair_cache_full: errors & JPH_PhysicsUpdateError_BodyPairCacheFull != 0,
+            contact_constraints_full: errors & JPH_PhysicsUpdateError_ContactConstraintsFull != 0,
         })
+    }
+}
+
+/// What a [`PhysicsWorld::step`] that ran reports. The world has advanced either way.
+///
+/// When a fixed-size buffer was full, Jolt finished the step but ignored some contacts; the
+/// flags say which buffer, and the matching [`WorldSettings`] limit should be raised.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use = "a step may have dropped contacts; check `is_complete`"]
+#[non_exhaustive]
+pub struct StepReport {
+    /// The contact manifold cache was full: too many contacts between bodies. Raise
+    /// [`WorldSettings::max_contact_constraints`].
+    pub manifold_cache_full: bool,
+    /// The body pair cache was full: too many bodies touched. Raise
+    /// [`WorldSettings::max_body_pairs`].
+    pub body_pair_cache_full: bool,
+    /// The contact constraint buffer was full. Raise
+    /// [`WorldSettings::max_contact_constraints`].
+    pub contact_constraints_full: bool,
+}
+
+impl StepReport {
+    /// Whether the step ran without dropping any work.
+    pub fn is_complete(&self) -> bool {
+        !(self.manifold_cache_full || self.body_pair_cache_full || self.contact_constraints_full)
     }
 }
 
