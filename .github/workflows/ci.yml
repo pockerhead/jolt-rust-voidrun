@@ -18,7 +18,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUSTDOCFLAGS: -D warnings
-      FEATURE_ARGS: ${{ matrix.features && format('--features joltc-sys/{0}', matrix.features) || '' }}
+      FEATURE_ARGS: ${{ matrix.features && format('--features joltphysics-sys/{0}', matrix.features) || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,10 +37,10 @@ jobs:
       - name: Check pinned commits
         id: pins
         run: |
-          joltc=$(git rev-parse HEAD:crates/joltc-sys/vendor/joltc)
-          jolt=$(git rev-parse HEAD:crates/joltc-sys/vendor/JoltPhysics)
-          grep -q "\"$joltc\"" crates/joltc-sys/build.rs || { echo "build.rs JOLTC_COMMIT differs from the gitlink $joltc"; exit 1; }
-          grep -q "\"$jolt\"" crates/joltc-sys/build.rs || { echo "build.rs JOLT_COMMIT differs from the gitlink $jolt"; exit 1; }
+          joltc=$(git rev-parse HEAD:crates/joltphysics-sys/vendor/joltc)
+          jolt=$(git rev-parse HEAD:crates/joltphysics-sys/vendor/JoltPhysics)
+          grep -q "\"$joltc\"" crates/joltphysics-sys/build.rs || { echo "build.rs JOLTC_COMMIT differs from the gitlink $joltc"; exit 1; }
+          grep -q "\"$jolt\"" crates/joltphysics-sys/build.rs || { echo "build.rs JOLT_COMMIT differs from the gitlink $jolt"; exit 1; }
           echo "joltc=$joltc" >> "$GITHUB_OUTPUT"
           echo "jolt=$jolt" >> "$GITHUB_OUTPUT"
 
@@ -49,17 +49,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/joltc-prefix
-          key: joltc-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.joltc }}-${{ steps.pins.outputs.jolt }}-${{ matrix.features || 'default' }}-${{ hashFiles('crates/joltc-sys/native/**', 'crates/joltc-sys/build.rs') }}
+          key: joltc-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.joltc }}-${{ steps.pins.outputs.jolt }}-${{ matrix.features || 'default' }}-${{ hashFiles('crates/joltphysics-sys/native/**', 'crates/joltphysics-sys/build.rs') }}
 
       - name: Build native library
         if: steps.native.outputs.cache-hit != 'true'
         run: |
-          cargo build -p joltc-sys $FEATURE_ARGS
+          cargo build -p joltphysics-sys $FEATURE_ARGS
           shopt -s nullglob
-          dirs=(target/debug/build/joltc-sys-*/out/joltc)
+          dirs=(target/debug/build/joltphysics-sys-*/out/joltc)
           [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
           mkdir -p "$RUNNER_TEMP/joltc-prefix"
-          cp -r "${dirs[0]}/lib" "${dirs[0]}/include" "${dirs[0]}/joltc-sys-manifest.txt" "$RUNNER_TEMP/joltc-prefix/"
+          cp -r "${dirs[0]}/lib" "${dirs[0]}/include" "${dirs[0]}/joltphysics-sys-manifest.txt" "$RUNNER_TEMP/joltc-prefix/"
 
       # Every later step links the cached prefix, so each run also exercises
       # the JOLTC_LIB_DIR validation. A manifest mismatch means the cache key
