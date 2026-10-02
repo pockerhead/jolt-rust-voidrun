@@ -7,6 +7,7 @@ use std::ptr::NonNull;
 
 use joltphysics_sys::*;
 
+use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyError, ObjectLayer, PhysicsWorld, Quat, RVec3, Shape, Vec3};
 
@@ -409,13 +410,14 @@ fn has_well_conditioned_principal_moments(tensor: [[f64; 3]; 3]) -> bool {
 }
 
 /// Owns a `JPH_BodyCreationSettings`, which holds its own reference to the shape.
-struct CreationSettings(NonNull<JPH_BodyCreationSettings>);
+struct CreationSettings(Owned<JPH_BodyCreationSettings>);
 
-impl Drop for CreationSettings {
-    fn drop(&mut self) {
-        // SAFETY: this value owns the settings; bodies created from them keep their own shape
-        // reference.
-        unsafe { JPH_BodyCreationSettings_Destroy(self.0.as_ptr()) };
+/// Body creation settings, owned whole by their owner.
+impl JoltObject for JPH_BodyCreationSettings {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: the owner owns the settings (trait contract), which joltc deletes; bodies
+        // created from them keep their own shape reference.
+        unsafe { JPH_BodyCreationSettings_Destroy(ptr) };
     }
 }
 
@@ -424,19 +426,19 @@ impl CreationSettings {
         let position = settings.position.to_jph();
         let rotation = settings.rotation.to_jph();
         // SAFETY: `shape` is live for the call and the settings take their own reference to
-        // it; `position` and `rotation` are live locals.
-        let raw = unsafe {
-            JPH_BodyCreationSettings_Create3(
+        // it; `position` and `rotation` are live locals. The handle takes over the returned
+        // settings.
+        let this = unsafe {
+            Owned::from_raw(JPH_BodyCreationSettings_Create3(
                 shape.as_ptr(),
                 &position,
                 &rotation,
                 settings.motion_type.to_jph(),
                 settings.object_layer.get(),
-            )
-        };
-        let this = NonNull::new(raw)
-            .map(Self)
-            .ok_or(BodyError::AllocationFailed)?;
+            ))
+        }
+        .map(Self)
+        .ok_or(BodyError::AllocationFailed)?;
 
         let ptr = this.0.as_ptr();
         let linear_velocity = settings.linear_velocity.to_jph();
@@ -603,13 +605,12 @@ impl PhysicsWorld {
     }
 }
 
-/// Unlocks and frees a `JPH_BodyLockMultiWrite` on drop, also while unwinding.
-struct WriteLock(NonNull<JPH_BodyLockMultiWrite>);
-
-impl Drop for WriteLock {
-    fn drop(&mut self) {
-        // SAFETY: this value owns the lock, which is released exactly once here.
-        unsafe { JPH_BodyLockMultiWrite_Destroy(self.0.as_ptr()) };
+/// A body write lock. Destroying it deletes Jolt's `BodyLockMultiWrite`, which unlocks the
+/// bodies, and frees the joltc wrapper; as an `Owned` it is released also while unwinding.
+impl JoltObject for JPH_BodyLockMultiWrite {
+    unsafe fn destroy(ptr: *mut Self) {
+        // SAFETY: the owner owns the lock (trait contract), which is released exactly once here.
+        unsafe { JPH_BodyLockMultiWrite_Destroy(ptr) };
     }
 }
 
@@ -624,14 +625,17 @@ fn with_locked_body<R>(
 ) -> Option<R> {
     let raw = id.raw;
     // SAFETY: the lock interface belongs to a live world. joltc copies the one id into the
-    // lock object, so `raw` only has to live for the call.
-    let lock = NonNull::new(unsafe {
-        JPH_BodyLockInterface_LockMultiWrite(lock_interface.as_ptr(), &raw, 1)
-    })
-    .map(WriteLock)?;
+    // lock object, so `raw` only has to live for the call. The handle takes over the lock.
+    let lock = unsafe {
+        Owned::from_raw(JPH_BodyLockInterface_LockMultiWrite(
+            lock_interface.as_ptr(),
+            &raw,
+            1,
+        ))
+    }?;
     // SAFETY: `lock` is live and holds exactly one id, at index 0. Jolt returns null unless
     // index and sequence number both match a live body (`BodyManager::TryGetBody`).
-    let body = NonNull::new(unsafe { JPH_BodyLockMultiWrite_GetBody(lock.0.as_ptr(), 0) })?;
+    let body = NonNull::new(unsafe { JPH_BodyLockMultiWrite_GetBody(lock.as_ptr(), 0) })?;
     Some(f(body))
 }
 
@@ -893,9 +897,10 @@ mod tests {
     #[test]
     fn default_settings_match_jolt() {
         assert!(ensure_initialized());
-        // SAFETY: Jolt is initialised.
-        let jolt =
-            CreationSettings(NonNull::new(unsafe { JPH_BodyCreationSettings_Create() }).unwrap());
+        // SAFETY: Jolt is initialised, and the handle takes over the new settings.
+        let jolt = CreationSettings(
+            unsafe { Owned::from_raw(JPH_BodyCreationSettings_Create()) }.unwrap(),
+        );
         let ours = BodySettings::default();
         let ptr = jolt.0.as_ptr();
         // SAFETY: `ptr` is the live settings object owned by `jolt`; getters only read it.
