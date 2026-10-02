@@ -26,3 +26,29 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   a fixed-size Jolt buffer was full returns `Ok` with the matching `StepReport` flag set
   (`StepReport::is_complete` is false). `StepError::CacheFull` is gone. The rule for the safe API: `Err`
   means nothing happened; anything that happened but was degraded is reported in the `Ok` value.
+- Bodies: kinematic bodies, mass override, continuous collision (`MotionQuality::LinearCast`),
+  gravity factor, enhanced internal edge removal, forces at a point and torques, `reset_forces`,
+  and sleep and active readout. Invalid values are rejected with typed errors before they reach Jolt.
+- `WorldSettings::worker_threads` accepts 1 to `WorldSettings::MAX_WORKER_THREADS` (64).
+  `PhysicsWorld` is `Send` and `Sync`: many threads may read one world, and separate worlds step in
+  parallel.
+- `PhysicsWorld::remove_body` wakes the non-static bodies whose bounds overlap the removed one, in
+  body-id order, so a stack whose bottom is removed falls.
+- Shapes: Y-cylinders and Y-capsules, boxes and cylinders with a chosen convex radius (0 for sharp
+  edges), heightfields (`Shape::new_height_field`, `HeightFieldSettings`: holes, block size, bits per
+  sample, active-edge threshold) and compounds whose children carry their own pose and user data
+  (`Shape::new_compound`, `CompoundChild`). One shape serves many bodies in many worlds.
+- Scene queries on `&PhysicsWorld`: `cast_ray`, `cast_shape` (with target distance, start
+  penetration and deepest point) and `collide_shape`, all filtered by `QueryFilter` (object layers,
+  compound child groups, one excluded body). Hits report the outward normal of the obstacle and the
+  compound child that was hit. `optimize_broad_phase` makes queries fast after many single inserts.
+- `PhysicsWorld::rebase` moves the whole world into a new frame (floating origin) without waking or
+  putting to sleep any body.
+- A determinism gate: scenes run in two processes with 1 and 4 worker threads must match bit for
+  bit for 1000 ticks, and another creation order must not. CI runs it, and the whole suite, in the
+  default, `cross-platform-deterministic` and `double-precision` configurations.
+- `debug-renderer` feature: `PhysicsWorld::debug_lines` returns the wireframe of the colliders around
+  a point as line data, with layer and group filters and a line cap. Jolt's debug renderer is left
+  out of the native libraries without the feature.
+- A guide (`docs/guide.md`) with a headless example of a terrain, a chunk compound, an item, queries
+  and a rebase, run as a doctest.

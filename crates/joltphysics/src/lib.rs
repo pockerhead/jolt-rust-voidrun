@@ -113,3 +113,8 @@ pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{CollideShape, CollideShapeHit, RayCast, RayHit, ShapeCast, ShapeCastHit};
 pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
 pub use world::{PhysicsWorld, StepReport, WorldSettings};
+
+/// The repository's guide, `docs/guide.md`, whose example runs as a doctest.
+#[cfg(doctest)]
+#[doc = include_str!("../../../docs/guide.md")]
+pub struct Guide;
