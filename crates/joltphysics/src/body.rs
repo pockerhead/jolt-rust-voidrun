@@ -87,7 +87,7 @@ impl MotionType {
         }
     }
 
-    fn from_jph(value: JPH_MotionType) -> Self {
+    pub(crate) fn from_jph(value: JPH_MotionType) -> Self {
         [Self::Static, Self::Kinematic, Self::Dynamic]
             .into_iter()
             .find(|motion_type| motion_type.to_jph() == value)
@@ -354,7 +354,7 @@ const ZERO_MASS_PROPERTIES: JPH_MassProperties = JPH_MassProperties {
 /// The mass and inertia Jolt gives a body made from `shape` (Jolt
 /// `BodyCreationSettings::GetMassProperties` with the default inertia multiplier): the shape's
 /// own, scaled to `mass` when it is overridden.
-fn mass_properties(shape: &Shape, mass: Option<f32>) -> JPH_MassProperties {
+pub(crate) fn mass_properties(shape: &Shape, mass: Option<f32>) -> JPH_MassProperties {
     let mut properties = ZERO_MASS_PROPERTIES;
     // SAFETY: `shape` is live for the call; `properties` is a live local that joltc overwrites.
     unsafe { JPH_Shape_GetMassProperties(shape.as_ptr(), &mut properties) };
@@ -368,7 +368,7 @@ fn mass_properties(shape: &Shape, mass: Option<f32>) -> JPH_MassProperties {
 /// Whether Jolt's `MotionProperties::SetMassProperties` derives a finite inverse mass and
 /// inverse inertia from `properties`. A tiny mass, or a shape whose computed mass or inertia
 /// underflows, would otherwise give infinite inverses and turn the first force into NaN.
-fn has_finite_inverse(properties: &JPH_MassProperties) -> bool {
+pub(crate) fn has_finite_inverse(properties: &JPH_MassProperties) -> bool {
     let inverse_mass = 1.0 / properties.mass;
     // When the inertia is near zero Jolt uses the inertia of a unit sphere, 2.5 / mass.
     if !(properties.mass > 0.0 && inverse_mass.is_finite() && (2.5 * inverse_mass).is_finite()) {
@@ -582,8 +582,18 @@ impl PhysicsWorld {
     /// non-static body whose current bounds overlap (or touch) the removed body's bounds, in
     /// body-id order. The woken set depends only on body poses, not on broad-phase maintenance or
     /// worker threads; a stack whose bottom is removed falls.
+    ///
+    /// The inner body of a character cannot be removed this way
+    /// ([`BodyError::OwnedByCharacter`]); it goes with
+    /// [`remove_character`](Self::remove_character).
     pub fn remove_body(&mut self, id: BodyId) -> Result<(), BodyError> {
         self.check(id)?;
+        // The character's destructor destroys its inner body, and Jolt does not validate ids in
+        // `DestroyBody`: removing it here first would make that a double destroy. Any future
+        // API that destroys bodies needs the same check.
+        if self.is_inner_body(id) {
+            return Err(BodyError::OwnedByCharacter(id));
+        }
         let mut bounds = JPH_AABox {
             min: Vec3::ZERO.to_jph(),
             max: Vec3::ZERO.to_jph(),

@@ -4,10 +4,14 @@
 //! without synchronisation, so both run under one process-wide lock here. Stepping uses the
 //! world's own temp allocator and job system and needs no global lock, so independent worlds
 //! step in parallel. The joltc functions that read that global map (step listeners) or use
-//! joltc's shared temp allocator (`JPH_PhysicsSystem_Update`, the character updates) are not
-//! used here; wrapping them requires revisiting this lock. Callbacks that run inside a step
-//! must not use the locking body interface, which would deadlock.
+//! joltc's shared temp allocator (`JPH_PhysicsSystem_Update` and joltc's own character updates)
+//! are not used here; wrapping them requires revisiting this lock. Characters are updated with
+//! the world's own temp allocator through the `joltphysics-sys` extension
+//! (`JPH_CharacterVirtual_ExtendedUpdate2`, `JPH_CharacterVirtual_RefreshContacts2`), which
+//! needs `&mut self`. Callbacks that run inside a step must not use the locking body interface,
+//! which would deadlock.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,6 +20,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
+use crate::character::CharacterEntry;
 use crate::math::is_finite_positive;
 use crate::owned::{JoltObject, Owned};
 use crate::{
@@ -205,22 +210,34 @@ impl WorldTag {
 /// until Jolt has rebuilt it during steps (Jolt docs, "Bodies"); see
 /// [`optimize_broad_phase`](Self::optimize_broad_phase).
 pub struct PhysicsWorld {
-    // Field order is drop order. The system goes first, before the job system and allocator
+    // Field order is drop order. The characters go first: each destructor removes its inner
+    // body through the still-live system. The character collision set follows; it only frees
+    // its list of character pointers. The system goes next, before the job system and allocator
     // its steps used, and deletes the layer tables it owns. The interface and query pointers
     // after them are borrowed from the system and have no destructor.
-    system: Owned<JPH_PhysicsSystem>,
+    /// The characters by Jolt character id.
+    pub(crate) characters: BTreeMap<u32, CharacterEntry>,
+    /// Jolt's `CharacterVsCharacterCollisionSimple` of the characters that collide with each
+    /// other, created with the first of them.
+    pub(crate) character_collision: Option<Owned<JPH_CharacterVsCharacterCollision>>,
+    pub(crate) system: Owned<JPH_PhysicsSystem>,
     job_system: Owned<JPH_JobSystem>,
-    temp_allocator: Owned<JPH_TempAllocator>,
+    pub(crate) temp_allocator: Owned<JPH_TempAllocator>,
     pub(crate) body_interface: NonNull<JPH_BodyInterface>,
     pub(crate) body_lock_interface: NonNull<JPH_BodyLockInterface>,
     pub(crate) narrow_phase_query: NonNull<JPH_NarrowPhaseQuery>,
     pub(crate) broad_phase_query: NonNull<JPH_BroadPhaseQuery>,
     pub(crate) object_layer_count: u32,
     pub(crate) tag: WorldTag,
+    /// Raw ids of the characters' inner bodies.
+    pub(crate) inner_bodies: BTreeSet<u32>,
+    /// The Jolt character id the next character gets; ids start at 1 and are never reused.
+    pub(crate) next_character_id: u32,
 }
 
-// SAFETY: the physics system, job system and temp allocator have no thread affinity. `step`
-// needs `&mut self`, so the allocator and job system serve one `Update` at a time
+// SAFETY: the physics system, job system, temp allocator, characters and character collision
+// set have no thread affinity. `step` and the character updates need `&mut self`, so the
+// allocator and job system serve one call at a time
 // (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access).
 unsafe impl Send for PhysicsWorld {}
 // SAFETY: every `&self` method only calls Jolt's locking body interface, read-only system
@@ -229,7 +246,11 @@ unsafe impl Send for PhysicsWorld {}
 // Jolt forbids body access only while `PhysicsSystem::Update` runs, and `step` needs `&mut self`
 // (https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/index.html, multithreaded access). Query filter
 // and result callbacks run on the querying thread, read the world only through the locking body
-// interface and write only state on that query's stack.
+// interface and write only state on that query's stack. Character reads through `&self` are
+// joltc getters over const Jolt members (`GetPosition`, `GetGroundState`,
+// `GetActiveContacts().at()`, the const `SaveState`); every character change and update takes
+// `&mut self`, and so does every use of `CharacterVsCharacterCollisionSimple`, which is not
+// thread-safe (`CharacterVirtual.h`).
 unsafe impl Sync for PhysicsWorld {}
 
 /// One body's pose and velocities in a frame.
@@ -239,6 +260,15 @@ struct BodyFrameState {
     rotation: Quat,
     linear_velocity: Vec3,
     angular_velocity: Vec3,
+}
+
+/// One character's pose, up and velocity in a frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CharacterFrameState {
+    position: RVec3,
+    rotation: Quat,
+    up: Vec3,
+    linear_velocity: Vec3,
 }
 
 /// The rigid change of frame of a rebase: `p -> rotation * p + translation`.
@@ -297,6 +327,29 @@ impl FrameChange {
             && new.rotation.is_valid_rotation()
             && new.linear_velocity.is_finite()
             && new.angular_velocity.is_finite();
+        valid.then_some(new)
+    }
+
+    /// `state` in the new frame, or `None` when a value would not be finite or the rotation or
+    /// up not of unit length: the rule every character setter applies.
+    fn character(&self, state: CharacterFrameState) -> Option<CharacterFrameState> {
+        let rotation = if self.rotates() {
+            self.rotation.product(state.rotation).normalized()
+        } else {
+            state.rotation
+        };
+        let new = CharacterFrameState {
+            position: self.point(state.position),
+            rotation,
+            up: self.vector(state.up),
+            linear_velocity: self.vector(state.linear_velocity),
+        };
+        let unit_up = (new.up.dot(new.up) - 1.0).abs() <= 1.0e-5;
+        let valid = new.position.is_finite()
+            && new.rotation.is_valid_rotation()
+            && new.up.is_finite()
+            && unit_up
+            && new.linear_velocity.is_finite();
         valid.then_some(new)
     }
 }
@@ -385,6 +438,8 @@ impl PhysicsWorld {
             .ok_or(WorldError::AllocationFailed("broad phase query"))?;
 
         Ok(Self {
+            characters: BTreeMap::new(),
+            character_collision: None,
             system,
             job_system,
             temp_allocator,
@@ -394,6 +449,8 @@ impl PhysicsWorld {
             broad_phase_query,
             object_layer_count: settings.layers.object_layer_count(),
             tag: WorldTag::next(),
+            inner_bodies: BTreeSet::new(),
+            next_character_id: 1,
         })
     }
 
@@ -463,6 +520,14 @@ impl PhysicsWorld {
     /// [`optimize_broad_phase`](Self::optimize_broad_phase) afterwards is optional and only
     /// makes queries faster until the next step. Jolt caches contacts relative to the bodies,
     /// so bodies at rest keep their contacts on the next step.
+    ///
+    /// Characters move with the world, in id order after the bodies: position and rotation as
+    /// for bodies, up and linear velocity as vectors. The list must still name their inner
+    /// bodies, which are bodies of the world. The contacts and ground a character cached in its
+    /// last update stay in the old frame. A translation needs nothing more, because the next
+    /// update reads only cached normals and velocities; after a rotation call
+    /// [`refresh_character_contacts`](Self::refresh_character_contacts) for every character
+    /// before its next update.
     pub fn rebase(
         &mut self,
         bodies_in_key_order: &[BodyId],
@@ -510,6 +575,22 @@ impl PhysicsWorld {
         if frame.is_noop() {
             return Ok(());
         }
+        let mut characters = Vec::with_capacity(self.characters.len());
+        for id in self.character_ids().collect::<Vec<_>>() {
+            let character = self
+                .character(id)
+                .unwrap_or_else(|_| unreachable!("listed by the world"));
+            let old = CharacterFrameState {
+                position: character.position(),
+                rotation: character.rotation(),
+                up: character.up(),
+                linear_velocity: character.linear_velocity(),
+            };
+            let Some(new) = frame.character(old) else {
+                return invalid("rebase would give a character a non-finite pose or velocity");
+            };
+            characters.push((id, new));
+        }
 
         for (id, motion_type, old, new) in changes {
             let position = new.position.to_jph();
@@ -545,6 +626,20 @@ impl PhysicsWorld {
                     }
                 });
             }
+        }
+        // After the bodies: the character setters place each inner body absolutely at the
+        // character's new pose, which is the pose the body loop gave it. Up goes first, because
+        // the inner body's position includes the padding along up.
+        for (id, new) in characters {
+            let mut character = self
+                .character_mut(id)
+                .unwrap_or_else(|_| unreachable!("listed by the world"));
+            let written = character
+                .set_up(new.up)
+                .and_then(|()| character.set_position(new.position))
+                .and_then(|()| character.set_rotation(new.rotation))
+                .and_then(|()| character.set_linear_velocity(new.linear_velocity));
+            debug_assert_eq!(written, Ok(()), "checked by `FrameChange::character`");
         }
         if frame.rotates() {
             let gravity = gravity.to_jph();

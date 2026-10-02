@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::{BodyId, ObjectLayer};
+use crate::{BodyId, CharacterId, ObjectLayer};
 
 /// Why a [`PhysicsWorld`](crate::PhysicsWorld) could not be created or changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,6 +121,8 @@ pub enum BodyError {
     TooManyBodies,
     /// joltc returned null when creating the body settings.
     AllocationFailed,
+    /// The body is the inner body of a character; remove the character instead.
+    OwnedByCharacter(BodyId),
 }
 
 impl fmt::Display for BodyError {
@@ -138,8 +140,42 @@ impl fmt::Display for BodyError {
             Self::InvalidValue(what) => write!(f, "invalid body value: {what}"),
             Self::TooManyBodies => f.write_str("the world is full"),
             Self::AllocationFailed => f.write_str("could not create the body settings"),
+            Self::OwnedByCharacter(id) => {
+                write!(f, "body {id:?} is the inner body of a character")
+            }
         }
     }
 }
 
 impl std::error::Error for BodyError {}
+
+/// Why a character operation failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CharacterError {
+    /// The id names no character in this world: it was removed.
+    NotFound(CharacterId),
+    /// The id belongs to another world.
+    WrongWorld(CharacterId),
+    /// A value is out of range; the payload names it.
+    InvalidValue(&'static str),
+    /// The character asked for an inner body and the world already holds its maximum number of
+    /// bodies.
+    TooManyBodies,
+    /// The world has given out every character id.
+    TooManyCharacters,
+}
+
+impl fmt::Display for CharacterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound(id) => write!(f, "no character {id:?} in this world"),
+            Self::WrongWorld(id) => write!(f, "character {id:?} belongs to another world"),
+            Self::InvalidValue(what) => write!(f, "invalid character value: {what}"),
+            Self::TooManyBodies => f.write_str("the world is full; no room for the inner body"),
+            Self::TooManyCharacters => f.write_str("the world has no character ids left"),
+        }
+    }
+}
+
+impl std::error::Error for CharacterError {}
