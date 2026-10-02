@@ -335,6 +335,151 @@ fn compound_children_follow_body_and_child_rotation() {
     assert_eq!(lines_of(&lines, body, Some(Groups::FEATURE)).len(), 36);
 }
 
+/// `v` rotated by the unit quaternion `q`, computed in `Real`: `v + 2w (u x v) + 2 u x (u x v)`
+/// with `u` the vector part.
+fn rotate(q: Quat, v: [Real; 3]) -> [Real; 3] {
+    let cross = |a: [Real; 3], b: [Real; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let u = [q.x, q.y, q.z].map(Real::from);
+    let w = Real::from(q.w);
+    let t = cross(u, v).map(|c| 2.0 * c);
+    let c = cross(u, t);
+    [
+        v[0] + w * t[0] + c[0],
+        v[1] + w * t[1] + c[1],
+        v[2] + w * t[2] + c[2],
+    ]
+}
+
+#[test]
+fn compound_child_pose_applies_child_rotation_before_body_rotation() {
+    // The two rotations do not commute, so a swapped order moves the corners.
+    let (mut world, [_, chunk, ..]) = five_layer_world();
+    let half = [1.0, 0.5, 0.25];
+    let block = Shape::new_box(Vec3::new(1.0, 0.5, 0.25)).unwrap();
+    let marker = Shape::new_box(Vec3::new(0.1, 0.1, 0.1)).unwrap();
+    let child_rotation = quat_about(Vec3::new(0.0, 1.0, 0.0), 0.6);
+    let axis_length = 1.04_f32.sqrt();
+    let body_rotation = quat_about(Vec3::new(1.0 / axis_length, 0.0, 0.2 / axis_length), 0.9);
+    let child_position = [2.0, 1.0, -0.5];
+    let compound = Shape::new_compound(&[
+        CompoundChild {
+            shape: &block,
+            position: Vec3::new(2.0, 1.0, -0.5),
+            rotation: child_rotation,
+            user_data: Groups::STRUCTURE,
+        },
+        CompoundChild {
+            shape: &marker,
+            position: Vec3::new(-1.0, 0.0, 0.0),
+            rotation: Quat::IDENTITY,
+            user_data: Groups::FEATURE,
+        },
+    ])
+    .unwrap();
+    let origin = [5.0, 0.0, 5.0];
+    let body = world
+        .create_body(
+            &compound,
+            &BodySettings::new_static()
+                .position(RVec3::new(origin[0], origin[1], origin[2]))
+                .rotation(body_rotation)
+                .object_layer(chunk),
+        )
+        .unwrap();
+
+    let mut corners = Vec::new();
+    for sx in [-1.0, 1.0] {
+        for sy in [-1.0, 1.0] {
+            for sz in [-1.0, 1.0] {
+                let local = rotate(child_rotation, [sx * half[0], sy * half[1], sz * half[2]]);
+                let in_body = [
+                    local[0] + child_position[0],
+                    local[1] + child_position[1],
+                    local[2] + child_position[2],
+                ];
+                let world = rotate(body_rotation, in_body);
+                corners.push([
+                    world[0] + origin[0],
+                    world[1] + origin[1],
+                    world[2] + origin[2],
+                ]);
+            }
+        }
+    }
+    let lines = lines_near(&world, 30.0, usize::MAX, &QueryFilter::new());
+    let block_lines = lines_of(&lines, body, Some(Groups::STRUCTURE));
+    assert_eq!(block_lines.len(), 36);
+    for line in &block_lines {
+        for point in [line.from, line.to] {
+            assert!(
+                corners.iter().any(|c| {
+                    (point.x - c[0]).abs() < 1e-4
+                        && (point.y - c[1]).abs() < 1e-4
+                        && (point.z - c[2]).abs() < 1e-4
+                }),
+                "{point:?} is not a corner"
+            );
+        }
+    }
+}
+
+#[test]
+fn compound_child_beyond_radius_is_skipped_and_nested_compounds_keep_top_group() {
+    let (mut world, [_, chunk, ..]) = five_layer_world();
+    let unit = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let unit_child = |position: Vec3, user_data: u32| CompoundChild {
+        shape: &unit,
+        position,
+        rotation: Quat::IDENTITY,
+        user_data,
+    };
+    let inner = Shape::new_compound(&[
+        unit_child(Vec3::ZERO, 9),
+        unit_child(Vec3::new(0.0, 2.0, 0.0), 10),
+    ])
+    .unwrap();
+    let compound = Shape::new_compound(&[
+        unit_child(Vec3::ZERO, 1),
+        unit_child(Vec3::new(50.0, 0.0, 0.0), 2),
+        CompoundChild {
+            shape: &inner,
+            position: Vec3::new(0.0, 0.0, 3.0),
+            rotation: Quat::IDENTITY,
+            user_data: 3,
+        },
+    ])
+    .unwrap();
+    let body = add_static_in(&mut world, &compound, RVec3::ZERO, chunk);
+
+    let lines = lines_near(&world, 10.0, usize::MAX, &QueryFilter::new());
+    assert!(lines.lines().iter().all(|line| line.body == body));
+    assert_eq!(lines_of(&lines, body, Some(1)).len(), 36);
+    assert!(
+        lines_of(&lines, body, Some(2)).is_empty(),
+        "far child drawn"
+    );
+    assert_eq!(lines_of(&lines, body, Some(3)).len(), 72, "nested compound");
+    assert_eq!(lines.lines().len(), 108);
+
+    // The far child is drawn once the sphere reaches it.
+    let mut far = DebugLines::new();
+    let settings = DebugLineSettings::new(RVec3::new(50.0, 0.0, 0.0), 1.0);
+    world
+        .debug_lines(&settings, &QueryFilter::new(), &mut far)
+        .unwrap();
+    assert_eq!(far.lines().len(), 36);
+    assert!(far
+        .lines()
+        .iter()
+        .all(|line| line.child_user_data == Some(2)));
+}
+
 #[test]
 fn worlds_sharing_a_height_field_draw_it_concurrently() {
     // The shape's debug geometry is built lazily by the first draw, so both threads race for it.
