@@ -317,6 +317,24 @@ fn validate_point(point: RVec3) -> Result<(), &'static str> {
     }
 }
 
+/// Where constraints given in `space` hold body 1 by `point1` and body 2 by `point2`.
+fn point_anchors(
+    space: ConstraintSpace,
+    point1: RVec3,
+    point2: RVec3,
+) -> [world::sealed::Anchor; 2] {
+    [point1, point2].map(|point| match space {
+        ConstraintSpace::WorldSpace => world::sealed::Anchor::World(point),
+        // `Real` is `f32` without the `double-precision` feature, so the casts are no-ops there.
+        #[allow(clippy::unnecessary_cast)]
+        ConstraintSpace::LocalToBodyCom => world::sealed::Anchor::CenterOfMass(Vec3::new(
+            point.x as f32,
+            point.y as f32,
+            point.z as f32,
+        )),
+    })
+}
+
 /// Checks one frame: a finite point and two perpendicular unit axes.
 fn validate_frame(point: RVec3, axis_a: Vec3, axis_b: Vec3) -> Result<(), &'static str> {
     validate_point(point)?;

@@ -12,9 +12,12 @@ use joltphysics_sys::*;
 
 use super::SpringSettings;
 use crate::body::{with_locked_bodies, with_read_locked_body};
+use crate::limits;
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
-use crate::{BodyError, BodyId, ConstraintError, PhysicsWorld};
+use crate::{
+    BodyError, BodyId, ConstraintError, MotionType, PhysicsWorld, Quat, RVec3, Real, Vec3,
+};
 
 /// The kinds of constraint a world can hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -59,10 +62,42 @@ pub(crate) mod sealed {
         const SUB_TYPE: JPH_ConstraintSubType;
     }
 
+    /// Where a constraint holds one of its bodies, for the lever-arm check of
+    /// [`PhysicsWorld::create_constraint`](crate::PhysicsWorld::create_constraint).
+    #[derive(Clone, Copy, Debug)]
+    pub enum Anchor {
+        /// A point in world space, where it is when the constraint is created.
+        World(RVec3),
+        /// A point relative to the body's centre of mass, in the body's frame.
+        CenterOfMass(Vec3),
+        /// Any point within `radius` of `offset`, which is relative to body 1's origin in
+        /// body 1's frame: a path fixed to body 1, or one point of it.
+        OnBody1 {
+            /// The point, or the centre of the points, relative to body 1's origin in body 1's
+            /// frame.
+            offset: Vec3,
+            /// How far from `offset` the points lie at most, metres; 0 for one point.
+            radius: f64,
+        },
+        /// A point Jolt places between the two bodies' centres of mass.
+        BetweenCentersOfMass,
+    }
+
     /// Settings a world constraint is created from.
     pub trait Settings {
+        /// Whether Jolt's solver parts for the constraint need both bodies dynamic: the gear's,
+        /// the rack and pinion's and the pulley's read both bodies' motion properties without
+        /// checking that the body has any.
+        const NEEDS_DYNAMIC_BODIES: bool = false;
+
         /// What Jolt asserts or silently rewrites, checked before anything is created.
         fn validate(&self) -> Result<(), &'static str>;
+
+        /// Where the constraint holds body 1 and body 2, or `None` for a constraint that holds
+        /// no point of its bodies (a gear, a rack and pinion).
+        fn anchors(&self) -> Option<[Anchor; 2]> {
+            None
+        }
 
         /// Every spring whose frequency-mode coefficients depend on the bodies' effective mass.
         fn springs(&self) -> Vec<SpringSettings>;
@@ -453,6 +488,96 @@ pub(crate) fn check_spring(spring: SpringSettings, bound: f64) -> Result<(), Con
     }
 }
 
+/// What every point a world constraint holds a dynamic body by must satisfy.
+const LEVER_ARM_RULE: &str = "points where a constraint holds a dynamic body must have a lever-arm ratio of at most limits::MAX_LEVER_ARM_RATIO";
+
+/// The pose of a body and, for a dynamic one, its mass properties, as the lever-arm check of
+/// [`PhysicsWorld::create_constraint`] reads them.
+struct LeverState {
+    is_static: bool,
+    position: RVec3,
+    rotation: Quat,
+    center_of_mass: RVec3,
+    motion: Option<LeverMotion>,
+}
+
+/// The mass properties of a dynamic body, with the rotation from its principal frame to the
+/// world.
+#[derive(Clone, Copy)]
+struct LeverMotion {
+    inverse_mass: f32,
+    inverse_inertia: Vec3,
+    principal_to_world: Quat,
+}
+
+impl LeverState {
+    /// Reads the state of `body`.
+    ///
+    /// # Safety
+    /// `body` is a live body, locked for reading for the call.
+    unsafe fn read(body: NonNull<JPH_Body>) -> Self {
+        let body = body.as_ptr();
+        let mut position = RVec3::ZERO.to_jph();
+        let mut rotation = Quat::IDENTITY.to_jph();
+        let mut center_of_mass = RVec3::ZERO.to_jph();
+        // SAFETY: the caller's contract; the getters only read the body and write the live
+        // locals.
+        unsafe {
+            JPH_Body_GetPosition(body, &mut position);
+            JPH_Body_GetRotation(body, &mut rotation);
+            JPH_Body_GetCenterOfMassPosition(body, &mut center_of_mass);
+        }
+        let rotation = Quat::from_jph(rotation);
+        // SAFETY: as above. A dynamic body has motion properties, so the unchecked getters read
+        // live members, and the getters write only the live locals.
+        let motion = unsafe { JPH_Body_IsDynamic(body) }.then(|| unsafe {
+            let properties = JPH_Body_GetMotionProperties(body);
+            let mut inverse_inertia = Vec3::ZERO.to_jph();
+            let mut inertia_rotation = Quat::IDENTITY.to_jph();
+            JPH_MotionProperties_GetInverseInertiaDiagonal(properties, &mut inverse_inertia);
+            JPH_MotionProperties_GetInertiaRotation(properties, &mut inertia_rotation);
+            LeverMotion {
+                inverse_mass: JPH_MotionProperties_GetInverseMassUnchecked(properties),
+                inverse_inertia: Vec3::from_jph(inverse_inertia),
+                principal_to_world: rotation.product(Quat::from_jph(inertia_rotation)),
+            }
+        });
+        Self {
+            // SAFETY: as above; the getter reads the body's motion type.
+            is_static: unsafe { JPH_Body_IsStatic(body) },
+            position: RVec3::from_jph(position),
+            rotation,
+            center_of_mass: RVec3::from_jph(center_of_mass),
+            motion,
+        }
+    }
+
+    /// The vector from the centre of mass to the world point `point`, in `f32` as Jolt keeps
+    /// levers.
+    fn lever_from_world(&self, point: RVec3) -> Vec3 {
+        // `Real` is `f32` without the `double-precision` feature, so the casts are no-ops there.
+        #[allow(clippy::unnecessary_cast)]
+        Vec3::new(
+            (point.x - self.center_of_mass.x) as f32,
+            (point.y - self.center_of_mass.y) as f32,
+            (point.z - self.center_of_mass.z) as f32,
+        )
+    }
+}
+
+impl LeverMotion {
+    /// The lever-arm ratio at `lever`, a world vector from the centre of mass.
+    fn ratio_at(self, lever: Vec3) -> f64 {
+        let principal = self.principal_to_world.conjugated().rotate(lever);
+        limits::lever_arm_ratio(self.inverse_mass, self.inverse_inertia, principal)
+    }
+
+    /// The largest lever-arm ratio at any point within `distance` of the centre of mass.
+    fn ratio_within(self, distance: f64) -> f64 {
+        limits::lever_arm_ratio_within(self.inverse_mass, self.inverse_inertia, distance)
+    }
+}
+
 /// What every frequency-mode spring of a world constraint must satisfy.
 const SPRING_BOUND_RULE: &str = "spring stiffness and damping derived from the bodies' effective mass must be at most limits::MAX_SPRING_COEFFICIENT";
 
@@ -462,10 +587,25 @@ impl PhysicsWorld {
     /// Frames given in [`ConstraintSpace::WorldSpace`](crate::ConstraintSpace::WorldSpace) are
     /// world space at the time the constraint is created; Jolt turns them into each body's own
     /// frame then. Both bodies must be bodies of this world, different, and neither the inner
-    /// body of a character nor a part of a ragdoll ([`ConstraintError::Body`]). One of them may
-    /// be static, which anchors the constraint to the world. Jolt still lets the two bodies
-    /// collide with each other where their shapes touch. While the constraint exists,
+    /// body of a character nor a part of a ragdoll ([`ConstraintError::Body`]). Except for a
+    /// gear, a rack and pinion and a pulley, one of them may be static or kinematic, which
+    /// anchors the constraint to the world or to the kinematic body. Those three need two
+    /// dynamic bodies ([`ConstraintError::NotDynamic`]): Jolt's solver parts for them read both
+    /// bodies' motion properties without checking that a body has any, which a static body does
+    /// not, and would push a kinematic body. A pulley's fixed points already anchor its rope.
+    /// The public API cannot change a body's motion type afterwards; only ragdoll parts, which
+    /// are refused here, can change it. Jolt still lets the two bodies collide with each other
+    /// where their shapes touch. While the constraint exists,
     /// [`remove_body`](Self::remove_body) refuses its bodies ([`BodyError::UsedByConstraint`]).
+    ///
+    /// Each point where the constraint holds a dynamic body must have a lever-arm ratio of at
+    /// most [`limits::MAX_LEVER_ARM_RATIO`], its distance from the body's centre of mass
+    /// measured against the body's size (see there). The check uses the bodies' poses now and
+    /// covers every point of a path and, for an automatic point, the whole segment between the
+    /// centres of mass.
+    ///
+    /// The new constraint wakes its bodies that can move, as its setters do, so a sleeping body
+    /// starts following it at the next step.
     ///
     /// Frequency-mode springs ([`SpringSettings::FrequencyAndDamping`]) become a stiffness and
     /// damping that grow with the bodies' effective mass, so they are checked against an upper
@@ -474,7 +614,8 @@ impl PhysicsWorld {
     /// afterwards, and only ragdoll parts, which are refused here, can turn kinematic or
     /// static bodies dynamic, so the bound stays valid for the constraint's life.
     ///
-    /// Fails with [`ConstraintError::InvalidValue`] when a setting is out of range, with
+    /// Fails with [`ConstraintError::InvalidValue`] when a setting or a lever-arm ratio is out of
+    /// range, with [`ConstraintError::NotDynamic`] as above, with
     /// [`ConstraintError::NotFound`] or [`ConstraintError::WrongWorld`] for a referenced
     /// constraint that is not in this world, and with [`ConstraintError::TooManyConstraints`]
     /// when the world has run out of ids. Nothing changes on failure.
@@ -537,6 +678,18 @@ impl PhysicsWorld {
             if self.is_ragdoll_body(body) {
                 return Err(ConstraintError::Body(BodyError::OwnedByRagdoll(body)));
             }
+            if S::NEEDS_DYNAMIC_BODIES
+                && self
+                    .body(body)
+                    .map_err(ConstraintError::Body)?
+                    .motion_type()
+                    != MotionType::Dynamic
+            {
+                return Err(ConstraintError::NotDynamic(body));
+            }
+        }
+        if let Some(anchors) = settings.anchors() {
+            self.check_lever_arms([body1, body2], anchors)?;
         }
         let references = settings.references();
         for reference in references.into_iter().flatten() {
@@ -619,7 +772,64 @@ impl PhysicsWorld {
             },
         );
         self.next_constraint_id += 1;
+        self.wake_constraint_bodies([body1, body2]);
         Ok(ConstraintId::new(raw, self.tag))
+    }
+
+    /// `Err(InvalidValue)` unless every point where `anchors` hold the dynamic ones of
+    /// `bodies` has a lever-arm ratio of at most [`limits::MAX_LEVER_ARM_RATIO`].
+    fn check_lever_arms(
+        &self,
+        bodies: [BodyId; 2],
+        anchors: [sealed::Anchor; 2],
+    ) -> Result<(), ConstraintError> {
+        let states = bodies.map(|id| {
+            with_read_locked_body(self.body_lock_interface, id, |body| {
+                // SAFETY: `body` is locked for reading for the duration of the closure.
+                unsafe { LeverState::read(body) }
+            })
+            .unwrap_or_else(|| unreachable!("checked by the caller"))
+        });
+        for (state, anchor) in states.iter().zip(anchors) {
+            let Some(motion) = state.motion else {
+                continue;
+            };
+            // The lever from the centre of mass in world space, and how far around its end the
+            // held points may lie.
+            let (lever, radius) = match anchor {
+                sealed::Anchor::World(point) => (state.lever_from_world(point), 0.0),
+                sealed::Anchor::CenterOfMass(lever) => (state.rotation.rotate(lever), 0.0),
+                sealed::Anchor::OnBody1 { offset, radius } => {
+                    let body1 = &states[0];
+                    let turned = body1.rotation.rotate(offset);
+                    let point = RVec3::new(
+                        body1.position.x + Real::from(turned.x),
+                        body1.position.y + Real::from(turned.y),
+                        body1.position.z + Real::from(turned.z),
+                    );
+                    (state.lever_from_world(point), radius)
+                }
+                // Jolt puts the point at the centre of mass of the body that is not static when
+                // the other one is, and otherwise between the two centres of mass, weighted by
+                // their inverse masses (`FixedConstraint.cpp`, `SliderConstraint.cpp`).
+                sealed::Anchor::BetweenCentersOfMass if states.iter().any(|s| s.is_static) => {
+                    (Vec3::ZERO, 0.0)
+                }
+                sealed::Anchor::BetweenCentersOfMass => {
+                    let span = states[0].lever_from_world(states[1].center_of_mass);
+                    (Vec3::ZERO, limits::f64_length(span))
+                }
+            };
+            let ratio = if radius == 0.0 {
+                motion.ratio_at(lever)
+            } else {
+                motion.ratio_within(limits::f64_length(lever) + radius)
+            };
+            if !limits::is_lever_arm_ratio(ratio) {
+                return Err(ConstraintError::InvalidValue(LEVER_ARM_RULE));
+            }
+        }
+        Ok(())
     }
 
     /// An upper bound of the effective mass or inertia a constraint between `bodies` sees: over

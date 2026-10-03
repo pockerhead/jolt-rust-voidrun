@@ -82,7 +82,8 @@ unsafe fn check_reference(
 /// A gear (Jolt `GearConstraintSettings`): body 1 turning about its hinge axis turns body 2
 /// about its own: `ω1 + ratio · ω2 = 0` for the rotation rates about the two axes, so a ratio
 /// of 2 turns gear 2 half as fast, the other way. The bodies need their own hinges, which hold
-/// them in place.
+/// them in place, and both must be dynamic
+/// ([`ConstraintError::NotDynamic`](crate::ConstraintError::NotDynamic)).
 ///
 /// The ratio is between 1 and [`limits::MAX_GEAR_RATIO`] (10): body 2 is the gear that turns
 /// slower. Both bounds come from a defect in Jolt's gear solver (Jolt 5.6, unchanged on Jolt's
@@ -172,6 +173,8 @@ impl GearConstraintSettings {
 }
 
 impl sealed::Settings for GearConstraintSettings {
+    const NEEDS_DYNAMIC_BODIES: bool = true;
+
     fn validate(&self) -> Result<(), &'static str> {
         if !(is_unit(self.hinge_axis1) && is_unit(self.hinge_axis2)) {
             return Err("constraint frame axes must be unit vectors");
@@ -249,7 +252,8 @@ impl ConstraintRef<'_, GearConstraint> {
 
 /// A rack and pinion (Jolt `RackAndPinionConstraintSettings`): body 1, the pinion, turning about
 /// its hinge axis moves body 2, the rack, along its slider axis with `rotation = ratio ·
-/// translation` (radians per metre). The bodies need their own hinge and slider.
+/// translation` (radians per metre). The bodies need their own hinge and slider, and both must
+/// be dynamic ([`ConstraintError::NotDynamic`](crate::ConstraintError::NotDynamic)).
 ///
 /// Without [`constraints`](Self::constraints) Jolt couples the velocities only and the two
 /// drift apart; with them it also corrects the rotation from the hinge's angle and the slider's
@@ -338,6 +342,8 @@ impl RackAndPinionConstraintSettings {
 }
 
 impl sealed::Settings for RackAndPinionConstraintSettings {
+    const NEEDS_DYNAMIC_BODIES: bool = true;
+
     fn validate(&self) -> Result<(), &'static str> {
         if !(is_unit(self.hinge_axis) && is_unit(self.slider_axis)) {
             return Err("constraint frame axes must be unit vectors");

@@ -8,8 +8,8 @@ use joltphysics_sys::*;
 
 use super::world::{check_spring, sealed, ConstraintSettings};
 use super::{
-    constraint_base, non_negative, validate_hinge_limits, validate_point, within, ConstraintSpace,
-    MotorSettings, SpringSettings,
+    constraint_base, non_negative, point_anchors, validate_hinge_limits, validate_point, within,
+    ConstraintSpace, MotorSettings, SpringSettings,
 };
 use crate::limits;
 use crate::math::is_unit;
@@ -58,6 +58,10 @@ impl sealed::Settings for HingeConstraintSettings {
 
     fn springs(&self) -> Vec<SpringSettings> {
         HingeConstraintSettings::springs(self).collect()
+    }
+
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        Some(point_anchors(self.space, self.point1, self.point2))
     }
 
     unsafe fn create(
@@ -343,6 +347,10 @@ impl sealed::Settings for ConeConstraintSettings {
         Vec::new()
     }
 
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        Some(point_anchors(self.space, self.point1, self.point2))
+    }
+
     unsafe fn create(
         &self,
         body1: NonNull<JPH_Body>,
@@ -410,6 +418,10 @@ impl sealed::Settings for SwingTwistConstraintSettings {
 
     fn springs(&self) -> Vec<SpringSettings> {
         SwingTwistConstraintSettings::springs(self).collect()
+    }
+
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        Some(point_anchors(self.space, self.position1, self.position2))
     }
 
     unsafe fn create(
@@ -634,6 +646,10 @@ impl sealed::Settings for SixDofConstraintSettings {
 
     fn springs(&self) -> Vec<SpringSettings> {
         SixDofConstraintSettings::springs(self).collect()
+    }
+
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        Some(point_anchors(self.space, self.position1, self.position2))
     }
 
     unsafe fn create(

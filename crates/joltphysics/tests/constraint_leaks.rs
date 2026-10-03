@@ -143,7 +143,16 @@ fn constraint_round(scene: &mut Scene, round: usize) {
         RVec3::new(c.x, c.y + 2.0, c.z),
     );
     let pulley = world.create_constraint(b[11], b[12], &pulley).unwrap();
-    let path = PathConstraintSettings::new(scene.path.clone());
+    // The path starts at the box, so the constraint holds it near its centre of mass.
+    let (start, origin) = (p(world, 13), world.body(anchor).unwrap().position());
+    // `Real` is `f32` without the `double-precision` feature, so the casts are no-ops there.
+    #[allow(clippy::unnecessary_cast)]
+    let offset = Vec3::new(
+        (start.x - origin.x) as f32,
+        (start.y - origin.y) as f32,
+        (start.z - origin.z) as f32,
+    );
+    let path = PathConstraintSettings::new(scene.path.clone()).path_position(offset);
     let path = world.create_constraint(anchor, b[13], &path).unwrap();
     let mut motor = world.constraint_mut(path).unwrap();
     motor.set_target_path_fraction(1.0).unwrap();

@@ -508,6 +508,99 @@ fn removing_a_constraint_wakes_its_bodies() {
     assert!(world.body(cube).unwrap().position().y < 3.5);
 }
 
+#[test]
+fn gears_racks_and_pulleys_need_two_dynamic_bodies() {
+    let mut world = world(Vec3::ZERO, 1);
+    let shape = Shape::new_box(Vec3::new(0.2, 0.2, 0.2)).unwrap();
+    let wall = world
+        .create_body(&shape, &BodySettings::new_static())
+        .unwrap();
+    let conveyor = world
+        .create_body(
+            &shape,
+            &BodySettings::new_kinematic()
+                .position(RVec3::new(0.0, 3.0, 0.0))
+                .angular_velocity(Z),
+        )
+        .unwrap();
+    let wheel = add_box(
+        &mut world,
+        Vec3::new(0.2, 0.2, 0.2),
+        RVec3::new(3.0, 0.0, 0.0),
+    );
+    let other = add_box(
+        &mut world,
+        Vec3::new(0.2, 0.2, 0.2),
+        RVec3::new(6.0, 0.0, 0.0),
+    );
+    let gear = GearConstraintSettings::new(Z, Z, 2.0);
+    let rack = RackAndPinionConstraintSettings::new(Z, X, 2.0);
+    let pulley = PulleyConstraintSettings::new(
+        RVec3::new(3.0, 0.0, 0.0),
+        RVec3::new(3.0, 5.0, 0.0),
+        RVec3::new(6.0, 0.0, 0.0),
+        RVec3::new(6.0, 5.0, 0.0),
+    )
+    .length(PulleyLength::Range {
+        min: 0.0,
+        max: 12.0,
+    });
+    for not_dynamic in [wall, conveyor] {
+        for pair in [[not_dynamic, wheel], [wheel, not_dynamic]] {
+            let refused = |result: Result<AnyConstraintId, ConstraintError>| {
+                assert!(
+                    matches!(result, Err(ConstraintError::NotDynamic(id)) if id == not_dynamic),
+                    "{result:?}"
+                );
+            };
+            refused(
+                world
+                    .create_constraint(pair[0], pair[1], &gear)
+                    .map(Into::into),
+            );
+            refused(
+                world
+                    .create_constraint(pair[0], pair[1], &rack)
+                    .map(Into::into),
+            );
+            refused(
+                world
+                    .create_constraint(pair[0], pair[1], &pulley)
+                    .map(Into::into),
+            );
+        }
+    }
+    // Nothing was created, and the world steps; the kinematic body keeps its own motion.
+    assert_eq!(world.constraint_count(), 0);
+    step(&mut world, 10);
+    assert_eq!(world.body(conveyor).unwrap().angular_velocity(), Z);
+    // Between two dynamic bodies all three are accepted.
+    world.create_constraint(wheel, other, &gear).unwrap();
+    world.create_constraint(wheel, other, &rack).unwrap();
+    world.create_constraint(wheel, other, &pulley).unwrap();
+    assert_eq!(world.constraint_count(), 3);
+    step(&mut world, 10);
+}
+
+#[test]
+fn a_new_constraint_wakes_its_sleeping_bodies() {
+    // A box asleep on the ground gets a rope of at most 5 m to an anchor 10 m above it.
+    let mut world = world(GRAVITY, 1);
+    add_floor(&mut world);
+    let anchor = add_anchor(&mut world, RVec3::new(0.0, 10.0, 0.0));
+    let cube = add_cube(&mut world, RVec3::new(0.0, 0.5, 0.0));
+    fall_asleep(&mut world, cube);
+    let rope =
+        DistanceConstraintSettings::new(RVec3::new(0.0, 10.0, 0.0), RVec3::new(0.0, 0.5, 0.0))
+            .range(DistanceRange::Range { min: 0.0, max: 5.0 });
+    world.create_constraint(anchor, cube, &rope).unwrap();
+    assert!(!world.body(cube).unwrap().is_sleeping());
+    step(&mut world, 120);
+    // The rope lifted the box to within 5 m of the anchor; measured 4.999999 m.
+    let y = wide(world.body(cube).unwrap().position().y);
+    assert!(y > 4.99, "{y}");
+}
+
 /// Steps `world` until `body` sleeps, at most 900 ticks.
 fn fall_asleep(world: &mut PhysicsWorld, body: BodyId) {
     let asleep = (0..900).any(|_| {
@@ -1682,10 +1775,13 @@ fn rebase_moves_constraints_rigidly() {
     let translation = RVec3::new(30.0, -12.0, 7.0);
     let shifted = rebase_drift(Quat::IDENTITY, translation);
     let turned = rebase_drift(quat_about(Vec3::new(0.0, 0.6, 0.8), 0.4), translation);
-    // Measured: 0.000007 m after a translation and 0.0023 m after a rotation. The pulley pair
-    // built in the turned frame from the start and stepped next to the unturned one differs by
-    // the same 0.0023 m: Jolt's pulley is not exactly rotation-equivariant in f32, and the
-    // rebase adds nothing to that (the door alone stays within 0.00001 m).
+    // Measured: 0.000007 m after a translation and 0.0023 m after a rotation. In the turned
+    // frame Jolt's `f32` rope length rounds differently, and once it comes out just under the
+    // pulley's maximum of 6 m (5.999999 m) the rope is slack for that step: no impulse, the
+    // pair stretches the rope by 0.0044 m and the next steps pull it back, a drift that peaks
+    // at 0.0023 m and decays to below 0.00002 m within 15 steps. In single precision this
+    // happens in the first step after the rebase, in double precision in the 26th. The door
+    // alone stays within 0.00001 m.
     assert!(shifted < 1e-4, "{shifted} m");
     assert!(turned < 5e-3, "{turned} m");
 }

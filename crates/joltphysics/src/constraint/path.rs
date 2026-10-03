@@ -133,6 +133,45 @@ impl HermitePath {
         self.looping
     }
 
+    /// The point at `fraction` (within `0..=max_fraction`) in path space, as Jolt's
+    /// `PathConstraintPathHermite::GetPointOnPath` computes it.
+    fn point_at(&self, fraction: f32) -> Vec3 {
+        let count = self.points.len();
+        // `fraction` is at least 0 and at most the point count, so it fits a `usize`.
+        let mut index = fraction.trunc() as usize;
+        let mut t = fraction - index as f32;
+        if self.looping {
+            index %= count;
+        } else if index >= count - 1 {
+            index = count - 2;
+            t = 1.0;
+        }
+        let (p1, p2) = (self.points[index], self.points[(index + 1) % count]);
+        let (t2, t3) = (t * t, t * t * t);
+        let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+        let h10 = t3 - 2.0 * t2 + t;
+        let h01 = -2.0 * t3 + 3.0 * t2;
+        let h11 = t3 - t2;
+        let blend = |a: f32, b: f32, c: f32, d: f32| h00 * a + h10 * b + h01 * c + h11 * d;
+        Vec3::new(
+            blend(p1.position.x, p1.tangent.x, p2.position.x, p2.tangent.x),
+            blend(p1.position.y, p1.tangent.y, p2.position.y, p2.tangent.y),
+            blend(p1.position.z, p1.tangent.z, p2.position.z, p2.tangent.z),
+        )
+    }
+
+    /// How far from the path's start any point of the path lies at most, metres: each segment
+    /// stays within the hull of its Bézier control points `p0`, `p0 + t0 / 3`, `p1 - t1 / 3` and
+    /// `p1`.
+    fn reach(&self) -> f64 {
+        self.points
+            .iter()
+            .map(|point| {
+                limits::f64_length(point.position) + limits::f64_length(point.tangent) / 3.0
+            })
+            .fold(0.0, f64::max)
+    }
+
     /// A new native path with these points, holding one reference.
     fn create(&self) -> Owned<JPH_PathConstraintPath> {
         // SAFETY: Jolt is initialised (a world exists to create the constraint in). The handle
@@ -347,6 +386,28 @@ impl sealed::Settings for PathConstraintSettings {
 
     fn springs(&self) -> Vec<SpringSettings> {
         vec![self.position_motor.spring]
+    }
+
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        // Body 1 holds the path anywhere along it; body 2 holds the point where it is attached,
+        // the path's point at the start fraction.
+        let attached = self
+            .path_rotation
+            .rotate(self.path.point_at(self.path_fraction));
+        Some([
+            sealed::Anchor::OnBody1 {
+                offset: self.path_position,
+                radius: self.path.reach(),
+            },
+            sealed::Anchor::OnBody1 {
+                offset: Vec3::new(
+                    self.path_position.x + attached.x,
+                    self.path_position.y + attached.y,
+                    self.path_position.z + attached.z,
+                ),
+                radius: 0.0,
+            },
+        ])
     }
 
     unsafe fn create(

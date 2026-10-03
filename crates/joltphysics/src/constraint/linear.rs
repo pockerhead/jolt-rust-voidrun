@@ -8,8 +8,8 @@ use joltphysics_sys::*;
 use super::rotational::{check_friction, check_motor};
 use super::world::{check_spring, sealed, ConstraintSettings};
 use super::{
-    constraint_base, non_negative, validate_frame, validate_point, within, ConstraintSpace,
-    MotorSettings, SpringSettings,
+    constraint_base, non_negative, point_anchors, validate_frame, validate_point, within,
+    ConstraintSpace, MotorSettings, SpringSettings,
 };
 use crate::body::with_locked_bodies;
 use crate::limits;
@@ -127,6 +127,14 @@ impl sealed::Settings for FixedConstraintSettings {
         Vec::new()
     }
 
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        Some(if self.auto_detect_point {
+            [sealed::Anchor::BetweenCentersOfMass; 2]
+        } else {
+            point_anchors(self.space, self.point1, self.point2)
+        })
+    }
+
     unsafe fn create(
         &self,
         body1: NonNull<JPH_Body>,
@@ -213,6 +221,10 @@ impl sealed::Settings for PointConstraintSettings {
 
     fn springs(&self) -> Vec<SpringSettings> {
         Vec::new()
+    }
+
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        Some(point_anchors(self.space, self.point1, self.point2))
     }
 
     unsafe fn create(
@@ -344,6 +356,10 @@ impl sealed::Settings for DistanceConstraintSettings {
 
     fn springs(&self) -> Vec<SpringSettings> {
         vec![self.limits_spring]
+    }
+
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        Some(point_anchors(self.space, self.point1, self.point2))
     }
 
     unsafe fn create(
@@ -575,6 +591,14 @@ impl sealed::Settings for SliderConstraintSettings {
 
     fn springs(&self) -> Vec<SpringSettings> {
         vec![self.limits_spring, self.motor.spring]
+    }
+
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        Some(if self.auto_detect_point {
+            [sealed::Anchor::BetweenCentersOfMass; 2]
+        } else {
+            point_anchors(self.space, self.point1, self.point2)
+        })
     }
 
     unsafe fn create(
@@ -818,7 +842,8 @@ fn validate_pulley_length(min: f32, max: f32, ratio: f32) -> Result<(), &'static
 /// far as body 1, a block and tackle.
 ///
 /// The fixed points are world points whatever [`space`](Self::space) says;
-/// [`PhysicsWorld::rebase`](crate::PhysicsWorld::rebase) moves them with the world.
+/// [`PhysicsWorld::rebase`](crate::PhysicsWorld::rebase) moves them with the world. Both bodies
+/// must be dynamic ([`ConstraintError::NotDynamic`]); the fixed points anchor the rope.
 ///
 /// The default is Jolt's: every point at the origin, world space, ratio 1, a rope up to the
 /// length at creation.
@@ -902,6 +927,8 @@ impl PulleyConstraintSettings {
 }
 
 impl sealed::Settings for PulleyConstraintSettings {
+    const NEEDS_DYNAMIC_BODIES: bool = true;
+
     fn validate(&self) -> Result<(), &'static str> {
         for point in [
             self.body_point1,
@@ -924,6 +951,14 @@ impl sealed::Settings for PulleyConstraintSettings {
 
     fn springs(&self) -> Vec<SpringSettings> {
         Vec::new()
+    }
+
+    fn anchors(&self) -> Option<[sealed::Anchor; 2]> {
+        Some(point_anchors(
+            self.space,
+            self.body_point1,
+            self.body_point2,
+        ))
     }
 
     unsafe fn create(

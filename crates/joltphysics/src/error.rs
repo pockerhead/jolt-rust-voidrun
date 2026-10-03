@@ -302,6 +302,9 @@ pub enum ConstraintError {
     /// A body of the constraint is not usable: not in this world, the inner body of a character
     /// or a part of a ragdoll.
     Body(BodyError),
+    /// A gear, rack and pinion or pulley names a static or kinematic body; Jolt's solver parts
+    /// for these constraints only work between dynamic bodies.
+    NotDynamic(BodyId),
     /// The constraint is referenced by another one (a gear or a rack and pinion); remove that
     /// one first.
     UsedByConstraint(AnyConstraintId),
@@ -316,6 +319,7 @@ impl fmt::Display for ConstraintError {
             Self::WrongWorld(id) => write!(f, "constraint {id:?} belongs to another world"),
             Self::InvalidValue(what) => write!(f, "invalid constraint value: {what}"),
             Self::Body(error) => write!(f, "unusable constraint body: {error}"),
+            Self::NotDynamic(id) => write!(f, "constraint body {id:?} is not dynamic"),
             Self::UsedByConstraint(id) => write!(
                 f,
                 "constraint {id:?} is referenced by another constraint; remove that one first"
