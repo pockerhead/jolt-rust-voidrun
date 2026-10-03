@@ -2,71 +2,11 @@
 
 mod common;
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
-use common::soft_body::Cloth;
+use common::events::*;
 use common::*;
 use joltphysics::*;
-
-fn contacts() -> EventSettings {
-    EventSettings::default().contacts(true)
-}
-
-fn every_event() -> EventSettings {
-    EventSettings::default()
-        .persisted_contacts(true)
-        .body_activation(true)
-        .soft_body_contacts(true)
-        .soft_body_validations(true)
-}
-
-/// A static compound of two 2 x 1 x 2 boxes side by side along X, user data 10 and 11, top face
-/// at y = 0.
-fn add_two_box_floor(world: &mut PhysicsWorld) -> BodyId {
-    let half = Shape::new_box(Vec3::new(1.0, 0.5, 1.0)).unwrap();
-    let child = |x, user_data| CompoundChild {
-        shape: &half,
-        position: Vec3::new(x, 0.0, 0.0),
-        rotation: Quat::IDENTITY,
-        user_data,
-    };
-    let floor = Shape::new_compound(&[child(-1.0, 10), child(1.0, 11)]).unwrap();
-    world
-        .create_body(
-            &floor,
-            &BodySettings::new_static().position(RVec3::new(0.0, -0.5, 0.0)),
-        )
-        .unwrap()
-}
-
-/// A dynamic cube of half extent 0.25 at `position`.
-fn add_small_cube(world: &mut PhysicsWorld, position: RVec3) -> BodyId {
-    let shape = Shape::new_box(Vec3::new(0.25, 0.25, 0.25)).unwrap();
-    world
-        .create_body(&shape, &BodySettings::new_dynamic().position(position))
-        .unwrap()
-}
-
-fn kinds(events: &WorldEvents) -> Vec<char> {
-    events
-        .contacts
-        .iter()
-        .map(|event| match event {
-            ContactEvent::Added { .. } => 'a',
-            ContactEvent::Persisted { .. } => 'p',
-            ContactEvent::Removed(_) => 'r',
-        })
-        .collect()
-}
-
-fn lift(world: &mut PhysicsWorld, id: BodyId, position: RVec3) {
-    world
-        .body_mut(id)
-        .unwrap()
-        .set_position(position, Activation::Activate)
-        .unwrap();
-}
 
 #[test]
 fn a_default_world_reports_nothing() {
@@ -437,44 +377,6 @@ fn dropping_worlds_with_every_kind_of_object_and_events_on_is_clean() {
 
 // Soft bodies.
 
-/// A static 4 x 1 x 4 box with its top face at y = 0, at `x`.
-fn add_table(world: &mut PhysicsWorld, x: Real) -> BodyId {
-    let shape = Shape::new_box(Vec3::new(2.0, 0.5, 2.0)).unwrap();
-    world
-        .create_body(
-            &shape,
-            &BodySettings::new_static().position(RVec3::new(x, -0.5, 0.0)),
-        )
-        .unwrap()
-}
-
-fn add_cloth(world: &mut PhysicsWorld, position: RVec3, rotation: Quat) -> BodyId {
-    let cloth = Cloth::new(6, 0.2);
-    let settings = cloth
-        .builder()
-        .create_constraints(SoftBodyBendType::None, SoftBodyVertexAttributes::default())
-        .build()
-        .unwrap();
-    world
-        .create_soft_body(
-            &settings,
-            &SoftBodySettings::default()
-                .position(position)
-                .rotation(rotation),
-        )
-        .unwrap()
-}
-
-/// Steps `ticks` times and returns every soft body contact snapshot.
-fn soft_contacts(world: &mut PhysicsWorld, ticks: usize) -> Vec<SoftBodyContacts> {
-    let mut contacts = Vec::new();
-    for _ in 0..ticks {
-        step(world, 1);
-        contacts.extend(world.take_events().soft_body_contacts);
-    }
-    contacts
-}
-
 #[test]
 fn a_cloth_on_a_table_reports_its_vertex_contacts() {
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 2);
@@ -606,259 +508,144 @@ fn observation_leaves_the_simulation_bit_identical() {
     assert!(silent == observed, "events changed the simulation");
 }
 
-// Contact listeners.
+// Replay and the other kinds of objects.
 
-/// A listener that changes nothing.
-struct NoOp;
-
-impl ContactListener for NoOp {}
-
-/// Material user data of ice.
-const ICE: u64 = 1;
-
-/// Frictionless contacts with ice.
-struct IceIsSlippery;
-
-impl ContactListener for IceIsSlippery {
-    fn contact_added(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
-        self.contact_persisted(manifold, settings);
-    }
-
-    fn contact_persisted(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
-        if manifold.materials.contains(&Some(ICE)) {
-            settings.set_combined_friction(0.0).unwrap();
-        }
-    }
+/// Per-tick events and body states over `ticks` steps.
+fn record_ticks(world: &mut PhysicsWorld, ids: &[BodyId], ticks: usize) -> Vec<(String, Vec<u8>)> {
+    (0..ticks)
+        .map(|_| {
+            step(world, 1);
+            let events = format!("{:?}", world.take_events());
+            let mut state = Vec::new();
+            for &id in ids {
+                record_body(world, id, &mut state);
+            }
+            (events, state)
+        })
+        .collect()
 }
 
-/// How far an ice cube slides down a 20 degree ramp of high friction in one second.
-fn ramp_slide(listener: Option<Arc<dyn ContactListener>>) -> Real {
-    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
-    world.set_contact_listener(listener);
-    let ramp = Shape::new_box(Vec3::new(10.0, 0.5, 2.0)).unwrap();
-    let tilt = quat_about(Vec3::new(0.0, 0.0, 1.0), 20f32.to_radians());
+#[test]
+fn a_replay_after_a_detour_reports_the_same_events() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 2);
+    world.set_event_settings(every_event());
+    world.set_contact_listener(Some(Arc::new(RoughContacts)));
+    let ids = build_stacks(&mut world);
+    step(&mut world, 30);
+    world.take_events();
+    let saved = world.save_state();
+    let reference = record_ticks(&mut world, &ids, 90);
+
+    // A detour without structural changes: other velocities, a teleport, other gravity.
+    world.restore_state(&saved).unwrap();
+    for &id in &ids[1..] {
+        world
+            .body_mut(id)
+            .unwrap()
+            .set_linear_velocity(Vec3::new(0.0, 4.0, 1.0))
+            .unwrap();
+    }
+    world
+        .body_mut(ids[3])
+        .unwrap()
+        .set_position(RVec3::new(-3.0, 4.0, 0.0), Activation::Activate)
+        .unwrap();
+    world.set_gravity(Vec3::new(1.0, -3.0, 0.0)).unwrap();
+    step(&mut world, 40);
+    world.take_events();
+
+    world.restore_state(&saved).unwrap();
+    assert!(world.take_events().is_empty(), "a restore reports nothing");
+    let replay = record_ticks(&mut world, &ids, 90);
+    for (tick, (a, b)) in reference.iter().zip(&replay).enumerate() {
+        assert_eq!(a.0, b.0, "events differ at tick {tick}");
+        assert!(a.1 == b.1, "state differs at tick {tick}");
+    }
+    assert!(reference
+        .iter()
+        .any(|(events, _)| events.contains("Persisted")));
+}
+
+#[test]
+fn character_inner_bodies_and_vehicle_chassis_report_rigid_contacts() {
+    let (mut world, layers) = vehicle::car_world(Vec3::new(0.0, -9.81, 0.0), 2);
+    world.set_event_settings(contacts());
+    let ground = Shape::new_box(Vec3::new(50.0, 0.5, 50.0)).unwrap();
     world
         .create_body(
-            &ramp,
-            &BodySettings::new_static().rotation(tilt).friction(1.0),
+            &ground,
+            &BodySettings::new_static()
+                .position(RVec3::new(0.0, -0.5, 0.0))
+                .object_layer(layers.ground),
         )
         .unwrap();
-    let ice = PhysicsMaterial::new(ICE).unwrap();
-    let cube_shape = Shape::new_box_with_material(Vec3::new(0.25, 0.25, 0.25), 0.05, &ice).unwrap();
-    let start = RVec3::new(0.0, 0.85, 0.0);
-    let cube = world
-        .create_body(
-            &cube_shape,
-            &BodySettings::new_dynamic()
-                .position(start)
-                .rotation(tilt)
-                .friction(1.0),
-        )
-        .unwrap();
-    step(&mut world, 60);
-    let end = world.body(cube).unwrap().position();
-    let (dx, dy) = (end.x - start.x, end.y - start.y);
-    (dx * dx + dy * dy).sqrt()
-}
-
-#[test]
-fn a_listener_makes_ice_slippery() {
-    let sticky = ramp_slide(None);
-    let slippery = ramp_slide(Some(Arc::new(IceIsSlippery)));
-    assert!(sticky < 0.1, "{sticky}");
-    assert!(slippery > 1.0, "{slippery}");
-}
-
-/// A conveyor belt: the floor's surface moves along +x under body 2.
-struct Conveyor;
-
-impl ContactListener for Conveyor {
-    fn contact_added(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
-        self.contact_persisted(manifold, settings);
-    }
-
-    fn contact_persisted(&self, _: &ContactManifold, settings: &mut ContactSettings) {
-        settings
-            .set_relative_linear_surface_velocity(Vec3::new(2.0, 0.0, 0.0))
-            .unwrap();
-    }
-}
-
-#[test]
-fn a_conveyor_moves_a_resting_cube() {
-    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
-    add_floor(&mut world);
-    world.set_contact_listener(Some(Arc::new(Conveyor)));
-    let cube = add_small_cube(&mut world, RVec3::new(0.0, 0.25, 0.0));
-    let before = world.body(cube).unwrap().position();
-    step(&mut world, 60);
-    let after = world.body(cube).unwrap().position();
-    assert!((after.x - before.x).abs() > 0.5, "{before:?} -> {after:?}");
-    assert!((after.y - before.y).abs() < 0.01, "{before:?} -> {after:?}");
-}
-
-/// Turns every contact into a sensor contact.
-struct Ghost;
-
-impl ContactListener for Ghost {
-    fn contact_added(&self, _: &ContactManifold, settings: &mut ContactSettings) {
-        settings.set_is_sensor(true).unwrap();
-    }
-
-    fn contact_persisted(&self, _: &ContactManifold, settings: &mut ContactSettings) {
-        settings.set_is_sensor(true).unwrap();
-    }
-}
-
-#[test]
-fn sensor_contacts_let_a_cube_fall_through_and_are_still_reported() {
-    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 2);
-    world.set_event_settings(contacts());
-    world.set_contact_listener(Some(Arc::new(Ghost)));
-    add_two_box_floor(&mut world);
-    let cube = add_small_cube(&mut world, RVec3::new(-1.0, 0.3, 0.0));
-    step(&mut world, 60);
-    assert!(world.body(cube).unwrap().position().y < -1.0);
-    let events = world.take_events();
-    let ContactEvent::Added { settings, .. } = &events.contacts[0] else {
-        panic!("{events:?}");
-    };
-    assert!(
-        settings.is_sensor(),
-        "the event holds the settings Jolt used"
-    );
-}
-
-/// Rejects every soft body contact.
-struct NoSoftContacts;
-
-impl ContactListener for NoSoftContacts {
-    fn soft_body_contact_validate(
-        &self,
-        _: BodyId,
-        _: BodyId,
-        _: &mut SoftBodyContactSettings,
-    ) -> SoftBodyValidateResult {
-        SoftBodyValidateResult::RejectContact
-    }
-}
-
-#[test]
-fn rejected_soft_body_contacts_let_a_cloth_fall_through() {
-    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
-    world.set_event_settings(EventSettings::default().soft_body_validations(true));
-    world.set_contact_listener(Some(Arc::new(NoSoftContacts)));
-    let table = add_table(&mut world, 0.0);
-    let cloth = add_cloth(&mut world, RVec3::new(0.0, 0.3, 0.0), Quat::IDENTITY);
-    step(&mut world, 60);
-    assert!(world.body(cloth).unwrap().position().y < -1.0);
-    let validations = world.take_events().soft_body_validations;
-    assert!(validations
-        .iter()
-        .any(|v| v.other == table && v.result == SoftBodyValidateResult::RejectContact));
-}
-
-/// Panics in every contact callback, or only once.
-struct Panicking {
-    always: bool,
-    panicked: std::sync::atomic::AtomicBool,
-}
-
-impl ContactListener for Panicking {
-    fn contact_persisted(&self, _: &ContactManifold, settings: &mut ContactSettings) {
-        settings.set_combined_friction(0.0).unwrap();
-        if self.always
-            || !self
-                .panicked
-                .swap(true, std::sync::atomic::Ordering::Relaxed)
-        {
-            panic!("contact listener panic");
-        }
-    }
-}
-
-#[test]
-fn a_panicking_listener_is_resumed_by_step() {
-    for always in [false, true] {
-        let mut world = world(Vec3::new(0.0, -9.81, 0.0), 4);
-        world.set_contact_listener(Some(Arc::new(Panicking {
-            always,
-            panicked: Default::default(),
-        })));
-        add_floor(&mut world);
-        let cube = world
+    let crate_shape = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    let obstacle = |world: &mut PhysicsWorld, x, z| {
+        world
             .create_body(
-                &Shape::new_box(Vec3::new(0.25, 0.25, 0.25)).unwrap(),
+                &crate_shape,
                 &BodySettings::new_dynamic()
-                    .position(RVec3::new(0.0, 0.3, 0.0))
-                    .allow_sleeping(false),
+                    .position(RVec3::new(x, 0.5, z))
+                    .object_layer(layers.moving),
+            )
+            .unwrap()
+    };
+    let (chassis, car) = vehicle::add_car(
+        &mut world,
+        &layers,
+        RVec3::new(0.0, 1.0, 0.0),
+        Quat::IDENTITY,
+    );
+    let crate_ahead = obstacle(&mut world, 0.0, 8.0);
+    let capsule = Shape::new_capsule(0.5, 0.3).unwrap();
+    let settings = CharacterSettings::new(&capsule).inner_body(Some(InnerBody {
+        shape: &capsule,
+        object_layer: layers.moving,
+    }));
+    let character = world
+        .create_character(&settings, RVec3::new(-10.0, 0.0, 0.0), Quat::IDENTITY)
+        .unwrap();
+    let inner = world.character(character).unwrap().inner_body().unwrap();
+    let crate_beside = obstacle(&mut world, -8.0, 0.0);
+    let gravity = Vec3::new(0.0, -9.81, 0.0);
+    let mut pairs = Vec::new();
+    for _ in 0..180 {
+        let mut vehicle = world.vehicle_mut(car).unwrap();
+        vehicle.set_gravity(gravity).unwrap();
+        vehicle
+            .set_driver_input(DriverInput {
+                forward: 1.0,
+                ..DriverInput::default()
+            })
+            .unwrap();
+        world
+            .character_mut(character)
+            .unwrap()
+            .set_linear_velocity(Vec3::new(2.0, 0.0, 0.0))
+            .unwrap();
+        world
+            .update_character(
+                character,
+                DT,
+                gravity,
+                &ExtendedUpdateSettings::default(),
+                &QueryFilter::new(),
             )
             .unwrap();
-        let mut panics = 0;
-        for _ in 0..60 {
-            match catch_unwind(AssertUnwindSafe(|| world.step(DT))) {
-                Ok(report) => assert!(report.unwrap().is_complete()),
-                Err(payload) => {
-                    assert_eq!(
-                        payload.downcast_ref::<&str>(),
-                        Some(&"contact listener panic")
-                    );
-                    panics += 1;
-                }
-            }
-        }
-        if always {
-            assert!(
-                panics > 50,
-                "every step with a persisted contact panics: {panics}"
-            );
-        } else {
-            assert_eq!(panics, 1);
-        }
-        world.remove_body(cube).unwrap();
         step(&mut world, 1);
+        for event in world.take_events().contacts {
+            let pair = event.pair();
+            pairs.push((pair.body1, pair.body2));
+        }
     }
-}
-
-/// Doubles the friction of every contact, within the bound.
-struct RoughContacts;
-
-impl ContactListener for RoughContacts {
-    fn contact_added(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
-        self.contact_persisted(manifold, settings);
-    }
-
-    fn contact_persisted(&self, _: &ContactManifold, settings: &mut ContactSettings) {
-        let doubled = (2.0 * settings.combined_friction()).min(limits::MAX_FRICTION);
-        settings.set_combined_friction(doubled).unwrap();
-    }
-}
-
-#[test]
-fn continuous_collision_with_a_listener_steps_cleanly() {
-    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 2);
-    world.set_event_settings(EventSettings::default().persisted_contacts(true));
-    world.set_contact_listener(Some(Arc::new(RoughContacts)));
-    add_floor(&mut world);
-    let shape = Shape::new_box(Vec3::new(0.1, 0.1, 0.1)).unwrap();
-    let bullet = world
-        .create_body(
-            &shape,
-            &BodySettings::new_dynamic()
-                .position(RVec3::new(0.0, 3.0, 0.0))
-                .linear_velocity(Vec3::new(5.0, -200.0, 0.0))
-                .motion_quality(MotionQuality::LinearCast),
-        )
-        .unwrap();
-    let mut contacts = 0;
-    for _ in 0..30 {
-        step(&mut world, 1);
-        contacts += world.take_events().contacts.len();
-    }
-    let position = world.body(bullet).unwrap().position();
+    let touched = |a: BodyId, b: BodyId| {
+        pairs
+            .iter()
+            .any(|&(x, y)| (x, y) == (a, b) || (x, y) == (b, a))
+    };
+    assert!(touched(chassis, crate_ahead), "the car runs into the crate");
     assert!(
-        position.y > -0.05,
-        "the bullet did not tunnel: {position:?}"
+        touched(inner, crate_beside),
+        "the character walks into the crate"
     );
-    assert!(contacts > 0);
 }
