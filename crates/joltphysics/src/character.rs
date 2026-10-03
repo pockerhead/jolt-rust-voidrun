@@ -218,7 +218,7 @@ impl<'a> CharacterSettings<'a> {
 
     /// The steepest ground the character can stand on, radians in `[0, π/2]`. Default 50°.
     ///
-    /// Jolt turns the slope limit off when its cosine is above 0.9999, that is for angles below
+    /// Jolt turns the slope limit off when its cosine is 0.9999 or above, that is for angles below
     /// about 0.81° (0.0141 rad): then no ground is too steep, so `0.0` means "no limit", not
     /// "flat ground only".
     #[must_use]
@@ -519,9 +519,10 @@ impl ExtendedUpdateSettings {
     ///
     /// The highest step climbed is not this length: a capsule of radius `r` climbs about
     /// step-up + padding + `r (1 - cos max_slope_angle)`, and the step's own rounding changes it
-    /// too, so measure it. Jolt judges a step by the surface
-    /// normal at the contact, and on a box with sharp edges (convex radius 0) that is the top
-    /// face's normal, so walk stairs never climbs such a step.
+    /// too, so measure it. Jolt judges a step by the surface normal at the contact; on a box with
+    /// sharp edges (convex radius 0) the contact sits on the top edge, where float rounding
+    /// decides between the top face's normal and the side's, so walk stairs climbs such a step
+    /// unreliably.
     #[must_use]
     pub fn walk_stairs_step_up(mut self, value: Vec3) -> Self {
         self.walk_stairs_step_up = value;

@@ -115,8 +115,8 @@ sample `ceil(p * n)`, counting from 1.
 
 The tick rows come from a separate run of the tick case alone (`-- tick`), on the same machine and
 day as the rest of the table. The other rows were measured at commit `fb07618`. Later changes to the
-bench touched only the labels and limits of those cases, not what they time, and the table shows
-the labels the bench prints now.
+bench touched only the labels, limits and one note text of those cases (the spawn ray's filter
+description), not what they time, and the table shows the labels and notes the bench prints now.
 
 ## Reading
 

@@ -126,12 +126,14 @@ of the update and is not added to the velocity; the caller feeds the vertical sp
 
 Jolt's walk stairs and its steep-slope test judge an obstacle by the surface normal at the contact.
 On a box with sharp edges (`new_box_with_convex_radius(.., 0.0)`) a capsule pressing on a face
-touches it at the top edge, where Jolt reports the top face's normal. Walk stairs then never fires,
-while the capsule still creeps onto low sharp edges by itself (up to about 0.37 m in the walker
-tests). No `CharacterSettings` value changes this. On Jolt's default rounded boxes walk stairs works (a 0.25 m step with a 0.4 m
-step-up is climbed), but the height it climbs is about step-up + padding +
-`r (1 - cos max_slope_angle)`, not the step-up itself, and the step's rounding changes it too, so
-measure it for your capsule.
+touches it at the top edge. There Jolt picks the top face's normal or the side's by float
+rounding of the contact point, so walk stairs on sharp steps is unreliable: the same settings
+climb a 0.45 m step and refuse a 0.40 m one, and the outcome changes from scene to scene.
+The capsule also creeps onto low sharp edges by itself (up to about 0.37 m in the walker tests).
+No `CharacterSettings` value makes this dependable. On Jolt's default rounded boxes walk stairs
+works (a 0.25 m step with a 0.4 m step-up is climbed), but the height it climbs is about
+step-up + padding + `r (1 - cos max_slope_angle)`, not the step-up itself, and the step's rounding
+changes it too, so measure it for your capsule.
 
 A game with sharp structures turns walk stairs off (`walk_stairs_step_up(Vec3::ZERO)`) and steps
 in its own code after the update, with shape casts, which report the geometry's own normal: when a

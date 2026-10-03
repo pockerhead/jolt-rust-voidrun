@@ -583,9 +583,9 @@ pub fn near_step(world: &mut PhysicsWorld, walker: &Walker, input: NearInput) ->
 ///
 /// Jolt's own walk stairs is not used for this: it judges a step by the surface normal at the
 /// contact, and a capsule pressing on the face of a sharp box touches it at the box's top edge,
-/// where `BoxShape::GetSurfaceNormal` returns the top face's normal. Jolt then never sees the
-/// step, and lifts the walker onto edges it must not climb. The casts here judge by the contact
-/// normal, which is the geometry's own.
+/// where `BoxShape::GetSurfaceNormal` picks the top face's normal or the side's by float rounding.
+/// Jolt then misses some steps, climbs others, and lifts the walker onto edges it must not climb.
+/// The casts here judge by the contact normal, which is the geometry's own.
 fn autostep(
     world: &mut PhysicsWorld,
     walker: &Walker,

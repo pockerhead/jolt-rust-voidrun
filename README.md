@@ -122,8 +122,10 @@ state of bodies is in neither layer yet; only a character's state can be saved.
   particular order.
 - **Characters.** A new character reports `InAir` until its first update or
   `refresh_character_contacts`. Jolt's walk stairs and steep-slope test judge an obstacle by the
-  surface normal at the contact; on a box with sharp edges (convex radius 0) that is the top face's
-  normal, so walk stairs never climbs a sharp step, while a capsule creeps onto low sharp edges by
+  surface normal at the contact. On a box with sharp edges (convex radius 0) the contact sits on
+  the top edge, and whether Jolt reports the top face's normal there or the side's is decided by
+  float rounding, so walk stairs on a sharp step is unreliable: it climbs some step heights and
+  refuses others, differently from scene to scene. A capsule also creeps onto low sharp edges by
   itself (up to about 0.37 m in the walker tests, measured on a sharp dynamic box).
   The [guide](docs/guide.md#sharp-steps-and-the-games-own-autostep) shows the autostep a game builds
   instead. With walk stairs on, the climbable height is not `walk_stairs_step_up` but about it
