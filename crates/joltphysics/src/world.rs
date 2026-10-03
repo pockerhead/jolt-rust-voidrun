@@ -24,6 +24,7 @@ use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
 use crate::character::CharacterEntry;
+use crate::jolt_assert;
 use crate::owned::{JoltObject, Owned};
 use crate::ragdoll::RagdollEntry;
 use crate::vehicle::VehicleEntry;
@@ -31,13 +32,18 @@ use crate::{
     BodyError, BodyId, CollisionLayers, MotionType, Quat, RVec3, StepError, Vec3, WorldError,
 };
 
-/// Runs `JPH_Init` once per process and returns whether it succeeded. joltphysics never calls
-/// `JPH_Shutdown`: Jolt's global state lives as long as the process.
+/// Installs the assertion handler and runs `JPH_Init` once per process, and returns whether
+/// `JPH_Init` succeeded. joltphysics never calls `JPH_Shutdown`: Jolt's global state lives as
+/// long as the process.
 pub(crate) fn ensure_initialized() -> bool {
     static INIT: OnceLock<bool> = OnceLock::new();
-    // SAFETY: `OnceLock` runs the closure exactly once per process, which is the only
-    // synchronisation `JPH_Init` (an unsynchronised `bool` guard) needs.
-    *INIT.get_or_init(|| unsafe { JPH_Init() })
+    *INIT.get_or_init(|| {
+        jolt_assert::install();
+        // SAFETY: `OnceLock` runs the closure exactly once per process, which is the only
+        // synchronisation `JPH_Init` (an unsynchronised `bool` guard) needs. The assertion
+        // handler is in place before `JPH_Init` registers Jolt's types.
+        unsafe { JPH_Init() }
+    })
 }
 
 /// Serialises `JPH_PhysicsSystem_Create` and `JPH_PhysicsSystem_Destroy`, which write joltc's

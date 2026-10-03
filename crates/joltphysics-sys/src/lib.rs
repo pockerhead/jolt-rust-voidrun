@@ -17,7 +17,10 @@
 //! `joltphysics` crate.
 //!
 //! # Features
-//! - `asserts`: compile Jolt with its debug assertions.
+//! - `asserts`: compile Jolt with its debug assertions. joltc's default handler prints a failed
+//!   assertion and then executes a breakpoint (`__debugbreak` on MSVC), so raw users should
+//!   install their own with `JPH_SetAssertFailureHandler` before `JPH_Init`. The handler is one
+//!   process-global joltc slot, and the `joltphysics` crate installs its own.
 //! - `double-precision`: world positions ([`Real`], `JPH_RVec3`, `JPH_RMat4`) use `f64`.
 //! - `cross-platform-deterministic`: build Jolt with its cross-platform deterministic
 //!   floating point settings (slower; same results across compilers and platforms).
@@ -119,6 +122,9 @@ pub type Real = f64;
 /// Scalar type of world positions: `f64` with the `double-precision` feature, `f32` otherwise.
 #[cfg(not(feature = "double-precision"))]
 pub type Real = f32;
+
+/// Whether the native library was built with Jolt's assertions (the `asserts` feature).
+pub const ASSERTS_ENABLED: bool = cfg!(feature = "asserts");
 
 /// `JPH_Mat4_RotationTranslation` under the name double precision uses.
 ///
