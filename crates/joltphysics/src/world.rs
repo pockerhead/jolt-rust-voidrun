@@ -300,11 +300,12 @@ impl WorldJobSystem {
         }
     }
 
-    /// The first panic of the caller's `queue_job` during the last step.
-    fn take_panic(&self) -> Option<Box<dyn Any + Send>> {
+    /// Finishes a step after the update returned: releases the jobs a caller job system left to
+    /// the stepping thread and returns the first panic of its `queue_job` during the step.
+    fn finish_update(&self) -> Option<Box<dyn Any + Send>> {
         match self {
             Self::ThreadPool(_) => None,
-            Self::Caller(context) => context.take_panic(),
+            Self::Caller(context) => context.finish_update(),
         }
     }
 }
@@ -904,9 +905,9 @@ impl PhysicsWorld {
     ///
     /// # Panics
     /// With a caller [`JobSystem`], a panic in its [`queue_job`](JobSystem::queue_job) does not
-    /// stop the step: the remaining jobs of that step run on the threads that queue them, the
-    /// world advances, and `step` then resumes the first such panic. The next step uses the
-    /// caller's job system again.
+    /// stop the step: the remaining jobs of that step run on the stepping thread, the world
+    /// advances, and `step` then resumes the first such panic. The next step uses the caller's
+    /// job system again.
     pub fn step(&mut self, delta_time: f32) -> Result<StepReport, StepError> {
         if !Self::is_valid_delta_time(delta_time) {
             return Err(StepError::InvalidDeltaTime);
@@ -922,7 +923,7 @@ impl PhysicsWorld {
                 self.job_system.as_ptr(),
             )
         };
-        if let Some(payload) = self.job_system.take_panic() {
+        if let Some(payload) = self.job_system.finish_update() {
             std::panic::resume_unwind(payload);
         }
         Ok(StepReport {

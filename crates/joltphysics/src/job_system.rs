@@ -1,23 +1,8 @@
-//! Running Jolt's jobs on the caller's thread pool.
-//!
-//! A step splits its work into jobs: small closures with dependencies that Jolt hands to a job
-//! system to run. By default a world owns Jolt's own thread pool
-//! ([`WorldSettings::worker_threads`](crate::WorldSettings::worker_threads)); with
-//! [`WorldSettings::job_system`](crate::WorldSettings::job_system) it hands its jobs to a
-//! [`JobSystem`] the caller implements instead, for example on Rayon or the game's own pool.
-//!
-//! The thread that calls [`PhysicsWorld::step`](crate::PhysicsWorld::step) waits for the jobs
-//! of each stage at a Jolt barrier, and while it waits it runs the jobs of that stage that no
-//! other thread has started. A step therefore finishes even when the caller's pool runs a job
-//! late or never; a job the stepping thread already ran does nothing when the pool runs it.
-//!
-//! Jolt documents its simulation as deterministic for the same binary, the same initial state
-//! and the same calls in the same order (Jolt docs, "Deterministic Simulation"); which job
-//! system ran the jobs is not part of that state. The determinism gates of this crate compare a
-//! Rayon pool and an inline job system with Jolt's thread pool. Side effects of the caller's own
-//! code in [`JobSystem::queue_job`] are not covered.
+//! Running Jolt's jobs on the caller's thread pool: the public [`JobSystem`] and [`Job`], and
+//! the joltc callback job system behind them.
 
 use std::any::Any;
+use std::cell::Cell;
 use std::ffi::c_void;
 use std::fmt;
 use std::io::Write;
@@ -33,7 +18,27 @@ use crate::owned::Owned;
 use crate::WorldError;
 
 /// A thread pool that runs Jolt's jobs for a world, set with
-/// [`WorldSettings::job_system`](crate::WorldSettings::job_system).
+/// [`WorldSettings::job_system`](crate::WorldSettings::job_system), for example Rayon or a
+/// game's own pool. Without it a world runs its jobs on Jolt's thread pool
+/// ([`WorldSettings::worker_threads`](crate::WorldSettings::worker_threads)).
+///
+/// A step splits its work into jobs, small closures with dependencies. The thread that calls
+/// [`PhysicsWorld::step`](crate::PhysicsWorld::step) waits for them at a Jolt barrier, and while
+/// it waits it runs the jobs that no other thread has started. A step therefore finishes even
+/// when the pool runs a job late or never; a job the stepping thread already ran does nothing
+/// when the pool runs it.
+///
+/// Jolt does not let a job start inside another job on the same thread: some jobs release the
+/// jobs that depend on them while they still hold their body access rights, which Jolt's
+/// assertions track per thread (`BodyAccess::Grant`). A job that is run or dropped while
+/// [`queue_job`](Self::queue_job) is on the same thread's stack is therefore not started there;
+/// it is left to the stepping thread, and the step hands it back to Jolt after the update.
+///
+/// Jolt documents its simulation as deterministic for the same binary, the same initial state
+/// and the same calls in the same order (Jolt docs, "Deterministic Simulation"); which threads
+/// ran the jobs is not part of that state. This crate's determinism gates compare a Rayon pool
+/// and a job system that calls [`Job::run`] inside `queue_job` with Jolt's thread pool. Side
+/// effects of the caller's own code in `queue_job` are not covered.
 ///
 /// Several worlds may share one job system and step on different threads at the same time.
 ///
@@ -86,21 +91,24 @@ pub trait JobSystem: Send + Sync + 'static {
     /// [`PhysicsWorld::step`](crate::PhysicsWorld::step).
     ///
     /// [`PhysicsWorld::new`](crate::PhysicsWorld::new) reads it once and rejects the settings
-    /// unless it is within `1..=`[`WorldSettings::MAX_CONCURRENCY`](crate::WorldSettings::MAX_CONCURRENCY).
-    /// Jolt uses it to decide how many jobs a stage is split into (at most 32 in Jolt 5.6); it
-    /// changes how the work is split, not the results.
+    /// unless it is within `1..=`
+    /// [`WorldSettings::MAX_CONCURRENCY`](crate::WorldSettings::MAX_CONCURRENCY). Jolt uses it
+    /// to decide how many jobs a stage is split into, at most 32
+    /// (`PhysicsUpdateContext::cMaxConcurrency`); it changes how the work is split, not the
+    /// results.
     fn max_concurrency(&self) -> u32;
 
-    /// Runs `job` soon, on any thread, or right here before returning.
+    /// Runs `job` soon, on any thread.
     ///
-    /// Running the job inline is supported, as Jolt's own `JobSystemSingleThreaded` does. Jolt
-    /// calls this from the stepping thread and from threads that run jobs, also from inside
-    /// [`Job::run`] of another job on the same thread. It must not block waiting for any job.
-    /// Every job must be run or dropped soon: each one holds a slot of a pool of 2048 jobs per
-    /// world, and when that pool is empty Jolt waits for a free slot (and asserts with the
-    /// `asserts` feature).
+    /// Jolt calls this from the stepping thread and from threads that run jobs, from inside a
+    /// running job. Calling [`Job::run`] here, before returning, is allowed but does not start
+    /// the job: it is left to the stepping thread (see above). This must not block waiting for
+    /// any job. Every job must be run or dropped soon: each one holds a slot of a pool of 2048
+    /// jobs per world, and when that pool is empty Jolt waits for a free slot (and asserts with
+    /// the `asserts` feature).
     ///
-    /// A panic here does not unwind into Jolt; see [`PhysicsWorld::step`](crate::PhysicsWorld::step).
+    /// A panic here does not unwind into Jolt; see
+    /// [`PhysicsWorld::step`](crate::PhysicsWorld::step).
     fn queue_job(&self, job: Job);
 }
 
@@ -109,15 +117,15 @@ pub trait JobSystem: Send + Sync + 'static {
 /// Run it with [`run`](Self::run). Dropping it runs it as well, so a job that is never run is
 /// still finished. A job may be sent to any thread and may outlive its world.
 pub struct Job {
-    function: unsafe extern "C" fn(*mut c_void),
-    arg: NonNull<c_void>,
+    task: JobTask,
     /// Keeps the native job system alive until the job has run and been released.
-    _native: Arc<CallbackJobSystem>,
+    native: Arc<CallbackJobSystem>,
 }
 
 impl Job {
     /// Runs the Jolt job unless the stepping thread already ran it, then hands the job back to
-    /// Jolt.
+    /// Jolt. Called while [`JobSystem::queue_job`] is on this thread's stack, it leaves the job
+    /// to the stepping thread instead.
     pub fn run(self) {
         drop(self);
     }
@@ -125,16 +133,42 @@ impl Job {
 
 impl Drop for Job {
     fn drop(&mut self) {
-        // SAFETY: `function` is joltc's `RunJob` and `arg` a Jolt job carrying the one reference
-        // joltc's `QueueJob(s)` added for this hand-off. This value is the only owner of that
-        // reference and is dropped once. `RunJob` executes the job at most once (`Job::Execute`
-        // in `JobSystem.h` starts only from zero dependencies) and then releases that reference.
-        // The native job system it releases into, and whose barrier a running job notifies,
-        // stays alive: `self._native` is a field and drops only after this body returns. Job
-        // functions capture only references, pointers and integers, so a job freed after its
-        // world is gone touches nothing but the native job system. That relies on Jolt adding
-        // every job of `PhysicsSystem::Update` to the update barrier, so that `Update` returns
-        // only after every job ran; re-check this when updating Jolt or joltc.
+        if in_queue_callback() {
+            self.native.park(self.task);
+        } else {
+            // SAFETY: `task` holds the one reference joltc's `QueueJob(s)` added for this
+            // hand-off; this value is its only owner and is dropped once. The native job system
+            // it belongs to stays alive: `self.native` is a field and drops only after this body
+            // returns. No queue callback is on this thread's stack, so no Jolt job is running
+            // on this thread.
+            unsafe { self.task.run() }
+        }
+    }
+}
+
+/// joltc's `RunJob` with its argument: a Jolt job holding one reference for its hand-off.
+#[derive(Clone, Copy)]
+struct JobTask {
+    function: unsafe extern "C" fn(*mut c_void),
+    arg: NonNull<c_void>,
+}
+
+impl JobTask {
+    /// Executes the Jolt job unless it already ran, then releases the reference.
+    ///
+    /// # Safety
+    /// The caller owns the task's reference and gives it up here, and the native job system the
+    /// job belongs to is alive. Either no Jolt job is running on this thread, or the job has
+    /// already run, so that it does not start inside another job.
+    unsafe fn run(self) {
+        // SAFETY: `function` is joltc's `RunJob`, which executes the job at most once
+        // (`Job::Execute` in `JobSystem.h` starts only from zero dependencies) and then releases
+        // the caller's reference into the live native job system, whose barrier a running job
+        // notifies (contract). Job functions capture only references, pointers and integers, so
+        // a job freed after its world is gone touches nothing but the native job system. A job
+        // that still has to run belongs to an update in progress: Jolt adds every job of
+        // `PhysicsSystem::Update` to the update barrier and returns only after each one ran, so
+        // the world is alive while it runs; re-check this when updating Jolt or joltc.
         unsafe { (self.function)(self.arg.as_ptr()) }
     }
 }
@@ -144,6 +178,34 @@ impl Drop for Job {
 // `CallbackJobSystem` is `Send + Sync`. `Job` is not `Sync`: it is run by value, once.
 unsafe impl Send for Job {}
 
+thread_local! {
+    /// How many queue callbacks are on this thread's stack.
+    static QUEUE_CALLBACK_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Whether a queue callback, and so a running Jolt job or update, is on this thread's stack.
+fn in_queue_callback() -> bool {
+    QUEUE_CALLBACK_DEPTH
+        .try_with(|depth| depth.get() > 0)
+        .unwrap_or(false)
+}
+
+/// Marks a queue callback on this thread's stack while it lives.
+struct InQueueCallback;
+
+impl InQueueCallback {
+    fn enter() -> Self {
+        QUEUE_CALLBACK_DEPTH.with(|depth| depth.set(depth.get() + 1));
+        Self
+    }
+}
+
+impl Drop for InQueueCallback {
+    fn drop(&mut self) {
+        QUEUE_CALLBACK_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
 impl fmt::Debug for Job {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Job")
@@ -152,14 +214,51 @@ impl fmt::Debug for Job {
 
 /// joltc's callback job system of one world, destroyed by its last owner: the world's
 /// [`QueueContext`] or a [`Job`] that is still queued.
-pub(crate) struct CallbackJobSystem(Owned<JPH_JobSystem>);
+pub(crate) struct CallbackJobSystem {
+    // Field order: `Drop` releases the parked jobs, then `native` is destroyed.
+    /// Jobs run or dropped inside a queue callback, left to the update barrier; their
+    /// references are released after the update.
+    parked: Mutex<Vec<JobTask>>,
+    native: Owned<JPH_JobSystem>,
+}
+
+impl CallbackJobSystem {
+    fn park(&self, task: JobTask) {
+        self.parked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(task);
+    }
+
+    /// Releases the parked jobs. Called when no update of this job system runs, so every
+    /// parked job has run and only its reference is released.
+    fn release_parked(&self) {
+        let parked = mem::take(&mut *self.parked.lock().unwrap_or_else(PoisonError::into_inner));
+        for task in parked {
+            // SAFETY: a parked task holds its job's reference, which `park` took over from the
+            // `Job` and this loop gives up once (`mem::take` emptied the list). `self` is the
+            // live native job system the job belongs to. No update of it runs (caller), so the
+            // update barrier has run the job and it does not start here.
+            unsafe { task.run() };
+        }
+    }
+}
+
+impl Drop for CallbackJobSystem {
+    fn drop(&mut self) {
+        // The last owner holds no update in progress: the world, if it still exists, does not
+        // step (it would own a reference), and a parked job of an earlier update has run.
+        self.release_parked();
+    }
+}
 
 // SAFETY: Jolt calls `QueueJob`, `FreeJob` and the barrier methods of one job system from many
 // threads (lock-free free list, atomic barrier state), and `GetMaxConcurrency` reads a field
-// set at creation. The object is destroyed only by the last `Arc`, so no call overlaps the
+// set at creation. The parked tasks are Jolt jobs, which may be released on any thread, behind
+// a mutex. The object is destroyed only by the last `Arc`, so no call overlaps the
 // destruction, and destruction has no thread affinity.
 unsafe impl Send for CallbackJobSystem {}
-// SAFETY: as for `Send`; shared references only hand the pointer to Jolt, as above.
+// SAFETY: as for `Send`; shared references only hand the pointer to Jolt or lock `parked`.
 unsafe impl Sync for CallbackJobSystem {}
 
 /// What joltc's queue callbacks of one world get as their `context`: the caller's job system,
@@ -171,7 +270,7 @@ pub(crate) struct QueueContext {
     job_system: Arc<dyn JobSystem>,
     /// Set once, right after the native object was created and before any step.
     native: OnceLock<Arc<CallbackJobSystem>>,
-    /// Whether `panic` holds a payload; from then on jobs run inline.
+    /// Whether `panic` holds a payload; from then on jobs are left to the stepping thread.
     panicked: AtomicBool,
     panic: Mutex<Option<Box<dyn Any + Send>>>,
 }
@@ -192,22 +291,22 @@ impl QueueContext {
             .native
             .get()
             .expect("caller job system is created with its context");
-        native.0.as_ptr()
+        native.native.as_ptr()
     }
 
     /// Wraps a job joltc queued; aborts on input joltc never passes.
     fn job(&self, function: JPH_JobFunction, arg: *mut c_void) -> Job {
         match (function, NonNull::new(arg), self.native.get()) {
             (Some(function), Some(arg), Some(native)) => Job {
-                function,
-                arg,
-                _native: Arc::clone(native),
+                task: JobTask { function, arg },
+                native: Arc::clone(native),
             },
             _ => abort_in_callback("joltc queued a job without a function or argument"),
         }
     }
 
-    /// Hands `job` to the caller's job system, or runs it here once that panicked.
+    /// Hands `job` to the caller's job system, or once that panicked, leaves it to the stepping
+    /// thread.
     fn queue(&self, job: Job) {
         if self.panicked.load(Ordering::Acquire) {
             drop(job);
@@ -236,10 +335,14 @@ impl QueueContext {
         }
     }
 
-    /// The first panic of the caller's `queue_job` since the last call, after which the caller's
-    /// job system is used again. Called by `step` after the update returned, when no queue
-    /// callback of this world runs.
-    pub(crate) fn take_panic(&self) -> Option<Box<dyn Any + Send>> {
+    /// Finishes an update: releases the jobs left to the stepping thread and returns the first
+    /// panic of the caller's `queue_job` since the last call, after which the caller's job
+    /// system is used again. Called by `step` after the update returned, when no queue callback
+    /// of this world runs.
+    pub(crate) fn finish_update(&self) -> Option<Box<dyn Any + Send>> {
+        if let Some(native) = self.native.get() {
+            native.release_parked();
+        }
         let payload = self
             .panic
             .lock()
@@ -265,6 +368,7 @@ unsafe extern "C" fn queue_job(context: *mut c_void, function: JPH_JobFunction, 
     // SAFETY: `context` is the world's live `QueueContext` (contract), which the world keeps in
     // an `Arc` and only reads through shared references.
     let context = unsafe { &*context.cast::<QueueContext>() };
+    let _in_callback = InQueueCallback::enter();
     context.queue(context.job(function, arg));
 }
 
@@ -287,6 +391,7 @@ unsafe extern "C" fn queue_jobs(
     }
     // SAFETY: as in `queue_job`.
     let context = unsafe { &*context.cast::<QueueContext>() };
+    let _in_callback = InQueueCallback::enter();
     for i in 0..count as usize {
         // SAFETY: `args` points to `count` job pointers that live during this call (contract);
         // each is read once, here, before the call returns.
@@ -318,7 +423,10 @@ pub(crate) fn create_caller_job_system(
     let native = unsafe { Owned::from_raw(JPH_JobSystemCallback_Create(&config)) }
         .ok_or(WorldError::AllocationFailed("job system"))?;
     // A fresh `OnceLock` is empty, so this always stores.
-    let _ = context.native.set(Arc::new(CallbackJobSystem(native)));
+    let _ = context.native.set(Arc::new(CallbackJobSystem {
+        parked: Mutex::new(Vec::new()),
+        native,
+    }));
     Ok(context)
 }
 
@@ -361,9 +469,11 @@ mod tests {
 
     fn counting_job(context: &QueueContext, runs: &AtomicUsize) -> Job {
         Job {
-            function: count_run,
-            arg: NonNull::from(runs).cast(),
-            _native: Arc::clone(context.native.get().unwrap()),
+            task: JobTask {
+                function: count_run,
+                arg: NonNull::from(runs).cast(),
+            },
+            native: Arc::clone(context.native.get().unwrap()),
         }
     }
 
@@ -374,6 +484,10 @@ mod tests {
             .unwrap_or_default()
     }
 
+    fn count(runs: &AtomicUsize) -> usize {
+        runs.load(Ordering::Relaxed)
+    }
+
     #[test]
     fn run_and_drop_each_run_the_job_once() {
         let context = context(Arc::new(AlwaysPanics {
@@ -381,33 +495,53 @@ mod tests {
         }));
         let runs = AtomicUsize::new(0);
         counting_job(&context, &runs).run();
-        assert_eq!(runs.load(Ordering::Relaxed), 1);
+        assert_eq!(count(&runs), 1);
         drop(counting_job(&context, &runs));
-        assert_eq!(runs.load(Ordering::Relaxed), 2);
+        assert_eq!(count(&runs), 2);
+        assert!(context.finish_update().is_none());
+        assert_eq!(count(&runs), 2);
     }
 
     #[test]
-    fn the_first_panic_is_kept_later_jobs_run_inline_and_take_panic_resets() {
+    fn jobs_run_inside_a_queue_callback_wait_for_the_end_of_the_update() {
+        let context = context(Arc::new(AlwaysPanics {
+            calls: AtomicUsize::new(0),
+        }));
+        let runs = AtomicUsize::new(0);
+        {
+            let _in_callback = InQueueCallback::enter();
+            counting_job(&context, &runs).run();
+            drop(counting_job(&context, &runs));
+            assert_eq!(count(&runs), 0);
+        }
+        assert!(context.finish_update().is_none());
+        assert_eq!(count(&runs), 2);
+    }
+
+    #[test]
+    fn the_first_panic_is_kept_later_jobs_skip_the_job_system_and_finish_update_resets() {
         let job_system = Arc::new(AlwaysPanics {
             calls: AtomicUsize::new(0),
         });
         let context = context(job_system.clone());
         let runs = AtomicUsize::new(0);
+        let calls = || job_system.calls.load(Ordering::Relaxed);
 
         context.queue(counting_job(&context, &runs));
         context.queue(counting_job(&context, &runs));
-        assert_eq!(runs.load(Ordering::Relaxed), 2);
-        assert_eq!(job_system.calls.load(Ordering::Relaxed), 1);
+        assert_eq!(count(&runs), 2);
+        assert_eq!(calls(), 1);
 
         context.record_panic(Box::new(String::from("second")));
-        let payload = context.take_panic().unwrap();
+        let payload = context.finish_update().unwrap();
         assert_eq!(message(&*payload), "queue_job call 1");
-        assert!(context.take_panic().is_none());
+        assert!(context.finish_update().is_none());
 
         context.queue(counting_job(&context, &runs));
-        assert_eq!(runs.load(Ordering::Relaxed), 3);
-        assert_eq!(job_system.calls.load(Ordering::Relaxed), 2);
-        assert_eq!(message(&*context.take_panic().unwrap()), "queue_job call 2");
+        assert_eq!(count(&runs), 3);
+        assert_eq!(calls(), 2);
+        let payload = context.finish_update().unwrap();
+        assert_eq!(message(&*payload), "queue_job call 2");
     }
 
     #[test]
@@ -425,6 +559,6 @@ mod tests {
         }));
         context.record_panic(Box::new(String::from("first")));
         context.record_panic(Box::new(PanicsOnDrop));
-        assert_eq!(message(&*context.take_panic().unwrap()), "first");
+        assert_eq!(message(&*context.finish_update().unwrap()), "first");
     }
 }

@@ -1,6 +1,6 @@
 //! Worlds that run Jolt's jobs on a caller job system: results equal to Jolt's thread pool,
-//! inline and re-entrant execution, jobs that outlive their world, panics in the caller's
-//! `queue_job`, the concurrency bound and the choice between the two job systems.
+//! jobs run inside `queue_job`, re-entrant steps, jobs that outlive their world, panics in the
+//! caller's `queue_job`, the concurrency bound and the choice between the two job systems.
 
 mod common;
 
@@ -102,11 +102,11 @@ enum PanicMode {
     BeforeStoring(usize),
     /// On the n-th call, after storing the job for the test to drain.
     AfterStoring(usize),
-    /// On every call while armed, also on the calls Jolt makes while the first panic unwinds.
+    /// On every call while armed.
     Always,
 }
 
-/// Runs jobs inline, except that it panics as its mode says.
+/// Calls `Job::run` right away, except that it panics as its mode says.
 struct PanickingJobs {
     mode: PanicMode,
     armed: AtomicBool,
@@ -152,7 +152,8 @@ impl JobSystem for PanickingJobs {
     }
 }
 
-/// Reads the job system's concurrency from a field and counts the reads; runs jobs inline.
+/// Reads the job system's concurrency from a field and counts the reads; calls `Job::run` right
+/// away.
 struct FixedConcurrency {
     value: u32,
     reads: AtomicUsize,
@@ -232,8 +233,8 @@ fn inline_job_system_matches_the_native_pool() {
     assert_eq!(caller, stacks_digest(native()));
     assert!(jobs.queued() > 0);
 
-    // Inline execution nests jobs on one stack; a Jolt job that waited for work held lower on
-    // that stack would never return.
+    // Every job is left to the stepping thread, also in a pile whose large islands Jolt splits
+    // into many jobs.
     let pile_jobs = Arc::new(InlineJobs { concurrency: 3 });
     let caller = with_timeout(TIMEOUT_SECS, move || {
         ragdoll_pile_digest(WorldSettings::default().job_system(pile_jobs))

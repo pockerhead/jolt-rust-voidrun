@@ -41,7 +41,8 @@ impl JobSystem for RayonJobs {
     }
 }
 
-/// Runs every job right away on the thread that queues it, which nests jobs on one stack.
+/// Calls [`Job::run`] right away inside `queue_job`, which leaves every job to the stepping
+/// thread.
 pub struct InlineJobs {
     pub concurrency: u32,
 }
