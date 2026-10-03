@@ -161,6 +161,16 @@
 //! # }
 //! ```
 //!
+//! # Constraints
+//! [`PhysicsWorld::create_constraint`] joins two bodies of a world with a constraint built from
+//! settings: [`FixedConstraintSettings`], [`PointConstraintSettings`],
+//! [`DistanceConstraintSettings`], [`HingeConstraintSettings`], [`SliderConstraintSettings`],
+//! [`ConeConstraintSettings`], [`SwingTwistConstraintSettings`], [`SixDofConstraintSettings`],
+//! [`GearConstraintSettings`], [`RackAndPinionConstraintSettings`], [`PulleyConstraintSettings`]
+//! and [`PathConstraintSettings`]. The world owns the constraint; the returned [`ConstraintId`]
+//! is typed by the kind, which selects the motor, target, limit and readout methods of
+//! [`ConstraintRef`] and [`ConstraintMut`]. A body cannot be removed while a constraint uses it.
+//!
 //! # Threads
 //! Changing a world, including [`PhysicsWorld::step`], takes `&mut PhysicsWorld`; reading it
 //! takes `&PhysicsWorld`. `PhysicsWorld` is `Send` and `Sync`, so many threads may read one

@@ -105,7 +105,21 @@
 //! - query arithmetic: rays, shape casts and collisions from frame corners
 //!   (`query_inputs_are_bounded_by_the_frame`) and a sphere at the extent bound cast across
 //!   the frame and collided with separations up to the extent bound
-//!   (`queries_with_shapes_at_the_extent_bound_stay_finite`).
+//!   (`queries_with_shapes_at_the_extent_bound_stay_finite`);
+//! - world constraints: gears, racks and pinions and pulleys at both [`MAX_RATIO`] bounds
+//!   between bodies of both mass extremes, one of them turning or sliding at the velocity bound
+//!   (`ratios_at_the_bound_step_finitely`, `pulleys_at_the_ratio_bound_step_finitely`); motor and
+//!   limit springs accepted at the effective-mass bound and rejected one representable frequency
+//!   above it (`world_constraint_springs_are_bounded_by_the_bodies_effective_mass`,
+//!   `slider_swing_twist_and_six_dof_motor_springs_are_bounded`,
+//!   `path_motor_springs_and_friction_are_bounded`); targets at their bounds
+//!   (`constraint_targets_are_bounded`, `slider_cone_swing_twist_and_six_dof_targets_are_bounded`,
+//!   `path_inputs_are_bounded`); hinge, slider, swing-twist and path friction of `f32::MAX` on
+//!   bodies moving at the velocity bounds (`constraint_friction_at_f32_max_steps_finitely`,
+//!   `slider_and_swing_twist_friction_at_f32_max_steps_finitely`,
+//!   `path_motor_springs_and_friction_are_bounded`); and a path segment at the margin of the
+//!   segment check stepped end to end with every rotation constraint
+//!   (`path_validation_accepts_its_boundary`).
 //!
 //! # Not covered
 //! - State the simulation produces itself is not an input and is not checked again: a body Jolt
@@ -119,7 +133,8 @@
 //!   for the suspension effective mass Jolt forms from a wheel's force point and the chassis's
 //!   inverse inertia (`VehicleConstraint.cpp:448-451`).
 //! - Inputs that are only checked to be finite or ordered, as the audit table says: ray
-//!   directions, damping, motor force and torque limits, joint friction, wheel friction curves
+//!   directions, damping, motor force and torque limits, ragdoll joint friction (world
+//!   constraint friction is probed as above), wheel friction curves
 //!   and the wheel and drivetrain values that only have to give finite step coefficients.
 //! - `RagdollSettings::new_stabilized` reports Jolt's `Stabilize` failing to decompose an
 //!   inertia tensor as an error, but Jolt asserts on that path first (`Ragdoll.cpp:158`).
