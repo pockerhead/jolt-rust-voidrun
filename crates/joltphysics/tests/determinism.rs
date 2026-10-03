@@ -975,6 +975,13 @@ struct Fleet {
     /// Vehicles in key order; the removed one becomes `None`.
     vehicles: Vec<Option<VehicleId>>,
     slab: BodyId,
+    /// The two abutting coplanar boxes under the seam cars, lower x first. The seam between
+    /// them runs under the cars' left wheels.
+    seam_boxes: [BodyId; 2],
+    /// A twin of the lower seam box at its exact pose, under the seam cars' right wheels.
+    seam_twin: BodyId,
+    /// The object layer of the static ground.
+    ground: ObjectLayer,
 }
 
 /// The carrier: a 10 m flatbed vehicle with a low centre of mass.
@@ -1000,9 +1007,9 @@ fn carrier_settings(layers: &vehicle::CarLayers) -> (Shape, VehicleSettings) {
     (shape, settings)
 }
 
-/// Builds the fleet scene: a flat terrain, the slab and the seam boxes, then the vehicles in
-/// key order: 32 cars on the open terrain, 4 cars on the shared dynamic slab, the carrier, the
-/// car parked on the carrier's deck and the two cylinder-tester cars on the seam.
+/// Builds the fleet scene: a flat terrain, the seam boxes and their twin, and the slab, then the
+/// vehicles in key order: 32 cars on the open terrain, 4 cars on the shared dynamic slab, the
+/// carrier, the car parked on the carrier's deck and the two cylinder-tester cars on the seam.
 fn build_fleet(worker_threads: u32) -> Fleet {
     let (mut world, layers) = vehicle::car_world(Vec3::ZERO, worker_threads);
     let samples = vec![0.0; 257 * 257];
@@ -1015,10 +1022,12 @@ fn build_fleet(worker_threads: u32) -> Fleet {
     };
     world.create_body(&terrain, &ground(RVec3::ZERO)).unwrap();
     let seam_box = Shape::new_box(Vec3::new(5.0, 0.25, 25.0)).unwrap();
-    for x in [SEAM_X - 5.0, SEAM_X + 5.0] {
-        let position = RVec3::new(x as Real, 0.25, 0.0);
-        world.create_body(&seam_box, &ground(position)).unwrap();
-    }
+    let seam_box_at = |x: f32| ground(RVec3::new(x as Real, 0.25, 0.0));
+    let seam_boxes = [SEAM_X - 5.0, SEAM_X + 5.0]
+        .map(|x| world.create_body(&seam_box, &seam_box_at(x)).unwrap());
+    let seam_twin = world
+        .create_body(&seam_box, &seam_box_at(SEAM_X - 5.0))
+        .unwrap();
     let slab = world
         .create_body(
             &Shape::new_box(Vec3::new(8.0, 0.2, 8.0)).unwrap(),
@@ -1077,6 +1086,9 @@ fn build_fleet(worker_threads: u32) -> Fleet {
         chassis,
         vehicles,
         slab,
+        seam_boxes,
+        seam_twin,
+        ground: layers.ground,
     }
 }
 
@@ -1112,13 +1124,80 @@ fn fleet_input(key: usize, tick: usize, nudged: bool) -> DriverInput {
     input
 }
 
+/// Whether the seam wheel `wheel` of the car on `chassis` lies across the seam: both boxes
+/// under its tread, outside the cylinder's rounded edges.
+fn straddles_seam(world: &PhysicsWorld, chassis: BodyId, wheel: usize) -> bool {
+    let body = world.body(chassis).unwrap();
+    let offset = walker::rotate(body.rotation(), walker::f3(vehicle::WHEEL_POSITIONS[wheel]));
+    let x = v3(body.position())[0] + offset[0];
+    let limit = 0.5 * vehicle::WHEEL_WIDTH - SEAM_CYLINDER_CONVEX_RADIUS;
+    (x - f64::from(SEAM_X)).abs() <= f64::from(limit)
+}
+
+/// Hamilton product `a * b`: the rotation `b` followed by `a`.
+fn quat_mul(a: Quat, b: Quat) -> Quat {
+    Quat::from_xyzw(
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+    )
+}
+
+/// What the tie check of the seam twins needs: the world, its ground layer, the lower seam box,
+/// its twin and a cylinder of the wheel's size with the tester's convex radius.
+struct TwinProbe<'a> {
+    world: &'a PhysicsWorld,
+    ground: ObjectLayer,
+    seam_box: BodyId,
+    twin: BodyId,
+    cylinder: &'a Shape,
+}
+
+impl TwinProbe<'_> {
+    /// Whether the cylinder, cast down the suspension of wheel `wheel` of the car on `chassis`
+    /// as Jolt's cylinder tester casts it, hits the lower seam box and its twin each alone at
+    /// the same fraction: the two candidate hits of the tester tie exactly.
+    fn twins_tie(&self, chassis: BodyId, wheel: usize) -> bool {
+        let body = self.world.body(chassis).unwrap();
+        let rotation = body.rotation();
+        let attachment = walker::rotate(rotation, walker::f3(vehicle::WHEEL_POSITIONS[wheel]));
+        let origin = walker::rvec3(walker::add(v3(body.position()), attachment));
+        let travel = [0.0, -f64::from(vehicle::SUSPENSION_MAX), 0.0];
+        let direction = walker::vec3(walker::rotate(rotation, travel));
+        // The cylinder's axis turned onto the wheel's axle, body x for the unsteered seam
+        // wheels.
+        let axle = quat_mul(
+            rotation,
+            quat_about(Vec3::new(0.0, 0.0, 1.0), std::f32::consts::FRAC_PI_2),
+        );
+        let cast = ShapeCast::new(self.cylinder, origin, axle, direction);
+        let ground = [self.ground];
+        let hit_without = |other: BodyId| {
+            let filter = QueryFilter::new()
+                .object_layers(&ground)
+                .exclude_body(other);
+            let hit = self.world.cast_shape(&cast, &filter).unwrap()?;
+            Some((hit.body, hit.fraction.to_bits()))
+        };
+        match (hit_without(self.twin), hit_without(self.seam_box)) {
+            (Some((first, first_fraction)), Some((second, second_fraction))) => {
+                first == self.seam_box && second == self.twin && first_fraction == second_fraction
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Runs the fleet scene and records every vehicle (or, once removed, its chassis) and the slab
 /// after every tick, in key order. `"nudged"` changes car 0's steering on one tick.
 ///
 /// The scene couples vehicles in the ways a step listener order could show: cars sharing a
 /// dynamic slab as wheel ground, a car whose wheels stand on another vehicle's chassis, and
-/// cylinder wheels on the seam of two coplanar boxes, where two hits tie. The run asserts that
-/// each coupling actually happens.
+/// cylinder wheels on two coincident boxes, whose hits tie exactly and leave the choice to the
+/// order of the broad-phase traversal. Cylinder wheels on the seam of two abutting coplanar
+/// boxes add hits on two bodies a few ulps apart. The run asserts that each coupling actually
+/// happens.
 fn run_fleet(worker_threads: u32, variant: &str) -> Digest {
     let nudged = match variant {
         "forward" => false,
@@ -1130,10 +1209,19 @@ fn run_fleet(worker_threads: u32, variant: &str) -> Digest {
         chassis,
         mut vehicles,
         slab,
+        seam_boxes,
+        seam_twin,
+        ground,
     } = build_fleet(worker_threads);
+    let seam_cylinder = Shape::new_cylinder_with_convex_radius(
+        0.5 * vehicle::WHEEL_WIDTH,
+        vehicle::WHEEL_RADIUS,
+        SEAM_CYLINDER_CONVEX_RADIUS,
+    )
+    .unwrap();
     let mut slab_ticks = [0_usize; SLAB_CARS];
     let mut carrier_ticks = 0;
-    let mut seam_ticks = [0_usize; 4];
+    let mut seam_ticks = [[0_usize; 4]; SEAM_CARS.len()];
     let mut digest = Digest::new();
     for tick in 0..FLEET_TICKS {
         if tick == FLEET_EVENT_TICK {
@@ -1177,15 +1265,28 @@ fn run_fleet(worker_threads: u32, variant: &str) -> Digest {
         if contacts_on(PARKED_CAR, chassis[CARRIER]) >= 3 {
             carrier_ticks += 1;
         }
-        for (i, &key) in SEAM_CARS.iter().enumerate() {
-            let body = world.body(chassis[key]).unwrap();
-            for (j, wheel) in [0, 2].into_iter().enumerate() {
-                let offset =
-                    walker::rotate(body.rotation(), walker::f3(vehicle::WHEEL_POSITIONS[wheel]));
-                let x = v3(body.position())[0] + offset[0];
-                let limit = 0.5 * vehicle::WHEEL_WIDTH - SEAM_CYLINDER_CONVEX_RADIUS;
-                if (x - f64::from(SEAM_X)).abs() <= f64::from(limit) {
-                    seam_ticks[2 * i + j] += 1;
+        // A left seam wheel counts when it stands on a seam box across the seam, a right one
+        // when it stands on the lower box or its twin and their hits tie.
+        let twins = TwinProbe {
+            world: &world,
+            ground,
+            seam_box: seam_boxes[0],
+            twin: seam_twin,
+            cylinder: &seam_cylinder,
+        };
+        for (&key, ticks) in SEAM_CARS.iter().zip(&mut seam_ticks) {
+            let wheels = world.vehicle(vehicles[key].unwrap()).unwrap().wheels();
+            for (wheel, ticks) in ticks.iter_mut().enumerate() {
+                let contact_body = wheels[wheel].contact.map(|contact| contact.body);
+                let on_seam = if vehicle::WHEEL_POSITIONS[wheel].x > 0.0 {
+                    contact_body.is_some_and(|body| seam_boxes.contains(&body) || body == seam_twin)
+                        && straddles_seam(&world, chassis[key], wheel)
+                } else {
+                    contact_body.is_some_and(|body| body == seam_boxes[0] || body == seam_twin)
+                        && twins.twins_tie(chassis[key], wheel)
+                };
+                if on_seam {
+                    *ticks += 1;
                 }
             }
         }
@@ -1200,7 +1301,7 @@ fn run_fleet(worker_threads: u32, variant: &str) -> Digest {
         "parked car on the carrier: {carrier_ticks}"
     );
     assert!(
-        seam_ticks.into_iter().all(enough),
+        seam_ticks.into_iter().flatten().all(enough),
         "seam wheels: {seam_ticks:?}"
     );
     digest
