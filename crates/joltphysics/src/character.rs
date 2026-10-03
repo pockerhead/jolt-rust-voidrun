@@ -103,8 +103,9 @@ impl GroundState {
 /// find it (Jolt `CharacterVirtualSettings::mInnerBodyShape`).
 #[derive(Clone, Copy)]
 pub struct InnerBody<'a> {
-    /// The body's shape, which must suit a kinematic body (no heightfield, a mass Jolt can
-    /// invert).
+    /// The body's shape, which must suit a kinematic body: no heightfield, a mass and inertia
+    /// Jolt can invert, and an inertia that meets the rigid body inertia floor of [`limits`]
+    /// when it is not diagonal.
     pub shape: &'a Shape,
     /// The body's object layer, which must exist in the world.
     pub object_layer: ObjectLayer,
@@ -436,7 +437,9 @@ impl<'a> CharacterSettings<'a> {
             }
             // Jolt creates the inner body kinematic, which computes mass properties.
             if !has_finite_inverse(&mass_properties(inner.shape, None)) {
-                return invalid("inner body shape gives an infinite inverse mass or inertia");
+                return invalid(
+                    "inner body shape must give a finite inverse mass and inertia, and an inertia                      that is not diagonal must meet the rigid body inertia floor of limits",
+                );
             }
         }
         Ok(())

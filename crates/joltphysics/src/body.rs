@@ -284,8 +284,8 @@ impl BodySettings {
     }
 
     /// Overrides the mass in kg, between [`limits::MIN_MASS`] and [`limits::MAX_MASS`] (and large
-    /// enough that Jolt can invert the scaled inertia; [`PhysicsWorld::create_body`] checks
-    /// this). Without an override, a dynamic body's computed mass must lie in the same range. The
+    /// enough that Jolt can invert the scaled inertia, which must also meet the rigid body
+    /// inertia floor when it is not diagonal; [`PhysicsWorld::create_body`] checks this). Without an override, a dynamic body's computed mass must lie in the same range. The
     /// inertia is computed
     /// from the shape and scaled to this mass (Jolt `EOverrideMassProperties::CalculateInertia`).
     /// By default Jolt computes mass and inertia from the shape with a density of 1000 kg/m³.
@@ -387,6 +387,8 @@ pub(crate) const ANGULAR_VELOCITY_RULE: &str =
     "angular velocity must be finite and at most limits::MAX_ANGULAR_VELOCITY long";
 /// What a dynamic body's mass must satisfy.
 pub(crate) const MASS_RULE: &str = "mass must be between limits::MIN_MASS and limits::MAX_MASS";
+/// What the mass properties of a body that is not static must satisfy ([`has_finite_inverse`]).
+pub(crate) const INERTIA_RULE: &str = "mass and shape must give a finite inverse mass and inertia,     and an inertia that is not diagonal must meet the rigid body inertia floor of limits";
 
 /// Zero mass and a zero inertia tensor.
 const ZERO_MASS_PROPERTIES: JPH_MassProperties = JPH_MassProperties {
@@ -530,8 +532,10 @@ impl PhysicsWorld {
     /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, when a dynamic or
     /// kinematic body uses a shape that only static bodies may use (a heightfield, or a
     /// compound that contains one), when a dynamic or kinematic body's mass or inertia
-    /// (overridden, or computed from a tiny or very slender shape) is too small for Jolt to
-    /// invert, and when a dynamic body's mass (overridden or computed) is outside
+    /// (overridden, or computed from a tiny shape) has no finite inverse, when its inertia
+    /// tensor is not diagonal (a rotated or offset compound child, an offset centre of mass) and
+    /// too badly conditioned for Jolt to decompose, such as a slender shape in a rotated child
+    /// (see the rigid body inertia rule in [`limits`]), and when a dynamic body's mass (overridden or computed) is outside
     /// [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`]. Kinematic bodies are exempt from the mass
     /// range: Jolt gives them infinite mass in the solver.
     pub fn create_body(
@@ -554,9 +558,7 @@ impl PhysicsWorld {
         if settings.motion_type != MotionType::Static {
             let properties = mass_properties(shape, settings.mass);
             if !has_finite_inverse(&properties) {
-                return Err(BodyError::InvalidValue(
-                    "mass and shape give an infinite inverse mass or inertia",
-                ));
+                return Err(BodyError::InvalidValue(INERTIA_RULE));
             }
             if settings.motion_type == MotionType::Dynamic && !is_mass(properties.mass) {
                 return Err(BodyError::InvalidValue(MASS_RULE));

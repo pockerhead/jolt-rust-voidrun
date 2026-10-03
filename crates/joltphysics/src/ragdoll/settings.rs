@@ -6,7 +6,7 @@ use std::ffi::CString;
 
 use joltphysics_sys::*;
 
-use crate::body::{has_finite_inverse, mass_properties, CreationSettings, MASS_RULE};
+use crate::body::{has_finite_inverse, mass_properties, CreationSettings, INERTIA_RULE, MASS_RULE};
 use crate::limits;
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
@@ -268,8 +268,9 @@ impl RagdollSettings {
     ///
     /// Fails with [`RagdollError::InvalidValue`] when the part count differs from the joint count,
     /// when the root part has a joint or another part has none, when a part is static, uses a
-    /// shape only static bodies may use (a heightfield), has a mass or inertia too small for
-    /// Jolt to invert or a mass (overridden or computed) outside
+    /// shape only static bodies may use (a heightfield), has a mass or inertia with no finite
+    /// inverse or a non-diagonal inertia below the rigid body inertia floor of [`limits`], or a
+    /// mass (overridden or computed) outside
     /// [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`], when a body or joint setting is out of
     /// range, or when a joint spring would give Jolt a stiffness or damping above
     /// [`limits::MAX_SPRING_COEFFICIENT`] for the parts' masses (see
@@ -437,7 +438,7 @@ fn validate_parts(skeleton: &Skeleton, parts: &[RagdollPart<'_>]) -> Result<(), 
         }
         let properties = mass_properties(part.shape, part.body.mass);
         if !has_finite_inverse(&properties) {
-            return invalid("mass and shape give an infinite inverse mass or inertia");
+            return invalid(INERTIA_RULE);
         }
         // Also for kinematic parts, which `RagdollMut::set_motion_type` can make dynamic.
         if !limits::is_mass(properties.mass) {
