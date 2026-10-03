@@ -188,6 +188,43 @@
 //! the `cross-platform-deterministic` feature. The repository README's Determinism section
 //! lists what is and is not covered.
 //!
+//! # Save and restore
+//! [`PhysicsWorld::save_state`] saves the world's simulation state (bodies, contacts,
+//! constraints, vehicles and characters) as a [`WorldState`], and
+//! [`PhysicsWorld::restore_state`] goes back to it, for rollback and replays: after a restore,
+//! the same calls give the same results bit for bit. A state restores only into the world that
+//! saved it, while no body, character, vehicle, ragdoll or constraint has been created or
+//! removed since; configuration Jolt does not save, such as constraint limits, stays as it is.
+//! [`WorldState`] lists what is and is not saved.
+//!
+//! ```
+//! use joltphysics::*;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut world = PhysicsWorld::new(WorldSettings::default())?;
+//! let floor = Shape::new_box(Vec3::new(10.0, 1.0, 10.0))?;
+//! world.create_body(&floor, &BodySettings::new_static().position(RVec3::new(0.0, -1.0, 0.0)))?;
+//! let ball_shape = Shape::new_sphere(0.5)?;
+//! let ball = world.create_body(
+//!     &ball_shape,
+//!     &BodySettings::new_dynamic().position(RVec3::new(0.0, 2.0, 0.0)),
+//! )?;
+//!
+//! let saved = world.save_state();
+//! for _ in 0..60 {
+//!     world.step(1.0 / 60.0)?;
+//! }
+//! let first_run = world.body(ball)?.position();
+//!
+//! world.restore_state(&saved)?;
+//! for _ in 0..60 {
+//!     world.step(1.0 / 60.0)?;
+//! }
+//! assert_eq!(world.body(ball)?.position(), first_run);
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # Frame
 //! [`PhysicsWorld::rebase`] moves the whole world into a new frame (a floating origin) with one
 //! rotation and translation, without waking or putting to sleep any body. It must name every
@@ -241,6 +278,7 @@ mod owned;
 mod query;
 mod ragdoll;
 mod shape;
+mod state;
 mod vehicle;
 mod world;
 
@@ -264,8 +302,8 @@ pub use constraint::{
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, ConstraintError, QueryError, RagdollError, ShapeError, StepError,
-    VehicleError, WorldError,
+    BodyError, CharacterError, ConstraintError, QueryError, RagdollError, ShapeError, StateError,
+    StepError, VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
@@ -277,6 +315,7 @@ pub use ragdoll::{
     RagdollSettings, SettleDetector, Skeleton, SkeletonJoint, SkeletonPose,
 };
 pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
+pub use state::WorldState;
 pub use vehicle::{
     DriverInput, SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester,
     VehicleDifferentialSettings, VehicleEngineSettings, VehicleId, VehicleMut, VehicleRef,

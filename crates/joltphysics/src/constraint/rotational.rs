@@ -182,6 +182,8 @@ impl ConstraintMut<'_, HingeConstraint> {
 
     /// Replaces the motor settings, checked as at creation and bounded through the bodies'
     /// effective mass. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_motor_settings(&mut self, motor: MotorSettings) -> Result<(), ConstraintError> {
         check_motor(motor, self.effective_mass_bound())?;
         let mut motor = motor.to_jph();
@@ -193,6 +195,8 @@ impl ConstraintMut<'_, HingeConstraint> {
 
     /// Sets the angle limits: `min` in `[-π, 0]`, `max` in `[0, π]`; `min == max` needs a soft
     /// limits spring. `(-π, π)` turns the limits off. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_limits(&mut self, min: f32, max: f32) -> Result<(), ConstraintError> {
         validate_hinge_limits(min, max, self.limits_spring())
             .map_err(ConstraintError::InvalidValue)?;
@@ -204,6 +208,8 @@ impl ConstraintMut<'_, HingeConstraint> {
 
     /// Replaces the spring that makes the limits soft, bounded through the bodies' effective
     /// mass. Limits with `min == max` keep needing a soft spring. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_limits_spring(&mut self, spring: SpringSettings) -> Result<(), ConstraintError> {
         check_spring(spring, self.effective_mass_bound())?;
         // SAFETY: as in `set_motor_state`.
@@ -223,6 +229,8 @@ impl ConstraintMut<'_, HingeConstraint> {
 
     /// Sets the friction torque in N·m applied while the motor is off, finite and at least 0.
     /// Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_max_friction_torque(&mut self, torque: f32) -> Result<(), ConstraintError> {
         check_friction(torque)?;
         // SAFETY: as in `set_motor_state`.
@@ -401,6 +409,8 @@ impl ConstraintRef<'_, ConeConstraint> {
 
 impl ConstraintMut<'_, ConeConstraint> {
     /// Sets the half angle of the cone, radians in `[0, π]`. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_half_cone_angle(&mut self, angle: f32) -> Result<(), ConstraintError> {
         validate_half_cone_angle(angle).map_err(ConstraintError::InvalidValue)?;
         // SAFETY: the world is borrowed mutably through this view and owns the constraint; no
@@ -602,6 +612,8 @@ impl ConstraintMut<'_, SwingTwistConstraint> {
 
     /// Replaces the swing motor settings, checked as at creation and bounded through the
     /// bodies' effective mass. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_swing_motor_settings(
         &mut self,
         motor: MotorSettings,
@@ -616,6 +628,8 @@ impl ConstraintMut<'_, SwingTwistConstraint> {
 
     /// Replaces the twist motor settings, checked as at creation and bounded through the
     /// bodies' effective mass. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_twist_motor_settings(
         &mut self,
         motor: MotorSettings,
@@ -630,6 +644,8 @@ impl ConstraintMut<'_, SwingTwistConstraint> {
 
     /// Sets the friction torque in N·m applied while no motor drives the joint, finite and at
     /// least 0. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_max_friction_torque(&mut self, torque: f32) -> Result<(), ConstraintError> {
         check_friction(torque)?;
         // SAFETY: as in `set_swing_motor_state`.
@@ -777,6 +793,8 @@ impl ConstraintMut<'_, SixDofConstraint> {
 
     /// Replaces the motor settings of `axis`, checked as at creation and bounded through the
     /// bodies' effective mass. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_motor_settings(
         &mut self,
         axis: SixDofConstraintAxis,

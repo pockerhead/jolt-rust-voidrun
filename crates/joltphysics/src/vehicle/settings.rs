@@ -86,8 +86,9 @@ impl VehicleSettings {
     }
 
     /// Largest angle in radians, in `[0, π]`, between the vehicle's up and the world up (the
-    /// opposite of gravity) before a constraint keeps it from tilting further. π, the default,
-    /// turns the limit off.
+    /// opposite of gravity, or the last world up while gravity is zero; see
+    /// [`VehicleRef::world_up`](crate::VehicleRef::world_up)) before a constraint keeps it from
+    /// tilting further. π, the default, turns the limit off.
     #[must_use]
     pub fn max_pitch_roll_angle(mut self, radians: f32) -> Self {
         self.max_pitch_roll_angle = radians;

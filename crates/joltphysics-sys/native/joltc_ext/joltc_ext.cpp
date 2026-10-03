@@ -14,6 +14,11 @@
 // object, and Constraint is the first base of their single-inheritance chain, so the same address
 // is the JPH_Constraint joltc's AsConstraint expects. A path handle is a JPH::PathConstraintPath*
 // (the base that carries the reference count), never a pointer to a derived path.
+//
+// Unlike the other handles, a JPH_PhysicsSystem is joltc's own wrapper struct around the Jolt
+// system, which is reached through its physicsSystem member. The struct's definition comes from a
+// header that the build generates from joltc.cpp at configure time (joltc_physics_system.h), so
+// this translation unit and joltc.cpp define the same type.
 
 #include <Jolt/Jolt.h>
 
@@ -23,6 +28,7 @@
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/ShapeFilter.h>
+#include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/PathConstraint.h>
 #include <Jolt/Physics/Constraints/PathConstraintPathHermite.h>
@@ -37,8 +43,10 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "joltc_ext.h"
+#include "joltc_physics_system.h"
 
 // joltc's own conversions of the constraint settings, defined in joltc.cpp at global scope with C++
 // linkage but not declared in joltc.h. Declaring them here keeps one conversion shared with joltc's
@@ -94,6 +102,41 @@ namespace
 	{
 		return reinterpret_cast<const JPH::StateRecorderImpl*>(recorder);
 	}
+
+	JPH::PhysicsSystem& AsJoltPhysicsSystem(JPH_PhysicsSystem* system)
+	{
+		return *system->physicsSystem;
+	}
+
+	const JPH::PhysicsSystem& AsJoltPhysicsSystem(const JPH_PhysicsSystem* system)
+	{
+		return *system->physicsSystem;
+	}
+
+	// Saves only the bodies whose id is in the list. The list is copied, sorted and deduplicated
+	// here, so callers may pass the ids in any order.
+	class SortedBodyIdFilter final : public JPH::StateRecorderFilter
+	{
+	public:
+		SortedBodyIdFilter(const JPH_BodyID* bodies, uint32_t bodyCount)
+		{
+			// The pointer of an empty list need not point to any object (Rust passes a dangling
+			// one for an empty slice), so it takes part in no pointer arithmetic.
+			if (bodyCount == 0)
+				return;
+			mBodies.assign(bodies, bodies + bodyCount);
+			std::sort(mBodies.begin(), mBodies.end());
+			mBodies.erase(std::unique(mBodies.begin(), mBodies.end()), mBodies.end());
+		}
+
+		bool ShouldSaveBody(const JPH::Body& inBody) const override
+		{
+			return std::binary_search(mBodies.begin(), mBodies.end(), inBody.GetID().GetIndexAndSequenceNumber());
+		}
+
+	private:
+		std::vector<JPH::uint32> mBodies;
+	};
 
 	JPH::CharacterVirtual* AsCharacterVirtual(JPH_CharacterVirtual* character)
 	{
@@ -322,6 +365,34 @@ void JPH_StateRecorder_CopyData(JPH_StateRecorder* recorder, void* data, size_t 
 bool JPH_StateRecorder_IsFailed(const JPH_StateRecorder* recorder)
 {
 	return AsStateRecorder(recorder)->IsFailed();
+}
+
+/* PhysicsSystem state */
+static_assert(static_cast<int>(JPH::EStateRecorderState::None) == JPH_StateRecorderState_None);
+static_assert(static_cast<int>(JPH::EStateRecorderState::Global) == JPH_StateRecorderState_Global);
+static_assert(static_cast<int>(JPH::EStateRecorderState::Bodies) == JPH_StateRecorderState_Bodies);
+static_assert(static_cast<int>(JPH::EStateRecorderState::Contacts) == JPH_StateRecorderState_Contacts);
+static_assert(static_cast<int>(JPH::EStateRecorderState::Constraints) == JPH_StateRecorderState_Constraints);
+static_assert(static_cast<int>(JPH::EStateRecorderState::All) == JPH_StateRecorderState_All);
+
+void JPH_PhysicsSystem_SaveState(const JPH_PhysicsSystem* system, JPH_StateRecorder* recorder, JPH_StateRecorderState state, const JPH_BodyID* bodies, uint32_t bodyCount)
+{
+	JPH_ASSERT(bodies != nullptr || bodyCount == 0);
+
+	const JPH::EStateRecorderState joltState = static_cast<JPH::EStateRecorderState>(state);
+	if (bodies == nullptr)
+	{
+		AsJoltPhysicsSystem(system).SaveState(*AsStateRecorder(recorder), joltState, nullptr);
+		return;
+	}
+
+	SortedBodyIdFilter filter(bodies, bodyCount);
+	AsJoltPhysicsSystem(system).SaveState(*AsStateRecorder(recorder), joltState, &filter);
+}
+
+bool JPH_PhysicsSystem_RestoreState(JPH_PhysicsSystem* system, JPH_StateRecorder* recorder)
+{
+	return AsJoltPhysicsSystem(system).RestoreState(*AsStateRecorder(recorder));
 }
 
 /* CharacterVirtual */
