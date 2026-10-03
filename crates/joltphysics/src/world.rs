@@ -3,9 +3,12 @@
 //! joltc keeps a global map of physics systems that creating and destroying a system writes
 //! without synchronisation, so both run under one process-wide lock here. Stepping uses the
 //! world's own temp allocator and job system and needs no global lock, so independent worlds
-//! step in parallel. The joltc functions that read that global map (step listeners) or use
-//! joltc's shared temp allocator (`JPH_PhysicsSystem_Update` and joltc's own character updates)
-//! are not used here; wrapping them requires revisiting this lock. Characters are updated with
+//! step in parallel. The joltc functions that read that global map (joltc's own step listener,
+//! `JPH_PhysicsStepListener_Create`) or use joltc's shared temp allocator
+//! (`JPH_PhysicsSystem_Update` and joltc's own character updates) are not used here; wrapping
+//! them requires revisiting this lock. Vehicles are Jolt's own step listeners: they get the
+//! system from the step context and touch no joltc global, so worlds with vehicles still step
+//! in parallel. Characters are updated with
 //! the world's own temp allocator through the `joltphysics-sys` extension
 //! (`JPH_CharacterVirtual_ExtendedUpdate2`, `JPH_CharacterVirtual_RefreshContacts2`), which
 //! needs `&mut self`. Callbacks that run inside a step must not use the locking body interface,
@@ -23,6 +26,7 @@ use crate::body::with_locked_body;
 use crate::character::CharacterEntry;
 use crate::math::is_finite_positive;
 use crate::owned::{JoltObject, Owned};
+use crate::vehicle::VehicleEntry;
 use crate::{
     BodyError, BodyId, CollisionLayers, MotionType, Quat, RVec3, StepError, Vec3, WorldError,
 };
@@ -210,13 +214,17 @@ impl WorldTag {
 /// until Jolt has rebuilt it during steps (Jolt docs, "Bodies"); see
 /// [`optimize_broad_phase`](Self::optimize_broad_phase).
 pub struct PhysicsWorld {
-    // Field order is drop order. The characters go first: each destructor removes its inner
+    // Field order is drop order, after `Drop for PhysicsWorld` has taken every vehicle out of
+    // the system's step listeners and constraints and released it, so `vehicles` is empty by
+    // then. The characters go first: each destructor removes its inner
     // body through the still-live system. The character collision set follows; it only frees
     // its list of character pointers. The system goes next, before the job system and allocator
     // its steps used, and deletes the layer tables it owns. The interface and query pointers
     // after them are borrowed from the system and have no destructor.
     /// The characters by Jolt character id.
     pub(crate) characters: BTreeMap<u32, CharacterEntry>,
+    /// The vehicles by vehicle id.
+    pub(crate) vehicles: BTreeMap<u32, VehicleEntry>,
     /// Jolt's `CharacterVsCharacterCollisionSimple` of the characters that collide with each
     /// other, created with the first of them.
     pub(crate) character_collision: Option<Owned<JPH_CharacterVsCharacterCollision>>,
@@ -233,6 +241,16 @@ pub struct PhysicsWorld {
     pub(crate) inner_bodies: BTreeSet<u32>,
     /// The Jolt character id the next character gets; ids start at 1 and are never reused.
     pub(crate) next_character_id: u32,
+    /// Raw ids of the vehicles' chassis bodies, with their vehicle ids.
+    pub(crate) vehicle_bodies: BTreeMap<u32, u32>,
+    /// The id the next vehicle gets; ids start at 1 and are never reused.
+    pub(crate) next_vehicle_id: u32,
+}
+
+impl Drop for PhysicsWorld {
+    fn drop(&mut self) {
+        self.remove_all_vehicles();
+    }
 }
 
 // SAFETY: the physics system, job system, temp allocator, characters and character collision
@@ -250,7 +268,9 @@ unsafe impl Send for PhysicsWorld {}
 // joltc getters over const Jolt members (`GetPosition`, `GetGroundState`,
 // `GetActiveContacts().at()`, the const `SaveState`); every character change and update takes
 // `&mut self`, and so does every use of `CharacterVsCharacterCollisionSimple`, which is not
-// thread-safe (`CharacterVirtual.h`).
+// thread-safe (`CharacterVirtual.h`). Vehicle reads through `&self` are joltc getters over
+// members of the vehicle constraint, its wheels and controller, which Jolt writes only during
+// `step` and the vehicle setters, both behind `&mut self`.
 unsafe impl Sync for PhysicsWorld {}
 
 /// One body's pose and velocities in a frame.
@@ -439,6 +459,7 @@ impl PhysicsWorld {
 
         Ok(Self {
             characters: BTreeMap::new(),
+            vehicles: BTreeMap::new(),
             character_collision: None,
             system,
             job_system,
@@ -451,6 +472,8 @@ impl PhysicsWorld {
             tag: WorldTag::next(),
             inner_bodies: BTreeSet::new(),
             next_character_id: 1,
+            vehicle_bodies: BTreeMap::new(),
+            next_vehicle_id: 1,
         })
     }
 

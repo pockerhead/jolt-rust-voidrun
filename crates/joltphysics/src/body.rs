@@ -585,7 +585,9 @@ impl PhysicsWorld {
     ///
     /// The inner body of a character cannot be removed this way
     /// ([`BodyError::OwnedByCharacter`]); it goes with
-    /// [`remove_character`](Self::remove_character).
+    /// [`remove_character`](Self::remove_character). The chassis of a vehicle cannot be removed
+    /// while the vehicle exists ([`BodyError::UsedByVehicle`]); remove the vehicle first with
+    /// [`remove_vehicle`](Self::remove_vehicle).
     pub fn remove_body(&mut self, id: BodyId) -> Result<(), BodyError> {
         self.check(id)?;
         // The character's destructor destroys its inner body, and Jolt does not validate ids in
@@ -593,6 +595,12 @@ impl PhysicsWorld {
         // API that destroys bodies needs the same check.
         if self.is_inner_body(id) {
             return Err(BodyError::OwnedByCharacter(id));
+        }
+        // A vehicle keeps a pointer to its chassis and dereferences it on every step. Any future
+        // API that destroys bodies or changes their motion type must consult the vehicle bodies
+        // the same way.
+        if self.is_vehicle_body(id) {
+            return Err(BodyError::UsedByVehicle(id));
         }
         let mut bounds = JPH_AABox {
             min: Vec3::ZERO.to_jph(),

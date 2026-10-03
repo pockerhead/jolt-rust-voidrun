@@ -49,6 +49,55 @@
 //! kinematic inner body and can collide with other characters. [`CharacterRef::save_state`] and
 //! [`CharacterMut::restore_state`] continue a character bit for bit, for replays.
 //!
+//! # Vehicles
+//! [`PhysicsWorld::create_vehicle`] attaches a wheeled vehicle (Jolt `VehicleConstraint` with
+//! the wheeled controller) to a dynamic chassis body: suspension, wheels that find the ground
+//! with a ray, sphere or cylinder cast ([`VehicleCollisionTester`]), an engine, an automatic
+//! transmission and differentials. The vehicle runs inside [`PhysicsWorld::step`]; the caller
+//! sets [`DriverInput`] and, for radial gravity, the gravity at the vehicle every tick
+//! ([`VehicleMut::set_gravity`]), and reads each wheel's [`WheelState`].
+//!
+//! ```
+//! use joltphysics::*;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut world = PhysicsWorld::new(WorldSettings::default().gravity(Vec3::ZERO))?;
+//! let floor = Shape::new_box(Vec3::new(50.0, 1.0, 50.0))?;
+//! world.create_body(&floor, &BodySettings::new_static().position(RVec3::new(0.0, -1.0, 0.0)))?;
+//!
+//! // A chassis with a low centre of mass, under the caller's gravity only.
+//! let hull = Shape::new_box(Vec3::new(0.9, 0.3, 2.0))?;
+//! let chassis_shape = Shape::new_offset_center_of_mass(&hull, Vec3::new(0.0, -0.3, 0.0))?;
+//! let chassis = world.create_body(
+//!     &chassis_shape,
+//!     &BodySettings::new_dynamic()
+//!         .position(RVec3::new(0.0, 1.0, 0.0))
+//!         .mass(1500.0)
+//!         .allow_sleeping(false)
+//!         .gravity_factor(0.0),
+//! )?;
+//! let wheel = |x: f32, z: f32| WheelSettings::new(Vec3::new(x, -0.1, z)).radius(0.35);
+//! let settings = VehicleSettings::new(
+//!     vec![wheel(0.9, 1.4), wheel(-0.9, 1.4), wheel(0.9, -1.4), wheel(-0.9, -1.4)],
+//!     vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
+//!     VehicleCollisionTester::cast_sphere(ObjectLayer::MOVING, 0.2),
+//! );
+//! let car = world.create_vehicle(chassis, &settings)?;
+//!
+//! for _ in 0..120 {
+//!     let mut vehicle = world.vehicle_mut(car)?;
+//!     vehicle.set_gravity(Vec3::new(0.0, -9.81, 0.0))?;
+//!     vehicle.set_driver_input(DriverInput { forward: 1.0, ..DriverInput::default() })?;
+//!     world.step(1.0 / 60.0)?;
+//! }
+//! let wheels = world.vehicle(car)?.wheels();
+//! let contact = wheels[0].contact.expect("the front left wheel is on the floor");
+//! assert!(contact.normal.y > 0.99);
+//! assert!(world.body(chassis)?.position().z > 1.0);
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # Threads
 //! Changing a world, including [`PhysicsWorld::step`], takes `&mut PhysicsWorld`; reading it
 //! takes `&PhysicsWorld`. `PhysicsWorld` is `Send` and `Sync`, so many threads may read one
@@ -97,6 +146,7 @@ mod math;
 mod owned;
 mod query;
 mod shape;
+mod vehicle;
 mod world;
 
 pub use body::{Activation, BodyId, BodyMut, BodyRef, BodySettings, MotionQuality, MotionType};
@@ -106,12 +156,20 @@ pub use character::{
 };
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
-pub use error::{BodyError, CharacterError, QueryError, ShapeError, StepError, WorldError};
+pub use error::{
+    BodyError, CharacterError, QueryError, ShapeError, StepError, VehicleError, WorldError,
+};
 pub use filter::QueryFilter;
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{CollideShape, CollideShapeHit, RayCast, RayHit, ShapeCast, ShapeCastHit};
 pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
+pub use vehicle::{
+    DriverInput, SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester,
+    VehicleDifferentialSettings, VehicleEngineSettings, VehicleId, VehicleMut, VehicleRef,
+    VehicleSettings, VehicleTransmissionSettings, WheelContact, WheelSettings, WheelState,
+    DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
+};
 pub use world::{PhysicsWorld, StepReport, WorldSettings};
 
 /// The repository's guide, `docs/guide.md`, whose examples run as doctests.

@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::{BodyId, CharacterId, ObjectLayer};
+use crate::{BodyId, CharacterId, ObjectLayer, VehicleId};
 
 /// Why a [`PhysicsWorld`](crate::PhysicsWorld) could not be created or changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,6 +123,8 @@ pub enum BodyError {
     AllocationFailed,
     /// The body is the inner body of a character; remove the character instead.
     OwnedByCharacter(BodyId),
+    /// The body is the chassis of a vehicle; remove the vehicle first.
+    UsedByVehicle(BodyId),
 }
 
 impl fmt::Display for BodyError {
@@ -143,6 +145,7 @@ impl fmt::Display for BodyError {
             Self::OwnedByCharacter(id) => {
                 write!(f, "body {id:?} is the inner body of a character")
             }
+            Self::UsedByVehicle(id) => write!(f, "body {id:?} is the chassis of a vehicle"),
         }
     }
 }
@@ -179,3 +182,46 @@ impl fmt::Display for CharacterError {
 }
 
 impl std::error::Error for CharacterError {}
+
+/// Why a vehicle operation failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum VehicleError {
+    /// The id names no vehicle in this world: it was removed.
+    NotFound(VehicleId),
+    /// The id belongs to another world.
+    WrongWorld(VehicleId),
+    /// A setting or input is out of range; the payload names it.
+    InvalidValue(&'static str),
+    /// The chassis body is not usable: not in this world, or the inner body of a character.
+    Body(BodyError),
+    /// The chassis body is not dynamic.
+    NotDynamic(BodyId),
+    /// The chassis body already carries a vehicle.
+    AlreadyHasVehicle(BodyId),
+    /// The world has given out every vehicle id.
+    TooManyVehicles,
+}
+
+impl fmt::Display for VehicleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound(id) => write!(f, "no vehicle {id:?} in this world"),
+            Self::WrongWorld(id) => write!(f, "vehicle {id:?} belongs to another world"),
+            Self::InvalidValue(what) => write!(f, "invalid vehicle value: {what}"),
+            Self::Body(error) => write!(f, "unusable chassis body: {error}"),
+            Self::NotDynamic(id) => write!(f, "chassis body {id:?} is not dynamic"),
+            Self::AlreadyHasVehicle(id) => write!(f, "body {id:?} already carries a vehicle"),
+            Self::TooManyVehicles => f.write_str("the world has no vehicle ids left"),
+        }
+    }
+}
+
+impl std::error::Error for VehicleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Body(error) => Some(error),
+            _ => None,
+        }
+    }
+}
