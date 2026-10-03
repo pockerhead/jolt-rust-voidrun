@@ -404,8 +404,8 @@ pub const MAX_GEAR_RATIO: f32 = 10.0;
 /// `2 · (|r| / k)²`, so the bound allows `|r|` up to about `22 · k`; a rod held at its end has a
 /// ratio of 6 at any length.
 /// [`PhysicsWorld::create_constraint`] checks every point a constraint holds a dynamic body by
-/// (for a path, every point of the path; for an automatic point, any point between the
-/// centres of mass).
+/// (for a path, every point of the path; for an automatic point, the point Jolt picks
+/// between the centres of mass, weighted by inverse mass towards the lighter body).
 ///
 /// Crate policy, measured, not derived. Jolt solves each constraint part with its effective mass
 /// `K = Σ (m⁻¹ · 1 + [r]× I⁻¹ [r]×ᵀ)` (`PointConstraintPart.h`, `AxisConstraintPart.h`) in `f32`.

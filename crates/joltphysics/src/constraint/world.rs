@@ -494,7 +494,10 @@ const LEVER_ARM_RULE: &str = "points where a constraint holds a dynamic body mus
 /// The pose of a body and, for a dynamic one, its mass properties, as the lever-arm check of
 /// [`PhysicsWorld::create_constraint`] reads them.
 struct LeverState {
-    is_static: bool,
+    /// Jolt's `CanBeKinematicOrDynamic`: whether the body has motion properties.
+    can_move: bool,
+    /// The inverse mass of a body that can move, 0 for one that cannot.
+    inverse_mass: f32,
     position: RVec3,
     rotation: Quat,
     center_of_mass: RVec3,
@@ -528,6 +531,17 @@ impl LeverState {
             JPH_Body_GetCenterOfMassPosition(body, &mut center_of_mass);
         }
         let rotation = Quat::from_jph(rotation);
+        // SAFETY: as above; the getter reads whether the body has motion properties.
+        let can_move = unsafe { JPH_Body_CanBeKinematicOrDynamic(body) };
+        let inverse_mass = if can_move {
+            // SAFETY: as above. A body that can move has motion properties, so the unchecked
+            // getter reads a live member.
+            unsafe {
+                JPH_MotionProperties_GetInverseMassUnchecked(JPH_Body_GetMotionProperties(body))
+            }
+        } else {
+            0.0
+        };
         // SAFETY: as above. A dynamic body has motion properties, so the unchecked getters read
         // live members, and the getters write only the live locals.
         let motion = unsafe { JPH_Body_IsDynamic(body) }.then(|| unsafe {
@@ -543,8 +557,8 @@ impl LeverState {
             }
         });
         Self {
-            // SAFETY: as above; the getter reads the body's motion type.
-            is_static: unsafe { JPH_Body_IsStatic(body) },
+            can_move,
+            inverse_mass,
             position: RVec3::from_jph(position),
             rotation,
             center_of_mass: RVec3::from_jph(center_of_mass),
@@ -563,6 +577,33 @@ impl LeverState {
             (point.z - self.center_of_mass.z) as f32,
         )
     }
+}
+
+/// The world point where Jolt puts an automatic point between `states` (`FixedConstraint.cpp`,
+/// `SliderConstraint.cpp`): the centre of mass of one body when the other cannot move, and
+/// otherwise the centres of mass weighted by their inverse masses, so the point lies near the
+/// lighter body.
+fn automatic_point([first, second]: &[LeverState; 2]) -> RVec3 {
+    if !first.can_move {
+        return second.center_of_mass;
+    }
+    if !second.can_move {
+        return first.center_of_mass;
+    }
+    let (weight1, weight2) = (
+        Real::from(first.inverse_mass),
+        Real::from(second.inverse_mass),
+    );
+    let total = weight1 + weight2;
+    if total == 0.0 {
+        return first.center_of_mass;
+    }
+    let (c1, c2) = (first.center_of_mass, second.center_of_mass);
+    RVec3::new(
+        (weight1 * c1.x + weight2 * c2.x) / total,
+        (weight1 * c1.y + weight2 * c2.y) / total,
+        (weight1 * c1.z + weight2 * c2.z) / total,
+    )
 }
 
 impl LeverMotion {
@@ -601,8 +642,8 @@ impl PhysicsWorld {
     /// Each point where the constraint holds a dynamic body must have a lever-arm ratio of at
     /// most [`limits::MAX_LEVER_ARM_RATIO`], its distance from the body's centre of mass
     /// measured against the body's size (see there). The check uses the bodies' poses now and
-    /// covers every point of a path and, for an automatic point, the whole segment between the
-    /// centres of mass.
+    /// covers every point of a path and, for an automatic point, the point Jolt picks: between
+    /// the centres of mass, weighted by inverse mass towards the lighter body.
     ///
     /// The new constraint wakes its bodies that can move, as its setters do, so a sleeping body
     /// starts following it at the next step.
@@ -809,15 +850,8 @@ impl PhysicsWorld {
                     );
                     (state.lever_from_world(point), radius)
                 }
-                // Jolt puts the point at the centre of mass of the body that is not static when
-                // the other one is, and otherwise between the two centres of mass, weighted by
-                // their inverse masses (`FixedConstraint.cpp`, `SliderConstraint.cpp`).
-                sealed::Anchor::BetweenCentersOfMass if states.iter().any(|s| s.is_static) => {
-                    (Vec3::ZERO, 0.0)
-                }
                 sealed::Anchor::BetweenCentersOfMass => {
-                    let span = states[0].lever_from_world(states[1].center_of_mass);
-                    (Vec3::ZERO, limits::f64_length(span))
+                    (state.lever_from_world(automatic_point(&states)), 0.0)
                 }
             };
             let ratio = if radius == 0.0 {

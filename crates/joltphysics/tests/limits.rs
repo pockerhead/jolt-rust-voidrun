@@ -2072,17 +2072,34 @@ fn lever_arms_are_bounded_by_the_bodies_size() {
         )
         .unwrap();
 
-    // An automatic point lies between two dynamic bodies' centres of mass: two cubes 12 · |r|²
-    // apart in ratio; next to a static body it is the dynamic body's centre of mass.
-    let span = cube_lever(0.5, bound / 2.0) * 2.0_f32.sqrt();
+    // An automatic point is where Jolt puts it: between the centres of mass, weighted by inverse
+    // mass towards the lighter body, kinematic bodies included. A 1 kg, 1 m cube, dynamic or
+    // kinematic, welded to a dynamic 1000 kg, 4 m cube holds the large cube at 1000/1001 of the
+    // distance between them, which its ratio bounds.
     let weld = FixedConstraintSettings::default().auto_detect_point();
-    for (distance, accepted) in [(span * 0.999, true), (span * 1.001, false)] {
-        let mut world = empty_world();
-        let first = cube(&mut world, 0.5, 1.0, RVec3::ZERO);
-        let second = cube(&mut world, 0.5, 1.0, at(AXIS_X, distance));
-        let result = world.create_constraint(first, second, &weld);
-        assert_eq!(result.is_ok(), accepted, "{distance}: {result:?}");
+    let reach = cube_lever(2.0, bound) * 1.001;
+    for light_settings in [BodySettings::new_dynamic(), BodySettings::new_kinematic()] {
+        for (distance, accepted) in [(reach * 0.999, true), (reach * 1.001, false)] {
+            let mut world = empty_world();
+            let light = world
+                .create_body(
+                    &Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap(),
+                    &light_settings.clone().mass(1.0),
+                )
+                .unwrap();
+            let heavy = cube(&mut world, 2.0, 1000.0, at(AXIS_X, distance));
+            let result = world.create_constraint(light, heavy, &weld);
+            assert_eq!(result.is_ok(), accepted, "{distance}: {result:?}");
+        }
     }
+    // A 10 g, 6 cm part welded 3 cm from a 1000 kg cube is held at its own centre.
+    for half in [0.5, 1.0, 2.0] {
+        let mut world = empty_world();
+        let big = cube(&mut world, half, 1000.0, RVec3::ZERO);
+        let part = cube(&mut world, 0.03, 0.01, at(AXIS_X, half + 0.06));
+        world.create_constraint(big, part, &weld).unwrap();
+    }
+    // Next to a static body it is the dynamic body's centre of mass.
     let far = cube(&mut world, 0.5, 1.0, RVec3::new(4000.0, 0.0, 0.0));
     world.create_constraint(anchor, far, &weld).unwrap();
 
