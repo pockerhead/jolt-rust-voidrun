@@ -7,7 +7,9 @@
 // they stand for (joltc's DEF_MAP_DECL and its Managed*Filter classes, which derive from the
 // Jolt filter classes with single inheritance). The vehicle constraint is a reinterpret_cast of
 // the most derived object, as in joltc; its bases are reached with static_cast, because
-// VehicleConstraint inherits from both Constraint and PhysicsStepListener.
+// VehicleConstraint inherits from both Constraint and PhysicsStepListener. Body creation settings,
+// ragdoll settings and the swing-twist and hinge constraints are reinterpret_casts of the Jolt
+// objects, as joltc's DEF_MAP_DECL defines them.
 
 #include <Jolt/Jolt.h>
 
@@ -17,6 +19,10 @@
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/ShapeFilter.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/SixDOFConstraint.h>
+#include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
+#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Jolt/Physics/StateRecorderImpl.h>
 #include <Jolt/Physics/Vehicle/VehicleConstraint.h>
 
@@ -25,6 +31,13 @@
 #include <string>
 
 #include "joltc_ext.h"
+
+// joltc's own conversions of the constraint settings, defined in joltc.cpp at global scope with C++
+// linkage but not declared in joltc.h. Declaring them here keeps one conversion shared with joltc's
+// JPH_*Constraint_Create functions.
+void JPH_SwingTwistConstraintSettings_ToJolt(JPH::SwingTwistConstraintSettings* joltSettings, const JPH_SwingTwistConstraintSettings* settings);
+void JPH_HingeConstraintSettings_ToJolt(JPH::HingeConstraintSettings* joltSettings, const JPH_HingeConstraintSettings* settings);
+void JPH_SixDOFConstraintSettings_ToJolt(JPH::SixDOFConstraintSettings* joltSettings, const JPH_SixDOFConstraintSettings* settings);
 
 namespace
 {
@@ -85,6 +98,57 @@ namespace
 	JPH::TempAllocator& AsTempAllocator(JPH_TempAllocator* allocator)
 	{
 		return *reinterpret_cast<JPH::TempAllocator*>(allocator);
+	}
+
+	JPH::RagdollSettings* AsRagdollSettings(JPH_RagdollSettings* settings)
+	{
+		return reinterpret_cast<JPH::RagdollSettings*>(settings);
+	}
+
+	JPH::SwingTwistConstraint* AsSwingTwistConstraint(JPH_SwingTwistConstraint* constraint)
+	{
+		return reinterpret_cast<JPH::SwingTwistConstraint*>(constraint);
+	}
+
+	const JPH::SwingTwistConstraint* AsSwingTwistConstraint(const JPH_SwingTwistConstraint* constraint)
+	{
+		return reinterpret_cast<const JPH::SwingTwistConstraint*>(constraint);
+	}
+
+	JPH::HingeConstraint* AsHingeConstraint(JPH_HingeConstraint* constraint)
+	{
+		return reinterpret_cast<JPH::HingeConstraint*>(constraint);
+	}
+
+	// JPH_Quat is four floats; JPH::Quat is a 16-byte SIMD type, so it is built, never cast.
+	JPH::Quat ToQuat(const JPH_Quat& quat)
+	{
+		return JPH::Quat(quat.x, quat.y, quat.z, quat.w);
+	}
+
+	void FromQuat(JPH::QuatArg quat, JPH_Quat* result)
+	{
+		result->x = quat.GetX();
+		result->y = quat.GetY();
+		result->z = quat.GetZ();
+		result->w = quat.GetW();
+	}
+
+	// Replaces the constraint of part partIndex to its parent by a new JoltSettings that convert
+	// fills from constraintSettings; null removes it. The part's Ref takes the reference.
+	template <class JoltSettings, class CSettings, class Convert>
+	void SetPartToParent(JPH_RagdollSettings* settings, int partIndex, const CSettings* constraintSettings, Convert convert)
+	{
+		JPH::RagdollSettings::Part& part = AsRagdollSettings(settings)->mParts[partIndex];
+		if (constraintSettings == nullptr)
+		{
+			part.mToParent = nullptr;
+			return;
+		}
+
+		JoltSettings* joltSettings = new JoltSettings();
+		convert(joltSettings, constraintSettings);
+		part.mToParent = joltSettings;
 	}
 }
 
@@ -187,4 +251,77 @@ JPH_Constraint* JPH_VehicleConstraint_AsConstraint(JPH_VehicleConstraint* constr
 
 	JPH::Constraint* joltConstraint = static_cast<JPH::Constraint*>(reinterpret_cast<JPH::VehicleConstraint*>(constraint));
 	return reinterpret_cast<JPH_Constraint*>(joltConstraint);
+}
+
+/* RagdollSettings */
+void JPH_RagdollSettings_SetPart(JPH_RagdollSettings* settings, int partIndex, const JPH_BodyCreationSettings* bodySettings)
+{
+	JPH_ASSERT(settings && bodySettings);
+
+	// Assigns the BodyCreationSettings base only, so the part keeps its mToParent.
+	static_cast<JPH::BodyCreationSettings&>(AsRagdollSettings(settings)->mParts[partIndex]) =
+		*reinterpret_cast<const JPH::BodyCreationSettings*>(bodySettings);
+}
+
+void JPH_RagdollSettings_SetPartToParentSwingTwist(JPH_RagdollSettings* settings, int partIndex, const JPH_SwingTwistConstraintSettings* constraintSettings)
+{
+	SetPartToParent<JPH::SwingTwistConstraintSettings>(settings, partIndex, constraintSettings, JPH_SwingTwistConstraintSettings_ToJolt);
+}
+
+void JPH_RagdollSettings_SetPartToParentHinge(JPH_RagdollSettings* settings, int partIndex, const JPH_HingeConstraintSettings* constraintSettings)
+{
+	SetPartToParent<JPH::HingeConstraintSettings>(settings, partIndex, constraintSettings, JPH_HingeConstraintSettings_ToJolt);
+}
+
+void JPH_RagdollSettings_SetPartToParentSixDOF(JPH_RagdollSettings* settings, int partIndex, const JPH_SixDOFConstraintSettings* constraintSettings)
+{
+	SetPartToParent<JPH::SixDOFConstraintSettings>(settings, partIndex, constraintSettings, JPH_SixDOFConstraintSettings_ToJolt);
+}
+
+void JPH_RagdollSettings_CalculateConstraintPriorities(JPH_RagdollSettings* settings, uint32_t basePriority)
+{
+	AsRagdollSettings(settings)->CalculateConstraintPriorities(basePriority);
+}
+
+/* SwingTwistConstraint */
+void JPH_SwingTwistConstraint_SetSwingMotorState(JPH_SwingTwistConstraint* constraint, JPH_MotorState state)
+{
+	AsSwingTwistConstraint(constraint)->SetSwingMotorState(static_cast<JPH::EMotorState>(state));
+}
+
+JPH_MotorState JPH_SwingTwistConstraint_GetSwingMotorState(const JPH_SwingTwistConstraint* constraint)
+{
+	return static_cast<JPH_MotorState>(AsSwingTwistConstraint(constraint)->GetSwingMotorState());
+}
+
+void JPH_SwingTwistConstraint_SetTwistMotorState(JPH_SwingTwistConstraint* constraint, JPH_MotorState state)
+{
+	AsSwingTwistConstraint(constraint)->SetTwistMotorState(static_cast<JPH::EMotorState>(state));
+}
+
+JPH_MotorState JPH_SwingTwistConstraint_GetTwistMotorState(const JPH_SwingTwistConstraint* constraint)
+{
+	return static_cast<JPH_MotorState>(AsSwingTwistConstraint(constraint)->GetTwistMotorState());
+}
+
+void JPH_SwingTwistConstraint_SetTargetOrientationBS(JPH_SwingTwistConstraint* constraint, const JPH_Quat* orientation)
+{
+	JPH_ASSERT(orientation);
+
+	AsSwingTwistConstraint(constraint)->SetTargetOrientationBS(ToQuat(*orientation));
+}
+
+void JPH_SwingTwistConstraint_GetRotationInConstraintSpace(const JPH_SwingTwistConstraint* constraint, JPH_Quat* result)
+{
+	JPH_ASSERT(result);
+
+	FromQuat(AsSwingTwistConstraint(constraint)->GetRotationInConstraintSpace(), result);
+}
+
+/* HingeConstraint */
+void JPH_HingeConstraint_SetTargetOrientationBS(JPH_HingeConstraint* constraint, const JPH_Quat* orientation)
+{
+	JPH_ASSERT(orientation);
+
+	AsHingeConstraint(constraint)->SetTargetOrientationBS(ToQuat(*orientation));
 }

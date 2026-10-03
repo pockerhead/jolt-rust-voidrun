@@ -5,9 +5,16 @@
 //! extension adds functions in joltc's naming that are compiled into the joltc
 //! archive: a `JPH_StateRecorder`, `JPH_CharacterVirtual_SaveState` and
 //! `RestoreState`, `JPH_CharacterVirtual_ExtendedUpdate2` and
-//! `RefreshContacts2` with explicit gravity, filters and temp allocator, and
+//! `RefreshContacts2` with explicit gravity, filters and temp allocator,
 //! `JPH_VehicleConstraint_AsConstraint`, the `Constraint` base of a vehicle
-//! constraint. The safe API lives in the `joltphysics` crate.
+//! constraint, and for ragdolls `JPH_RagdollSettings_SetPart`, the typed
+//! `JPH_RagdollSettings_SetPartToParentSwingTwist`, `_SetPartToParentHinge` and
+//! `_SetPartToParentSixDOF`, `JPH_RagdollSettings_CalculateConstraintPriorities`,
+//! the swing-twist motor states (`JPH_SwingTwistConstraint_SetSwingMotorState`,
+//! `_GetSwingMotorState`, `_SetTwistMotorState`, `_GetTwistMotorState`), its
+//! `SetTargetOrientationBS` and `GetRotationInConstraintSpace`, and
+//! `JPH_HingeConstraint_SetTargetOrientationBS`. The safe API lives in the
+//! `joltphysics` crate.
 //!
 //! # Features
 //! - `asserts`: compile Jolt with its debug assertions.
@@ -67,6 +74,21 @@
 //!   that the caller must destroy with `JPH_LinearCurve_Destroy`.
 //! - The `JPH_Wheel_GetContact*` getters are meaningful only while `JPH_Wheel_HasContact`
 //!   returns true.
+//! - `JPH_RagdollSettings_CreateRagdoll` dereferences null when the world cannot hold every
+//!   part. Check `JPH_PhysicsSystem_GetNumBodies() + parts <= JPH_PhysicsSystem_GetMaxBodies()`
+//!   first, with no body created concurrently. The skeleton must list parents before their
+//!   children.
+//! - A ragdoll destroys its bodies through its physics system when its last reference is
+//!   released: remove it from the system (`JPH_Ragdoll_RemoveFromPhysicsSystem`) before that,
+//!   and release it before the system is destroyed.
+//! - `JPH_Ragdoll_DriveToPoseUsingMotors` drives only swing-twist and hinge parts (any other
+//!   constraint is a Jolt assertion) and needs
+//!   `JPH_RagdollSettings_CalculateBodyIndexToConstraintIndex` to have run.
+//! - `JPH_RagdollSettings_SetPartToParent` handles swing-twist only and drops the constraint
+//!   base settings, the spring modes and the motor torque limits; the typed
+//!   `JPH_RagdollSettings_SetPartToParent*` functions of the extension keep every field.
+//! - A motor state other than `JPH_MotorState_Off` needs valid motor settings (Jolt
+//!   `MotorSettings::IsValid`).
 //! - These joltc functions are not bound: `JPH_RagdollSettings_DisableParentChildCollisions`,
 //!   `JPH_Ragdoll_SetPose2`, `JPH_Ragdoll_GetPose2`, `JPH_SkeletonMapper_Initialize`,
 //!   `JPH_SkeletonMapper_LockAllTranslations`, `JPH_SkeletonMapper_LockTranslations`,
