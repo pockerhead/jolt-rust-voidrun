@@ -39,6 +39,13 @@ pub struct SoftBodyVertex {
     pub velocity: Vec3,
     /// Inverse mass in 1/kg: 0 for a kinematic vertex, which only moves by its velocity, or the
     /// inverse of a mass within [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`].
+    ///
+    /// The 1 g floor applies per vertex, so a light, finely divided body is refused at its real
+    /// masses: a 1 m² cotton cloth of 0.15 kg at 21 × 21 vertices (0.34 g each), a 2 m flag of
+    /// 0.4 kg at 30 × 30, or a 57 g ball of 162 vertices. Use fewer vertices or give each at
+    /// least 1 g. Gravity and damping move a vertex the same at any mass; pressure and added
+    /// forces move a heavier vertex less, and a heavier body pushes the rigid bodies it
+    /// touches harder.
     pub inverse_mass: f32,
 }
 
@@ -869,7 +876,8 @@ impl SoftBodySettings {
     /// outwards with it divided by the enclosed volume. Default 0.
     ///
     /// Above 0, [`PhysicsWorld::create_soft_body`] also needs faces wound counter-clockwise
-    /// seen from outside that enclose a volume large enough for the pressure: the pressure
+    /// seen from outside that enclose a volume large enough for the pressure (an open mesh
+    /// passes when the signed volume Jolt computes about the body origin does): the pressure
     /// force Jolt computes for a vertex at the start geometry may give a vertex of
     /// [`limits::MIN_MASS`] at most [`limits::MAX_ACCELERATION`] (see
     /// [Derived bounds](crate::limits#derived-bounds)). Jolt computes the volume in `f32` from
@@ -1187,7 +1195,10 @@ impl PhysicsWorld {
 pub struct SoftBodyVertexState {
     /// Position in world space, in metres.
     pub position: RVec3,
-    /// Velocity in world space, in m/s.
+    /// Velocity in world space, in m/s. Jolt puts a soft body to sleep once the fastest vertex
+    /// is slower than about 0.17 m/s (it compares the squared speed with
+    /// `PhysicsSettings::mPointVelocitySleepThreshold`, 0.03) without zeroing the vertex
+    /// velocities, so a sleeping body reads back such speeds and resumes them when it wakes.
     pub velocity: Vec3,
     /// Inverse mass in 1/kg; 0 for a kinematic vertex.
     pub inverse_mass: f32,

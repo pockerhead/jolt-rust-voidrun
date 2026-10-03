@@ -708,7 +708,9 @@ impl PhysicsWorld {
     /// `PhysicsSystem::WereBodiesInContact`).
     ///
     /// Jolt answers from the contact cache of the last step, and only for pairs of which at
-    /// least one body was awake in it; bodies removed since are allowed. Fails with
+    /// least one body was awake in it; bodies removed since are allowed. A soft body's
+    /// vertices collide inside the soft body solver and never enter that cache, so this is
+    /// `false` for every pair with a soft body, even one lying on the other body. Fails with
     /// [`BodyError::WrongWorld`] for an id of another world.
     pub fn were_bodies_in_contact(&self, a: BodyId, b: BodyId) -> Result<bool, BodyError> {
         for id in [a, b] {

@@ -253,7 +253,14 @@
 //!   by the volume of every sub-step (`SoftBodyMotionProperties.cpp:300-307`), and the
 //!   creation check holds only for the start geometry.
 //! - Soft body constraint stability: [`MAX_COMPLIANCE`] keeps Jolt's compliance terms finite,
-//!   not the solver convergent.
+//!   not the solver convergent. Measured: a 2 m cube of 1 g vertices, three of them kinematic,
+//!   with six tetrahedral volume constraints of compliances 0 to 1e20, per-vertex attributes
+//!   with edge and shear compliances up to 1e20 and LRA multipliers up to 1e4, distance bends,
+//!   100 iterations, no damping, restitution 1, a vertex speed limit of 1 m/s, one vertex given
+//!   155 m/s and an accepted force of 3.7e6 N, had NaN vertices after its first step in the
+//!   release build and asserted that a squared velocity is finite (`MotionProperties.inl:28`)
+//!   in the asserts build. With a tenth of the force, 5 iterations, no volume constraints or
+//!   uniform attributes it stayed finite. No input bound in this module excludes it.
 //! - `RagdollSettings::new_stabilized` reports Jolt's `Stabilize` failing to decompose an
 //!   inertia tensor as an error, but Jolt asserts on that path first (`Ragdoll.cpp:158`).
 //! - The assertion `errors == EPhysicsUpdateError::None` at the end of every step that drops
