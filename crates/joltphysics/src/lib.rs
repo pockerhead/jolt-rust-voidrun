@@ -186,6 +186,43 @@
 //! its force at the centre, but also adds its torque, which a soft body never clears.
 //! [`BodyMut::add_force`] works on soft bodies.
 //!
+//! # Events
+//! A world records contact, body activation and soft body contact events once
+//! [`PhysicsWorld::set_event_settings`] asks for them; by default it records nothing and installs
+//! no listener in Jolt. Jolt reports them from its worker threads during a step; the world sorts
+//! each step's events into an order that does not depend on the thread count and queues them
+//! until [`PhysicsWorld::take_events`], which should be called after every step. Contacts carry
+//! the sub-shapes that touch and the user data of their [`PhysicsMaterial`]s.
+//! `docs/events.md` describes where each event comes from.
+//!
+//! ```
+//! use joltphysics::*;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut world = PhysicsWorld::new(WorldSettings::default())?;
+//! world.set_event_settings(EventSettings::default().contacts(true));
+//! let floor = Shape::new_box(Vec3::new(10.0, 1.0, 10.0))?;
+//! world.create_body(&floor, &BodySettings::new_static().position(RVec3::new(0.0, -1.0, 0.0)))?;
+//! let cube_shape = Shape::new_box(Vec3::new(0.5, 0.5, 0.5))?;
+//! let cube = world.create_body(
+//!     &cube_shape,
+//!     &BodySettings::new_dynamic().position(RVec3::new(0.0, 1.0, 0.0)),
+//! )?;
+//!
+//! let mut added = Vec::new();
+//! for _ in 0..60 {
+//!     world.step(1.0 / 60.0)?;
+//!     for event in world.take_events().contacts {
+//!         if let ContactEvent::Added { manifold, .. } = event {
+//!             added.push(manifold.pair.body2);
+//!         }
+//!     }
+//! }
+//! assert_eq!(added, [cube]);
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # Threads
 //! Changing a world, including [`PhysicsWorld::step`], takes `&mut PhysicsWorld`; reading it
 //! takes `&PhysicsWorld`. `PhysicsWorld` is `Send` and `Sync`, so many threads may read one
@@ -255,8 +292,9 @@
 //! joltphysics calls `JPH_Init` once per process and never calls `JPH_Shutdown`. It also
 //! installs joltc's object-layer, body and shape filter procs once per process and owns them;
 //! code that uses `joltphysics-sys` directly must leave them alone (see its notes on the raw
-//! API). With `debug-renderer`, joltphysics also installs joltc's debug renderer procs once and
-//! serializes debug drawing.
+//! API). The same holds for the contact, body activation and soft body contact listener procs,
+//! which joltphysics installs the first time a world records events. With `debug-renderer`,
+//! joltphysics also installs joltc's debug renderer procs once and serializes debug drawing.
 //!
 //! joltphysics installs Jolt's assertion handler once per process, before `JPH_Init`. With the
 //! `asserts` feature, which compiles Jolt with its debug assertions, a failed assertion prints its
@@ -288,6 +326,7 @@ mod job_system;
 mod jolt_assert;
 mod layers;
 pub mod limits;
+mod listener;
 mod material;
 mod math;
 mod owned;
@@ -325,6 +364,11 @@ pub use error::{
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
+pub use listener::{
+    ActivationEvent, ContactEvent, ContactManifold, ContactPoint, ContactSettings, EventSettings,
+    SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
+    SoftBodyVertexContact, SubShapeIdPair, WorldEvents,
+};
 pub use material::PhysicsMaterial;
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{CollideShape, CollideShapeHit, RayCast, RayHit, ShapeCast, ShapeCastHit};

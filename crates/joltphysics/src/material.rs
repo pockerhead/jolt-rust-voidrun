@@ -9,7 +9,7 @@ use crate::shape::{
     initialize, validate_box, validate_capsule, validate_cylinder, validate_height_field,
     validate_sphere, ShapeSettings,
 };
-use crate::{HeightFieldSettings, Shape, ShapeError, Vec3};
+use crate::{HeightFieldSettings, Shape, ShapeError, SubShapeId, Vec3};
 
 /// Jolt's `Color::sGrey`, the debug colour of every material made here.
 const GREY: u32 = 0xFF80_8080;
@@ -21,7 +21,8 @@ const MAX_HEIGHT_FIELD_MATERIALS: usize = 256;
 ///
 /// A material says which surface a shape is made of, for example to pick footstep sounds or
 /// the friction of a contact. Jolt keeps no friction or restitution in a material; those stay
-/// on the bodies.
+/// on the bodies. Contact events report the user data of the material on each side
+/// ([`ContactManifold::materials`](crate::ContactManifold::materials)).
 ///
 /// Owns one Jolt reference. Every shape made with the material holds its own, so the material
 /// may be dropped while shapes use it. Materials made here cannot be serialized by Jolt's
@@ -77,6 +78,23 @@ impl PhysicsMaterial {
 
     pub(crate) fn as_ptr(&self) -> *const JPH_PhysicsMaterial {
         self.material.as_ptr()
+    }
+}
+
+/// The user data of the [`PhysicsMaterial`] of the leaf of `shape` that `id` leads to, or
+/// `None` when that leaf has no such material (Jolt's default material, or one made elsewhere).
+///
+/// # Safety
+/// `shape` is live, and `id` is a sub-shape id Jolt reported for this shape: Jolt decodes it
+/// without range checks.
+pub(crate) unsafe fn shape_material(shape: *const JPH_Shape, id: SubShapeId) -> Option<u64> {
+    let mut user_data = 0;
+    // SAFETY: the shape is live and `id` is valid for it (contract). Jolt's `GetMaterial` only
+    // reads the shape and returns a material the shape keeps alive, which the extension reads
+    // at once; `user_data` is a live local.
+    unsafe {
+        let material = JPH_Shape_GetMaterial(shape, id.to_raw());
+        JPH_PhysicsMaterial_GetUserData(material, &mut user_data).then_some(user_data)
     }
 }
 
@@ -246,13 +264,9 @@ mod tests {
 
     /// The user data of the material Jolt finds for `shape` at sub-shape `id`.
     fn material_at(shape: &Shape, id: u32) -> Option<u64> {
-        let mut user_data = 0;
-        // SAFETY: the shape is live and `id` is its root or an id Jolt reported for it; the
-        // returned material is kept alive by the shape and read at once.
-        unsafe {
-            let material = JPH_Shape_GetMaterial(shape.as_ptr(), id);
-            JPH_PhysicsMaterial_GetUserData(material, &mut user_data).then_some(user_data)
-        }
+        // SAFETY: the shape is live and `id` is its root (no sub-shapes) or an id Jolt reported
+        // for it.
+        unsafe { shape_material(shape.as_ptr(), SubShapeId::new(id)) }
     }
 
     /// The shape's local bounds as `[min, max]`.
