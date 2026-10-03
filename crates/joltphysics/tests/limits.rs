@@ -2483,10 +2483,10 @@ fn soft_body_shared_settings_are_bounded() {
             ..vertex(away)
         })
     };
-    for inverse_mass in [0.0, 1.0 / limits::MIN_MASS, 2.0 / limits::MAX_MASS] {
+    for inverse_mass in [0.0, limits::MAX_VERTEX_INVERSE_MASS, 2.0 / limits::MAX_MASS] {
         accepted.push(with_inverse_mass(inverse_mass));
     }
-    for inverse_mass in [-0.5, (1.0 / limits::MIN_MASS).next_up(), 1.0e-7]
+    for inverse_mass in [-0.5, limits::MAX_VERTEX_INVERSE_MASS.next_up(), 1.0e-7]
         .into_iter()
         .chain(NON_FINITE)
     {
@@ -2741,7 +2741,7 @@ fn smallest_pressurised_height(side: f32, pressure: f32, inverse_mass: f32) -> f
 fn a_sliver_at_the_pressure_bound_steps_finitely() {
     // The lightest vertices; the largest pressure, where the force term decides the volume
     // bound, and a pressure so small that the bound of Jolt's rounding decides.
-    let inverse_mass = 1.0 / limits::MIN_MASS;
+    let inverse_mass = limits::MAX_VERTEX_INVERSE_MASS;
     for (side, pressure) in [(20.0, limits::MAX_SOFT_BODY_PRESSURE), (1.0, 1.0e-3)] {
         let height = smallest_pressurised_height(side, pressure, inverse_mass);
         for gravity in [Vec3::ZERO, GRAVITY] {
@@ -2849,7 +2849,7 @@ fn soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing() {
             body.set_vertex_velocity(1, Vec3::new(value, 0.0, 0.0))
         ));
     }
-    for inverse_mass in [-0.5, (1.0 / limits::MIN_MASS).next_up(), 1.0e-7]
+    for inverse_mass in [-0.5, limits::MAX_VERTEX_INVERSE_MASS.next_up(), 1.0e-7]
         .into_iter()
         .chain(NON_FINITE)
     {
@@ -2872,7 +2872,7 @@ fn soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing() {
     }
     // Vertex 2 pinned, so vertex 1 alone may take the largest mass.
     body.set_vertex_inverse_mass(2, 0.0).unwrap();
-    for inverse_mass in [0.0, 1.0 / limits::MIN_MASS, 1.0 / limits::MAX_MASS] {
+    for inverse_mass in [0.0, limits::MAX_VERTEX_INVERSE_MASS, 1.0 / limits::MAX_MASS] {
         body.set_vertex_inverse_mass(1, inverse_mass).unwrap();
     }
     // Two vertices of the largest mass pass the total bound.

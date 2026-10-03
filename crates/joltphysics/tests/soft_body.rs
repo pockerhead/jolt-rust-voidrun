@@ -272,7 +272,7 @@ fn invalid_vertex_writes_change_nothing() {
         body.set_vertex_velocity(0, Vec3::new(f32::NAN, 0.0, 0.0))
     ));
     assert!(invalid(body.set_vertex_inverse_mass(16, 1.0)));
-    for inverse_mass in [-1.0, f32::NAN, (1.0 / limits::MIN_MASS).next_up()] {
+    for inverse_mass in [-1.0, f32::NAN, limits::MAX_VERTEX_INVERSE_MASS.next_up()] {
         assert!(invalid(body.set_vertex_inverse_mass(0, inverse_mass)));
     }
     // A movable vertex cannot be moved kinematically.
@@ -600,7 +600,10 @@ fn pressure_at_the_bound_steps_finitely() {
     // to the total bound.
     let (vertices, faces) = sphere(0.5, 8, 12);
     let count = vertices.len() as f32;
-    for inverse_mass in [1.0 / limits::MIN_MASS, (count / limits::MAX_MASS).next_up()] {
+    for inverse_mass in [
+        limits::MAX_VERTEX_INVERSE_MASS,
+        (count / limits::MAX_MASS).next_up(),
+    ] {
         let vertices: Vec<_> = vertices
             .iter()
             .map(|v| SoftBodyVertex { inverse_mass, ..*v })
