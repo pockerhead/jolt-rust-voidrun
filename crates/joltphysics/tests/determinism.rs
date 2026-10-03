@@ -99,6 +99,40 @@ fn run_stacks(worker_threads: u32, variant: &str) -> Digest {
     digest
 }
 
+/// Columns of [`run_pile`] along x and z.
+const PILE_COLUMNS: usize = 10;
+/// Cubes in each column of [`run_pile`].
+const PILE_LAYERS: usize = 6;
+
+/// A floor and 600 cubes in leaning columns that topple into one pile: enough work per step
+/// that the threads of a caller's pool run Jolt jobs even on a loaded machine, where the
+/// stepping thread can finish every job of the eight-cube stacks scene before a pool thread is
+/// scheduled.
+fn run_pile(worker_threads: u32) -> Digest {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), worker_threads);
+    let mut ids = vec![add_floor(&mut world)];
+    for column in 0..PILE_COLUMNS * PILE_COLUMNS {
+        let (x, z) = (
+            (column % PILE_COLUMNS) as Real,
+            (column / PILE_COLUMNS) as Real,
+        );
+        for layer in 0..PILE_LAYERS {
+            let lean = 0.3 * layer as Real;
+            let position = RVec3::new(1.2 * x + lean, 0.5 + layer as Real, 1.2 * z);
+            ids.push(add_cube(&mut world, position));
+        }
+    }
+    let mut digest = Digest::new();
+    for _ in 0..TICKS {
+        assert!(world.step(DT).unwrap().is_complete());
+        let record = digest.push();
+        for &id in &ids {
+            record_body(&world, id, &mut record.state);
+        }
+    }
+    digest
+}
+
 /// The raw body ids of the first tick, in scene order.
 fn first_tick_ids(digest: &Digest) -> Vec<u32> {
     digest.ticks[0]
@@ -867,6 +901,7 @@ fn determinism_child() {
     let job_choice = JobChoice::from_env();
     let digest = match scenario.as_str() {
         "stacks" => run_stacks(threads, &variant),
+        "pile" => run_pile(threads),
         "chunk" => run_chunk(threads, &variant),
         "walker" => run_walker(threads),
         "vehicle" => run_vehicle(threads),
@@ -884,7 +919,9 @@ fn determinism_child() {
             "the {job_choice:?} job system was handed no job"
         ),
     }
-    if job_choice == JobChoice::Rayon {
+    // Only the pile is busy enough: in the smaller scenes a loaded machine's stepping thread may
+    // run every job before a pool thread is scheduled.
+    if job_choice == JobChoice::Rayon && scenario == "pile" {
         assert!(
             jobs::queued_from_pool_jobs() > 0,
             "the Rayon pool executed no Jolt job"
@@ -920,6 +957,12 @@ fn assert_caller_job_systems_agree(scenario: &str, variant: &str) {
 fn stacks_digest_is_identical_with_caller_job_systems() {
     assert_caller_job_systems_agree("stacks", "forward");
     assert_caller_job_systems_agree("stacks", "rebased");
+}
+
+#[test]
+fn pile_digest_is_identical_with_caller_job_systems() {
+    // The Rayon child also asserts that its pool executed Jolt jobs.
+    assert_caller_job_systems_agree("pile", "forward");
 }
 
 #[test]

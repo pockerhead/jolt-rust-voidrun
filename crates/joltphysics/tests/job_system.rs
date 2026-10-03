@@ -194,10 +194,6 @@ fn rayon_job_system_matches_the_native_pool() {
     let caller = stacks_digest(WorldSettings::default().job_system(jobs.clone()));
     assert_eq!(caller, stacks_digest(native()));
     assert!(jobs.queued() > 0);
-    assert!(
-        jobs.inner.queued_from_pool_jobs() > 0,
-        "the pool executed no Jolt job"
-    );
 }
 
 /// Sixteen humanoid ragdolls lying side by side on a floor, touching, for 120 ticks: per-tick
