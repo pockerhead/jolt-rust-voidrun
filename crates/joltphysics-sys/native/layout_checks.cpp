@@ -421,6 +421,12 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, maxContactConstraints, 
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, broadPhaseLayerInterface, 24);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, objectLayerPairFilter, 32);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, objectVsBroadPhaseLayerFilter, 40);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_JobSystemConfig, 32, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_JobSystemConfig, context, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_JobSystemConfig, queueJob, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_JobSystemConfig, queueJobs, 16);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_JobSystemConfig, maxConcurrency, 24);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_JobSystemConfig, maxBarriers, 28);
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_PathConstraintSettings, 112, 8);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, base, 0);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, path, 32);

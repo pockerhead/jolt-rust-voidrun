@@ -478,6 +478,14 @@ const _: () = {
     assert!(offset_of!(JPH_PhysicsSystemSettings, objectLayerPairFilter) == 32);
     assert!(offset_of!(JPH_PhysicsSystemSettings, objectVsBroadPhaseLayerFilter) == 40);
 
+    assert!(size_of::<JPH_JobSystemConfig>() == 32);
+    assert!(align_of::<JPH_JobSystemConfig>() == 8);
+    assert!(offset_of!(JPH_JobSystemConfig, context) == 0);
+    assert!(offset_of!(JPH_JobSystemConfig, queueJob) == 8);
+    assert!(offset_of!(JPH_JobSystemConfig, queueJobs) == 16);
+    assert!(offset_of!(JPH_JobSystemConfig, maxConcurrency) == 24);
+    assert!(offset_of!(JPH_JobSystemConfig, maxBarriers) == 28);
+
     assert!(size_of::<JPH_CollideShapeResult>() == 80);
     assert!(align_of::<JPH_CollideShapeResult>() == 8);
     assert!(offset_of!(JPH_CollideShapeResult, contactPointOn1) == 0);
