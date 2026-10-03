@@ -199,6 +199,13 @@
 //! | `PulleyConstraintSettings::ratio` | positive, within `1 / `[`MAX_RATIO`]`..=`[`MAX_RATIO`] | new: `pulley_ratio_and_lengths_are_bounded`, `pulleys_at_the_ratio_bound_step_finitely` |
 //! | `PulleyLength::Range`, `ConstraintMut::<PulleyConstraint>::set_length` | `0 <= min <= max <= (1 + ratio) ·` [`MAX_SHAPE_EXTENT`] | new: `pulley_ratio_and_lengths_are_bounded` |
 //! | `PulleyConstraintSettings::new` body and fixed points | [`MAX_POSITION`]; a rebase moves fixed points as re-expressed state, checked finite only | new: `pulley_ratio_and_lengths_are_bounded` |
+//! | `HermitePath::new` points | 2 to `HermitePath::MAX_POINTS`; positions and tangents within [`MAX_SHAPE_EXTENT`] per axis; unit normal | new: `invalid_paths_are_rejected`, `path_inputs_are_bounded` |
+//! | `HermitePath::new` segments | chord at least 1 mm; derivative along the chord at least twice its bound along the normal and above an `f32` margin, so Jolt's normal stays unit | new: `invalid_paths_are_rejected`, `path_validation_accepts_its_boundary` |
+//! | `PathConstraintSettings::path_position`, `path_rotation`, `path_fraction` | [`MAX_SHAPE_EXTENT`] per axis; unit quaternion; `[0, max_fraction]` | new: `path_inputs_are_bounded` |
+//! | `PathConstraintSettings::max_friction_force`, `ConstraintMut::<PathConstraint>::set_max_friction_force` | finite, at least 0 | new: `path_motor_springs_and_friction_are_bounded` |
+//! | `PathConstraintSettings::position_motor`, `ConstraintMut::<PathConstraint>::set_position_motor_settings` springs | as for `create_constraint` | new: `path_motor_springs_and_friction_are_bounded` |
+//! | `ConstraintMut::<PathConstraint>::set_target_velocity`, `set_target_path_fraction` | [`MAX_LINEAR_VELOCITY`]; `[0, max_fraction]` | new: `path_inputs_are_bounded` |
+//! | `ConstraintRef::<PathConstraint>::closest_fraction` | point within [`MAX_SHAPE_EXTENT`] per axis, finite hint | new: `path_inputs_are_bounded` |
 //! | `SwingTwistConstraintSettings::max_friction_torque`, `HingeConstraintSettings::max_friction_torque`, `SixDofConstraintSettings::max_friction` | finite, at least 0; Jolt clamps the friction impulse to `dt · limit` and applies no more than stops the relative motion | existing: `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
 //! | `SixDofAxis::Limited` on a translation axis | finite, `min < max`, within [`MAX_SHAPE_EXTENT`] | new: `six_dof_limits_are_validated`, `six_dof_translation_limits_at_the_bound_step_finitely` |
 //! | `RagdollSettings::new`, `new_stabilized` part masses | [`MIN_MASS`]`..=`[`MAX_MASS`], also for kinematic parts (`RagdollMut::set_motion_type` can make them dynamic) | new: `part_masses_and_velocities_are_bounded` |

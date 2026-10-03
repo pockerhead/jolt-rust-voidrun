@@ -1439,3 +1439,322 @@ fn rebase_with_pulleys_is_repeatable() {
     };
     assert_eq!(run(), run());
 }
+
+fn point(position: [f32; 3], tangent: [f32; 3]) -> HermitePathPoint {
+    HermitePathPoint {
+        position: Vec3::from(position),
+        tangent: Vec3::from(tangent),
+    }
+}
+
+/// The position on `path` at `fraction`, with Jolt's Hermite formula.
+fn path_point(path: &HermitePath, fraction: f32) -> Vec3 {
+    let points = path.points();
+    let last = if path.is_looping() {
+        points.len()
+    } else {
+        points.len() - 1
+    };
+    let index = (fraction.floor() as usize).min(last - 1);
+    let t = fraction - index as f32;
+    let (p1, p2) = (points[index], points[(index + 1) % points.len()]);
+    let (t2, t3) = (t * t, t * t * t);
+    let h = [
+        2.0 * t3 - 3.0 * t2 + 1.0,
+        t3 - 2.0 * t2 + t,
+        -2.0 * t3 + 3.0 * t2,
+        t3 - t2,
+    ];
+    let mix = |a: f32, b: f32, c: f32, d: f32| h[0] * a + h[1] * b + h[2] * c + h[3] * d;
+    Vec3::new(
+        mix(p1.position.x, p1.tangent.x, p2.position.x, p2.tangent.x),
+        mix(p1.position.y, p1.tangent.y, p2.position.y, p2.tangent.y),
+        mix(p1.position.z, p1.tangent.z, p2.position.z, p2.tangent.z),
+    )
+}
+
+/// A descending S curve in the XY plane of its path space.
+fn s_curve() -> HermitePath {
+    HermitePath::new(
+        Z,
+        vec![
+            point([0.0, 0.0, 0.0], [1.0, -0.3, 0.0]),
+            point([1.0, -0.3, 0.0], [1.0, -0.5, 0.0]),
+            point([2.0, -0.9, 0.0], [1.0, -0.5, 0.0]),
+            point([3.0, -1.2, 0.0], [1.0, -0.3, 0.0]),
+        ],
+        false,
+    )
+    .unwrap()
+}
+
+/// A static anchor at `origin` turned by `turn`, and a small box at the start of a path that
+/// begins 0.5 m along the anchor's x axis.
+fn path_scene(
+    world: &mut PhysicsWorld,
+    origin: RVec3,
+    turn: Quat,
+    path: &HermitePath,
+) -> (BodyId, ConstraintId<PathConstraint>) {
+    let shape = Shape::new_box(Vec3::new(0.1, 0.1, 0.1)).unwrap();
+    let anchor = world
+        .create_body(
+            &shape,
+            &BodySettings::new_static().position(origin).rotation(turn),
+        )
+        .unwrap();
+    let offset = Vec3::new(0.5, 0.0, 0.0);
+    let start = attached(origin, turn, offset);
+    let body = world
+        .create_body(&shape, &BodySettings::new_dynamic().position(start))
+        .unwrap();
+    let constraint = world
+        .create_constraint(
+            anchor,
+            body,
+            &PathConstraintSettings::new(path.clone()).path_position(offset),
+        )
+        .unwrap();
+    (body, constraint)
+}
+
+/// `p` in the path space of a path at `offset` in the frame of a body at `origin` turned by
+/// `turn`.
+fn in_path_space(p: RVec3, origin: RVec3, turn: Quat, offset: Vec3) -> Vec3 {
+    let local = Vec3::new(
+        wide(p.x - origin.x) as f32,
+        wide(p.y - origin.y) as f32,
+        wide(p.z - origin.z) as f32,
+    );
+    let local = common::ragdoll::rotate(common::ragdoll::conj(turn), local);
+    Vec3::new(local.x - offset.x, local.y - offset.y, local.z - offset.z)
+}
+
+#[test]
+fn path_keeps_a_body_on_its_curve() {
+    let mut world = world(GRAVITY, 1);
+    let origin = RVec3::new(5.0, 3.0, -2.0);
+    // Turned about the vertical, so gravity stays in the path's plane and pulls the box along.
+    let turn = quat_about(Y, 0.5);
+    let path = s_curve();
+    let (body, constraint) = path_scene(&mut world, origin, turn, &path);
+    let mut worst: f32 = 0.0;
+    let mut last_fraction = 0.0;
+    for _ in 0..70 {
+        step(&mut world, 1);
+        let position = world.body(body).unwrap().position();
+        let local = in_path_space(position, origin, turn, Vec3::new(0.5, 0.0, 0.0));
+        let reading = world.constraint(constraint).unwrap();
+        let fraction = reading.closest_fraction(local, last_fraction).unwrap();
+        let on_curve = path_point(&path, fraction);
+        let off = Vec3::new(
+            local.x - on_curve.x,
+            local.y - on_curve.y,
+            local.z - on_curve.z,
+        );
+        worst = worst.max(off.x.hypot(off.y).hypot(off.z));
+        let sliding = reading.path_fraction();
+        assert!(
+            sliding >= last_fraction - 1e-4,
+            "{sliding} after {last_fraction}"
+        );
+        last_fraction = sliding;
+    }
+    // While the box slides, before it reaches the end of the path; measured: at most 0.0007 m
+    // off the curve, sliding to fraction 1.69.
+    assert!(last_fraction > 1.0, "{last_fraction}");
+    assert!(worst < 1e-2, "{worst} m");
+}
+
+#[test]
+fn path_motor_drives_to_a_target_fraction() {
+    let mut world = world(Vec3::ZERO, 1);
+    let (_, constraint) = path_scene(&mut world, RVec3::ZERO, Quat::IDENTITY, &s_curve());
+    let mut motor = world.constraint_mut(constraint).unwrap();
+    motor.set_target_path_fraction(1.5).unwrap();
+    motor.set_motor_state(MotorState::Position);
+    step(&mut world, 180);
+    let reading = world.constraint(constraint).unwrap();
+    let fraction = reading.path_fraction();
+    // Measured: 1.49997.
+    assert!((fraction - 1.5).abs() < 1e-2, "{fraction}");
+    assert_eq!(reading.target_path_fraction(), 1.5);
+    assert_eq!(reading.max_fraction(), 3.0);
+}
+
+/// A loop through four points on a circle of radius 1, tangents of a quarter arc's length.
+fn circle() -> HermitePath {
+    let arc = std::f32::consts::FRAC_PI_2;
+    HermitePath::new(
+        Z,
+        vec![
+            point([1.0, 0.0, 0.0], [0.0, arc, 0.0]),
+            point([0.0, 1.0, 0.0], [-arc, 0.0, 0.0]),
+            point([-1.0, 0.0, 0.0], [0.0, -arc, 0.0]),
+            point([0.0, -1.0, 0.0], [arc, 0.0, 0.0]),
+        ],
+        true,
+    )
+    .unwrap()
+}
+
+#[test]
+fn looping_path_wraps() {
+    let mut world = world(Vec3::ZERO, 1);
+    let path = circle();
+    assert_eq!(path.max_fraction(), 4.0);
+    let (_, constraint) = path_scene(&mut world, RVec3::ZERO, Quat::IDENTITY, &path);
+    let mut motor = world.constraint_mut(constraint).unwrap();
+    motor.set_target_velocity(3.0).unwrap();
+    motor.set_motor_state(MotorState::Velocity);
+    let mut wraps = 0;
+    let mut last = world.constraint(constraint).unwrap().path_fraction();
+    for _ in 0..240 {
+        step(&mut world, 1);
+        let fraction = world.constraint(constraint).unwrap().path_fraction();
+        if fraction < last - 2.0 {
+            wraps += 1;
+        }
+        last = fraction;
+    }
+    // About 12 m along a loop of about 6.3 m: measured 1 wrap.
+    assert!(wraps >= 1, "{wraps} wraps, at {last}");
+    // A looping path's target fraction is within its range too.
+    let mut motor = world.constraint_mut(constraint).unwrap();
+    assert!(motor.set_target_path_fraction(4.0).is_ok());
+    assert!(matches!(
+        motor.set_target_path_fraction(4.0_f32.next_up()),
+        Err(ConstraintError::InvalidValue(_))
+    ));
+}
+
+#[test]
+fn invalid_paths_are_rejected() {
+    let invalid = |normal: Vec3, points: Vec<HermitePathPoint>, looping: bool| {
+        matches!(
+            HermitePath::new(normal, points, looping),
+            Err(ConstraintError::InvalidValue(_))
+        )
+    };
+    let straight = |n: usize| -> Vec<HermitePathPoint> {
+        (0..n)
+            .map(|i| point([i as f32 * 0.01, 0.0, 0.0], [0.01, 0.0, 0.0]))
+            .collect()
+    };
+    assert!(HermitePath::new(Z, straight(2), false).is_ok());
+    assert!(HermitePath::new(Z, straight(HermitePath::MAX_POINTS), false).is_ok());
+    assert!(invalid(Z, straight(1), false));
+    assert!(invalid(Z, straight(HermitePath::MAX_POINTS + 1), false));
+    // Zero chord.
+    let mut repeated = straight(3);
+    repeated[1].position = repeated[0].position;
+    assert!(invalid(Z, repeated, false));
+    // A loop whose ends coincide.
+    let square = vec![
+        point([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        point([1.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        point([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+    ];
+    assert!(invalid(Z, square, true));
+    // A tangent against the chord.
+    assert!(invalid(
+        Z,
+        vec![
+            point([0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]),
+            point([1.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+        ],
+        false
+    ));
+    // Tangents along the chord but so long that the curve runs backwards in the middle:
+    // f(0.5) = -0.5 for a chord of 1 and tangent components of 4.
+    assert!(invalid(
+        Z,
+        vec![
+            point([0.0, 0.0, 0.0], [4.0, 0.0, 0.0]),
+            point([1.0, 0.0, 0.0], [4.0, 0.0, 0.0])
+        ],
+        false
+    ));
+    // A tangent out of the plane.
+    assert!(invalid(
+        Z,
+        vec![
+            point([0.0, 0.0, 0.0], [1.0, 0.0, 0.6]),
+            point([1.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+        ],
+        false
+    ));
+    assert!(invalid(Vec3::new(0.0, 0.0, 1.1), straight(2), false));
+    assert!(invalid(
+        Z,
+        vec![
+            point([f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            point([1.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+        ],
+        false
+    ));
+    let extent = limits::MAX_SHAPE_EXTENT;
+    assert!(invalid(
+        Z,
+        vec![
+            point([0.0, 0.0, 0.0], [extent.next_up(), 0.0, 0.0]),
+            point([1.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+        ],
+        false
+    ));
+}
+
+#[test]
+fn path_validation_accepts_its_boundary() {
+    // Tangents (1, y, 0) along a chord of 1 along x, normal y: the derivative along the chord is
+    // 1 everywhere and along the normal at most 2y, so y = 0.25 is the bound.
+    let segment = |y: f32| {
+        HermitePath::new(
+            Y,
+            vec![
+                point([0.0, 0.0, 0.0], [1.0, y, 0.0]),
+                point([1.0, 0.0, 0.0], [1.0, y, 0.0]),
+            ],
+            false,
+        )
+    };
+    assert!(matches!(
+        segment(0.25_f32.next_up()),
+        Err(ConstraintError::InvalidValue(_))
+    ));
+    let path = segment(0.25).unwrap();
+    // The accepted segment steps end to end with every rotation constraint.
+    for rotation in [
+        PathRotationConstraint::Free,
+        PathRotationConstraint::ConstrainAroundTangent,
+        PathRotationConstraint::ConstrainAroundNormal,
+        PathRotationConstraint::ConstrainAroundBinormal,
+        PathRotationConstraint::ConstrainToPath,
+        PathRotationConstraint::FullyConstrained,
+    ] {
+        let mut world = world(Vec3::ZERO, 1);
+        let shape = Shape::new_box(Vec3::new(0.1, 0.1, 0.1)).unwrap();
+        let anchor = world
+            .create_body(
+                &shape,
+                &BodySettings::new_static().position(RVec3::new(0.0, 0.0, -2.0)),
+            )
+            .unwrap();
+        let body = add_box(&mut world, Vec3::new(0.1, 0.1, 0.1), RVec3::ZERO);
+        let constraint = world
+            .create_constraint(
+                anchor,
+                body,
+                &PathConstraintSettings::new(path.clone())
+                    .path_position(Vec3::new(0.0, 0.0, 2.0))
+                    .rotation_constraint(rotation),
+            )
+            .unwrap();
+        let mut motor = world.constraint_mut(constraint).unwrap();
+        motor.set_target_velocity(2.0).unwrap();
+        motor.set_motor_state(MotorState::Velocity);
+        step(&mut world, 60);
+        let fraction = world.constraint(constraint).unwrap().path_fraction();
+        assert!(fraction > 0.99, "{rotation:?}: {fraction}");
+    }
+}

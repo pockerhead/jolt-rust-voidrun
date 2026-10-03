@@ -238,12 +238,13 @@ pub use constraint::{
     AnyConstraintId, ConeConstraint, ConeConstraintSettings, ConstraintId, ConstraintKind,
     ConstraintMut, ConstraintRef, ConstraintSettings, ConstraintSpace, ConstraintType,
     DistanceConstraint, DistanceConstraintSettings, DistanceRange, FixedConstraint,
-    FixedConstraintSettings, GearConstraint, GearConstraintSettings, HingeConstraint,
-    HingeConstraintSettings, MotorSettings, MotorState, PathConstraint, PointConstraint,
-    PointConstraintSettings, PulleyConstraint, PulleyConstraintSettings, PulleyLength,
-    RackAndPinionConstraint, RackAndPinionConstraintSettings, SixDofAxis, SixDofConstraint,
-    SixDofConstraintAxis, SixDofConstraintSettings, SliderConstraint, SliderConstraintSettings,
-    SpringSettings, SwingTwistConstraint, SwingTwistConstraintSettings, SwingType,
+    FixedConstraintSettings, GearConstraint, GearConstraintSettings, HermitePath, HermitePathPoint,
+    HingeConstraint, HingeConstraintSettings, MotorSettings, MotorState, PathConstraint,
+    PathConstraintSettings, PathRotationConstraint, PointConstraint, PointConstraintSettings,
+    PulleyConstraint, PulleyConstraintSettings, PulleyLength, RackAndPinionConstraint,
+    RackAndPinionConstraintSettings, SixDofAxis, SixDofConstraint, SixDofConstraintAxis,
+    SixDofConstraintSettings, SliderConstraint, SliderConstraintSettings, SpringSettings,
+    SwingTwistConstraint, SwingTwistConstraintSettings, SwingType,
 };
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};

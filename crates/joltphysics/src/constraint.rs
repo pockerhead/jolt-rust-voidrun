@@ -13,6 +13,7 @@
 
 mod coupling;
 mod linear;
+mod path;
 mod rotational;
 mod world;
 
@@ -25,6 +26,7 @@ pub use linear::{
     DistanceConstraintSettings, DistanceRange, FixedConstraintSettings, PointConstraintSettings,
     PulleyConstraintSettings, PulleyLength, SliderConstraintSettings,
 };
+pub use path::{HermitePath, HermitePathPoint, PathConstraintSettings, PathRotationConstraint};
 pub use rotational::ConeConstraintSettings;
 pub(crate) use world::ConstraintEntry;
 pub use world::{

@@ -1931,3 +1931,150 @@ fn pulleys_at_the_ratio_bound_step_finitely() {
         }
     }
 }
+
+fn path_point(position: [f32; 3], tangent: [f32; 3]) -> HermitePathPoint {
+    HermitePathPoint {
+        position: Vec3::from(position),
+        tangent: Vec3::from(tangent),
+    }
+}
+
+/// A straight path of one segment of `length` metres along x, in the plane of normal z.
+fn straight_path(start: f32, length: f32) -> Result<HermitePath, ConstraintError> {
+    HermitePath::new(
+        Vec3::new(0.0, 0.0, 1.0),
+        vec![
+            path_point([start, 0.0, 0.0], [length, 0.0, 0.0]),
+            path_point([start + length, 0.0, 0.0], [length, 0.0, 0.0]),
+        ],
+        false,
+    )
+}
+
+#[test]
+fn path_inputs_are_bounded() {
+    let extent = limits::MAX_SHAPE_EXTENT;
+    // Positions and tangents within the extent.
+    assert!(straight_path(extent - 1.0, 1.0).is_ok());
+    assert!(constraint_invalid(straight_path(extent, 1.0)));
+    assert!(straight_path(0.0, extent).is_ok());
+    assert!(constraint_invalid(straight_path(0.0, extent.next_up())));
+
+    let path = straight_path(0.0, 1.0).unwrap();
+    let settings = |f: &dyn Fn(PathConstraintSettings) -> PathConstraintSettings| {
+        f(PathConstraintSettings::new(path.clone()))
+    };
+    let create = |settings: PathConstraintSettings| joined_sphere(1.0, &settings).2;
+    for offset in on_axes(extent) {
+        assert!(create(settings(&|s| s.path_position(offset))).is_ok());
+    }
+    for offset in on_axes(extent.next_up()) {
+        assert!(constraint_invalid(create(settings(
+            &|s| s.path_position(offset)
+        ))));
+    }
+    assert!(constraint_invalid(create(settings(&|s| {
+        s.path_rotation(Quat::from_xyzw(0.0, 0.6, 0.0, 0.81))
+    }))));
+    for fraction in [0.0, 1.0] {
+        assert!(create(settings(&|s| s.path_fraction(fraction))).is_ok());
+    }
+    for fraction in [-1.0e-6, 1.0_f32.next_up(), f32::NAN] {
+        assert!(constraint_invalid(create(settings(
+            &|s| s.path_fraction(fraction)
+        ))));
+    }
+    assert!(constraint_invalid(create(settings(
+        &|s| s.max_friction_force(-1.0)
+    ))));
+
+    let (mut world, _, id) = joined_sphere(1.0, &PathConstraintSettings::new(path.clone()));
+    let id = id.unwrap();
+    let reading = world.constraint(id).unwrap();
+    assert!(reading
+        .closest_fraction(Vec3::new(extent, 0.0, 0.0), 0.0)
+        .is_ok());
+    assert!(constraint_invalid(
+        reading.closest_fraction(Vec3::new(extent.next_up(), 0.0, 0.0), 0.0)
+    ));
+    assert!(constraint_invalid(
+        reading.closest_fraction(Vec3::ZERO, f32::NAN)
+    ));
+    let mut motor = world.constraint_mut(id).unwrap();
+    let speed = limits::MAX_LINEAR_VELOCITY;
+    for velocity in [speed, -speed] {
+        assert!(motor.set_target_velocity(velocity).is_ok());
+    }
+    for velocity in [speed.next_up(), (-speed).next_down()] {
+        assert!(constraint_invalid(motor.set_target_velocity(velocity)));
+    }
+    for fraction in [0.0, 1.0] {
+        assert!(motor.set_target_path_fraction(fraction).is_ok());
+    }
+    for fraction in [-1.0e-6, 1.0_f32.next_up()] {
+        assert!(constraint_invalid(motor.set_target_path_fraction(fraction)));
+    }
+    assert!(constraint_invalid(motor.set_max_friction_force(f32::NAN)));
+}
+
+#[test]
+fn path_motor_springs_and_friction_are_bounded() {
+    // As in `world_constraint_springs_are_bounded_by_the_bodies_effective_mass`.
+    let mass = limits::MAX_MASS;
+    let bound = 1.0 / f64::from(1.0 / mass);
+    let fits = |frequency: f32| {
+        let omega = 2.0 * std::f64::consts::PI * f64::from(frequency);
+        bound * omega * omega <= f64::from(limits::MAX_SPRING_COEFFICIENT)
+    };
+    let mut frequency = ((f64::from(limits::MAX_SPRING_COEFFICIENT) / bound).sqrt()
+        / (2.0 * std::f64::consts::PI)) as f32;
+    while !fits(frequency) {
+        frequency = frequency.next_down();
+    }
+    while fits(frequency.next_up()) {
+        frequency = frequency.next_up();
+    }
+    let motor = |frequency| {
+        MotorSettings::default().spring(SpringSettings::FrequencyAndDamping {
+            frequency,
+            damping: 0.0,
+        })
+    };
+    let path = straight_path(0.0, 1.0).unwrap();
+    let settings = PathConstraintSettings::new(path);
+    assert!(
+        joined_sphere(mass, &settings.clone().position_motor(motor(frequency)))
+            .2
+            .is_ok()
+    );
+    assert!(constraint_invalid(
+        joined_sphere(
+            mass,
+            &settings.clone().position_motor(motor(frequency.next_up()))
+        )
+        .2
+    ));
+    let (mut world, _, id) = joined_sphere(mass, &settings);
+    let mut path = world.constraint_mut(id.unwrap()).unwrap();
+    assert!(path.set_position_motor_settings(motor(frequency)).is_ok());
+    assert!(constraint_invalid(
+        path.set_position_motor_settings(motor(frequency.next_up()))
+    ));
+
+    // Unlimited friction on a body sliding along the path at the velocity bound.
+    for mass in [limits::MIN_MASS, limits::MAX_MASS] {
+        let (mut world, body, id) =
+            joined_sphere(mass, &settings.clone().max_friction_force(f32::MAX));
+        world
+            .constraint_mut(id.unwrap())
+            .unwrap()
+            .set_max_friction_force(f32::MAX)
+            .unwrap();
+        world
+            .body_mut(body)
+            .unwrap()
+            .set_linear_velocity(Vec3::new(limits::MAX_LINEAR_VELOCITY, 0.0, 0.0))
+            .unwrap();
+        step_coupling(&mut world, &[body], &format!("path friction, mass {mass}"));
+    }
+}
