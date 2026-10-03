@@ -27,6 +27,9 @@ use crate::{
     Shape, SubShapeId, Vec3,
 };
 
+/// What the shape of a character's inner body must satisfy ([`has_finite_inverse`]).
+pub(crate) const INNER_BODY_INERTIA_RULE: &str = "inner body shape must give a finite inverse mass and inertia, and an inertia that is not diagonal must meet the rigid body inertia floor of limits";
+
 /// Jolt's invalid `BodyID` and `CharacterID` value.
 const INVALID_ID: u32 = 0xffff_ffff;
 
@@ -437,9 +440,7 @@ impl<'a> CharacterSettings<'a> {
             }
             // Jolt creates the inner body kinematic, which computes mass properties.
             if !has_finite_inverse(&mass_properties(inner.shape, None)) {
-                return invalid(
-                    "inner body shape must give a finite inverse mass and inertia, and an inertia                      that is not diagonal must meet the rigid body inertia floor of limits",
-                );
+                return invalid(INNER_BODY_INERTIA_RULE);
             }
         }
         Ok(())

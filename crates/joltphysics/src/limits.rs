@@ -763,7 +763,7 @@ pub(crate) fn is_rigid_body_inertia(tensor: [[f64; 3]; 3]) -> bool {
     let minors = (a * e - b * d) + (a * i - c * g) + (e * i - f * h);
     let frobenius = tensor.iter().flatten().map(|v| v * v).sum::<f64>().sqrt();
     // `det / minors` is at most the smallest principal moment (see `is_soft_body_inertia`).
-    det > 0.0 && minors > 0.0 && det / minors >= MIN_INERTIA_RATIO * frobenius
+    a + e + i > 0.0 && det > 0.0 && minors > 0.0 && det / minors >= MIN_INERTIA_RATIO * frobenius
 }
 
 /// The vertices of a soft body as Jolt's inertia computation sees them, reduced to what
