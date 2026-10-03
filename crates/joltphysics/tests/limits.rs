@@ -5,6 +5,8 @@
 
 mod common;
 
+use std::f32::consts::PI;
+
 use common::vehicle::*;
 use common::walker::{f3, v3};
 use common::*;
@@ -1230,4 +1232,1197 @@ fn largest_shapes_collide_finitely() {
         );
     }
     step_at_both_extremes(&mut world, &bodies, "largest shapes");
+}
+
+/// A static anchor and a dynamic sphere of `mass` at the origin, hinged about z at the origin.
+fn hinged_sphere(
+    mass: f32,
+    settings: HingeConstraintSettings,
+) -> (
+    PhysicsWorld,
+    BodyId,
+    Result<ConstraintId<HingeConstraint>, ConstraintError>,
+) {
+    let mut world = empty_world();
+    let anchor = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(0.0, 5.0, 0.0)),
+        )
+        .unwrap();
+    let body = world
+        .create_body(&sphere(), &BodySettings::new_dynamic().mass(mass))
+        .unwrap();
+    let hinge = world.create_constraint(anchor, body, &settings);
+    (world, body, hinge)
+}
+
+fn z_hinge() -> HingeConstraintSettings {
+    HingeConstraintSettings::new(
+        RVec3::ZERO,
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(1.0, 0.0, 0.0),
+    )
+}
+
+fn constraint_invalid(result: Result<impl Sized, ConstraintError>) -> bool {
+    matches!(result, Err(ConstraintError::InvalidValue(_)))
+}
+
+#[test]
+fn world_constraint_springs_are_bounded_by_the_bodies_effective_mass() {
+    // A sphere's largest principal moment, 0.1 m for a radius of 0.5 m, is below its mass, so
+    // the bound is the mass as Jolt stores it: 1 / (1 / m) with the inverse in f32.
+    let mass = limits::MAX_MASS;
+    let bound = 1.0 / f64::from(1.0 / mass);
+    let fits = |frequency: f32| {
+        let omega = 2.0 * std::f64::consts::PI * f64::from(frequency);
+        bound * omega * omega <= f64::from(limits::MAX_SPRING_COEFFICIENT)
+    };
+    let mut frequency = ((f64::from(limits::MAX_SPRING_COEFFICIENT) / bound).sqrt()
+        / (2.0 * std::f64::consts::PI)) as f32;
+    while !fits(frequency) {
+        frequency = frequency.next_down();
+    }
+    while fits(frequency.next_up()) {
+        frequency = frequency.next_up();
+    }
+    let spring = |frequency| SpringSettings::FrequencyAndDamping {
+        frequency,
+        damping: 0.0,
+    };
+    let motor = |frequency| MotorSettings::default().spring(spring(frequency));
+
+    let (_, _, accepted) = hinged_sphere(mass, z_hinge().motor(motor(frequency)));
+    assert!(accepted.is_ok());
+    let (_, _, rejected) = hinged_sphere(mass, z_hinge().motor(motor(frequency.next_up())));
+    assert!(constraint_invalid(rejected));
+
+    let (mut world, _, hinge) = hinged_sphere(mass, z_hinge());
+    let mut hinge = world.constraint_mut(hinge.unwrap()).unwrap();
+    assert!(hinge.set_motor_settings(motor(frequency)).is_ok());
+    assert!(constraint_invalid(
+        hinge.set_motor_settings(motor(frequency.next_up()))
+    ));
+    assert!(hinge.set_limits_spring(spring(frequency)).is_ok());
+    assert!(constraint_invalid(
+        hinge.set_limits_spring(spring(frequency.next_up()))
+    ));
+
+    // A static body has no effective mass, so any valid frequency fits it; between two static
+    // bodies nothing bounds a spring.
+    let (mut world, body, _) = hinged_sphere(mass, z_hinge());
+    let anchor = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(3.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    let other = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(-3.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    let rod =
+        DistanceConstraintSettings::new(RVec3::new(3.0, 0.0, 0.0), RVec3::new(-3.0, 0.0, 0.0))
+            .limits_spring(spring(f32::MAX));
+    assert!(world.create_constraint(anchor, other, &rod).is_ok());
+    let rod = DistanceConstraintSettings::new(RVec3::new(3.0, 0.0, 0.0), RVec3::ZERO);
+    let rod = world.create_constraint(anchor, body, &rod).unwrap();
+    let mut rod = world.constraint_mut(rod).unwrap();
+    assert!(rod.set_limits_spring(spring(frequency)).is_ok());
+    assert!(constraint_invalid(
+        rod.set_limits_spring(spring(frequency.next_up()))
+    ));
+}
+
+#[test]
+fn constraint_targets_are_bounded() {
+    let (mut world, body, hinge) = hinged_sphere(1.0, z_hinge());
+    let mut hinge = world.constraint_mut(hinge.unwrap()).unwrap();
+    for angle in [PI, -PI] {
+        assert!(hinge.set_target_angle(angle).is_ok());
+    }
+    for angle in [PI.next_up(), (-PI).next_down(), f32::NAN] {
+        assert!(constraint_invalid(hinge.set_target_angle(angle)));
+    }
+    let speed = limits::MAX_ANGULAR_VELOCITY;
+    for velocity in [speed, -speed] {
+        assert!(hinge.set_target_angular_velocity(velocity).is_ok());
+    }
+    for velocity in [speed.next_up(), (-speed).next_down(), f32::INFINITY] {
+        assert!(constraint_invalid(
+            hinge.set_target_angular_velocity(velocity)
+        ));
+    }
+
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let anchor = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(3.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    let rod = |range| {
+        DistanceConstraintSettings::new(RVec3::new(3.0, 0.0, 0.0), RVec3::ZERO).range(range)
+    };
+    for (min, max) in [(extent.next_up(), extent.next_up()), (-1.0e-6, 1.0)] {
+        assert!(constraint_invalid(world.create_constraint(
+            anchor,
+            body,
+            &rod(DistanceRange::Range { min, max })
+        )));
+    }
+    let rod = world
+        .create_constraint(
+            anchor,
+            body,
+            &rod(DistanceRange::Range {
+                min: 0.0,
+                max: extent,
+            }),
+        )
+        .unwrap();
+    let mut rod = world.constraint_mut(rod).unwrap();
+    assert!(rod.set_distance(extent, extent).is_ok());
+    assert!(rod.set_distance(0.0, 0.0).is_ok());
+    for (min, max) in [
+        (0.0, extent.next_up()),
+        (-1.0e-6, 0.0),
+        (1.0, 0.5),
+        (f32::NAN, 1.0),
+    ] {
+        assert!(constraint_invalid(rod.set_distance(min, max)));
+    }
+
+    // Constraint points follow the frame rule. A kinematic body has no lever-arm check, so
+    // only the frame rule applies.
+    let held = world
+        .create_body(&sphere(), &BodySettings::new_kinematic())
+        .unwrap();
+    let point = |at| PointConstraintSettings::new(RVec3::ZERO).point2(at);
+    for at in real_on_axes(limits::MAX_POSITION) {
+        let id = world.create_constraint(anchor, held, &point(at)).unwrap();
+        world.remove_constraint(id).unwrap();
+    }
+    for at in real_on_axes(limits::MAX_POSITION.next_up()) {
+        assert!(constraint_invalid(world.create_constraint(
+            anchor,
+            held,
+            &point(at)
+        )));
+    }
+}
+
+#[test]
+fn constraint_friction_at_f32_max_steps_finitely() {
+    // Jolt clamps a constraint's friction impulse to `dt` times the friction: a hinge of
+    // unlimited friction on bodies of both mass extremes spinning at the velocity bound.
+    for mass in [limits::MIN_MASS, limits::MAX_MASS] {
+        let (mut world, body, hinge) = hinged_sphere(mass, z_hinge().max_friction_torque(f32::MAX));
+        let hinge = hinge.unwrap();
+        world
+            .constraint_mut(hinge)
+            .unwrap()
+            .set_max_friction_torque(f32::MAX)
+            .unwrap();
+        world
+            .body_mut(body)
+            .unwrap()
+            .set_angular_velocity(Vec3::new(0.0, 0.0, limits::MAX_ANGULAR_VELOCITY))
+            .unwrap();
+        for tick in 0..120 {
+            let _ = world.step(DT).unwrap();
+            assert_body_finite(&world, body, &format!("mass {mass}, tick {tick}"));
+        }
+        let lambda = world.constraint(hinge).unwrap().total_lambda_position();
+        assert!(
+            f3(lambda).iter().all(|value| value.is_finite()),
+            "{lambda:?}"
+        );
+        step_at_both_extremes(&mut world, &[body], &format!("friction, mass {mass}"));
+    }
+}
+
+/// A static anchor and a dynamic sphere of `mass` at the origin joined by `settings`.
+fn joined_sphere<S: ConstraintSettings>(
+    mass: f32,
+    settings: &S,
+) -> (
+    PhysicsWorld,
+    BodyId,
+    Result<ConstraintId<S::Kind>, ConstraintError>,
+) {
+    let mut world = empty_world();
+    let anchor = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(0.0, 5.0, 0.0)),
+        )
+        .unwrap();
+    let body = world
+        .create_body(&sphere(), &BodySettings::new_dynamic().mass(mass))
+        .unwrap();
+    let id = world.create_constraint(anchor, body, settings);
+    (world, body, id)
+}
+
+/// As [`joined_sphere`], with a kinematic sphere: without a dynamic body no lever-arm check
+/// applies, so only the settings' own ranges decide.
+fn joined_kinematic_sphere<S: ConstraintSettings>(
+    settings: &S,
+) -> Result<ConstraintId<S::Kind>, ConstraintError> {
+    let mut world = empty_world();
+    let anchor = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(0.0, 5.0, 0.0)),
+        )
+        .unwrap();
+    let body = world
+        .create_body(&sphere(), &BodySettings::new_kinematic())
+        .unwrap();
+    world.create_constraint(anchor, body, settings)
+}
+
+/// Two dynamic spheres of 1 kg, 3 m apart along x, joined by `settings`: gears, racks and
+/// pinions and pulleys need two dynamic bodies.
+fn coupled_spheres<S: ConstraintSettings>(
+    settings: &S,
+) -> Result<ConstraintId<S::Kind>, ConstraintError> {
+    let mut world = empty_world();
+    let [first, second] = [0.0, 3.0].map(|x| {
+        world
+            .create_body(
+                &sphere(),
+                &BodySettings::new_dynamic().position(RVec3::new(x, 0.0, 0.0)),
+            )
+            .unwrap()
+    });
+    world.create_constraint(first, second, settings)
+}
+
+const AXIS_X: Vec3 = Vec3::new(1.0, 0.0, 0.0);
+const AXIS_Y: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+
+#[test]
+fn slider_cone_swing_twist_and_six_dof_targets_are_bounded() {
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let speed = limits::MAX_LINEAR_VELOCITY;
+    let spin = limits::MAX_ANGULAR_VELOCITY;
+    let slider = || SliderConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y);
+    for (min, max) in [(-extent, extent), (0.0, extent), (-extent, 0.0)] {
+        assert!(joined_sphere(1.0, &slider().limits(min, max)).2.is_ok());
+    }
+    for (min, max) in [
+        (-extent.next_up(), 0.0),
+        (0.0, extent.next_up()),
+        (0.1, 1.0),
+    ] {
+        assert!(constraint_invalid(
+            joined_sphere(1.0, &slider().limits(min, max)).2
+        ));
+    }
+    let (mut world, _, id) = joined_sphere(1.0, &slider());
+    let mut slider = world.constraint_mut(id.unwrap()).unwrap();
+    for position in [extent, -extent] {
+        assert!(slider.set_target_position(position).is_ok());
+    }
+    for position in [extent.next_up(), (-extent).next_down(), f32::NAN] {
+        assert!(constraint_invalid(slider.set_target_position(position)));
+    }
+    for velocity in [speed, -speed] {
+        assert!(slider.set_target_velocity(velocity).is_ok());
+    }
+    for velocity in [speed.next_up(), (-speed).next_down()] {
+        assert!(constraint_invalid(slider.set_target_velocity(velocity)));
+    }
+    assert!(slider.set_limits(Some((-extent, extent))).is_ok());
+    assert!(constraint_invalid(
+        slider.set_limits(Some((-extent, extent.next_up())))
+    ));
+    assert!(slider.set_limits(None).is_ok());
+
+    let cone = |angle| ConeConstraintSettings::new(RVec3::ZERO, AXIS_X, angle);
+    for angle in [0.0, PI] {
+        assert!(joined_sphere(1.0, &cone(angle)).2.is_ok());
+    }
+    for angle in [-1.0e-6, PI.next_up(), f32::NAN] {
+        assert!(constraint_invalid(joined_sphere(1.0, &cone(angle)).2));
+    }
+    let (mut world, _, id) = joined_sphere(1.0, &cone(0.5));
+    let mut cone = world.constraint_mut(id.unwrap()).unwrap();
+    assert!(cone.set_half_cone_angle(PI).is_ok());
+    assert!(constraint_invalid(cone.set_half_cone_angle(PI.next_up())));
+
+    let rotation_bound = |set: &mut dyn FnMut(Quat) -> Result<(), ConstraintError>| {
+        assert!(set(Quat::from_xyzw(0.0, 0.6, 0.0, 0.8)).is_ok());
+        assert!(constraint_invalid(set(Quat::from_xyzw(
+            0.0, 0.6, 0.0, 0.81
+        ))));
+        assert!(constraint_invalid(set(Quat::from_xyzw(
+            f32::NAN,
+            0.0,
+            0.0,
+            1.0
+        ))));
+    };
+    let swing_twist = SwingTwistConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y)
+        .half_cone_angles(1.0, 1.0)
+        .twist_limits(-1.0, 1.0);
+    let (mut world, _, id) = joined_sphere(1.0, &swing_twist);
+    let mut joint = world.constraint_mut(id.unwrap()).unwrap();
+    for velocity in on_axes(spin) {
+        assert!(joint.set_target_angular_velocity_cs(velocity).is_ok());
+    }
+    for velocity in on_axes(spin.next_up()) {
+        assert!(constraint_invalid(
+            joint.set_target_angular_velocity_cs(velocity)
+        ));
+    }
+    rotation_bound(&mut |q| joint.set_target_orientation_cs(q));
+
+    let (mut world, _, id) = joined_sphere(1.0, &SixDofConstraintSettings::default());
+    let mut joint = world.constraint_mut(id.unwrap()).unwrap();
+    for velocity in on_axes(speed) {
+        assert!(joint.set_target_velocity_cs(velocity).is_ok());
+    }
+    for velocity in on_axes(speed.next_up()) {
+        assert!(constraint_invalid(joint.set_target_velocity_cs(velocity)));
+    }
+    for velocity in on_axes(spin) {
+        assert!(joint.set_target_angular_velocity_cs(velocity).is_ok());
+    }
+    for velocity in on_axes(spin.next_up()) {
+        assert!(constraint_invalid(
+            joint.set_target_angular_velocity_cs(velocity)
+        ));
+    }
+    for position in on_axes(extent) {
+        assert!(joint.set_target_position_cs(position).is_ok());
+    }
+    for position in on_axes(extent.next_up()) {
+        assert!(constraint_invalid(joint.set_target_position_cs(position)));
+    }
+    rotation_bound(&mut |q| joint.set_target_orientation_cs(q));
+}
+
+#[test]
+fn slider_swing_twist_and_six_dof_motor_springs_are_bounded() {
+    // As in `world_constraint_springs_are_bounded_by_the_bodies_effective_mass`, for the motor
+    // setters of the other driven kinds.
+    let mass = limits::MAX_MASS;
+    let bound = 1.0 / f64::from(1.0 / mass);
+    let fits = |frequency: f32| {
+        let omega = 2.0 * std::f64::consts::PI * f64::from(frequency);
+        bound * omega * omega <= f64::from(limits::MAX_SPRING_COEFFICIENT)
+    };
+    let mut frequency = ((f64::from(limits::MAX_SPRING_COEFFICIENT) / bound).sqrt()
+        / (2.0 * std::f64::consts::PI)) as f32;
+    while !fits(frequency) {
+        frequency = frequency.next_down();
+    }
+    while fits(frequency.next_up()) {
+        frequency = frequency.next_up();
+    }
+    let motor = |frequency| {
+        MotorSettings::default().spring(SpringSettings::FrequencyAndDamping {
+            frequency,
+            damping: 0.0,
+        })
+    };
+    let check = |set: &mut dyn FnMut(MotorSettings) -> Result<(), ConstraintError>| {
+        assert!(set(motor(frequency)).is_ok());
+        assert!(constraint_invalid(set(motor(frequency.next_up()))));
+    };
+
+    let slider = SliderConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y);
+    assert!(joined_sphere(mass, &slider.clone().motor(motor(frequency)))
+        .2
+        .is_ok());
+    assert!(constraint_invalid(
+        joined_sphere(mass, &slider.clone().motor(motor(frequency.next_up()))).2
+    ));
+    let (mut world, _, id) = joined_sphere(mass, &slider);
+    let mut slider = world.constraint_mut(id.unwrap()).unwrap();
+    check(&mut |m| slider.set_motor_settings(m));
+
+    let (mut world, _, id) = joined_sphere(mass, &SwingTwistConstraintSettings::default());
+    let mut joint = world.constraint_mut(id.unwrap()).unwrap();
+    check(&mut |m| joint.set_swing_motor_settings(m));
+    check(&mut |m| joint.set_twist_motor_settings(m));
+
+    let (mut world, _, id) = joined_sphere(mass, &SixDofConstraintSettings::default());
+    let mut joint = world.constraint_mut(id.unwrap()).unwrap();
+    for axis in [
+        SixDofConstraintAxis::TranslationX,
+        SixDofConstraintAxis::RotationZ,
+    ] {
+        check(&mut |m| joint.set_motor_settings(axis, m));
+    }
+}
+
+#[test]
+fn slider_and_swing_twist_friction_at_f32_max_steps_finitely() {
+    // As for the hinge: a slider sliding and a swing-twist joint spinning at the velocity
+    // bounds, with unlimited friction, on bodies of both mass extremes.
+    for mass in [limits::MIN_MASS, limits::MAX_MASS] {
+        let slider =
+            SliderConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y).max_friction_force(f32::MAX);
+        let (mut world, body, id) = joined_sphere(mass, &slider);
+        world
+            .constraint_mut(id.unwrap())
+            .unwrap()
+            .set_max_friction_force(f32::MAX)
+            .unwrap();
+        world
+            .body_mut(body)
+            .unwrap()
+            .set_linear_velocity(Vec3::new(limits::MAX_LINEAR_VELOCITY, 0.0, 0.0))
+            .unwrap();
+        for tick in 0..120 {
+            let _ = world.step(DT).unwrap();
+            assert_body_finite(&world, body, &format!("slider, mass {mass}, tick {tick}"));
+        }
+        step_at_both_extremes(&mut world, &[body], &format!("slider, mass {mass}"));
+
+        let joint = SwingTwistConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y)
+            .twist_limits(-PI, PI)
+            .max_friction_torque(f32::MAX);
+        let (mut world, body, id) = joined_sphere(mass, &joint);
+        world
+            .constraint_mut(id.unwrap())
+            .unwrap()
+            .set_max_friction_torque(f32::MAX)
+            .unwrap();
+        world
+            .body_mut(body)
+            .unwrap()
+            .set_angular_velocity(Vec3::new(limits::MAX_ANGULAR_VELOCITY, 0.0, 0.0))
+            .unwrap();
+        for tick in 0..120 {
+            let _ = world.step(DT).unwrap();
+            assert_body_finite(
+                &world,
+                body,
+                &format!("swing-twist, mass {mass}, tick {tick}"),
+            );
+        }
+        step_at_both_extremes(&mut world, &[body], &format!("swing-twist, mass {mass}"));
+    }
+}
+
+#[test]
+fn coupling_ratios_are_bounded() {
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let max = limits::MAX_RATIO;
+    let min = 1.0 / limits::MAX_RATIO;
+    let gear = |ratio| GearConstraintSettings::new(z, z, ratio);
+    let rack = |ratio| RackAndPinionConstraintSettings::new(z, AXIS_X, ratio);
+    // A gear's ratio is between 1 and its own bound (see `GearConstraintSettings`).
+    let gear_max = limits::MAX_GEAR_RATIO;
+    for ratio in [1.0, gear_max] {
+        assert!(coupled_spheres(&gear(ratio)).is_ok());
+    }
+    for ratio in [
+        1.0_f32.next_down(),
+        gear_max.next_up(),
+        max,
+        0.5,
+        -1.0,
+        -2.0,
+        f32::NAN,
+    ] {
+        assert!(constraint_invalid(coupled_spheres(&gear(ratio))));
+    }
+    for ratio in [max, -max, min, -min] {
+        assert!(coupled_spheres(&rack(ratio)).is_ok());
+    }
+    for ratio in [
+        max.next_up(),
+        -max.next_up(),
+        min.next_down(),
+        0.0,
+        f32::NAN,
+    ] {
+        assert!(constraint_invalid(coupled_spheres(&rack(ratio))));
+    }
+    // Teeth give Jolt's ratios; zero teeth or a rack length out of range give none.
+    assert!(coupled_spheres(&gear(1.0).teeth(10, 30)).is_ok());
+    for (teeth1, teeth2) in [(0, 30), (30, 10), (1, 11)] {
+        assert!(constraint_invalid(coupled_spheres(
+            &gear(1.0).teeth(teeth1, teeth2)
+        )));
+    }
+    assert!(coupled_spheres(&rack(1.0).teeth(20, 1.0, 10)).is_ok());
+    for (teeth, length) in [
+        (0, 1.0),
+        (20, 0.0),
+        (20, limits::MAX_SHAPE_EXTENT.next_up()),
+    ] {
+        assert!(constraint_invalid(coupled_spheres(
+            &rack(1.0).teeth(teeth, length, 10)
+        )));
+    }
+}
+
+/// A static base far away and three spheres hinged to it about z at x = 0 and 3 and held on a
+/// slider along x at x = -3, of masses `masses`.
+fn coupling_scene(
+    masses: [f32; 3],
+) -> (
+    PhysicsWorld,
+    [BodyId; 3],
+    [ConstraintId<HingeConstraint>; 2],
+    ConstraintId<SliderConstraint>,
+) {
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let mut world = empty_world();
+    let base = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(0.0, -10.0, 0.0)),
+        )
+        .unwrap();
+    let xs = [0.0, 3.0, -3.0];
+    let bodies = [0, 1, 2].map(|i| {
+        world
+            .create_body(
+                &sphere(),
+                &BodySettings::new_dynamic()
+                    .mass(masses[i])
+                    .position(RVec3::new(xs[i], 0.0, 0.0)),
+            )
+            .unwrap()
+    });
+    let hinges = [0, 1].map(|i| {
+        world
+            .create_constraint(
+                base,
+                bodies[i],
+                &HingeConstraintSettings::new(RVec3::new(xs[i], 0.0, 0.0), z, AXIS_X),
+            )
+            .unwrap()
+    });
+    let slider = world
+        .create_constraint(
+            base,
+            bodies[2],
+            &SliderConstraintSettings::new(RVec3::new(-3.0, 0.0, 0.0), AXIS_X, AXIS_Y),
+        )
+        .unwrap();
+    (world, bodies, hinges, slider)
+}
+
+/// Steps 120 ticks and then both time step extremes, checking `bodies` finite.
+fn step_coupling(world: &mut PhysicsWorld, bodies: &[BodyId], what: &str) {
+    for tick in 0..120 {
+        let _ = world.step(DT).unwrap();
+        for &id in bodies {
+            assert_body_finite(world, id, &format!("{what}, tick {tick}"));
+        }
+    }
+    step_at_both_extremes(world, bodies, what);
+}
+
+#[test]
+fn ratios_at_the_bound_step_finitely() {
+    // Gears and racks and pinions at their ratio bounds between bodies of both mass extremes,
+    // one of the coupled bodies spinning at the angular velocity bound.
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let spin = Vec3::new(0.0, 0.0, limits::MAX_ANGULAR_VELOCITY);
+    let masses = [limits::MIN_MASS, limits::MAX_MASS];
+    for mass1 in masses {
+        for mass2 in masses {
+            for spun in [0, 1] {
+                for ratio in [1.0, limits::MAX_GEAR_RATIO] {
+                    let (mut world, bodies, hinges, _) = coupling_scene([mass1, mass2, mass2]);
+                    world
+                        .create_constraint(
+                            bodies[0],
+                            bodies[1],
+                            &GearConstraintSettings::new(z, z, ratio).hinges(hinges[0], hinges[1]),
+                        )
+                        .unwrap();
+                    world
+                        .body_mut(bodies[spun])
+                        .unwrap()
+                        .set_angular_velocity(spin)
+                        .unwrap();
+                    let what = format!("gear {ratio}, masses {mass1} {mass2}, body {spun} spun");
+                    step_coupling(&mut world, &bodies[..2], &what);
+                }
+                let max = limits::MAX_RATIO;
+                for ratio in [max, -max, 1.0 / max, -1.0 / max] {
+                    let (mut world, bodies, hinges, slider) = coupling_scene([mass1, mass2, mass2]);
+                    world
+                        .create_constraint(
+                            bodies[0],
+                            bodies[2],
+                            &RackAndPinionConstraintSettings::new(z, AXIS_X, ratio)
+                                .constraints(hinges[0], slider),
+                        )
+                        .unwrap();
+                    let driven = if spun == 0 { bodies[0] } else { bodies[2] };
+                    let mut body = world.body_mut(driven).unwrap();
+                    if spun == 0 {
+                        body.set_angular_velocity(spin).unwrap();
+                    } else {
+                        body.set_linear_velocity(Vec3::new(limits::MAX_LINEAR_VELOCITY, 0.0, 0.0))
+                            .unwrap();
+                    }
+                    let what = format!("rack {ratio}, masses {mass1} {mass2}, body {spun} driven");
+                    step_coupling(&mut world, &[bodies[0], bodies[2]], &what);
+                }
+            }
+        }
+    }
+}
+
+/// A pulley between two dynamic spheres of `masses` hanging 3 m below their fixed points.
+fn pulley_pair(
+    gravity: Vec3,
+    masses: [f32; 2],
+    settings: impl Fn(PulleyConstraintSettings) -> PulleyConstraintSettings,
+) -> (
+    PhysicsWorld,
+    [BodyId; 2],
+    Result<ConstraintId<PulleyConstraint>, ConstraintError>,
+) {
+    let mut world = world(gravity, 1);
+    let xs = [-2.0, 2.0];
+    let bodies = [0, 1].map(|i| {
+        world
+            .create_body(
+                &sphere(),
+                &BodySettings::new_dynamic()
+                    .mass(masses[i])
+                    .position(RVec3::new(xs[i], 0.0, 0.0)),
+            )
+            .unwrap()
+    });
+    let pulley = settings(PulleyConstraintSettings::new(
+        RVec3::new(-2.0, 0.0, 0.0),
+        RVec3::new(-2.0, 3.0, 0.0),
+        RVec3::new(2.0, 0.0, 0.0),
+        RVec3::new(2.0, 3.0, 0.0),
+    ));
+    let id = world.create_constraint(bodies[0], bodies[1], &pulley);
+    (world, bodies, id)
+}
+
+#[test]
+fn pulley_ratio_and_lengths_are_bounded() {
+    let max = limits::MAX_RATIO;
+    let min = 1.0 / limits::MAX_RATIO;
+    let create = |settings: &dyn Fn(PulleyConstraintSettings) -> PulleyConstraintSettings| {
+        pulley_pair(Vec3::ZERO, [1.0, 1.0], settings).2
+    };
+    for ratio in [min, max] {
+        assert!(create(&|s| s.ratio(ratio)).is_ok());
+    }
+    for ratio in [min.next_down(), max.next_up(), -1.0, 0.0, f32::NAN] {
+        assert!(constraint_invalid(create(&|s| s.ratio(ratio))));
+    }
+    let longest = 3.0 * limits::MAX_SHAPE_EXTENT;
+    let range = |min, max| PulleyLength::Range { min, max };
+    for (lo, hi) in [(0.0, longest), (longest, longest), (0.0, 0.0)] {
+        assert!(create(&|s| s.ratio(2.0).length(range(lo, hi))).is_ok());
+    }
+    for (lo, hi) in [(0.0, longest.next_up()), (-1.0e-6, 1.0), (2.0, 1.0)] {
+        assert!(constraint_invalid(create(&|s| s
+            .ratio(2.0)
+            .length(range(lo, hi)))));
+    }
+    // Fixed points are world points under the frame rule, like body points.
+    for point in real_on_axes(limits::MAX_POSITION.next_up()) {
+        assert!(constraint_invalid(create(&|_| {
+            PulleyConstraintSettings::new(
+                RVec3::new(-2.0, 0.0, 0.0),
+                point,
+                RVec3::new(2.0, 0.0, 0.0),
+                RVec3::new(2.0, 3.0, 0.0),
+            )
+        })));
+    }
+
+    let (mut world, _, id) = pulley_pair(Vec3::ZERO, [1.0, 1.0], |s| s.ratio(2.0));
+    let mut pulley = world.constraint_mut(id.unwrap()).unwrap();
+    assert!(pulley.set_length(0.0, longest).is_ok());
+    assert!(pulley.set_length(longest, longest).is_ok());
+    for (lo, hi) in [(0.0, longest.next_up()), (-1.0e-6, 1.0), (2.0, 1.0)] {
+        assert!(constraint_invalid(pulley.set_length(lo, hi)));
+    }
+}
+
+#[test]
+fn pulleys_at_the_ratio_bound_step_finitely() {
+    let gravity = Vec3::new(0.0, -9.81, 0.0);
+    let masses = [limits::MIN_MASS, limits::MAX_MASS];
+    for ratio in [limits::MAX_RATIO, 1.0 / limits::MAX_RATIO] {
+        for mass1 in masses {
+            for mass2 in masses {
+                let (mut world, bodies, id) =
+                    pulley_pair(gravity, [mass1, mass2], |s| s.ratio(ratio));
+                id.unwrap();
+                let what = format!("pulley {ratio}, masses {mass1} {mass2}");
+                step_coupling(&mut world, &bodies, &what);
+            }
+        }
+    }
+}
+
+/// A dynamic cube of half extent `half` and `mass` at `position`.
+fn cube(world: &mut PhysicsWorld, half: f32, mass: f32, position: RVec3) -> BodyId {
+    world
+        .create_body(
+            &Shape::new_box(Vec3::new(half, half, half)).unwrap(),
+            &BodySettings::new_dynamic().mass(mass).position(position),
+        )
+        .unwrap()
+}
+
+/// The lever at which a cube of half extent `half` has the lever-arm ratio `ratio`: a cube's
+/// ratio is `2 · |r|² / k²` with `k² = (2 · half)² / 6`.
+fn cube_lever(half: f32, ratio: f32) -> f32 {
+    let k_squared = (2.0 * half) * (2.0 * half) / 6.0;
+    (ratio * k_squared / 2.0).sqrt()
+}
+
+/// `direction` scaled to `length`, as a position.
+fn at(direction: Vec3, length: f32) -> RVec3 {
+    let unit = length
+        / (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+            .sqrt();
+    RVec3::new(
+        Real::from(direction.x * unit),
+        Real::from(direction.y * unit),
+        Real::from(direction.z * unit),
+    )
+}
+
+#[test]
+fn lever_arms_are_bounded_by_the_bodies_size() {
+    let bound = limits::MAX_LEVER_ARM_RATIO;
+    let lever = cube_lever(0.5, bound);
+    let below = lever * 0.999;
+    let above = lever * 1.001;
+    let directions = [AXIS_X, Vec3::new(0.0, -1.0, 0.0), Vec3::new(1.0, 1.0, -1.0)];
+
+    // A point in world space on a 1 kg, 1 m cube held by a static anchor, in several
+    // directions; the anchor itself is not checked.
+    let mut world = empty_world();
+    let anchor = world
+        .create_body(&sphere(), &BodySettings::new_static())
+        .unwrap();
+    let body = cube(&mut world, 0.5, 1.0, RVec3::new(0.0, 0.0, 0.0));
+    for direction in directions {
+        let id = world
+            .create_constraint(
+                anchor,
+                body,
+                &PointConstraintSettings::new(at(direction, below)),
+            )
+            .unwrap();
+        world.remove_constraint(id).unwrap();
+        assert!(constraint_invalid(world.create_constraint(
+            anchor,
+            body,
+            &PointConstraintSettings::new(at(direction, above))
+        )));
+    }
+    // The same in the bodies' own frames, on a turned body: the ratio does not depend on the
+    // frame.
+    let turned = world
+        .create_body(
+            &Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap(),
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(0.0, 30.0, 0.0))
+                .rotation(Quat::from_xyzw(0.0, 0.6, 0.0, 0.8)),
+        )
+        .unwrap();
+    let local = |length: f32| {
+        let point = at(Vec3::new(1.0, 2.0, 3.0), length);
+        HingeConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y)
+            .space(ConstraintSpace::LocalToBodyCom)
+            .frame2(point, AXIS_X, AXIS_Y)
+    };
+    let id = world
+        .create_constraint(anchor, turned, &local(below))
+        .unwrap();
+    world.remove_constraint(id).unwrap();
+    assert!(constraint_invalid(world.create_constraint(
+        anchor,
+        turned,
+        &local(above)
+    )));
+    // A rod held at its end has a ratio of 6 at any length.
+    let rod = world
+        .create_body(
+            &Shape::new_box(Vec3::new(0.02, 1000.0, 0.02)).unwrap(),
+            &BodySettings::new_dynamic().position(RVec3::new(0.0, -1000.0, 50.0)),
+        )
+        .unwrap();
+    world
+        .create_constraint(
+            anchor,
+            rod,
+            &HingeConstraintSettings::new(RVec3::new(0.0, 0.0, 50.0), AXIS_X, AXIS_Y),
+        )
+        .unwrap();
+
+    // An automatic point is where Jolt puts it: between the centres of mass, weighted by inverse
+    // mass towards the lighter body, kinematic bodies included. A 1 kg, 1 m cube, dynamic or
+    // kinematic, welded to a dynamic 1000 kg, 4 m cube holds the large cube at 1000/1001 of the
+    // distance between them, which its ratio bounds.
+    let weld = FixedConstraintSettings::default().auto_detect_point();
+    let reach = cube_lever(2.0, bound) * 1.001;
+    for light_settings in [BodySettings::new_dynamic(), BodySettings::new_kinematic()] {
+        for (distance, accepted) in [(reach * 0.999, true), (reach * 1.001, false)] {
+            let mut world = empty_world();
+            let light = world
+                .create_body(
+                    &Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap(),
+                    &light_settings.clone().mass(1.0),
+                )
+                .unwrap();
+            let heavy = cube(&mut world, 2.0, 1000.0, at(AXIS_X, distance));
+            let result = world.create_constraint(light, heavy, &weld);
+            assert_eq!(result.is_ok(), accepted, "{distance}: {result:?}");
+        }
+    }
+    // A 10 g, 6 cm part welded 3 cm from a 1000 kg cube is held at its own centre.
+    for half in [0.5, 1.0, 2.0] {
+        let mut world = empty_world();
+        let big = cube(&mut world, half, 1000.0, RVec3::ZERO);
+        let part = cube(&mut world, 0.03, 0.01, at(AXIS_X, half + 0.06));
+        world.create_constraint(big, part, &weld).unwrap();
+    }
+    // Next to a static body it is the dynamic body's centre of mass.
+    let far = cube(&mut world, 0.5, 1.0, RVec3::new(4000.0, 0.0, 0.0));
+    world.create_constraint(anchor, far, &weld).unwrap();
+
+    // A path holds body 1 anywhere along it: a path reaching beyond the bound from a dynamic
+    // platform is refused, one within it accepted; body 2 sits at the path's start.
+    let path = |length: f32| {
+        PathConstraintSettings::new(
+            HermitePath::new(
+                Vec3::new(0.0, 0.0, 1.0),
+                vec![
+                    path_point([0.0, 0.0, 0.0], [length, 0.0, 0.0]),
+                    path_point([length, 0.0, 0.0], [length, 0.0, 0.0]),
+                ],
+                false,
+            )
+            .unwrap(),
+        )
+    };
+    for (length, accepted) in [(below * 0.7, true), (above, false)] {
+        let mut world = empty_world();
+        let platform = cube(&mut world, 0.5, 1.0, RVec3::ZERO);
+        let car = cube(&mut world, 0.1, 1.0, RVec3::ZERO);
+        let result = world.create_constraint(platform, car, &path(length));
+        assert_eq!(result.is_ok(), accepted, "{length}: {result:?}");
+    }
+}
+
+#[test]
+fn far_and_light_constraint_points_are_refused() {
+    // The three scenes in which a far point drove Jolt to a non-finite velocity in a release
+    // build or to a failed assertion with the `asserts` feature.
+    // Two 1 kg, 1 m cubes joined 4000 m away (ratio 1.9e8).
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let first = cube(&mut world, 0.5, 1.0, RVec3::ZERO);
+    let second = cube(&mut world, 0.5, 1.0, RVec3::new(2.0, 0.0, 0.0));
+    assert!(constraint_invalid(world.create_constraint(
+        first,
+        second,
+        &PointConstraintSettings::new(RVec3::new(2400.0, 3200.0, 0.0))
+    )));
+    // A 1 g, 6 cm cube hinged 116 m away to a 1000 kg plate (4.5e7).
+    let plate = world
+        .create_body(
+            &Shape::new_box(Vec3::new(0.5, 0.05, 0.5)).unwrap(),
+            &BodySettings::new_dynamic()
+                .mass(1000.0)
+                .position(RVec3::new(0.0, 20.0, 0.0)),
+        )
+        .unwrap();
+    let light = cube(
+        &mut world,
+        0.03,
+        limits::MIN_MASS,
+        RVec3::new(2.250432, 21.509048, -2.93712),
+    );
+    let hinge = HingeConstraintSettings::new(
+        RVec3::new(-96.0364, 77.2034, 37.558807),
+        Vec3::new(0.8384718, 0.37976828, -0.39082107),
+        Vec3::new(0.5449333, -0.57961416, 0.6058838),
+    );
+    assert!(constraint_invalid(
+        world.create_constraint(plate, light, &hinge)
+    ));
+    // A weld 3 m from a 1 g and 1.2 m from a 10 g cube of 6 cm (3.2e4 and 4400).
+    let heavier = cube(&mut world, 0.03, 0.01, RVec3::new(0.0, 40.0, 0.0));
+    let lighter = cube(
+        &mut world,
+        0.03,
+        limits::MIN_MASS,
+        RVec3::new(0.5571059, 42.71482, -2.755086),
+    );
+    let weld = FixedConstraintSettings::new(
+        RVec3::new(0.68242, 40.884994, -0.28849602),
+        Vec3::new(0.63742137, 0.31528664, 0.70305645),
+        Vec3::new(0.52797884, -0.8432883, -0.10051466),
+    );
+    assert!(constraint_invalid(
+        world.create_constraint(heavier, lighter, &weld)
+    ));
+    assert_eq!(world.constraint_count(), 0);
+}
+
+/// `direction` scaled to `length`.
+fn scaled(direction: Vec3, length: f32) -> Vec3 {
+    let unit = length
+        / (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+            .sqrt();
+    Vec3::new(direction.x * unit, direction.y * unit, direction.z * unit)
+}
+
+/// Holds a cube of `half` and `mass` at the origin by `settings(point)`, the point `lever`
+/// away: from a static anchor, or from a cube of the same size and ten times the mass on the
+/// far side of the point. The cube moves and spins at the velocity bounds under gravity for
+/// 120 ticks, then steps at both time step extremes.
+fn step_held_cube<S: ConstraintSettings>(
+    what: &str,
+    half: f32,
+    mass: f32,
+    anchored: bool,
+    settings: impl Fn(RVec3) -> S,
+) {
+    let direction = Vec3::new(0.1, 0.65, -0.7);
+    let lever = cube_lever(half, limits::MAX_LEVER_ARM_RATIO * 0.999);
+    let point = at(direction, lever);
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let other = if anchored {
+        world
+            .create_body(
+                &sphere(),
+                &BodySettings::new_static().position(at(direction, 3.0 * lever)),
+            )
+            .unwrap()
+    } else {
+        cube(&mut world, half, mass * 10.0, at(direction, 2.0 * lever))
+    };
+    let held = cube(&mut world, half, mass, RVec3::ZERO);
+    world
+        .create_constraint(other, held, &settings(point))
+        .unwrap();
+    let mut body = world.body_mut(held).unwrap();
+    body.set_linear_velocity(scaled(
+        Vec3::new(-0.45542818, 0.78363067, 0.42250222),
+        limits::MAX_LINEAR_VELOCITY * 0.999,
+    ))
+    .unwrap();
+    body.set_angular_velocity(scaled(
+        Vec3::new(-0.59818655, -0.4488059, 0.6638871),
+        limits::MAX_ANGULAR_VELOCITY * 0.999,
+    ))
+    .unwrap();
+    let what = format!("{what}, cube of {half} m and {mass} kg");
+    for tick in 0..120 {
+        let _ = world.step(DT).unwrap();
+        for id in [other, held] {
+            assert_body_finite(&world, id, &format!("{what}, tick {tick}"));
+        }
+    }
+    step_at_both_extremes(&mut world, &[other, held], &what);
+}
+
+#[test]
+fn constraints_at_the_lever_arm_bound_step_finitely() {
+    let axis = Vec3::new(0.63742137, 0.31528664, 0.70305645);
+    let normal = Vec3::new(0.52797884, -0.8432883, -0.10051466);
+    let locked = |point| {
+        let mut settings = SixDofConstraintSettings::new(point, axis, normal);
+        for which in [
+            SixDofConstraintAxis::TranslationX,
+            SixDofConstraintAxis::TranslationY,
+            SixDofConstraintAxis::TranslationZ,
+            SixDofConstraintAxis::RotationX,
+            SixDofConstraintAxis::RotationY,
+            SixDofConstraintAxis::RotationZ,
+        ] {
+            settings = settings.axis(which, SixDofAxis::Fixed);
+        }
+        settings
+    };
+    for (half, mass) in [(0.03, limits::MIN_MASS), (0.5, 1.0)] {
+        step_held_cube("ball joint", half, mass, true, PointConstraintSettings::new);
+        step_held_cube("hinge", half, mass, true, |p| {
+            HingeConstraintSettings::new(p, axis, normal)
+        });
+        for anchored in [true, false] {
+            step_held_cube("weld", half, mass, anchored, |p| {
+                FixedConstraintSettings::new(p, axis, normal)
+            });
+            step_held_cube("locked six-DOF joint", half, mass, anchored, locked);
+            step_held_cube(
+                "swing-twist joint with zero ranges",
+                half,
+                mass,
+                anchored,
+                |p| SwingTwistConstraintSettings::new(p, axis, normal),
+            );
+        }
+    }
+}
+
+fn path_point(position: [f32; 3], tangent: [f32; 3]) -> HermitePathPoint {
+    HermitePathPoint {
+        position: Vec3::from(position),
+        tangent: Vec3::from(tangent),
+    }
+}
+
+/// A straight path of one segment of `length` metres along x, in the plane of normal z.
+fn straight_path(start: f32, length: f32) -> Result<HermitePath, ConstraintError> {
+    HermitePath::new(
+        Vec3::new(0.0, 0.0, 1.0),
+        vec![
+            path_point([start, 0.0, 0.0], [length, 0.0, 0.0]),
+            path_point([start + length, 0.0, 0.0], [length, 0.0, 0.0]),
+        ],
+        false,
+    )
+}
+
+#[test]
+fn path_inputs_are_bounded() {
+    let extent = limits::MAX_SHAPE_EXTENT;
+    // Positions and tangents within the extent.
+    assert!(straight_path(extent - 1.0, 1.0).is_ok());
+    assert!(constraint_invalid(straight_path(extent, 1.0)));
+    assert!(straight_path(0.0, extent).is_ok());
+    assert!(constraint_invalid(straight_path(0.0, extent.next_up())));
+
+    let path = straight_path(0.0, 1.0).unwrap();
+    let settings = |f: &dyn Fn(PathConstraintSettings) -> PathConstraintSettings| {
+        f(PathConstraintSettings::new(path.clone()))
+    };
+    // A kinematic body, so that the lever-arm check does not decide.
+    let create = |settings: PathConstraintSettings| joined_kinematic_sphere(&settings);
+    for offset in on_axes(extent) {
+        assert!(create(settings(&|s| s.path_position(offset))).is_ok());
+    }
+    for offset in on_axes(extent.next_up()) {
+        assert!(constraint_invalid(create(settings(
+            &|s| s.path_position(offset)
+        ))));
+    }
+    assert!(constraint_invalid(create(settings(&|s| {
+        s.path_rotation(Quat::from_xyzw(0.0, 0.6, 0.0, 0.81))
+    }))));
+    for fraction in [0.0, 1.0] {
+        assert!(create(settings(&|s| s.path_fraction(fraction))).is_ok());
+    }
+    for fraction in [-1.0e-6, 1.0_f32.next_up(), f32::NAN] {
+        assert!(constraint_invalid(create(settings(
+            &|s| s.path_fraction(fraction)
+        ))));
+    }
+    assert!(constraint_invalid(create(settings(
+        &|s| s.max_friction_force(-1.0)
+    ))));
+
+    let (mut world, _, id) = joined_sphere(1.0, &PathConstraintSettings::new(path.clone()));
+    let id = id.unwrap();
+    let reading = world.constraint(id).unwrap();
+    assert!(reading
+        .closest_fraction(Vec3::new(extent, 0.0, 0.0), 0.0)
+        .is_ok());
+    assert!(constraint_invalid(
+        reading.closest_fraction(Vec3::new(extent.next_up(), 0.0, 0.0), 0.0)
+    ));
+    assert!(constraint_invalid(
+        reading.closest_fraction(Vec3::ZERO, f32::NAN)
+    ));
+    let mut motor = world.constraint_mut(id).unwrap();
+    let speed = limits::MAX_LINEAR_VELOCITY;
+    for velocity in [speed, -speed] {
+        assert!(motor.set_target_velocity(velocity).is_ok());
+    }
+    for velocity in [speed.next_up(), (-speed).next_down()] {
+        assert!(constraint_invalid(motor.set_target_velocity(velocity)));
+    }
+    for fraction in [0.0, 1.0] {
+        assert!(motor.set_target_path_fraction(fraction).is_ok());
+    }
+    for fraction in [-1.0e-6, 1.0_f32.next_up()] {
+        assert!(constraint_invalid(motor.set_target_path_fraction(fraction)));
+    }
+    assert!(constraint_invalid(motor.set_max_friction_force(f32::NAN)));
+}
+
+#[test]
+fn path_motor_springs_and_friction_are_bounded() {
+    // As in `world_constraint_springs_are_bounded_by_the_bodies_effective_mass`.
+    let mass = limits::MAX_MASS;
+    let bound = 1.0 / f64::from(1.0 / mass);
+    let fits = |frequency: f32| {
+        let omega = 2.0 * std::f64::consts::PI * f64::from(frequency);
+        bound * omega * omega <= f64::from(limits::MAX_SPRING_COEFFICIENT)
+    };
+    let mut frequency = ((f64::from(limits::MAX_SPRING_COEFFICIENT) / bound).sqrt()
+        / (2.0 * std::f64::consts::PI)) as f32;
+    while !fits(frequency) {
+        frequency = frequency.next_down();
+    }
+    while fits(frequency.next_up()) {
+        frequency = frequency.next_up();
+    }
+    let motor = |frequency| {
+        MotorSettings::default().spring(SpringSettings::FrequencyAndDamping {
+            frequency,
+            damping: 0.0,
+        })
+    };
+    let path = straight_path(0.0, 1.0).unwrap();
+    let settings = PathConstraintSettings::new(path);
+    assert!(
+        joined_sphere(mass, &settings.clone().position_motor(motor(frequency)))
+            .2
+            .is_ok()
+    );
+    assert!(constraint_invalid(
+        joined_sphere(
+            mass,
+            &settings.clone().position_motor(motor(frequency.next_up()))
+        )
+        .2
+    ));
+    let (mut world, _, id) = joined_sphere(mass, &settings);
+    let mut path = world.constraint_mut(id.unwrap()).unwrap();
+    assert!(path.set_position_motor_settings(motor(frequency)).is_ok());
+    assert!(constraint_invalid(
+        path.set_position_motor_settings(motor(frequency.next_up()))
+    ));
+
+    // Unlimited friction on a body sliding along the path at the velocity bound.
+    for mass in [limits::MIN_MASS, limits::MAX_MASS] {
+        let (mut world, body, id) =
+            joined_sphere(mass, &settings.clone().max_friction_force(f32::MAX));
+        world
+            .constraint_mut(id.unwrap())
+            .unwrap()
+            .set_max_friction_force(f32::MAX)
+            .unwrap();
+        world
+            .body_mut(body)
+            .unwrap()
+            .set_linear_velocity(Vec3::new(limits::MAX_LINEAR_VELOCITY, 0.0, 0.0))
+            .unwrap();
+        step_coupling(&mut world, &[body], &format!("path friction, mass {mass}"));
+    }
 }

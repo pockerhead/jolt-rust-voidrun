@@ -161,6 +161,16 @@
 //! # }
 //! ```
 //!
+//! # Constraints
+//! [`PhysicsWorld::create_constraint`] joins two bodies of a world with a constraint built from
+//! settings: [`FixedConstraintSettings`], [`PointConstraintSettings`],
+//! [`DistanceConstraintSettings`], [`HingeConstraintSettings`], [`SliderConstraintSettings`],
+//! [`ConeConstraintSettings`], [`SwingTwistConstraintSettings`], [`SixDofConstraintSettings`],
+//! [`GearConstraintSettings`], [`RackAndPinionConstraintSettings`], [`PulleyConstraintSettings`]
+//! and [`PathConstraintSettings`]. The world owns the constraint; the returned [`ConstraintId`]
+//! is typed by the kind, which selects the motor, target, limit and readout methods of
+//! [`ConstraintRef`] and [`ConstraintMut`]. A body cannot be removed while a constraint uses it.
+//!
 //! # Threads
 //! Changing a world, including [`PhysicsWorld::step`], takes `&mut PhysicsWorld`; reading it
 //! takes `&PhysicsWorld`. `PhysicsWorld` is `Send` and `Sync`, so many threads may read one
@@ -235,14 +245,22 @@ pub use character::{
     ExtendedUpdateSettings, GroundState, InnerBody,
 };
 pub use constraint::{
-    ConstraintSpace, HingeConstraintSettings, MotorSettings, SixDofAxis, SixDofConstraintAxis,
-    SixDofConstraintSettings, SpringSettings, SwingTwistConstraintSettings, SwingType,
+    AnyConstraintId, ConeConstraint, ConeConstraintSettings, ConstraintId, ConstraintKind,
+    ConstraintMut, ConstraintRef, ConstraintSettings, ConstraintSpace, ConstraintType,
+    DistanceConstraint, DistanceConstraintSettings, DistanceRange, FixedConstraint,
+    FixedConstraintSettings, GearConstraint, GearConstraintSettings, HermitePath, HermitePathPoint,
+    HingeConstraint, HingeConstraintSettings, MotorSettings, MotorState, PathConstraint,
+    PathConstraintSettings, PathRotationConstraint, PointConstraint, PointConstraintSettings,
+    PulleyConstraint, PulleyConstraintSettings, PulleyLength, RackAndPinionConstraint,
+    RackAndPinionConstraintSettings, SixDofAxis, SixDofConstraint, SixDofConstraintAxis,
+    SixDofConstraintSettings, SliderConstraint, SliderConstraintSettings, SpringSettings,
+    SwingTwistConstraint, SwingTwistConstraintSettings, SwingType,
 };
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, QueryError, RagdollError, ShapeError, StepError, VehicleError,
-    WorldError,
+    BodyError, CharacterError, ConstraintError, QueryError, RagdollError, ShapeError, StepError,
+    VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};

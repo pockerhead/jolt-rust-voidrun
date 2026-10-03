@@ -14,6 +14,8 @@
 //! with the couplings that would show a dependence on listener order. The ragdoll pile drops 16
 //! humanoid ragdolls into a pit, in contact with each other from the first tick, so that their
 //! joints and contacts form an island large enough for Jolt to split it for parallel solving.
+//! The constraints scene runs a hinge chain, a motor-driven slider, a gear pair, a pulley and a
+//! path, and removes and re-creates a constraint halfway.
 //!
 //! Each run happens in its own child process (this test binary, running the ignored
 //! `determinism_child` test), so no state leaks between runs; see `common::determinism`.
@@ -698,6 +700,160 @@ fn run_walker(worker_threads: u32) -> Digest {
     digest
 }
 
+/// Ticks of the constraints scene.
+const CONSTRAINT_TICKS: usize = 240;
+/// The tick at which the constraints scene removes its slider and creates it again.
+const CONSTRAINT_EVENT_TICK: usize = 120;
+
+/// The constraints scene: a chain of six hinged links swinging from a static anchor, a slider
+/// driven by a velocity motor, a gear pair driven through its first hinge, a pulley with two
+/// hanging boxes and a box sliding down a path, stepped for 240 ticks. At tick 120 the slider is
+/// removed and created again. Every dynamic body is recorded on every tick.
+fn run_constraints(worker_threads: u32) -> Digest {
+    let x = Vec3::new(1.0, 0.0, 0.0);
+    let y = Vec3::new(0.0, 1.0, 0.0);
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), worker_threads);
+    let small = Shape::new_box(Vec3::new(0.1, 0.1, 0.1)).unwrap();
+    let anchor = |world: &mut PhysicsWorld, at: [f64; 3]| {
+        world
+            .create_body(&small, &BodySettings::new_static().position(rvec3(at)))
+            .unwrap()
+    };
+    let dynamic = |world: &mut PhysicsWorld, shape: &Shape, at: [f64; 3]| {
+        world
+            .create_body(shape, &BodySettings::new_dynamic().position(rvec3(at)))
+            .unwrap()
+    };
+    let mut bodies = Vec::new();
+
+    // The chain: links of 0.8 m along x, each hinged about z to the one before.
+    let link = Shape::new_box(Vec3::new(0.4, 0.05, 0.05)).unwrap();
+    let mut previous = anchor(&mut world, [0.0, 10.0, 0.0]);
+    for i in 0..6 {
+        let left = 0.9 * i as f64;
+        let body = dynamic(&mut world, &link, [left + 0.45, 10.0, 0.0]);
+        world
+            .create_constraint(
+                previous,
+                body,
+                &HingeConstraintSettings::new(rvec3([left, 10.0, 0.0]), z, x),
+            )
+            .unwrap();
+        bodies.push(body);
+        previous = body;
+    }
+
+    // The slider, along x, 10 m in front of the chain.
+    let rail = anchor(&mut world, [0.0, 5.0, 10.0]);
+    let carriage_shape = Shape::new_box(Vec3::new(0.3, 0.1, 0.1)).unwrap();
+    let carriage = dynamic(&mut world, &carriage_shape, [2.0, 5.0, 10.0]);
+    bodies.push(carriage);
+    let slider = SliderConstraintSettings::new(rvec3([2.0, 5.0, 10.0]), x, y);
+    let drive_slider = |world: &mut PhysicsWorld, id: ConstraintId<SliderConstraint>| {
+        let mut motor = world.constraint_mut(id).unwrap();
+        motor.set_target_velocity(1.0).unwrap();
+        motor.set_motor_state(MotorState::Velocity);
+    };
+    let slider_id = world.create_constraint(rail, carriage, &slider).unwrap();
+    drive_slider(&mut world, slider_id);
+
+    // The gear pair, 20 m to the side, without gravity's help: discs about z.
+    let base = anchor(&mut world, [20.0, 0.0, 0.0]);
+    let disc = Shape::new_box(Vec3::new(0.5, 0.5, 0.1)).unwrap();
+    let discs = [20.0, 23.0].map(|cx| dynamic(&mut world, &disc, [cx, 3.0, 0.0]));
+    let hinges = [0, 1].map(|i| {
+        let cx = [20.0, 23.0][i];
+        world
+            .create_constraint(
+                base,
+                discs[i],
+                &HingeConstraintSettings::new(rvec3([cx, 3.0, 0.0]), z, x),
+            )
+            .unwrap()
+    });
+    world
+        .create_constraint(
+            discs[0],
+            discs[1],
+            &GearConstraintSettings::new(z, z, 2.0).hinges(hinges[0], hinges[1]),
+        )
+        .unwrap();
+    let mut motor = world.constraint_mut(hinges[0]).unwrap();
+    motor.set_target_angular_velocity(3.0).unwrap();
+    motor.set_motor_state(MotorState::Velocity);
+    bodies.extend(discs);
+
+    // The pulley, 20 m to the other side.
+    let crate_shape = Shape::new_box(Vec3::new(0.2, 0.2, 0.2)).unwrap();
+    let pair = [(-21.0, 2.0), (-19.0, 1.0)].map(|(px, mass)| {
+        world
+            .create_body(
+                &crate_shape,
+                &BodySettings::new_dynamic()
+                    .mass(mass)
+                    .position(rvec3([px, 2.0, 0.0])),
+            )
+            .unwrap()
+    });
+    world
+        .create_constraint(
+            pair[0],
+            pair[1],
+            &PulleyConstraintSettings::new(
+                rvec3([-21.0, 2.0, 0.0]),
+                rvec3([-21.0, 5.0, 0.0]),
+                rvec3([-19.0, 2.0, 0.0]),
+                rvec3([-19.0, 5.0, 0.0]),
+            ),
+        )
+        .unwrap();
+    bodies.extend(pair);
+
+    // The path: a descending S curve 20 m behind the chain.
+    let point = |position: [f32; 3], tangent: [f32; 3]| HermitePathPoint {
+        position: Vec3::from(position),
+        tangent: Vec3::from(tangent),
+    };
+    let path = HermitePath::new(
+        z,
+        vec![
+            point([0.0, 0.0, 0.0], [1.0, -0.3, 0.0]),
+            point([1.0, -0.3, 0.0], [1.0, -0.5, 0.0]),
+            point([2.0, -0.9, 0.0], [1.0, -0.5, 0.0]),
+            point([3.0, -1.2, 0.0], [1.0, -0.3, 0.0]),
+        ],
+        false,
+    )
+    .unwrap();
+    let track = anchor(&mut world, [0.0, 5.0, -20.0]);
+    let sled = dynamic(&mut world, &small, [0.5, 5.0, -20.0]);
+    world
+        .create_constraint(
+            track,
+            sled,
+            &PathConstraintSettings::new(path).path_position(Vec3::new(0.5, 0.0, 0.0)),
+        )
+        .unwrap();
+    bodies.push(sled);
+
+    let mut digest = Digest::new();
+    let mut slider_id = slider_id;
+    for tick in 0..CONSTRAINT_TICKS {
+        if tick == CONSTRAINT_EVENT_TICK {
+            world.remove_constraint(slider_id).unwrap();
+            slider_id = world.create_constraint(rail, carriage, &slider).unwrap();
+            drive_slider(&mut world, slider_id);
+        }
+        assert!(world.step(DT).unwrap().is_complete());
+        let record = digest.push();
+        for &body in &bodies {
+            record_body(&world, body, &mut record.state);
+        }
+    }
+    digest
+}
+
 #[test]
 #[ignore = "child process of the determinism gates"]
 fn determinism_child() {
@@ -711,6 +867,7 @@ fn determinism_child() {
         "vehicle" => run_vehicle(threads),
         "fleet" => run_fleet(threads, &variant),
         "ragdoll_pile" => run_ragdoll_pile(threads),
+        "constraints" => run_constraints(threads),
         scenario => panic!("unknown scenario {scenario}"),
     };
     finish_child(&digest);
@@ -1346,6 +1503,18 @@ fn vehicle_digest_is_identical_across_thread_counts() {
     assert!(!one_thread.ticks.is_empty());
     assert_same(
         "vehicle route, 1 vs 4 worker threads",
+        &one_thread,
+        &four_threads,
+    );
+}
+
+#[test]
+fn constraint_digest_is_identical_across_thread_counts() {
+    let one_thread = digest_in_child("determinism_child", "constraints", 1, "forward");
+    let four_threads = digest_in_child("determinism_child", "constraints", 4, "forward");
+    assert_eq!(one_thread.ticks.len(), CONSTRAINT_TICKS);
+    assert_same(
+        "constraints, 1 vs 4 worker threads",
         &one_thread,
         &four_threads,
     );

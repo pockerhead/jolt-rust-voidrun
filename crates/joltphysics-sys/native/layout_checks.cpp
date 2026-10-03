@@ -26,6 +26,7 @@
 #include <Jolt/Physics/Constraints/ContactConstraintManager.h>
 #include <Jolt/Physics/Constraints/ConstraintPart/SwingTwistConstraintPart.h>
 #include <Jolt/Physics/Constraints/MotorSettings.h>
+#include <Jolt/Physics/Constraints/PathConstraint.h>
 #include <Jolt/Physics/Constraints/SixDOFConstraint.h>
 #include <Jolt/Physics/Constraints/SpringSettings.h>
 #include <Jolt/Physics/EActivation.h>
@@ -37,6 +38,7 @@
 #include <type_traits>
 
 #include "joltc.h"
+#include "joltc_ext/joltc_ext.h"
 
 #define JOLTPHYSICS_SYS_ASSERT_LAYOUT(T, size, align)                                \
     static_assert(sizeof(T) == (size), #T ": unexpected size");                \
@@ -160,6 +162,18 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, numVelocityStepsOverride, 
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, numPositionStepsOverride, 12);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, drawConstraintSize, 16);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, userData, 24);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_GearConstraintSettings, 64, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_GearConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_GearConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_GearConstraintSettings, hingeAxis1, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_GearConstraintSettings, hingeAxis2, 48);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_GearConstraintSettings, ratio, 60);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_RackAndPinionConstraintSettings, 64, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RackAndPinionConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RackAndPinionConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RackAndPinionConstraintSettings, hingeAxis, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RackAndPinionConstraintSettings, sliderAxis, 48);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RackAndPinionConstraintSettings, ratio, 60);
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_PhysicsSettings, 84, 4);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, maxInFlightBodyPairs, 0);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, stepListenersBatchSize, 4);
@@ -237,6 +251,62 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SixDOFConstraintSettings, limitMin, 164);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SixDOFConstraintSettings, limitMax, 188);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SixDOFConstraintSettings, limitsSpringSettings, 212);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SixDOFConstraintSettings, motorSettings, 248);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_FixedConstraintSettings, 136, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, autoDetectPoint, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, point1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, axisX1, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, axisY1, 76);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, point2, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, axisX2, 112);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, axisY2, 124);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_PointConstraintSettings, 88, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PointConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PointConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PointConstraintSettings, point1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PointConstraintSettings, point2, 64);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_DistanceConstraintSettings, 112, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, point1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, point2, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, minDistance, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, maxDistance, 92);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, limitsSpringSettings, 96);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_SliderConstraintSettings, 192, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, autoDetectPoint, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, point1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, sliderAxis1, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, normalAxis1, 76);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, point2, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, sliderAxis2, 112);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, normalAxis2, 124);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, limitsMin, 136);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, limitsMax, 140);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, limitsSpringSettings, 144);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, maxFrictionForce, 156);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, motorSettings, 160);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ConeConstraintSettings, 120, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, point1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, twistAxis1, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, point2, 80);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, twistAxis2, 104);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, halfConeAngle, 116);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_PulleyConstraintSettings, 152, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, bodyPoint1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, fixedPoint1, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, bodyPoint2, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, fixedPoint2, 112);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, ratio, 136);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, minLength, 140);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, maxLength, 144);
 #else
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_HingeConstraintSettings, 160, 8);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_HingeConstraintSettings, base, 0);
@@ -284,6 +354,62 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SixDOFConstraintSettings, limitMin, 136);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SixDOFConstraintSettings, limitMax, 160);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SixDOFConstraintSettings, limitsSpringSettings, 184);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SixDOFConstraintSettings, motorSettings, 220);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_FixedConstraintSettings, 112, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, autoDetectPoint, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, point1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, axisX1, 52);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, axisY1, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, point2, 76);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, axisX2, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_FixedConstraintSettings, axisY2, 100);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_PointConstraintSettings, 64, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PointConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PointConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PointConstraintSettings, point1, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PointConstraintSettings, point2, 48);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_DistanceConstraintSettings, 80, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, point1, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, point2, 48);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, minDistance, 60);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, maxDistance, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_DistanceConstraintSettings, limitsSpringSettings, 68);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_SliderConstraintSettings, 168, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, autoDetectPoint, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, point1, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, sliderAxis1, 52);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, normalAxis1, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, point2, 76);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, sliderAxis2, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, normalAxis2, 100);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, limitsMin, 112);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, limitsMax, 116);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, limitsSpringSettings, 120);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, maxFrictionForce, 132);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SliderConstraintSettings, motorSettings, 136);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ConeConstraintSettings, 88, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, point1, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, twistAxis1, 48);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, point2, 60);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, twistAxis2, 72);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConeConstraintSettings, halfConeAngle, 84);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_PulleyConstraintSettings, 96, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, space, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, bodyPoint1, 36);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, fixedPoint1, 48);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, bodyPoint2, 60);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, fixedPoint2, 72);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, ratio, 84);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, minLength, 88);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PulleyConstraintSettings, maxLength, 92);
 #endif
 
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JobSystemThreadPoolConfig, 12, 4);
@@ -295,6 +421,15 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, maxContactConstraints, 
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, broadPhaseLayerInterface, 24);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, objectLayerPairFilter, 32);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, objectVsBroadPhaseLayerFilter, 40);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_PathConstraintSettings, 112, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, path, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, pathPosition, 40);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, pathRotation, 52);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, pathFraction, 68);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, maxFrictionForce, 72);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, rotationConstraintType, 76);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PathConstraintSettings, positionMotorSettings, 80);
 
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_CollideShapeResult, 80, 8);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CollideShapeResult, contactPointOn1, 0);
@@ -520,6 +655,21 @@ static_assert(int(JPH_ConstraintSubType_Vehicle) == int(JPH::EConstraintSubType:
 static_assert(int(JPH_ConstraintSubType_Hinge) == int(JPH::EConstraintSubType::Hinge), "JPH_ConstraintSubType_Hinge");
 static_assert(int(JPH_ConstraintSubType_SwingTwist) == int(JPH::EConstraintSubType::SwingTwist), "JPH_ConstraintSubType_SwingTwist");
 static_assert(int(JPH_ConstraintSubType_SixDOF) == int(JPH::EConstraintSubType::SixDOF), "JPH_ConstraintSubType_SixDOF");
+static_assert(int(JPH_ConstraintSubType_Fixed) == int(JPH::EConstraintSubType::Fixed), "JPH_ConstraintSubType_Fixed");
+static_assert(int(JPH_ConstraintSubType_Point) == int(JPH::EConstraintSubType::Point), "JPH_ConstraintSubType_Point");
+static_assert(int(JPH_ConstraintSubType_Distance) == int(JPH::EConstraintSubType::Distance), "JPH_ConstraintSubType_Distance");
+static_assert(int(JPH_ConstraintSubType_Slider) == int(JPH::EConstraintSubType::Slider), "JPH_ConstraintSubType_Slider");
+static_assert(int(JPH_ConstraintSubType_Cone) == int(JPH::EConstraintSubType::Cone), "JPH_ConstraintSubType_Cone");
+static_assert(int(JPH_ConstraintSubType_Path) == int(JPH::EConstraintSubType::Path), "JPH_ConstraintSubType_Path");
+static_assert(int(JPH_ConstraintSubType_RackAndPinion) == int(JPH::EConstraintSubType::RackAndPinion), "JPH_ConstraintSubType_RackAndPinion");
+static_assert(int(JPH_ConstraintSubType_Gear) == int(JPH::EConstraintSubType::Gear), "JPH_ConstraintSubType_Gear");
+static_assert(int(JPH_ConstraintSubType_Pulley) == int(JPH::EConstraintSubType::Pulley), "JPH_ConstraintSubType_Pulley");
+static_assert(int(JPH_PathRotationConstraintType_Free) == int(JPH::EPathRotationConstraintType::Free), "JPH_PathRotationConstraintType_Free");
+static_assert(int(JPH_PathRotationConstraintType_ConstrainAroundTangent) == int(JPH::EPathRotationConstraintType::ConstrainAroundTangent), "JPH_PathRotationConstraintType_ConstrainAroundTangent");
+static_assert(int(JPH_PathRotationConstraintType_ConstrainAroundNormal) == int(JPH::EPathRotationConstraintType::ConstrainAroundNormal), "JPH_PathRotationConstraintType_ConstrainAroundNormal");
+static_assert(int(JPH_PathRotationConstraintType_ConstrainAroundBinormal) == int(JPH::EPathRotationConstraintType::ConstrainAroundBinormal), "JPH_PathRotationConstraintType_ConstrainAroundBinormal");
+static_assert(int(JPH_PathRotationConstraintType_ConstrainToPath) == int(JPH::EPathRotationConstraintType::ConstrainToPath), "JPH_PathRotationConstraintType_ConstrainToPath");
+static_assert(int(JPH_PathRotationConstraintType_FullyConstrained) == int(JPH::EPathRotationConstraintType::FullyConstrained), "JPH_PathRotationConstraintType_FullyConstrained");
 static_assert(int(JPH_MotorState_Off) == int(JPH::EMotorState::Off), "JPH_MotorState_Off");
 static_assert(int(JPH_MotorState_Velocity) == int(JPH::EMotorState::Velocity), "JPH_MotorState_Velocity");
 static_assert(int(JPH_MotorState_Position) == int(JPH::EMotorState::Position), "JPH_MotorState_Position");

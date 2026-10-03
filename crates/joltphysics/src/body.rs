@@ -653,7 +653,10 @@ impl PhysicsWorld {
     /// [`remove_character`](Self::remove_character). The chassis of a vehicle cannot be removed
     /// while the vehicle exists ([`BodyError::UsedByVehicle`]); remove the vehicle first with
     /// [`remove_vehicle`](Self::remove_vehicle). A part of a ragdoll goes only with its ragdoll
-    /// ([`BodyError::OwnedByRagdoll`], [`remove_ragdoll`](Self::remove_ragdoll)).
+    /// ([`BodyError::OwnedByRagdoll`], [`remove_ragdoll`](Self::remove_ragdoll)). A body that a
+    /// constraint uses cannot be removed while the constraint exists
+    /// ([`BodyError::UsedByConstraint`]); remove the constraint first with
+    /// [`remove_constraint`](Self::remove_constraint).
     pub fn remove_body(&mut self, id: BodyId) -> Result<(), BodyError> {
         self.check(id)?;
         // The character's destructor destroys its inner body, and Jolt does not validate ids in
@@ -672,6 +675,11 @@ impl PhysicsWorld {
         // `DestroyBody`, so removing a part here would make that a double destroy.
         if self.is_ragdoll_body(id) {
             return Err(BodyError::OwnedByRagdoll(id));
+        }
+        // A constraint keeps pointers to its bodies and dereferences them on every step. Any
+        // future API that destroys bodies must consult the constraint bodies the same way.
+        if self.is_constraint_body(id) {
+            return Err(BodyError::UsedByConstraint(id));
         }
         let mut bounds = JPH_AABox {
             min: Vec3::ZERO.to_jph(),
@@ -892,6 +900,39 @@ pub(crate) fn with_locked_body<R>(
     // index and sequence number both match a live body (`BodyManager::TryGetBody`).
     let body = NonNull::new(unsafe { JPH_BodyLockMultiWrite_GetBody(lock.as_ptr(), 0) })?;
     Some(f(body))
+}
+
+/// Runs `f` with both bodies locked for writing under one multi-body lock; `None` if either id
+/// no longer resolves.
+///
+/// Jolt locks the bodies' mutexes in a fixed order, and two ids that share a mutex are locked
+/// once, so one lock cannot deadlock where two separate locks could. The body pointers never
+/// leave `f`. `f` must not call the body interface for these bodies: Jolt's body mutexes are not
+/// recursive.
+pub(crate) fn with_locked_bodies<R>(
+    lock_interface: NonNull<JPH_BodyLockInterface>,
+    ids: [BodyId; 2],
+    f: impl FnOnce(NonNull<JPH_Body>, NonNull<JPH_Body>) -> R,
+) -> Option<R> {
+    let raw = ids.map(|id| id.raw);
+    // SAFETY: the lock interface belongs to a live world. joltc copies the two ids into the lock
+    // object, so `raw` only has to live for the call. The handle takes over the lock.
+    let lock = unsafe {
+        Owned::from_raw(JPH_BodyLockInterface_LockMultiWrite(
+            lock_interface.as_ptr(),
+            raw.as_ptr(),
+            2,
+        ))
+    }?;
+    // SAFETY: `lock` is live and holds exactly two ids, at indices 0 and 1. Jolt returns null
+    // unless index and sequence number both match a live body (`BodyManager::TryGetBody`).
+    let (first, second) = unsafe {
+        (
+            JPH_BodyLockMultiWrite_GetBody(lock.as_ptr(), 0),
+            JPH_BodyLockMultiWrite_GetBody(lock.as_ptr(), 1),
+        )
+    };
+    Some(f(NonNull::new(first)?, NonNull::new(second)?))
 }
 
 /// A body read lock. Destroying it deletes Jolt's `BodyLockMultiRead`, which unlocks the

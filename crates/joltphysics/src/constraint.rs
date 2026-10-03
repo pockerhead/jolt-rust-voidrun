@@ -1,5 +1,5 @@
-//! Settings of the constraints that join ragdoll parts: Jolt's swing-twist, hinge and
-//! six-degree-of-freedom constraints, with Jolt's defaults.
+//! Constraint settings, used for ragdoll joints and world constraints, with Jolt's defaults, and
+//! the constraints a [`PhysicsWorld`](crate::PhysicsWorld) owns.
 //!
 //! The types here are plain Rust values, checked against what Jolt asserts or silently rewrites
 //! before any of them reaches Jolt. Angles are in radians, torques in N·m, forces in N.
@@ -7,13 +7,34 @@
 //! # Frames
 //! Each constraint attaches a frame to each of its two bodies: a point and two perpendicular unit
 //! axes. With [`ConstraintSpace::WorldSpace`] (the default) the frames are given in world space at
-//! the bodies' creation pose; with [`ConstraintSpace::LocalToBodyCom`] relative to each body's
-//! centre of mass. In the constraint frame, X is the twist (or hinge) axis and Y and Z are the
+//! the time the constraint is created (for a ragdoll joint, at the bodies' creation pose); with
+//! [`ConstraintSpace::LocalToBodyCom`] relative to each body's centre of mass. In the constraint frame, X is the twist (or hinge) axis and Y and Z are the
 //! swing axes.
+
+mod coupling;
+mod linear;
+mod path;
+mod rotational;
+mod world;
 
 use std::f32::consts::PI;
 
 use joltphysics_sys::*;
+
+pub use coupling::{GearConstraintSettings, RackAndPinionConstraintSettings};
+pub use linear::{
+    DistanceConstraintSettings, DistanceRange, FixedConstraintSettings, PointConstraintSettings,
+    PulleyConstraintSettings, PulleyLength, SliderConstraintSettings,
+};
+pub use path::{HermitePath, HermitePathPoint, PathConstraintSettings, PathRotationConstraint};
+pub use rotational::ConeConstraintSettings;
+pub(crate) use world::ConstraintEntry;
+pub use world::{
+    AnyConstraintId, ConeConstraint, ConstraintId, ConstraintKind, ConstraintMut, ConstraintRef,
+    ConstraintSettings, ConstraintType, DistanceConstraint, FixedConstraint, GearConstraint,
+    HingeConstraint, MotorState, PathConstraint, PointConstraint, PulleyConstraint,
+    RackAndPinionConstraint, SixDofConstraint, SliderConstraint, SwingTwistConstraint,
+};
 
 use crate::limits;
 use crate::math::is_unit;
@@ -39,7 +60,7 @@ pub(crate) fn constraint_base() -> JPH_ConstraintSettings {
 pub enum ConstraintSpace {
     /// Relative to each body's centre of mass.
     LocalToBodyCom,
-    /// In world space, at the bodies' creation pose. The default.
+    /// In world space, at the bodies' poses when the constraint is created. The default.
     #[default]
     WorldSpace,
 }
@@ -79,9 +100,11 @@ impl SwingType {
 /// Jolt turns every spring into a stiffness `k` and damping `c`, which must stay at most
 /// [`limits::MAX_SPRING_COEFFICIENT`]. In stiffness mode they are the values given. In frequency
 /// mode Jolt computes `k = m·ω²` and `c = 2·m·ζ·ω` with `ω = 2π·frequency`, where `m` is the
-/// effective mass (or inertia) of the joint's bodies. Only ragdolls use constraints, so
+/// effective mass (or inertia) of the joint's bodies.
 /// [`RagdollSettings::new`](crate::RagdollSettings::new) checks every joint spring against an
-/// upper bound of `m` computed from the masses and inertias of all its parts.
+/// upper bound of `m` computed from the masses and inertias of all its parts, and
+/// [`PhysicsWorld::create_constraint`](crate::PhysicsWorld::create_constraint) and the constraint
+/// setters against one computed from the constraint's two bodies.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SpringSettings {
     /// Oscillation frequency in Hz and damping ratio (1 is critical damping), both at least 0.
@@ -150,10 +173,29 @@ impl SpringSettings {
         let Self::FrequencyAndDamping { frequency, damping } = *self else {
             return true;
         };
+        // A rigid spring has no coefficients; an infinite bound times 0 would be NaN.
+        if frequency == 0.0 {
+            return true;
+        }
         let omega = 2.0 * std::f64::consts::PI * f64::from(frequency);
         let bound = f64::from(limits::MAX_SPRING_COEFFICIENT);
         effective_mass_bound * omega * omega <= bound
             && 2.0 * effective_mass_bound * f64::from(damping) * omega <= bound
+    }
+
+    fn from_jph(spring: JPH_SpringSettings) -> Self {
+        let (strength, damping) = (spring.frequencyOrStiffness, spring.damping);
+        if spring.mode == JPH_SpringMode_StiffnessAndDamping {
+            Self::StiffnessAndDamping {
+                stiffness: strength,
+                damping,
+            }
+        } else {
+            Self::FrequencyAndDamping {
+                frequency: strength,
+                damping,
+            }
+        }
     }
 
     fn to_jph(self) -> JPH_SpringSettings {
@@ -235,6 +277,16 @@ impl MotorSettings {
         }
     }
 
+    fn from_jph(motor: JPH_MotorSettings) -> Self {
+        Self {
+            spring: SpringSettings::from_jph(motor.springSettings),
+            min_force_limit: motor.minForceLimit,
+            max_force_limit: motor.maxForceLimit,
+            min_torque_limit: motor.minTorqueLimit,
+            max_torque_limit: motor.maxTorqueLimit,
+        }
+    }
+
     fn to_jph(self) -> JPH_MotorSettings {
         JPH_MotorSettings {
             springSettings: self.spring.to_jph(),
@@ -256,11 +308,36 @@ fn within(value: f32, min: f32, max: f32) -> bool {
     value.is_finite() && (min..=max).contains(&value)
 }
 
+/// Checks one constraint point: finite and within the frame.
+fn validate_point(point: RVec3) -> Result<(), &'static str> {
+    if limits::is_in_frame(point) {
+        Ok(())
+    } else {
+        Err("constraint frame points must be finite and within limits::MAX_POSITION")
+    }
+}
+
+/// Where constraints given in `space` hold body 1 by `point1` and body 2 by `point2`.
+fn point_anchors(
+    space: ConstraintSpace,
+    point1: RVec3,
+    point2: RVec3,
+) -> [world::sealed::Anchor; 2] {
+    [point1, point2].map(|point| match space {
+        ConstraintSpace::WorldSpace => world::sealed::Anchor::World(point),
+        // `Real` is `f32` without the `double-precision` feature, so the casts are no-ops there.
+        #[allow(clippy::unnecessary_cast)]
+        ConstraintSpace::LocalToBodyCom => world::sealed::Anchor::CenterOfMass(Vec3::new(
+            point.x as f32,
+            point.y as f32,
+            point.z as f32,
+        )),
+    })
+}
+
 /// Checks one frame: a finite point and two perpendicular unit axes.
 fn validate_frame(point: RVec3, axis_a: Vec3, axis_b: Vec3) -> Result<(), &'static str> {
-    if !limits::is_in_frame(point) {
-        return Err("constraint frame points must be finite and within limits::MAX_POSITION");
-    }
+    validate_point(point)?;
     if !(is_unit(axis_a) && is_unit(axis_b)) {
         return Err("constraint frame axes must be unit vectors");
     }
@@ -558,15 +635,8 @@ impl HingeConstraintSettings {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         validate_frame(self.point1, self.hinge_axis1, self.normal_axis1)?;
         validate_frame(self.point2, self.hinge_axis2, self.normal_axis2)?;
-        // Jolt asserts these ranges in `HingeConstraint::SetLimits`.
-        if !(within(self.limits_min, -PI, 0.0) && within(self.limits_max, 0.0, PI)) {
-            return Err("hinge limits must be min in [-pi, 0] and max in [0, pi]");
-        }
         self.limits_spring.validate()?;
-        // Jolt asserts this in the `HingeConstraint` constructor.
-        if self.limits_min == self.limits_max && !self.limits_spring.is_soft() {
-            return Err("hinge limits with min == max need a soft limits spring");
-        }
+        validate_hinge_limits(self.limits_min, self.limits_max, self.limits_spring)?;
         if !non_negative(self.max_friction_torque) {
             return Err("friction torque must be finite and not negative");
         }
@@ -595,6 +665,23 @@ impl HingeConstraintSettings {
             motorSettings: self.motor.to_jph(),
         }
     }
+}
+
+/// Checks a hinge's limits against the rules of Jolt's `HingeConstraint`.
+fn validate_hinge_limits(
+    min: f32,
+    max: f32,
+    limits_spring: SpringSettings,
+) -> Result<(), &'static str> {
+    // Jolt asserts these ranges in `HingeConstraint::SetLimits`.
+    if !(within(min, -PI, 0.0) && within(max, 0.0, PI)) {
+        return Err("hinge limits must be min in [-pi, 0] and max in [0, pi]");
+    }
+    // Jolt asserts this in the `HingeConstraint` constructor.
+    if min == max && !limits_spring.is_soft() {
+        return Err("hinge limits with min == max need a soft limits spring");
+    }
+    Ok(())
 }
 
 /// One axis of a six-degree-of-freedom constraint (Jolt `SixDOFConstraintSettings::EAxis`).

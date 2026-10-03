@@ -614,6 +614,56 @@ fn motors_drive_each_joint_kind_to_its_target() {
     }
 }
 
+/// Motor targets are parent-relative rotations. A ragdoll created at the bind pose has parents
+/// at identity rotation, where a world-frame target looks the same; this one is turned 0.9 rad
+/// about a skewed axis first, so a target taken in the wrong frame misses by about that angle.
+#[test]
+fn motors_drive_joints_of_a_turned_ragdoll_in_the_parent_frame() {
+    let axis = Vec3::new(0.48, 0.6, 0.64);
+    let turned = transformed_pose(&bind_pose(), quat_about(axis, 0.9), [0.0; 3]);
+    // Each driven part, the axis it turns about given in world space at the bind pose, and the
+    // angle: the right shoulder (swing-twist) raises the arm, the left hip (six-DOF) flexes the
+    // thigh forward and the left elbow (hinge) flexes the forearm.
+    let cases = [
+        (UPPER_ARM_R, Vec3::new(0.0, 0.0, 1.0), 0.6),
+        (THIGH_L, neg(X), 0.8),
+        (FOREARM_L, neg(Y), 1.2),
+    ];
+    let mut target = turned.clone();
+    let mut wanted = Vec::new();
+    for (part, bind_axis, angle) in cases {
+        let parent = PARTS[part].parent.unwrap() as usize;
+        let relative = mul(
+            conj(turned.joints[parent].rotation),
+            turned.joints[part].rotation,
+        );
+        // The bind-pose axis in the parent's frame, which the turn does not change.
+        let parent_axis = rotate(conj(bind_rotation(&PARTS[parent])), bind_axis);
+        let goal = mul(quat_about(parent_axis, angle), relative);
+        target.joints[part].rotation = mul(target.joints[parent].rotation, goal);
+        wanted.push((part, goal));
+    }
+
+    let (mut world, layers) = ragdoll_world(1);
+    let settings = humanoid_settings(layers.ragdoll);
+    let ragdoll = world
+        .create_ragdoll(&settings, Some(&turned), Activation::Activate)
+        .unwrap();
+    // Driven every tick, as a game does; each drive wakes the ragdoll.
+    for _ in 0..240 {
+        world
+            .ragdoll_mut(ragdoll)
+            .unwrap()
+            .drive_to_pose_using_motors(&target)
+            .unwrap();
+        step(&mut world, 1);
+    }
+    for (part, goal) in wanted {
+        let reached = angle_between(relative_rotation(&world, ragdoll, part), goal);
+        assert!(reached < 0.1, "part {part}: {reached} rad from the target");
+    }
+}
+
 #[test]
 fn plain_settings_keep_the_masses_and_stabilized_ones_the_total() {
     let (mut world, layers) = ragdoll_world(1);

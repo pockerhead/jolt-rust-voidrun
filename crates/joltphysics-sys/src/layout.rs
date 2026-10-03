@@ -137,6 +137,22 @@ const _: () = {
     assert!(offset_of!(JPH_ConstraintSettings, drawConstraintSize) == 16);
     assert!(offset_of!(JPH_ConstraintSettings, userData) == 24);
 
+    assert!(size_of::<JPH_GearConstraintSettings>() == 64);
+    assert!(align_of::<JPH_GearConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_GearConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_GearConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_GearConstraintSettings, hingeAxis1) == 36);
+    assert!(offset_of!(JPH_GearConstraintSettings, hingeAxis2) == 48);
+    assert!(offset_of!(JPH_GearConstraintSettings, ratio) == 60);
+
+    assert!(size_of::<JPH_RackAndPinionConstraintSettings>() == 64);
+    assert!(align_of::<JPH_RackAndPinionConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_RackAndPinionConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_RackAndPinionConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_RackAndPinionConstraintSettings, hingeAxis) == 36);
+    assert!(offset_of!(JPH_RackAndPinionConstraintSettings, sliderAxis) == 48);
+    assert!(offset_of!(JPH_RackAndPinionConstraintSettings, ratio) == 60);
+
     assert!(size_of::<JPH_PhysicsSettings>() == 84);
     assert!(align_of::<JPH_PhysicsSettings>() == 4);
     assert!(offset_of!(JPH_PhysicsSettings, maxInFlightBodyPairs) == 0);
@@ -193,6 +209,7 @@ const _: () = {
     assert!(size_of::<JPH_SwingType>() == 4);
     assert!(size_of::<JPH_ConstraintSpace>() == 4);
     assert!(size_of::<JPH_SixDOFConstraintAxis>() == 4);
+    assert!(size_of::<JPH_PathRotationConstraintType>() == 4);
 };
 
 #[cfg(feature = "double-precision")]
@@ -256,6 +273,74 @@ const _: () = {
     assert!(offset_of!(JPH_SixDOFConstraintSettings, limitMax) == 188);
     assert!(offset_of!(JPH_SixDOFConstraintSettings, limitsSpringSettings) == 212);
     assert!(offset_of!(JPH_SixDOFConstraintSettings, motorSettings) == 248);
+
+    assert!(size_of::<JPH_FixedConstraintSettings>() == 136);
+    assert!(align_of::<JPH_FixedConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_FixedConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_FixedConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_FixedConstraintSettings, autoDetectPoint) == 36);
+    assert!(offset_of!(JPH_FixedConstraintSettings, point1) == 40);
+    assert!(offset_of!(JPH_FixedConstraintSettings, axisX1) == 64);
+    assert!(offset_of!(JPH_FixedConstraintSettings, axisY1) == 76);
+    assert!(offset_of!(JPH_FixedConstraintSettings, point2) == 88);
+    assert!(offset_of!(JPH_FixedConstraintSettings, axisX2) == 112);
+    assert!(offset_of!(JPH_FixedConstraintSettings, axisY2) == 124);
+
+    assert!(size_of::<JPH_PointConstraintSettings>() == 88);
+    assert!(align_of::<JPH_PointConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_PointConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_PointConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_PointConstraintSettings, point1) == 40);
+    assert!(offset_of!(JPH_PointConstraintSettings, point2) == 64);
+
+    assert!(size_of::<JPH_DistanceConstraintSettings>() == 112);
+    assert!(align_of::<JPH_DistanceConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, point1) == 40);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, point2) == 64);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, minDistance) == 88);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, maxDistance) == 92);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, limitsSpringSettings) == 96);
+
+    assert!(size_of::<JPH_SliderConstraintSettings>() == 192);
+    assert!(align_of::<JPH_SliderConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_SliderConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_SliderConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_SliderConstraintSettings, autoDetectPoint) == 36);
+    assert!(offset_of!(JPH_SliderConstraintSettings, point1) == 40);
+    assert!(offset_of!(JPH_SliderConstraintSettings, sliderAxis1) == 64);
+    assert!(offset_of!(JPH_SliderConstraintSettings, normalAxis1) == 76);
+    assert!(offset_of!(JPH_SliderConstraintSettings, point2) == 88);
+    assert!(offset_of!(JPH_SliderConstraintSettings, sliderAxis2) == 112);
+    assert!(offset_of!(JPH_SliderConstraintSettings, normalAxis2) == 124);
+    assert!(offset_of!(JPH_SliderConstraintSettings, limitsMin) == 136);
+    assert!(offset_of!(JPH_SliderConstraintSettings, limitsMax) == 140);
+    assert!(offset_of!(JPH_SliderConstraintSettings, limitsSpringSettings) == 144);
+    assert!(offset_of!(JPH_SliderConstraintSettings, maxFrictionForce) == 156);
+    assert!(offset_of!(JPH_SliderConstraintSettings, motorSettings) == 160);
+
+    assert!(size_of::<JPH_ConeConstraintSettings>() == 120);
+    assert!(align_of::<JPH_ConeConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_ConeConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_ConeConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_ConeConstraintSettings, point1) == 40);
+    assert!(offset_of!(JPH_ConeConstraintSettings, twistAxis1) == 64);
+    assert!(offset_of!(JPH_ConeConstraintSettings, point2) == 80);
+    assert!(offset_of!(JPH_ConeConstraintSettings, twistAxis2) == 104);
+    assert!(offset_of!(JPH_ConeConstraintSettings, halfConeAngle) == 116);
+
+    assert!(size_of::<JPH_PulleyConstraintSettings>() == 152);
+    assert!(align_of::<JPH_PulleyConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, bodyPoint1) == 40);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, fixedPoint1) == 64);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, bodyPoint2) == 88);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, fixedPoint2) == 112);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, ratio) == 136);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, minLength) == 140);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, maxLength) == 144);
 };
 
 #[cfg(not(feature = "double-precision"))]
@@ -314,6 +399,74 @@ const _: () = {
     assert!(offset_of!(JPH_SixDOFConstraintSettings, limitMax) == 160);
     assert!(offset_of!(JPH_SixDOFConstraintSettings, limitsSpringSettings) == 184);
     assert!(offset_of!(JPH_SixDOFConstraintSettings, motorSettings) == 220);
+
+    assert!(size_of::<JPH_FixedConstraintSettings>() == 112);
+    assert!(align_of::<JPH_FixedConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_FixedConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_FixedConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_FixedConstraintSettings, autoDetectPoint) == 36);
+    assert!(offset_of!(JPH_FixedConstraintSettings, point1) == 40);
+    assert!(offset_of!(JPH_FixedConstraintSettings, axisX1) == 52);
+    assert!(offset_of!(JPH_FixedConstraintSettings, axisY1) == 64);
+    assert!(offset_of!(JPH_FixedConstraintSettings, point2) == 76);
+    assert!(offset_of!(JPH_FixedConstraintSettings, axisX2) == 88);
+    assert!(offset_of!(JPH_FixedConstraintSettings, axisY2) == 100);
+
+    assert!(size_of::<JPH_PointConstraintSettings>() == 64);
+    assert!(align_of::<JPH_PointConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_PointConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_PointConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_PointConstraintSettings, point1) == 36);
+    assert!(offset_of!(JPH_PointConstraintSettings, point2) == 48);
+
+    assert!(size_of::<JPH_DistanceConstraintSettings>() == 80);
+    assert!(align_of::<JPH_DistanceConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, point1) == 36);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, point2) == 48);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, minDistance) == 60);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, maxDistance) == 64);
+    assert!(offset_of!(JPH_DistanceConstraintSettings, limitsSpringSettings) == 68);
+
+    assert!(size_of::<JPH_SliderConstraintSettings>() == 168);
+    assert!(align_of::<JPH_SliderConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_SliderConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_SliderConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_SliderConstraintSettings, autoDetectPoint) == 36);
+    assert!(offset_of!(JPH_SliderConstraintSettings, point1) == 40);
+    assert!(offset_of!(JPH_SliderConstraintSettings, sliderAxis1) == 52);
+    assert!(offset_of!(JPH_SliderConstraintSettings, normalAxis1) == 64);
+    assert!(offset_of!(JPH_SliderConstraintSettings, point2) == 76);
+    assert!(offset_of!(JPH_SliderConstraintSettings, sliderAxis2) == 88);
+    assert!(offset_of!(JPH_SliderConstraintSettings, normalAxis2) == 100);
+    assert!(offset_of!(JPH_SliderConstraintSettings, limitsMin) == 112);
+    assert!(offset_of!(JPH_SliderConstraintSettings, limitsMax) == 116);
+    assert!(offset_of!(JPH_SliderConstraintSettings, limitsSpringSettings) == 120);
+    assert!(offset_of!(JPH_SliderConstraintSettings, maxFrictionForce) == 132);
+    assert!(offset_of!(JPH_SliderConstraintSettings, motorSettings) == 136);
+
+    assert!(size_of::<JPH_ConeConstraintSettings>() == 88);
+    assert!(align_of::<JPH_ConeConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_ConeConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_ConeConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_ConeConstraintSettings, point1) == 36);
+    assert!(offset_of!(JPH_ConeConstraintSettings, twistAxis1) == 48);
+    assert!(offset_of!(JPH_ConeConstraintSettings, point2) == 60);
+    assert!(offset_of!(JPH_ConeConstraintSettings, twistAxis2) == 72);
+    assert!(offset_of!(JPH_ConeConstraintSettings, halfConeAngle) == 84);
+
+    assert!(size_of::<JPH_PulleyConstraintSettings>() == 96);
+    assert!(align_of::<JPH_PulleyConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, space) == 32);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, bodyPoint1) == 36);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, fixedPoint1) == 48);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, bodyPoint2) == 60);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, fixedPoint2) == 72);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, ratio) == 84);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, minLength) == 88);
+    assert!(offset_of!(JPH_PulleyConstraintSettings, maxLength) == 92);
 };
 
 #[cfg(target_pointer_width = "64")]
@@ -414,6 +567,17 @@ const _: () = {
     assert!(offset_of!(JPH_CharacterContact, bodyB) == 8);
     assert!(offset_of!(JPH_CharacterContact, characterIDB) == 12);
     assert!(offset_of!(JPH_CharacterContact, subShapeIDB) == 16);
+
+    assert!(size_of::<JPH_PathConstraintSettings>() == 112);
+    assert!(align_of::<JPH_PathConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_PathConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_PathConstraintSettings, path) == 32);
+    assert!(offset_of!(JPH_PathConstraintSettings, pathPosition) == 40);
+    assert!(offset_of!(JPH_PathConstraintSettings, pathRotation) == 52);
+    assert!(offset_of!(JPH_PathConstraintSettings, pathFraction) == 68);
+    assert!(offset_of!(JPH_PathConstraintSettings, maxFrictionForce) == 72);
+    assert!(offset_of!(JPH_PathConstraintSettings, rotationConstraintType) == 76);
+    assert!(offset_of!(JPH_PathConstraintSettings, positionMotorSettings) == 80);
 };
 
 // The `JPH_CharacterContact` fields from its `JPH_RVec3` position on, whose size depends on

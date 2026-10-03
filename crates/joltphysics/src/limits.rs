@@ -54,7 +54,10 @@
 //!   directly, in frequency mode through an upper bound of the effective mass. For a ragdoll joint
 //!   that bound is computed at creation from the parts' masses and inertias, including Jolt's
 //!   `Stabilize` (`Ragdoll.cpp:135-185`); see [`SpringSettings`](crate::SpringSettings). For a
-//!   wheel's suspension it is [`MAX_MASS`], since Jolt's suspension effective mass is at most the
+//!   world constraint it is computed at creation from its two bodies: over the dynamic ones, the
+//!   larger of the mass and the largest principal moment of inertia
+//!   ([`PhysicsWorld::create_constraint`]); the constraint's spring setters use the same bound.
+//!   For a wheel's suspension it is [`MAX_MASS`], since Jolt's suspension effective mass is at most the
 //!   chassis mass (`VehicleConstraint.cpp:448-451`).
 //! - **Anti-roll bars.** Jolt computes `stiffness · length difference · dt` for each bar
 //!   (`VehicleConstraint.cpp:289-293`) and passes it as the bias `b` of the wheel's suspension
@@ -102,7 +105,26 @@
 //! - query arithmetic: rays, shape casts and collisions from frame corners
 //!   (`query_inputs_are_bounded_by_the_frame`) and a sphere at the extent bound cast across
 //!   the frame and collided with separations up to the extent bound
-//!   (`queries_with_shapes_at_the_extent_bound_stay_finite`).
+//!   (`queries_with_shapes_at_the_extent_bound_stay_finite`);
+//! - world constraints: gears at both ends of `1..=`[`MAX_GEAR_RATIO`], racks and pinions and
+//!   pulleys at both [`MAX_RATIO`] bounds
+//!   between bodies of both mass extremes, one of them turning or sliding at the velocity bound
+//!   (`ratios_at_the_bound_step_finitely`, `pulleys_at_the_ratio_bound_step_finitely`); motor and
+//!   limit springs accepted at the effective-mass bound and rejected one representable frequency
+//!   above it (`world_constraint_springs_are_bounded_by_the_bodies_effective_mass`,
+//!   `slider_swing_twist_and_six_dof_motor_springs_are_bounded`,
+//!   `path_motor_springs_and_friction_are_bounded`); targets at their bounds
+//!   (`constraint_targets_are_bounded`, `slider_cone_swing_twist_and_six_dof_targets_are_bounded`,
+//!   `path_inputs_are_bounded`); hinge, slider, swing-twist and path friction of `f32::MAX` on
+//!   bodies moving at the velocity bounds (`constraint_friction_at_f32_max_steps_finitely`,
+//!   `slider_and_swing_twist_friction_at_f32_max_steps_finitely`,
+//!   `path_motor_springs_and_friction_are_bounded`); and a path segment at the margin of the
+//!   segment check stepped end to end with every rotation constraint
+//!   (`path_validation_accepts_its_boundary`); points that hold a dynamic body at
+//!   [`MAX_LEVER_ARM_RATIO`]: a ball joint and a hinge on a static body, and a weld, a six-DOF
+//!   joint with every axis fixed and a swing-twist joint with zero ranges on a static body or
+//!   between two bodies, each holding a 1 g, 6 cm cube or a 1 kg, 1 m cube at the velocity
+//!   bounds under gravity (`constraints_at_the_lever_arm_bound_step_finitely`).
 //!
 //! # Not covered
 //! - State the simulation produces itself is not an input and is not checked again: a body Jolt
@@ -115,8 +137,47 @@
 //!   including a character's weight impulse, are neither derived nor tested. The same holds
 //!   for the suspension effective mass Jolt forms from a wheel's force point and the chassis's
 //!   inverse inertia (`VehicleConstraint.cpp:448-451`).
+//! - Constraints whose solver diverges for reasons the lever-arm ratio does not measure. In the
+//!   `asserts` build Jolt then asserts that a squared velocity is finite
+//!   (`MotionProperties.inl:28` or `:38`); in the release build the joint tears apart by metres
+//!   and the state can become NaN: Jolt's velocity clamp scales a velocity whose squared length
+//!   overflows to zero, turns an already infinite component into NaN (`inf * 0`) and lets NaN
+//!   through. No impact is needed. Measured with one constraint to a static
+//!   body under gravity unless stated otherwise:
+//!   - a hinge whose pin lies off the least-inertia axis of a slender body, outside its cross
+//!     section (an offset `d` of about twice the half thickness `t` or more). A 2 kg rod of 1 m
+//!     by 2 cm hinged 5 cm off its axis (a lever-arm ratio of 43.5) asserted while swinging
+//!     about the hinge at 10 rad/s; a 10 kg barrier arm of 3 m by 5 cm on a 5 cm bracket
+//!     (ratio 12) asserted at 30 rad/s. In the release build both became NaN within a few
+//!     hundred steps of such a swing (the step depends on the scene); a 1 m rod 1 cm thick with the pin 5 cm beside it
+//!     along the hinge line asserted while falling from horizontal under gravity alone. On 1 m
+//!     rods swung at up to 47 rad/s, `t` = 5 mm failed from `d` = 1 cm, `t` = 1 cm from 2 cm,
+//!     `t` = 2 cm only at 10 cm, and `t` = 5 cm not up to 10 cm;
+//!   - chains of hinges with non-parallel axes, also between cubes: of 100 seeded chains of 3 to
+//!     10 cubes, 3 asserted at kicks of 15 m/s and 1.4 rad/s per body at lever-arm ratios of 10
+//!     to 100, and 18 at ratios of 100 to 500; in the release build 2 of 100 chains became NaN
+//!     at 15 m/s and 31 of 100 at 50 m/s;
+//!   - a light body held by two to four constraints to static anchors, also without a hinge
+//!     (point and fixed, cone, distance and six-DOF, ...): of 300 seeded scenes at 0.3 to 1 of
+//!     the lever-arm bound, 24 asserted at the velocity bounds with every constraint kind and 8
+//!     without hinges, 3 at a tenth of the bounds and none at 3 %.
+//!
+//!   The same probes found no assert and no NaN for a 2 m by 1 m by 5 cm door hinged at its
+//!   edge, capsule limbs on hinges, a rod hinged on its axis, or the 12-capsule test ragdoll, at
+//!   kicks up to 499 m/s and 47 rad/s, but their joints still opened by more than 0.5 m: of 24
+//!   kicks at 150 m/s, 8 for the door, 10 for the rod and 9 for a forearm or shin capsule, and
+//!   at 499 m/s 16, 24 and 19, up to 3.3 m for the door, 4.1 m for the rod and 7.3 m for the
+//!   capsules; one of 24 exploded ragdolls opened by 1 m at 150 m/s. A six-DOF joint with the
+//!   hinge's free axis did not assert on the slender bodies but let the joint drift apart by
+//!   0.2 to 3.3 m while swinging and up to 6.9 m under kicks of 50 m/s, so it is no
+//!   workaround. No
+//!   input bound in this module excludes these cases.
+//! - A slider adds the distance travelled along its axis to the lever of body 1
+//!   (`SliderConstraint.cpp`), which [`MAX_LEVER_ARM_RATIO`] checks only at creation; with a
+//!   dynamic body 1 and a long travel the lever grows beyond the bound.
 //! - Inputs that are only checked to be finite or ordered, as the audit table says: ray
-//!   directions, damping, motor force and torque limits, joint friction, wheel friction curves
+//!   directions, damping, motor force and torque limits, ragdoll joint friction (world
+//!   constraint friction is probed as above), wheel friction curves
 //!   and the wheel and drivetrain values that only have to give finite step coefficients.
 //! - `RagdollSettings::new_stabilized` reports Jolt's `Stabilize` failing to decompose an
 //!   inertia tensor as an error, but Jolt asserts on that path first (`Ragdoll.cpp:158`).
@@ -174,7 +235,36 @@
 //! | `SpringSettings::StiffnessAndDamping` | [`MAX_SPRING_COEFFICIENT`] | new: `stiffness_springs_are_bounded_by_the_coefficient` |
 //! | `SpringSettings::FrequencyAndDamping` in `RagdollSettings::new`, `new_stabilized` | `B·ω²` and `2·B·ζ·ω` at most [`MAX_SPRING_COEFFICIENT`] | new: `motor_springs_are_bounded_by_the_parts_effective_mass`, `motor_spring_of_1e20_hz_is_rejected` |
 //! | `MotorSettings::force_limits`, `torque_limits`; angle limits | finite, `min <= max`; Jolt clamps the motor impulse to `dt · limit` | existing: `motors_and_springs_are_validated`, `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
-//! | constraint frame points | [`MAX_POSITION`] | new: `constraint_frame_points_are_bounded` |
+//! | constraint frame points | [`MAX_POSITION`] | new: `constraint_frame_points_are_bounded`, `constraint_targets_are_bounded` |
+//! | the points where `PhysicsWorld::create_constraint` holds a dynamic body (frame points, automatic points, every point of a path); no setter moves them, and a rebase moves them with their bodies | lever-arm ratio at most [`MAX_LEVER_ARM_RATIO`] | new: `lever_arms_are_bounded_by_the_bodies_size`, `far_and_light_constraint_points_are_refused`, `constraints_at_the_lever_arm_bound_step_finitely` |
+//! | `SpringSettings::FrequencyAndDamping` in `PhysicsWorld::create_constraint`, `ConstraintMut::<DistanceConstraint>::set_limits_spring`, `ConstraintMut::<HingeConstraint>::set_motor_settings`, `set_limits_spring` | `B·ω²` and `2·B·ζ·ω` at most [`MAX_SPRING_COEFFICIENT`], `B` from the constraint's two bodies | new: `world_constraint_springs_are_bounded_by_the_bodies_effective_mass` |
+//! | `DistanceRange::Range`, `ConstraintMut::<DistanceConstraint>::set_distance` | `0 <= min <= max <=` [`MAX_SHAPE_EXTENT`] | new: `constraint_targets_are_bounded` |
+//! | `ConstraintMut::<HingeConstraint>::set_target_angle` | `[-π, π]`; Jolt clamps it to the limits | new: `constraint_targets_are_bounded` |
+//! | `ConstraintMut::<HingeConstraint>::set_target_angular_velocity` | [`MAX_ANGULAR_VELOCITY`] | new: `constraint_targets_are_bounded` |
+//! | `ConstraintMut::<HingeConstraint>::set_limits` | Jolt's hinge ranges, `min == max` only with a soft spring | new: `hinge_setters_check_their_values` |
+//! | `ConstraintMut::<HingeConstraint>::set_max_friction_torque` | finite, at least 0; Jolt clamps the friction impulse to `dt · limit` | new: `constraint_friction_at_f32_max_steps_finitely` |
+//! | `SliderConstraintSettings::limits`, `ConstraintMut::<SliderConstraint>::set_limits` | `min` in `[-`[`MAX_SHAPE_EXTENT`]`, 0]`, `max` in `[0, `[`MAX_SHAPE_EXTENT`]`]`, `min == max` only with a soft spring | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
+//! | `ConstraintMut::<SliderConstraint>::set_target_position` | [`MAX_SHAPE_EXTENT`]; Jolt clamps it to the limits | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
+//! | `ConstraintMut::<SliderConstraint>::set_target_velocity` | [`MAX_LINEAR_VELOCITY`] | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
+//! | `SliderConstraintSettings::max_friction_force`, `ConstraintMut::<SliderConstraint>::set_max_friction_force`, `ConstraintMut::<SwingTwistConstraint>::set_max_friction_torque` | finite, at least 0 | new: `slider_and_swing_twist_friction_at_f32_max_steps_finitely` |
+//! | `SpringSettings::FrequencyAndDamping` in the slider, swing-twist and six-DOF motor and limit spring setters of `ConstraintMut` | as for `create_constraint` | new: `slider_swing_twist_and_six_dof_motor_springs_are_bounded` |
+//! | `ConeConstraintSettings::new` half angle, `ConstraintMut::<ConeConstraint>::set_half_cone_angle` | `[0, π]`, as Jolt asserts | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
+//! | `ConstraintMut::<SwingTwistConstraint>::set_target_angular_velocity_cs`, `ConstraintMut::<SixDofConstraint>::set_target_angular_velocity_cs` | [`MAX_ANGULAR_VELOCITY`] | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
+//! | `ConstraintMut::<SwingTwistConstraint>::set_target_orientation_cs`, `ConstraintMut::<SixDofConstraint>::set_target_orientation_cs` | finite unit quaternion; Jolt clamps it to the limits | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
+//! | `ConstraintMut::<SixDofConstraint>::set_target_velocity_cs` | [`MAX_LINEAR_VELOCITY`] | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
+//! | `ConstraintMut::<SixDofConstraint>::set_target_position_cs` | [`MAX_SHAPE_EXTENT`] per axis | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
+//! | `GearConstraintSettings::new`, `teeth` ratio | `1..=`[`MAX_GEAR_RATIO`] (see `GearConstraintSettings` and [`MAX_GEAR_RATIO`] for both bounds) | new: `coupling_ratios_are_bounded`, `ratios_at_the_bound_step_finitely`; behaviour at the bound in `tests/constraints.rs` |
+//! | `RackAndPinionConstraintSettings::new`, `teeth` ratio | magnitude within `1 / `[`MAX_RATIO`]`..=`[`MAX_RATIO`]; `teeth` length positive within [`MAX_SHAPE_EXTENT`] | new: `coupling_ratios_are_bounded`, `ratios_at_the_bound_step_finitely` |
+//! | `PulleyConstraintSettings::ratio` | positive, within `1 / `[`MAX_RATIO`]`..=`[`MAX_RATIO`] | new: `pulley_ratio_and_lengths_are_bounded`, `pulleys_at_the_ratio_bound_step_finitely` |
+//! | `PulleyLength::Range`, `ConstraintMut::<PulleyConstraint>::set_length` | `0 <= min <= max <= (1 + ratio) ·` [`MAX_SHAPE_EXTENT`] | new: `pulley_ratio_and_lengths_are_bounded` |
+//! | `PulleyConstraintSettings::new` body and fixed points | [`MAX_POSITION`]; a rebase moves fixed points as re-expressed state, checked finite only | new: `pulley_ratio_and_lengths_are_bounded` |
+//! | `HermitePath::new` points | 2 to `HermitePath::MAX_POINTS`; positions and tangents within [`MAX_SHAPE_EXTENT`] per axis; unit normal | new: `invalid_paths_are_rejected`, `path_inputs_are_bounded` |
+//! | `HermitePath::new` segments | chord at least 1 mm; derivative along the chord at least twice its bound along the normal and above an `f32` margin, so Jolt's normal stays unit | new: `invalid_paths_are_rejected`, `path_validation_accepts_its_boundary` |
+//! | `PathConstraintSettings::path_position`, `path_rotation`, `path_fraction` | [`MAX_SHAPE_EXTENT`] per axis; unit quaternion; `[0, max_fraction]` | new: `path_inputs_are_bounded` |
+//! | `PathConstraintSettings::max_friction_force`, `ConstraintMut::<PathConstraint>::set_max_friction_force` | finite, at least 0 | new: `path_motor_springs_and_friction_are_bounded` |
+//! | `PathConstraintSettings::position_motor`, `ConstraintMut::<PathConstraint>::set_position_motor_settings` springs | as for `create_constraint` | new: `path_motor_springs_and_friction_are_bounded` |
+//! | `ConstraintMut::<PathConstraint>::set_target_velocity`, `set_target_path_fraction` | [`MAX_LINEAR_VELOCITY`]; `[0, max_fraction]` | new: `path_inputs_are_bounded` |
+//! | `ConstraintRef::<PathConstraint>::closest_fraction` | point within [`MAX_SHAPE_EXTENT`] per axis, finite hint | new: `path_inputs_are_bounded` |
 //! | `SwingTwistConstraintSettings::max_friction_torque`, `HingeConstraintSettings::max_friction_torque`, `SixDofConstraintSettings::max_friction` | finite, at least 0; Jolt clamps the friction impulse to `dt · limit` and applies no more than stops the relative motion | existing: `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
 //! | `SixDofAxis::Limited` on a translation axis | finite, `min < max`, within [`MAX_SHAPE_EXTENT`] | new: `six_dof_limits_are_validated`, `six_dof_translation_limits_at_the_bound_step_finitely` |
 //! | `RagdollSettings::new`, `new_stabilized` part masses | [`MIN_MASS`]`..=`[`MAX_MASS`], also for kinematic parts (`RagdollMut::set_motion_type` can make them dynamic) | new: `part_masses_and_velocities_are_bounded` |
@@ -300,6 +390,74 @@ pub const MAX_SPRING_COEFFICIENT: f32 = 1.0e30;
 /// one-second updates, far above the characters of a game.
 pub const MAX_WEIGHT_IMPULSE: f32 = 1.0e9;
 
+/// Largest magnitude of a rack-and-pinion or pulley ratio; the smallest is its inverse. Gears
+/// have their own, tighter range (see [`MAX_GEAR_RATIO`]).
+///
+/// Crate policy. Jolt multiplies the inverse mass or inertia of body 2 by the ratio's square in
+/// the effective mass, and body 2's velocity (for racks and pulleys also its impulse) by the
+/// ratio (`GearConstraintPart.h:81,122`, `RackAndPinionConstraintPart.h:82,123`,
+/// `IndependentAxisConstraintPart.h:71,112` for pulleys). With a principal inverse inertia of at
+/// most `√3 · 1e6` (see [`MAX_WEIGHT_IMPULSE`]), `ratio² · I⁻¹` is at most about 1.7e14, far from
+/// `f32` overflow. A ratio of 1e4 already turns a pinion ten thousand radians per metre of its
+/// rack; tests step both bounds on the lightest and heaviest bodies.
+pub const MAX_RATIO: f32 = 1.0e4;
+
+/// Largest gear ratio; the smallest is 1 (see
+/// [`GearConstraintSettings`](crate::GearConstraintSettings)).
+///
+/// Crate policy, measured. Jolt 5.6 applies a gear's impulse to body 2 without the ratio
+/// (`GearConstraintPart::ApplyVelocityStep`), so each solver iteration keeps up to `1 − 1/ratio`
+/// of the velocity error `ω1 + ratio · ω2`, the worst case being a body 1 much heavier than
+/// body 2. With Jolt's 10 velocity iterations per step the gear then needs more steps to restore
+/// the relation the larger the ratio. The bound is the largest round ratio that, after a
+/// disturbance, brings the error back to within 2 % of its initial value within 10 steps for any
+/// mass distribution: measured worst 1.6 % at ratio 10, 6.5 % at 20, 60 % at 100, and at 1e4
+/// 91 % still after 60 steps. The first step after a disturbance leaves up to
+/// `(1 − 1/ratio)^10`, 35 % at ratio 10. Tested at the bound by
+/// `gear_keeps_its_velocity_relation_at_the_largest_ratio`.
+pub const MAX_GEAR_RATIO: f32 = 10.0;
+
+/// Largest lever-arm ratio a world constraint may give a dynamic body: how far the point where
+/// the constraint holds the body lies from its centre of mass, measured against the body's own
+/// size.
+///
+/// The lever-arm ratio of a body at a point `r` from its centre of mass is
+/// `mass · trace([r]× I⁻¹ [r]×ᵀ)`, with `I⁻¹` the body's inverse inertia: summed over the body's
+/// principal axes, the squared distance of the point from each axis divided by the squared
+/// radius of gyration about it. A sphere or cube with radius of gyration `k` has
+/// `2 · (|r| / k)²`, so the bound allows `|r|` up to about `22 · k`; a rod held at its end has a
+/// ratio of 6 at any length.
+/// [`PhysicsWorld::create_constraint`] checks every point a constraint holds a dynamic body by
+/// (for a path, every point of the path; for an automatic point, the point Jolt picks
+/// between the centres of mass, weighted by inverse mass towards the lighter body).
+///
+/// Crate policy, measured, not derived. Jolt solves each constraint part with its effective mass
+/// `K = Σ (m⁻¹ · 1 + [r]× I⁻¹ [r]×ᵀ)` (`PointConstraintPart.h`, `AxisConstraintPart.h`) in `f32`.
+/// A ratio of at most `B` per body bounds the lever terms by `B · m⁻¹`, so `K`'s condition number
+/// stays below `1 + B`. Two failures were measured with a body at the velocity bounds, under
+/// gravity, for 120 steps, in the `asserts` build:
+/// - a body held far from its centre of mass: a 1 g, 6 cm cube on a hinge 116 m away (a ratio
+///   of 4.5e7) went to NaN, two 1 kg, 1 m cubes joined by a point 3000 m away (1.1e8) moved
+///   erratically and at 4000 m Jolt asserted that a squared velocity is finite
+///   (`MotionProperties.inl:28`), and a cube on a static body took angular velocities rounded to
+///   powers of two from a ratio of about 1e8;
+/// - two light bodies held rigidly (a fixed constraint, a six-DOF constraint with every axis
+///   fixed, a swing-twist constraint with zero ranges): their accumulated impulse grows step
+///   after step until Jolt asserts that the squared angular velocity is finite
+///   (`MotionProperties.inl:38`), from `|r| / k` of about 37 (a ratio of 2700) for 1 g and 1 kg
+///   cubes of 6 cm and 20 cm, for the 6 cm cube also at a tenth of the velocity bounds; none of
+///   24 seeded cases failed at `|r| / k` of 34 or below. Point, hinge, cone, slider and six-DOF
+///   constraints with limited rotations did not fail at `|r| / k` of 650.
+///
+/// A derivation in the style of [`MAX_WEIGHT_IMPULSE`] (products of the largest accepted
+/// inverse inertia, lever and impulse kept finite in `f32`) allows levers of hundreds of metres
+/// and does not exclude the second failure, so the bound is the measured onset divided by 2.7.
+/// It allows a door on a hinge at its edge, a weld at the surface of a part, and a pendulum bob
+/// of radius `a` on a point or hinge constraint up to about `14 · a` from the pivot; a longer
+/// pendulum is a [`DistanceConstraintSettings`](crate::DistanceConstraintSettings) whose points
+/// lie on the bodies.
+pub const MAX_LEVER_ARM_RATIO: f32 = 1000.0;
+
 /// Whether every component of `position` is at most [`MAX_POSITION`] in absolute value.
 pub(crate) fn is_in_frame(position: RVec3) -> bool {
     [position.x, position.y, position.z]
@@ -370,6 +528,39 @@ pub(crate) fn is_weight_impulse(mass: f32, gravity: Vec3, delta_time: f32) -> bo
 /// Whether `mass` is finite and within `MIN_MASS..=MAX_MASS`.
 pub(crate) fn is_mass(mass: f32) -> bool {
     (MIN_MASS..=MAX_MASS).contains(&mass)
+}
+
+/// Whether `ratio` is finite and its magnitude within `1 / MAX_RATIO..=MAX_RATIO`.
+pub(crate) fn is_ratio(ratio: f32) -> bool {
+    (1.0 / MAX_RATIO..=MAX_RATIO).contains(&ratio.abs())
+}
+
+/// The lever-arm ratio (see [`MAX_LEVER_ARM_RATIO`]) of a dynamic body with `inverse_mass` and
+/// principal inverse inertia `inverse_inertia` at `lever`, given in the body's principal frame;
+/// computed in `f64`.
+pub(crate) fn lever_arm_ratio(inverse_mass: f32, inverse_inertia: Vec3, lever: Vec3) -> f64 {
+    let d = [inverse_inertia.x, inverse_inertia.y, inverse_inertia.z].map(f64::from);
+    let r = [lever.x, lever.y, lever.z].map(f64::from);
+    let squared = r.iter().map(|c| c * c).sum::<f64>();
+    let trace: f64 = (0..3).map(|k| d[k] * (squared - r[k] * r[k])).sum();
+    trace / f64::from(inverse_mass)
+}
+
+/// The largest lever-arm ratio of the same body at any point within `distance` of its centre of
+/// mass: the two largest principal inverse inertias times `distance²`, over the inverse mass.
+pub(crate) fn lever_arm_ratio_within(
+    inverse_mass: f32,
+    inverse_inertia: Vec3,
+    distance: f64,
+) -> f64 {
+    let mut d = [inverse_inertia.x, inverse_inertia.y, inverse_inertia.z].map(f64::from);
+    d.sort_by(f64::total_cmp);
+    (d[1] + d[2]) * distance * distance / f64::from(inverse_mass)
+}
+
+/// Whether `ratio` is at most [`MAX_LEVER_ARM_RATIO`]; false for NaN.
+pub(crate) fn is_lever_arm_ratio(ratio: f64) -> bool {
+    ratio <= f64::from(MAX_LEVER_ARM_RATIO)
 }
 
 /// The length of `v`, computed in `f64` so that it cannot overflow.
@@ -559,6 +750,26 @@ mod tests {
             Vec3::new(0.0, -gravity, 0.0),
             1.0f32.next_up()
         ));
+    }
+
+    #[test]
+    fn lever_arm_ratios_measure_the_lever_against_the_radius_of_gyration() {
+        // A 2 kg cube of side 1 m: inertia 2 / 6 about every axis, radius of gyration² 1 / 6.
+        let inverse_inertia = Vec3::new(3.0, 3.0, 3.0);
+        let ratio = lever_arm_ratio(0.5, inverse_inertia, Vec3::new(0.0, 2.0, 0.0));
+        assert!((ratio - 2.0 * 4.0 * 6.0).abs() < 1e-9, "{ratio}");
+        // A thin rod of 1 kg and 2 m along y held at its end: 6 whatever its thickness.
+        let rod = Vec3::new(3.0, 1.0e4, 3.0);
+        let ratio = lever_arm_ratio(1.0, rod, Vec3::new(0.0, 1.0, 0.0));
+        assert!((ratio - 6.0).abs() < 1e-9, "{ratio}");
+        // Anywhere within a distance: the two largest inverse inertias.
+        let within = lever_arm_ratio_within(1.0, rod, 1.0);
+        assert!((within - (1.0e4 + 3.0)).abs() < 1e-6, "{within}");
+        let bound = f64::from(MAX_LEVER_ARM_RATIO);
+        assert!(is_lever_arm_ratio(bound));
+        assert!(!is_lever_arm_ratio(bound.next_up()));
+        assert!(!is_lever_arm_ratio(f64::NAN));
+        assert!(!is_lever_arm_ratio(f64::INFINITY));
     }
 
     #[test]
