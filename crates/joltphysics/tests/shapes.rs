@@ -877,3 +877,45 @@ fn shapes_are_shared_across_bodies_and_worlds() {
     drop(world_a);
     assert_eq!(cast_all(&world_b), expected);
 }
+
+/// Roll in degrees after 300 ticks of a box with half extents (0.9, 0.3, 2.0) and mass 1500,
+/// optionally with its centre of mass moved by `offset`, released on the floor tilted by
+/// `tilt_degrees` about z with its lower long edge just above the floor.
+fn roll_after_release(offset: Option<Vec3>, tilt_degrees: f32) -> f32 {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    add_floor(&mut world);
+    let plain = Shape::new_box(Vec3::new(0.9, 0.3, 2.0)).unwrap();
+    let shape = match offset {
+        Some(offset) => Shape::new_offset_center_of_mass(&plain, offset).unwrap(),
+        None => plain,
+    };
+    let tilt = tilt_degrees.to_radians();
+    let lowest = 0.9 * tilt.sin() + 0.3 * tilt.cos();
+    let body = world
+        .create_body(
+            &shape,
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(0.0, (lowest + 0.01) as Real, 0.0))
+                .rotation(quat_about(Vec3::new(0.0, 0.0, 1.0), tilt))
+                .mass(1500.0),
+        )
+        .unwrap();
+    step(&mut world, 300);
+    let up = walker::rotate(world.body(body).unwrap().rotation(), [0.0, 1.0, 0.0]);
+    up[1].clamp(-1.0, 1.0).acos().to_degrees() as f32
+}
+
+#[test]
+fn low_center_of_mass_rights_a_tilted_box() {
+    // The plain box tips over its long edge once its centre of mass passes above that edge, at
+    // atan(0.9 / 0.3) = 71.6 degrees by geometry; with the centre of mass moved to the bottom
+    // face it would need 90 degrees. Measured by sweeping the release tilt in 1 degree steps:
+    // the plain box no longer comes back level from 71 degrees on, the offset box only from
+    // 89.5. Each case sits
+    // more than 10 degrees from the tipping angle that decides it.
+    let low = Some(Vec3::new(0.0, -0.3, 0.0));
+    let righted = roll_after_release(low, 75.0);
+    assert!(righted < 5.0, "offset box ends at roll {righted}");
+    let fallen = roll_after_release(None, 85.0);
+    assert!(fallen > 60.0, "plain box ends at roll {fallen}");
+}
