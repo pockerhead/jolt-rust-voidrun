@@ -40,6 +40,27 @@ const _: () = {
     assert!(offset_of!(JPH_RayCastResult, fraction) == 4);
     assert!(offset_of!(JPH_RayCastResult, subShapeID2) == 8);
 
+    assert!(size_of::<JPH_SoftVertex>() == 28);
+    assert!(align_of::<JPH_SoftVertex>() == 4);
+    assert!(offset_of!(JPH_SoftVertex, position) == 0);
+    assert!(offset_of!(JPH_SoftVertex, velocity) == 12);
+    assert!(offset_of!(JPH_SoftVertex, invMass) == 24);
+
+    assert!(size_of::<JPH_SoftFace>() == 16);
+    assert!(align_of::<JPH_SoftFace>() == 4);
+    assert!(offset_of!(JPH_SoftFace, vertex1) == 0);
+    assert!(offset_of!(JPH_SoftFace, vertex2) == 4);
+    assert!(offset_of!(JPH_SoftFace, vertex3) == 8);
+    assert!(offset_of!(JPH_SoftFace, materialIndex) == 12);
+
+    assert!(size_of::<JPH_SoftBodyVertexAttributes>() == 20);
+    assert!(align_of::<JPH_SoftBodyVertexAttributes>() == 4);
+    assert!(offset_of!(JPH_SoftBodyVertexAttributes, compliance) == 0);
+    assert!(offset_of!(JPH_SoftBodyVertexAttributes, shearCompliance) == 4);
+    assert!(offset_of!(JPH_SoftBodyVertexAttributes, bendCompliance) == 8);
+    assert!(offset_of!(JPH_SoftBodyVertexAttributes, lraType) == 12);
+    assert!(offset_of!(JPH_SoftBodyVertexAttributes, lraMaxDistanceMultiplier) == 16);
+
     assert!(size_of::<JPH_RayCastSettings>() == 12);
     assert!(align_of::<JPH_RayCastSettings>() == 4);
     assert!(offset_of!(JPH_RayCastSettings, backFaceModeTriangles) == 0);
