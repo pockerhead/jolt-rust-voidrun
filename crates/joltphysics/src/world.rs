@@ -905,9 +905,10 @@ impl PhysicsWorld {
     ///
     /// # Panics
     /// With a caller [`JobSystem`], a panic in its [`queue_job`](JobSystem::queue_job) does not
-    /// stop the step: the remaining jobs of that step run on the stepping thread, the world
-    /// advances, and `step` then resumes the first such panic. The next step uses the caller's
-    /// job system again.
+    /// stop the step: the world advances, and `step` then resumes the first such panic. Jobs
+    /// handed to the caller's job system before the panic may still run on its threads; the jobs
+    /// Jolt queues after it are not handed over and run on the stepping thread. The next step
+    /// uses the caller's job system again.
     pub fn step(&mut self, delta_time: f32) -> Result<StepReport, StepError> {
         if !Self::is_valid_delta_time(delta_time) {
             return Err(StepError::InvalidDeltaTime);

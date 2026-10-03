@@ -285,7 +285,8 @@ pub(crate) struct QueueContext {
     job_system: Arc<dyn JobSystem>,
     /// Set once, right after the native object was created and before any step.
     native: OnceLock<Arc<CallbackJobSystem>>,
-    /// Whether `panic` holds a payload; from then on jobs are left to the stepping thread.
+    /// Set by the first panic, whose payload `panic` then holds; from then on jobs are left to
+    /// the stepping thread.
     panicked: AtomicBool,
     panic: Mutex<Option<Box<dyn Any + Send>>>,
 }
@@ -333,19 +334,16 @@ impl QueueContext {
         }
     }
 
-    /// Keeps the first panic payload and drops later ones without letting their drop unwind.
+    /// Keeps the payload of the panic that set `panicked` first and drops later ones without
+    /// letting their drop unwind.
     fn record_panic(&self, payload: Box<dyn Any + Send>) {
-        self.panicked.store(true, Ordering::Release);
-        let discarded = {
-            let mut slot = self.panic.lock().unwrap_or_else(PoisonError::into_inner);
-            if slot.is_none() {
-                *slot = Some(payload);
-                None
-            } else {
-                Some(payload)
-            }
-        };
-        if let Err(panic_in_drop) = catch_unwind(AssertUnwindSafe(|| drop(discarded))) {
+        let first = self
+            .panicked
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok();
+        if first {
+            *self.panic.lock().unwrap_or_else(PoisonError::into_inner) = Some(payload);
+        } else if let Err(panic_in_drop) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
             mem::forget(panic_in_drop);
         }
     }
@@ -590,5 +588,65 @@ mod tests {
         context.record_panic(Box::new(String::from("first")));
         context.record_panic(Box::new(PanicsOnDrop));
         assert_eq!(message(&*context.finish_update().unwrap()), "first");
+    }
+
+    #[test]
+    fn concurrent_panics_keep_one_payload_and_drop_the_others() {
+        const THREADS: usize = 8;
+
+        /// Counts its drops in `DROPS`.
+        struct Payload;
+
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+        impl Drop for Payload {
+            fn drop(&mut self) {
+                DROPS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let context = context(Arc::new(AlwaysPanics {
+            calls: AtomicUsize::new(0),
+        }));
+        let start = std::sync::Barrier::new(THREADS);
+        std::thread::scope(|scope| {
+            for _ in 0..THREADS {
+                scope.spawn(|| {
+                    start.wait();
+                    context.record_panic(Box::new(Payload));
+                });
+            }
+        });
+        assert_eq!(DROPS.load(Ordering::Relaxed), THREADS - 1);
+        let kept = context.finish_update().unwrap();
+        assert!(kept.is::<Payload>());
+        drop(kept);
+        assert_eq!(DROPS.load(Ordering::Relaxed), THREADS);
+        assert!(context.finish_update().is_none());
+    }
+
+    #[test]
+    fn a_job_run_while_its_update_finishes_runs_once() {
+        const JOBS: usize = 64;
+
+        let context = context(Arc::new(AlwaysPanics {
+            calls: AtomicUsize::new(0),
+        }));
+        for _ in 0..100 {
+            let runs = AtomicUsize::new(0);
+            let jobs: Vec<Job> = (0..JOBS).map(|_| counting_job(&context, &runs)).collect();
+            let start = std::sync::Barrier::new(2);
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    start.wait();
+                    for job in jobs {
+                        job.run();
+                    }
+                });
+                start.wait();
+                assert!(context.finish_update().is_none());
+            });
+            assert_eq!(count(&runs), JOBS);
+        }
     }
 }
