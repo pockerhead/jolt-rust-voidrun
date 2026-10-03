@@ -961,6 +961,9 @@ const SLAB_CARS: usize = 4;
 const CARRIER: usize = OPEN_CARS + SLAB_CARS;
 const PARKED_CAR: usize = CARRIER + 1;
 const SEAM_CARS: [usize; 2] = [CARRIER + 2, CARRIER + 3];
+/// Ticks on which each left seam wheel must stand across the seam on each of the two seam
+/// boxes.
+const MIN_SEAM_BOX_TICKS: usize = FLEET_TICKS / 10;
 /// x of the seam between the two boxes the seam cars drive on.
 const SEAM_X: f32 = -80.0;
 /// Convex radius of the cylinder tester of the seam cars: Jolt's default fraction 0.1 of
@@ -1222,6 +1225,9 @@ fn run_fleet(worker_threads: u32, variant: &str) -> Digest {
     let mut slab_ticks = [0_usize; SLAB_CARS];
     let mut carrier_ticks = 0;
     let mut seam_ticks = [[0_usize; 4]; SEAM_CARS.len()];
+    // Per seam car and left wheel, the ticks it straddles the seam on the lower and on the upper
+    // seam box.
+    let mut seam_box_ticks = [[[0_usize; 2]; 4]; SEAM_CARS.len()];
     let mut digest = Digest::new();
     for tick in 0..FLEET_TICKS {
         if tick == FLEET_EVENT_TICK {
@@ -1266,7 +1272,8 @@ fn run_fleet(worker_threads: u32, variant: &str) -> Digest {
             carrier_ticks += 1;
         }
         // A left seam wheel counts when it stands on a seam box across the seam, a right one
-        // when it stands on the lower box or its twin and their hits tie.
+        // when it stands on the lower box or its twin and their hits tie. Each left wheel must
+        // also land on each of the two seam boxes on some ticks, or the seam would not choose.
         let twins = TwinProbe {
             world: &world,
             ground,
@@ -1274,13 +1281,23 @@ fn run_fleet(worker_threads: u32, variant: &str) -> Digest {
             twin: seam_twin,
             cylinder: &seam_cylinder,
         };
-        for (&key, ticks) in SEAM_CARS.iter().zip(&mut seam_ticks) {
+        for ((&key, ticks), box_ticks) in SEAM_CARS
+            .iter()
+            .zip(&mut seam_ticks)
+            .zip(&mut seam_box_ticks)
+        {
             let wheels = world.vehicle(vehicles[key].unwrap()).unwrap().wheels();
             for (wheel, ticks) in ticks.iter_mut().enumerate() {
                 let contact_body = wheels[wheel].contact.map(|contact| contact.body);
                 let on_seam = if vehicle::WHEEL_POSITIONS[wheel].x > 0.0 {
+                    let straddles = straddles_seam(&world, chassis[key], wheel);
+                    for (seam_box, box_ticks) in seam_boxes.iter().zip(&mut box_ticks[wheel]) {
+                        if straddles && contact_body == Some(*seam_box) {
+                            *box_ticks += 1;
+                        }
+                    }
                     contact_body.is_some_and(|body| seam_boxes.contains(&body) || body == seam_twin)
-                        && straddles_seam(&world, chassis[key], wheel)
+                        && straddles
                 } else {
                     contact_body.is_some_and(|body| body == seam_boxes[0] || body == seam_twin)
                         && twins.twins_tie(chassis[key], wheel)
@@ -1303,6 +1320,13 @@ fn run_fleet(worker_threads: u32, variant: &str) -> Digest {
     assert!(
         seam_ticks.into_iter().flatten().all(enough),
         "seam wheels: {seam_ticks:?}"
+    );
+    let left_wheels = (0..4).filter(|&wheel| vehicle::WHEEL_POSITIONS[wheel].x > 0.0);
+    assert!(
+        seam_box_ticks.iter().all(|car| left_wheels
+            .clone()
+            .all(|wheel| car[wheel].iter().all(|&ticks| ticks >= MIN_SEAM_BOX_TICKS))),
+        "left seam wheels on the lower and upper seam box: {seam_box_ticks:?}"
     );
     digest
 }
