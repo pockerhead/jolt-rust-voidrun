@@ -1213,8 +1213,9 @@ impl VehicleAntiRollBar {
 /// along its suspension from its attachment point at the start of every step.
 ///
 /// The wheels see the bodies whose object layer collides with the tester's `object_layer` in
-/// the world's [`CollisionLayers`](crate::CollisionLayers), never their own chassis and never
-/// sensors. Jolt's testers apply no per-sub-shape filter, so compound children cannot be
+/// the world's [`CollisionLayers`](crate::CollisionLayers), never their own chassis, never
+/// sensors and never soft bodies: Jolt's `VehicleConstraint` solves the body under a wheel as a
+/// rigid body, so a wheel passes through a soft body to the ground below it. Jolt's testers apply no per-sub-shape filter, so compound children cannot be
 /// excluded by group; give the wheels a dedicated object layer that collides with exactly the
 /// layers they should drive on.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1391,8 +1392,10 @@ impl VehicleCollisionTester {
         Ok(())
     }
 
-    /// The joltc tester of this validated tester, holding one reference.
-    pub(crate) fn create(&self) -> Owned<JPH_VehicleCollisionTester> {
+    /// The joltc tester of this validated tester for the vehicle whose chassis has the Jolt id
+    /// `vehicle_body`, holding one reference. It skips the chassis and every soft body: Jolt's
+    /// `VehicleConstraint` solves the body under a wheel as a rigid body.
+    pub(crate) fn create(&self, vehicle_body: JPH_BodyID) -> Owned<JPH_VehicleCollisionTester> {
         let tester: *mut JPH_VehicleCollisionTester = match *self {
             Self::Ray {
                 object_layer,
@@ -1403,7 +1406,12 @@ impl VehicleCollisionTester {
                 // SAFETY: Jolt is initialised (a world exists); `up` is a live local and every
                 // value was validated.
                 unsafe {
-                    JPH_VehicleCollisionTesterRay_Create(object_layer.get(), &up, max_slope_angle)
+                    JPH_VehicleCollisionTesterRay_Create2(
+                        object_layer.get(),
+                        &up,
+                        max_slope_angle,
+                        vehicle_body,
+                    )
                 }
                 .cast()
             }
@@ -1416,11 +1424,12 @@ impl VehicleCollisionTester {
                 let up = up.to_jph();
                 // SAFETY: as for the ray.
                 unsafe {
-                    JPH_VehicleCollisionTesterCastSphere_Create(
+                    JPH_VehicleCollisionTesterCastSphere_Create2(
                         object_layer.get(),
                         radius,
                         &up,
                         max_slope_angle,
+                        vehicle_body,
                     )
                 }
                 .cast()
@@ -1431,17 +1440,18 @@ impl VehicleCollisionTester {
             } => {
                 // SAFETY: as for the ray.
                 unsafe {
-                    JPH_VehicleCollisionTesterCastCylinder_Create(
+                    JPH_VehicleCollisionTesterCastCylinder_Create2(
                         object_layer.get(),
                         convex_radius_fraction,
+                        vehicle_body,
                     )
                 }
                 .cast()
             }
         };
-        // SAFETY: joltc returns the new tester holding one reference (it calls `AddRef`), which
-        // the guard takes over. Every tester kind derives from `VehicleCollisionTester` with
-        // single inheritance, joltc's cast convention.
+        // SAFETY: the extension returns the new tester holding one reference (it calls `AddRef`),
+        // which the guard takes over; the tester owns its body filter. Every tester kind derives
+        // from `VehicleCollisionTester` with single inheritance, joltc's cast convention.
         unsafe { Owned::from_raw(tester) }
             .unwrap_or_else(|| unreachable!("joltc `new`s the tester"))
     }
@@ -1777,7 +1787,7 @@ mod tests {
                 f32::MAX
             );
         }
-        let tester = VehicleCollisionTester::ray(ObjectLayer::new(1)).create();
+        let tester = VehicleCollisionTester::ray(ObjectLayer::new(1)).create(0);
         // SAFETY: the tester is live and only read.
         let layer = unsafe { JPH_VehicleCollisionTester_GetObjectLayer(tester.as_ptr()) };
         assert_eq!(layer, 1);

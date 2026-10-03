@@ -420,7 +420,7 @@ impl VehicleMut<'_> {
 
 /// Gives the vehicle a new Jolt tester built from the validated `tester` and records it.
 fn install_tester(entry: &mut VehicleEntry, tester: VehicleCollisionTester) {
-    let jolt_tester = tester.create();
+    let jolt_tester = tester.create(entry.body.to_raw());
     // SAFETY: the world is borrowed mutably (the caller holds the entry mutably) and owns the
     // constraint; no step runs. The constraint takes its own reference to the tester and
     // releases the one to the tester it replaces; the guard releases ours afterwards.
