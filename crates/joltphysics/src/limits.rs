@@ -54,7 +54,10 @@
 //!   directly, in frequency mode through an upper bound of the effective mass. For a ragdoll joint
 //!   that bound is computed at creation from the parts' masses and inertias, including Jolt's
 //!   `Stabilize` (`Ragdoll.cpp:135-185`); see [`SpringSettings`](crate::SpringSettings). For a
-//!   wheel's suspension it is [`MAX_MASS`], since Jolt's suspension effective mass is at most the
+//!   world constraint it is computed at creation from its two bodies: over the dynamic ones, the
+//!   larger of the mass and the largest principal moment of inertia
+//!   ([`PhysicsWorld::create_constraint`]); the constraint's spring setters use the same bound.
+//!   For a wheel's suspension it is [`MAX_MASS`], since Jolt's suspension effective mass is at most the
 //!   chassis mass (`VehicleConstraint.cpp:448-451`).
 //! - **Anti-roll bars.** Jolt computes `stiffness · length difference · dt` for each bar
 //!   (`VehicleConstraint.cpp:289-293`) and passes it as the bias `b` of the wheel's suspension
@@ -174,7 +177,13 @@
 //! | `SpringSettings::StiffnessAndDamping` | [`MAX_SPRING_COEFFICIENT`] | new: `stiffness_springs_are_bounded_by_the_coefficient` |
 //! | `SpringSettings::FrequencyAndDamping` in `RagdollSettings::new`, `new_stabilized` | `B·ω²` and `2·B·ζ·ω` at most [`MAX_SPRING_COEFFICIENT`] | new: `motor_springs_are_bounded_by_the_parts_effective_mass`, `motor_spring_of_1e20_hz_is_rejected` |
 //! | `MotorSettings::force_limits`, `torque_limits`; angle limits | finite, `min <= max`; Jolt clamps the motor impulse to `dt · limit` | existing: `motors_and_springs_are_validated`, `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
-//! | constraint frame points | [`MAX_POSITION`] | new: `constraint_frame_points_are_bounded` |
+//! | constraint frame points | [`MAX_POSITION`] | new: `constraint_frame_points_are_bounded`, `constraint_targets_are_bounded` |
+//! | `SpringSettings::FrequencyAndDamping` in `PhysicsWorld::create_constraint`, `ConstraintMut::<DistanceConstraint>::set_limits_spring`, `ConstraintMut::<HingeConstraint>::set_motor_settings`, `set_limits_spring` | `B·ω²` and `2·B·ζ·ω` at most [`MAX_SPRING_COEFFICIENT`], `B` from the constraint's two bodies | new: `world_constraint_springs_are_bounded_by_the_bodies_effective_mass` |
+//! | `DistanceRange::Range`, `ConstraintMut::<DistanceConstraint>::set_distance` | `0 <= min <= max <=` [`MAX_SHAPE_EXTENT`] | new: `constraint_targets_are_bounded` |
+//! | `ConstraintMut::<HingeConstraint>::set_target_angle` | `[-π, π]`; Jolt clamps it to the limits | new: `constraint_targets_are_bounded` |
+//! | `ConstraintMut::<HingeConstraint>::set_target_angular_velocity` | [`MAX_ANGULAR_VELOCITY`] | new: `constraint_targets_are_bounded` |
+//! | `ConstraintMut::<HingeConstraint>::set_limits` | Jolt's hinge ranges, `min == max` only with a soft spring | new: `hinge_setters_check_their_values` |
+//! | `ConstraintMut::<HingeConstraint>::set_max_friction_torque` | finite, at least 0; Jolt clamps the friction impulse to `dt · limit` | new: `constraint_friction_at_f32_max_steps_finitely` |
 //! | `SwingTwistConstraintSettings::max_friction_torque`, `HingeConstraintSettings::max_friction_torque`, `SixDofConstraintSettings::max_friction` | finite, at least 0; Jolt clamps the friction impulse to `dt · limit` and applies no more than stops the relative motion | existing: `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
 //! | `SixDofAxis::Limited` on a translation axis | finite, `min < max`, within [`MAX_SHAPE_EXTENT`] | new: `six_dof_limits_are_validated`, `six_dof_translation_limits_at_the_bound_step_finitely` |
 //! | `RagdollSettings::new`, `new_stabilized` part masses | [`MIN_MASS`]`..=`[`MAX_MASS`], also for kinematic parts (`RagdollMut::set_motion_type` can make them dynamic) | new: `part_masses_and_velocities_are_bounded` |

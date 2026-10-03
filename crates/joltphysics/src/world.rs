@@ -24,6 +24,7 @@ use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
 use crate::character::CharacterEntry;
+use crate::constraint::ConstraintEntry;
 use crate::jolt_assert;
 use crate::limits;
 use crate::owned::{JoltObject, Owned};
@@ -233,9 +234,10 @@ impl WorldTag {
 /// until Jolt has rebuilt it during steps (Jolt docs, "Bodies"); see
 /// [`optimize_broad_phase`](Self::optimize_broad_phase).
 pub struct PhysicsWorld {
-    // Field order is drop order, after `Drop for PhysicsWorld` has taken every vehicle out of
-    // the system's step listeners and constraints and every ragdoll out of the system and
-    // released them, so `vehicles` and `ragdolls` are empty by then. The characters go first: each destructor removes its inner
+    // Field order is drop order, after `Drop for PhysicsWorld` has taken every constraint out of
+    // the system and released it, then every vehicle out of the system's step listeners and
+    // constraints and every ragdoll out of the system, so `constraints`, `vehicles` and
+    // `ragdolls` are empty by then. The characters go first: each destructor removes its inner
     // body through the still-live system. The character collision set follows; it only frees
     // its list of character pointers. The system goes next, before the job system and allocator
     // its steps used, and deletes the layer tables it owns. The interface and query pointers
@@ -246,6 +248,8 @@ pub struct PhysicsWorld {
     pub(crate) vehicles: BTreeMap<u32, VehicleEntry>,
     /// The ragdolls by ragdoll id.
     pub(crate) ragdolls: BTreeMap<u32, RagdollEntry>,
+    /// The constraints by constraint id.
+    pub(crate) constraints: BTreeMap<u32, ConstraintEntry>,
     /// Jolt's `CharacterVsCharacterCollisionSimple` of the characters that collide with each
     /// other, created with the first of them.
     pub(crate) character_collision: Option<Owned<JPH_CharacterVsCharacterCollision>>,
@@ -270,10 +274,15 @@ pub struct PhysicsWorld {
     pub(crate) ragdoll_bodies: BTreeMap<u32, u32>,
     /// The id the next ragdoll gets; ids start at 1 and are never reused.
     pub(crate) next_ragdoll_id: u32,
+    /// Raw ids of the bodies constraints use, with the ids of those constraints.
+    pub(crate) constraint_bodies: BTreeMap<u32, BTreeSet<u32>>,
+    /// The id the next constraint gets; ids start at 1 and are never reused.
+    pub(crate) next_constraint_id: u32,
 }
 
 impl Drop for PhysicsWorld {
     fn drop(&mut self) {
+        self.remove_all_constraints();
         self.remove_all_vehicles();
         self.remove_all_ragdolls();
     }
@@ -299,7 +308,9 @@ unsafe impl Send for PhysicsWorld {}
 // `step` and the vehicle setters, both behind `&mut self`. Ragdoll reads through `&self` use the
 // locking body interface and constraint getters that read constraint members and the bodies'
 // rotations, which Jolt writes only in `step` and the ragdoll and body setters, all behind
-// `&mut self`.
+// `&mut self`. Constraint reads through `&self` are joltc getters over constraint members and the
+// bodies' transforms, which Jolt writes only in `step` and the `&mut` constraint and body
+// setters.
 unsafe impl Sync for PhysicsWorld {}
 
 /// One body's pose and velocities in a frame.
@@ -506,6 +517,7 @@ impl PhysicsWorld {
             characters: BTreeMap::new(),
             vehicles: BTreeMap::new(),
             ragdolls: BTreeMap::new(),
+            constraints: BTreeMap::new(),
             character_collision: None,
             system,
             job_system,
@@ -522,6 +534,8 @@ impl PhysicsWorld {
             next_vehicle_id: 1,
             ragdoll_bodies: BTreeMap::new(),
             next_ragdoll_id: 1,
+            constraint_bodies: BTreeMap::new(),
+            next_constraint_id: 1,
         })
     }
 

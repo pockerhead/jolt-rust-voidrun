@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use crate::{BodyId, CharacterId, ObjectLayer, RagdollId, VehicleId};
+use crate::{AnyConstraintId, BodyId, CharacterId, ObjectLayer, RagdollId, VehicleId};
 
 /// Why a [`PhysicsWorld`](crate::PhysicsWorld) could not be created or changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,6 +130,8 @@ pub enum BodyError {
     UsedByVehicle(BodyId),
     /// The body is a part of a ragdoll; remove the ragdoll instead.
     OwnedByRagdoll(BodyId),
+    /// The body is used by a constraint; remove the constraint first.
+    UsedByConstraint(BodyId),
 }
 
 impl fmt::Display for BodyError {
@@ -152,6 +154,10 @@ impl fmt::Display for BodyError {
             }
             Self::UsedByVehicle(id) => write!(f, "body {id:?} is the chassis of a vehicle"),
             Self::OwnedByRagdoll(id) => write!(f, "body {id:?} is a part of a ragdoll"),
+            Self::UsedByConstraint(id) => write!(
+                f,
+                "body {id:?} is used by a constraint; remove the constraint first"
+            ),
         }
     }
 }
@@ -275,6 +281,51 @@ impl fmt::Display for RagdollError {
 }
 
 impl std::error::Error for RagdollError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Body(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+/// Why a constraint operation failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConstraintError {
+    /// The id names no constraint in this world: it was removed.
+    NotFound(AnyConstraintId),
+    /// The id belongs to another world.
+    WrongWorld(AnyConstraintId),
+    /// A setting or input is out of range; the payload names it.
+    InvalidValue(&'static str),
+    /// A body of the constraint is not usable: not in this world, the inner body of a character
+    /// or a part of a ragdoll.
+    Body(BodyError),
+    /// The constraint is referenced by another one (a gear or a rack and pinion); remove that
+    /// one first.
+    UsedByConstraint(AnyConstraintId),
+    /// The world has given out every constraint id.
+    TooManyConstraints,
+}
+
+impl fmt::Display for ConstraintError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound(id) => write!(f, "no constraint {id:?} in this world"),
+            Self::WrongWorld(id) => write!(f, "constraint {id:?} belongs to another world"),
+            Self::InvalidValue(what) => write!(f, "invalid constraint value: {what}"),
+            Self::Body(error) => write!(f, "unusable constraint body: {error}"),
+            Self::UsedByConstraint(id) => write!(
+                f,
+                "constraint {id:?} is referenced by another constraint; remove that one first"
+            ),
+            Self::TooManyConstraints => f.write_str("the world has no constraint ids left"),
+        }
+    }
+}
+
+impl std::error::Error for ConstraintError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Body(error) => Some(error),

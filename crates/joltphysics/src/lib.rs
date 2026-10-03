@@ -235,14 +235,20 @@ pub use character::{
     ExtendedUpdateSettings, GroundState, InnerBody,
 };
 pub use constraint::{
-    ConstraintSpace, HingeConstraintSettings, MotorSettings, SixDofAxis, SixDofConstraintAxis,
-    SixDofConstraintSettings, SpringSettings, SwingTwistConstraintSettings, SwingType,
+    AnyConstraintId, ConeConstraint, ConstraintId, ConstraintKind, ConstraintMut, ConstraintRef,
+    ConstraintSettings, ConstraintSpace, ConstraintType, DistanceConstraint,
+    DistanceConstraintSettings, DistanceRange, FixedConstraint, FixedConstraintSettings,
+    GearConstraint, HingeConstraint, HingeConstraintSettings, MotorSettings, MotorState,
+    PathConstraint, PointConstraint, PointConstraintSettings, PulleyConstraint,
+    RackAndPinionConstraint, SixDofAxis, SixDofConstraint, SixDofConstraintAxis,
+    SixDofConstraintSettings, SliderConstraint, SpringSettings, SwingTwistConstraint,
+    SwingTwistConstraintSettings, SwingType,
 };
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, QueryError, RagdollError, ShapeError, StepError, VehicleError,
-    WorldError,
+    BodyError, CharacterError, ConstraintError, QueryError, RagdollError, ShapeError, StepError,
+    VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};

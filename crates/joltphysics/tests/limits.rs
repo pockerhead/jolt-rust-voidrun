@@ -5,6 +5,8 @@
 
 mod common;
 
+use std::f32::consts::PI;
+
 use common::vehicle::*;
 use common::walker::{f3, v3};
 use common::*;
@@ -1230,4 +1232,211 @@ fn largest_shapes_collide_finitely() {
         );
     }
     step_at_both_extremes(&mut world, &bodies, "largest shapes");
+}
+
+/// A static anchor and a dynamic sphere of `mass` at the origin, hinged about z at the origin.
+fn hinged_sphere(
+    mass: f32,
+    settings: HingeConstraintSettings,
+) -> (
+    PhysicsWorld,
+    BodyId,
+    Result<ConstraintId<HingeConstraint>, ConstraintError>,
+) {
+    let mut world = empty_world();
+    let anchor = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(0.0, 5.0, 0.0)),
+        )
+        .unwrap();
+    let body = world
+        .create_body(&sphere(), &BodySettings::new_dynamic().mass(mass))
+        .unwrap();
+    let hinge = world.create_constraint(anchor, body, &settings);
+    (world, body, hinge)
+}
+
+fn z_hinge() -> HingeConstraintSettings {
+    HingeConstraintSettings::new(
+        RVec3::ZERO,
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(1.0, 0.0, 0.0),
+    )
+}
+
+fn constraint_invalid(result: Result<impl Sized, ConstraintError>) -> bool {
+    matches!(result, Err(ConstraintError::InvalidValue(_)))
+}
+
+#[test]
+fn world_constraint_springs_are_bounded_by_the_bodies_effective_mass() {
+    // A sphere's largest principal moment, 0.1 m for a radius of 0.5 m, is below its mass, so
+    // the bound is the mass as Jolt stores it: 1 / (1 / m) with the inverse in f32.
+    let mass = limits::MAX_MASS;
+    let bound = 1.0 / f64::from(1.0 / mass);
+    let fits = |frequency: f32| {
+        let omega = 2.0 * std::f64::consts::PI * f64::from(frequency);
+        bound * omega * omega <= f64::from(limits::MAX_SPRING_COEFFICIENT)
+    };
+    let mut frequency = ((f64::from(limits::MAX_SPRING_COEFFICIENT) / bound).sqrt()
+        / (2.0 * std::f64::consts::PI)) as f32;
+    while !fits(frequency) {
+        frequency = frequency.next_down();
+    }
+    while fits(frequency.next_up()) {
+        frequency = frequency.next_up();
+    }
+    let spring = |frequency| SpringSettings::FrequencyAndDamping {
+        frequency,
+        damping: 0.0,
+    };
+    let motor = |frequency| MotorSettings::default().spring(spring(frequency));
+
+    let (_, _, accepted) = hinged_sphere(mass, z_hinge().motor(motor(frequency)));
+    assert!(accepted.is_ok());
+    let (_, _, rejected) = hinged_sphere(mass, z_hinge().motor(motor(frequency.next_up())));
+    assert!(constraint_invalid(rejected));
+
+    let (mut world, _, hinge) = hinged_sphere(mass, z_hinge());
+    let mut hinge = world.constraint_mut(hinge.unwrap()).unwrap();
+    assert!(hinge.set_motor_settings(motor(frequency)).is_ok());
+    assert!(constraint_invalid(
+        hinge.set_motor_settings(motor(frequency.next_up()))
+    ));
+    assert!(hinge.set_limits_spring(spring(frequency)).is_ok());
+    assert!(constraint_invalid(
+        hinge.set_limits_spring(spring(frequency.next_up()))
+    ));
+
+    // A static body has no effective mass, so any valid frequency fits it; between two static
+    // bodies nothing bounds a spring.
+    let (mut world, body, _) = hinged_sphere(mass, z_hinge());
+    let anchor = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(3.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    let other = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(-3.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    let rod =
+        DistanceConstraintSettings::new(RVec3::new(3.0, 0.0, 0.0), RVec3::new(-3.0, 0.0, 0.0))
+            .limits_spring(spring(f32::MAX));
+    assert!(world.create_constraint(anchor, other, &rod).is_ok());
+    let rod = DistanceConstraintSettings::new(RVec3::new(3.0, 0.0, 0.0), RVec3::ZERO);
+    let rod = world.create_constraint(anchor, body, &rod).unwrap();
+    let mut rod = world.constraint_mut(rod).unwrap();
+    assert!(rod.set_limits_spring(spring(frequency)).is_ok());
+    assert!(constraint_invalid(
+        rod.set_limits_spring(spring(frequency.next_up()))
+    ));
+}
+
+#[test]
+fn constraint_targets_are_bounded() {
+    let (mut world, body, hinge) = hinged_sphere(1.0, z_hinge());
+    let mut hinge = world.constraint_mut(hinge.unwrap()).unwrap();
+    for angle in [PI, -PI] {
+        assert!(hinge.set_target_angle(angle).is_ok());
+    }
+    for angle in [PI.next_up(), (-PI).next_down(), f32::NAN] {
+        assert!(constraint_invalid(hinge.set_target_angle(angle)));
+    }
+    let speed = limits::MAX_ANGULAR_VELOCITY;
+    for velocity in [speed, -speed] {
+        assert!(hinge.set_target_angular_velocity(velocity).is_ok());
+    }
+    for velocity in [speed.next_up(), (-speed).next_down(), f32::INFINITY] {
+        assert!(constraint_invalid(
+            hinge.set_target_angular_velocity(velocity)
+        ));
+    }
+
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let anchor = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(3.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    let rod = |range| {
+        DistanceConstraintSettings::new(RVec3::new(3.0, 0.0, 0.0), RVec3::ZERO).range(range)
+    };
+    for (min, max) in [(extent.next_up(), extent.next_up()), (-1.0e-6, 1.0)] {
+        assert!(constraint_invalid(world.create_constraint(
+            anchor,
+            body,
+            &rod(DistanceRange::Range { min, max })
+        )));
+    }
+    let rod = world
+        .create_constraint(
+            anchor,
+            body,
+            &rod(DistanceRange::Range {
+                min: 0.0,
+                max: extent,
+            }),
+        )
+        .unwrap();
+    let mut rod = world.constraint_mut(rod).unwrap();
+    assert!(rod.set_distance(extent, extent).is_ok());
+    assert!(rod.set_distance(0.0, 0.0).is_ok());
+    for (min, max) in [
+        (0.0, extent.next_up()),
+        (-1.0e-6, 0.0),
+        (1.0, 0.5),
+        (f32::NAN, 1.0),
+    ] {
+        assert!(constraint_invalid(rod.set_distance(min, max)));
+    }
+
+    // Constraint points follow the frame rule.
+    let point = |at| PointConstraintSettings::new(RVec3::ZERO).point2(at);
+    for at in real_on_axes(limits::MAX_POSITION) {
+        let id = world.create_constraint(anchor, body, &point(at)).unwrap();
+        world.remove_constraint(id).unwrap();
+    }
+    for at in real_on_axes(limits::MAX_POSITION.next_up()) {
+        assert!(constraint_invalid(world.create_constraint(
+            anchor,
+            body,
+            &point(at)
+        )));
+    }
+}
+
+#[test]
+fn constraint_friction_at_f32_max_steps_finitely() {
+    // Jolt clamps a constraint's friction impulse to `dt` times the friction: a hinge of
+    // unlimited friction on bodies of both mass extremes spinning at the velocity bound.
+    for mass in [limits::MIN_MASS, limits::MAX_MASS] {
+        let (mut world, body, hinge) = hinged_sphere(mass, z_hinge().max_friction_torque(f32::MAX));
+        let hinge = hinge.unwrap();
+        world
+            .constraint_mut(hinge)
+            .unwrap()
+            .set_max_friction_torque(f32::MAX)
+            .unwrap();
+        world
+            .body_mut(body)
+            .unwrap()
+            .set_angular_velocity(Vec3::new(0.0, 0.0, limits::MAX_ANGULAR_VELOCITY))
+            .unwrap();
+        for tick in 0..120 {
+            let _ = world.step(DT).unwrap();
+            assert_body_finite(&world, body, &format!("mass {mass}, tick {tick}"));
+        }
+        let lambda = world.constraint(hinge).unwrap().total_lambda_position();
+        assert!(
+            f3(lambda).iter().all(|value| value.is_finite()),
+            "{lambda:?}"
+        );
+        step_at_both_extremes(&mut world, &[body], &format!("friction, mass {mass}"));
+    }
 }
