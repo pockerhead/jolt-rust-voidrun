@@ -171,7 +171,8 @@ pub struct WheelState {
     pub hit_hard_point: bool,
     /// Rotation speed of the wheel, rad/s; positive when it rolls the vehicle forward.
     pub angular_velocity: f32,
-    /// Rotation angle of the wheel, radians in `[0, 2π]`.
+    /// Rotation angle of the wheel, radians. Jolt wraps it with `fmod` by 2π, so it stays within
+    /// `(−2π, 2π)` and goes negative when the wheel turns backwards past 0.
     pub rotation_angle: f32,
     /// Steering angle, radians; positive steers left.
     pub steer_angle: f32,

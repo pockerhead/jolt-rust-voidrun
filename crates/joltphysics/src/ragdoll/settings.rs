@@ -219,6 +219,20 @@ pub struct RagdollPart<'a> {
 /// ragdolls still collide. Joint priorities grow toward the root (Jolt
 /// `CalculateConstraintPriorities`).
 ///
+/// # Joint limits on impact
+/// Joints do not stay within their limits on every tick. In each solver iteration Jolt solves
+/// contacts after constraints, so when a ragdoll hits the ground the contacts win and joints pass
+/// their limits for a few dozen ticks; hinges also bend about their fixed axes, and a small error
+/// can remain at rest. How far depends on the
+/// ragdoll and the fall. In the repository's drop test (a 12-part humanoid dropped with its pelvis
+/// 1.5 m above a heightfield) the worst overshoot is 0.29 rad and 0.0037 rad remain at rest; the
+/// test's bounds, 0.40 rad during the fall and 0.01 rad at rest, hold for that drop only. Over a
+/// sweep of 126 drops of that humanoid the overshoot reached 0.48 rad, and up to 0.15 rad
+/// remained when the ragdoll came to rest. Thin parts falling fast can also sink into the ground
+/// with
+/// [`MotionQuality::Discrete`](crate::MotionQuality::Discrete); use
+/// [`MotionQuality::LinearCast`](crate::MotionQuality::LinearCast) on them for high falls.
+///
 /// The settings hold one reference to the skeleton, the parts' shapes and the group filter;
 /// every ragdoll created from them holds one reference to the settings, so they may be dropped
 /// while ragdolls live. Never changes after construction; one value may create ragdolls in any

@@ -5,9 +5,9 @@
 //! A [`PhysicsWorld`] owns a Jolt physics system with its collision layers
 //! ([`CollisionLayers`]), its own job system and temp allocator. Bodies are created from a
 //! [`Shape`] and [`BodySettings`] and named by a [`BodyId`]. Shapes are boxes (with a
-//! configurable convex radius), spheres, Y-cylinders, Y-capsules, heightfields and compounds
-//! whose children carry their own pose and user data, and one shape may serve
-//! many bodies in many worlds.
+//! configurable convex radius), spheres, Y-cylinders, Y-capsules, heightfields, compounds
+//! whose children carry their own pose and user data, and shapes with a moved centre of mass;
+//! one shape may serve many bodies in many worlds.
 //!
 //! Scene queries run on `&PhysicsWorld`: [`PhysicsWorld::cast_ray`] finds the closest body
 //! along a ray, [`PhysicsWorld::cast_shape`] the first obstacle a moving shape hits, and
@@ -110,6 +110,10 @@
 //! made from the same [`Shape`]s, which Jolt shares. For the caller's own gravity, create the
 //! parts with [`BodySettings::gravity_factor`] 0 and add `g * mass` ([`BodyRef::mass`]) to each
 //! part every tick.
+//!
+//! Joints do not stay within their limits on every tick: in each solver iteration Jolt solves
+//! contacts after constraints, so on impact joints pass their limits for a few dozen ticks, and a
+//! small error can remain at rest ([`RagdollSettings`] has the measured sizes).
 //!
 //! ```
 //! use joltphysics::*;

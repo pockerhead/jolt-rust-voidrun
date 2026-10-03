@@ -71,8 +71,9 @@ impl SwingType {
     }
 }
 
-/// A spring (Jolt `SpringSettings`). A spring with frequency or stiffness 0 is rigid. The
-/// default is rigid: frequency 0, damping 0.
+/// A spring (Jolt `SpringSettings`). A limit spring with frequency or stiffness 0 is rigid; a
+/// position motor whose spring has frequency or stiffness 0 does nothing (Jolt deactivates it).
+/// The default is rigid: frequency 0, damping 0.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SpringSettings {
     /// Oscillation frequency in Hz and damping ratio (1 is critical damping), both at least 0.
@@ -168,6 +169,10 @@ impl Default for MotorSettings {
 
 impl MotorSettings {
     /// The spring that drives a position motor to its target. Default 2 Hz, damping 1.
+    ///
+    /// Only finiteness and sign are checked, not size. An absurd frequency (about 1e19 Hz and
+    /// above) overflows Jolt's spring coefficient during the step: Jolt clamps the resulting
+    /// velocity, and with `joltphysics-sys/asserts` its finite-velocity assertion fires.
     #[must_use]
     pub fn spring(mut self, value: SpringSettings) -> Self {
         self.spring = value;
