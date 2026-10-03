@@ -109,6 +109,32 @@ fn step_rejects_delta_time_above_the_bound() {
     );
 }
 
+#[test]
+fn step_rejects_delta_time_below_the_bound() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let cube = add_cube(&mut world, RVec3::new(0.0, 2.0, 0.0));
+    let mut before = Vec::new();
+    record_body(&world, cube, &mut before);
+    let just_below = f32::from_bits(PhysicsWorld::MIN_DELTA_TIME.to_bits() - 1);
+    for dt in [
+        f32::from_bits(1),
+        f32::MIN_POSITIVE,
+        PhysicsWorld::MIN_DELTA_TIME / 2.0,
+        just_below,
+    ] {
+        assert_eq!(world.step(dt), Err(StepError::InvalidDeltaTime));
+        let mut after = Vec::new();
+        record_body(&world, cube, &mut after);
+        assert_eq!(after, before, "the world advanced with dt = {dt}");
+    }
+    assert!(world.step(PhysicsWorld::MIN_DELTA_TIME).is_ok());
+    let position: [Real; 3] = world.body(cube).unwrap().position().into();
+    assert!(
+        position.iter().all(|value| value.is_finite()),
+        "{position:?}"
+    );
+}
+
 /// A floor with a row of resting cubes, each touching only the floor, and one cube falling
 /// from above. Returns the falling cube.
 fn crowded_floor(world: &mut PhysicsWorld) -> BodyId {

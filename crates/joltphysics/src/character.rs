@@ -1208,8 +1208,8 @@ impl PhysicsWorld {
     /// character's own inner body is never hit. Characters that collide with characters also
     /// hit each other, whatever the filter says.
     ///
-    /// `delta_time` must be finite, positive and at most
-    /// [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), `gravity` finite, the settings valid and the
+    /// `delta_time` must be finite, at least [`MIN_DELTA_TIME`](Self::MIN_DELTA_TIME) and at
+    /// most [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), `gravity` finite, the settings valid and the
     /// filter's layers in this world; otherwise nothing happens and
     /// [`CharacterError::InvalidValue`] is returned.
     ///
@@ -1246,9 +1246,9 @@ impl PhysicsWorld {
         settings: &ExtendedUpdateSettings,
         filter: &QueryFilter<'_>,
     ) -> Result<(), CharacterError> {
-        if !(is_finite_positive(delta_time) && delta_time <= Self::MAX_DELTA_TIME) {
+        if !Self::is_valid_delta_time(delta_time) {
             return Err(CharacterError::InvalidValue(
-                "delta time must be finite, positive and at most MAX_DELTA_TIME",
+                "delta time must be finite and between MIN_DELTA_TIME and MAX_DELTA_TIME",
             ));
         }
         if !gravity.is_finite() {

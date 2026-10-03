@@ -24,7 +24,6 @@ use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
 use crate::character::CharacterEntry;
-use crate::math::is_finite_positive;
 use crate::owned::{JoltObject, Owned};
 use crate::vehicle::VehicleEntry;
 use crate::{
@@ -382,6 +381,22 @@ impl PhysicsWorld {
     /// larger ones may tunnel or sag depending on the scene.
     pub const MAX_DELTA_TIME: f32 = 1.0;
 
+    /// Smallest time step [`step`](Self::step) accepts, in seconds, inclusive.
+    ///
+    /// A joltphysics guard, not a Jolt limit. Jolt divides by the step: a kinematic body's
+    /// velocity is its move over the step (`MoveKinematic`), a character's velocities are
+    /// derived the same way, and a wheel's brake-lock torque is `|ω| · inertia / step`
+    /// (`WheeledVehicleController::PostCollide`). A subnormal step makes these infinite. The
+    /// bound keeps those reciprocals finite for finite settings; it does not bound every force
+    /// or velocity a step can produce.
+    pub const MIN_DELTA_TIME: f32 = 1.0e-6;
+
+    /// Whether `delta_time` is finite and within `MIN_DELTA_TIME..=MAX_DELTA_TIME`.
+    pub(crate) fn is_valid_delta_time(delta_time: f32) -> bool {
+        delta_time.is_finite()
+            && (Self::MIN_DELTA_TIME..=Self::MAX_DELTA_TIME).contains(&delta_time)
+    }
+
     /// Creates a world. Nothing is allocated when the settings are invalid.
     pub fn new(settings: WorldSettings) -> Result<Self, WorldError> {
         settings.validate()?;
@@ -688,13 +703,13 @@ impl PhysicsWorld {
 
     /// Advances the world by `delta_time` seconds in one collision step.
     ///
-    /// `delta_time` must be finite, positive and at most
-    /// [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), otherwise nothing happens and
+    /// `delta_time` must be finite, at least [`MIN_DELTA_TIME`](Self::MIN_DELTA_TIME) and at
+    /// most [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), otherwise nothing happens and
     /// [`StepError::InvalidDeltaTime`] is returned. Every other call advances the world and
     /// returns a [`StepReport`]; check [`StepReport::is_complete`] to learn whether Jolt
     /// dropped work because a fixed-size buffer was full.
     pub fn step(&mut self, delta_time: f32) -> Result<StepReport, StepError> {
-        if !(is_finite_positive(delta_time) && delta_time <= Self::MAX_DELTA_TIME) {
+        if !Self::is_valid_delta_time(delta_time) {
             return Err(StepError::InvalidDeltaTime);
         }
         // SAFETY: the system, temp allocator and job system are live and owned by this world;

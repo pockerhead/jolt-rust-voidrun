@@ -183,11 +183,12 @@ impl VehicleSettings {
 
     /// Checks that the coefficients the wheeled controller forms from the settings alone
     /// (`WheeledVehicleController::PostCollide`, `VehicleEngine::ApplyTorque`) are finite at
-    /// every step [`PhysicsWorld::step`] accepts. Each grows with the step, so the largest step
-    /// is the worst case. Values that are valid one by one can overflow together: a subnormal
-    /// inertia makes `delta_time / inertia` infinite, huge gear and differential ratios make
-    /// their product infinite. What the step computes from the vehicle's state afterwards is
-    /// not bounded here.
+    /// every step [`PhysicsWorld::step`] accepts. Most grow with the step, so the largest step
+    /// is their worst case; the brake-lock torque per rad/s of wheel speed, `inertia / step`,
+    /// grows as the step shrinks, so the smallest step is its worst case. Values that are valid
+    /// one by one can overflow together: a subnormal inertia makes `delta_time / inertia`
+    /// infinite, huge gear and differential ratios make their product infinite. What the step
+    /// computes from the vehicle's state afterwards is not bounded here.
     fn validate_step_coefficients(&self) -> Result<(), VehicleError> {
         let invalid = |what| Err(VehicleError::InvalidValue(what));
         let dt = PhysicsWorld::MAX_DELTA_TIME;
@@ -196,6 +197,7 @@ impl VehicleSettings {
             let brake_impulse = dt * (wheel.max_brake_torque + wheel.max_hand_brake_torque);
             if !all_finite(&[
                 dt / wheel.inertia,
+                wheel.inertia / PhysicsWorld::MIN_DELTA_TIME,
                 brake_impulse,
                 brake_impulse / wheel.inertia,
                 brake_impulse / wheel.radius,
@@ -1885,6 +1887,13 @@ mod tests {
             w.max_brake_torque(f32::MAX).max_hand_brake_torque(f32::MAX)
         }));
         assert_rejected(with_wheel(|w| w.max_brake_torque(f32::MAX).inertia(0.5)));
+        // The brake-lock torque per rad/s, `inertia / MIN_DELTA_TIME`, overflows; with radius 1
+        // every other coefficient of the wheel stays finite.
+        assert_rejected(with_wheel(|w| w.radius(1.0).inertia(f32::MAX / 2.0)));
+        assert_eq!(
+            with_wheel(|w| w.radius(1.0).inertia(1.0e30)).validate(LAYERS),
+            Ok(())
+        );
         assert_eq!(with_wheel(|w| w.inertia(1.0e-30)).validate(LAYERS), Ok(()));
         assert_eq!(
             with_wheel(|w| w.max_brake_torque(1.0e30)).validate(LAYERS),
