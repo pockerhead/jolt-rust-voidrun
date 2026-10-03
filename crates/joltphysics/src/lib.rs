@@ -358,16 +358,16 @@ pub use constraint::{
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, ConstraintError, QueryError, RagdollError, ShapeError,
-    SoftBodyError, StateError, StepError, VehicleError, WorldError,
+    BodyError, CharacterError, ConstraintError, ContactSettingsError, QueryError, RagdollError,
+    ShapeError, SoftBodyError, StateError, StepError, VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use listener::{
-    ActivationEvent, ContactEvent, ContactManifold, ContactPoint, ContactSettings, EventSettings,
-    SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
-    SoftBodyVertexContact, SubShapeIdPair, WorldEvents,
+    ActivationEvent, ContactEvent, ContactListener, ContactManifold, ContactPoint, ContactSettings,
+    EventSettings, SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult,
+    SoftBodyValidation, SoftBodyVertexContact, SubShapeIdPair, WorldEvents,
 };
 pub use material::PhysicsMaterial;
 pub use math::{Quat, RVec3, Real, Vec3};

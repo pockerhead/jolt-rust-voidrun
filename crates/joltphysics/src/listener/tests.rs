@@ -4,10 +4,12 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::Ordering;
 
+use joltphysics_sys::{JPH_ContactSettings, JPH_SoftBodyContactSettings};
+
 use super::*;
 use crate::{
-    Activation, BodyId, BodySettings, CompoundChild, PhysicsWorld, Quat, RVec3, Shape,
-    SoftBodyBendType, SoftBodySettings, SoftBodySharedSettings, SoftBodyVertex,
+    Activation, BodyId, BodySettings, CompoundChild, ContactSettingsError, PhysicsWorld, Quat,
+    RVec3, Shape, SoftBodyBendType, SoftBodySettings, SoftBodySharedSettings, SoftBodyVertex,
     SoftBodyVertexAttributes, Vec3, WorldSettings,
 };
 
@@ -257,4 +259,187 @@ fn replacing_the_settings_keeps_events_and_panics() {
     assert_eq!(events.activations, vec![ActivationEvent::Deactivated(ball)]);
     assert!(world.step(DT).unwrap().is_complete());
     assert!(world.take_events().is_empty());
+}
+
+fn contact_settings(sensor_body: bool, lever_arm: f64) -> ContactSettings {
+    let settings = JPH_ContactSettings {
+        combinedFriction: 0.5,
+        combinedRestitution: 0.0,
+        invMassScale1: 1.0,
+        invInertiaScale1: 1.0,
+        invMassScale2: 1.0,
+        invInertiaScale2: 1.0,
+        isSensor: u32::from(sensor_body),
+        relativeLinearSurfaceVelocity: Vec3::ZERO.to_jph(),
+        relativeAngularSurfaceVelocity: Vec3::ZERO.to_jph(),
+    };
+    ContactSettings::new(&settings, sensor_body, lever_arm)
+}
+
+/// The next `f32` above `value`.
+fn next_up(value: f32) -> f32 {
+    f32::from_bits(if value == 0.0 { 1 } else { value.to_bits() + 1 })
+}
+
+type Setter = fn(&mut ContactSettings, f32) -> Result<(), ContactSettingsError>;
+
+#[test]
+fn contact_settings_setters_accept_their_range_and_refuse_beyond() {
+    let unit_setters: [(Setter, ContactSettingsError); 5] = [
+        (
+            ContactSettings::set_combined_restitution,
+            ContactSettingsError::Restitution,
+        ),
+        (
+            ContactSettings::set_inv_mass_scale1,
+            ContactSettingsError::InverseMassScale,
+        ),
+        (
+            ContactSettings::set_inv_mass_scale2,
+            ContactSettingsError::InverseMassScale,
+        ),
+        (
+            ContactSettings::set_inv_inertia_scale1,
+            ContactSettingsError::InverseInertiaScale,
+        ),
+        (
+            ContactSettings::set_inv_inertia_scale2,
+            ContactSettingsError::InverseInertiaScale,
+        ),
+    ];
+    for (setter, error) in unit_setters {
+        let mut settings = contact_settings(false, 0.0);
+        for valid in [0.0, 0.5, 1.0] {
+            assert_eq!(setter(&mut settings, valid), Ok(()));
+        }
+        // Jolt allows 2 (half the mass); this API keeps scales at most 1.
+        for invalid in [
+            next_up(1.0),
+            2.0,
+            -f32::MIN_POSITIVE,
+            -1.0,
+            f32::NAN,
+            f32::INFINITY,
+        ] {
+            let before = settings;
+            assert_eq!(setter(&mut settings, invalid), Err(error), "{invalid}");
+            assert_eq!(settings, before, "a refused value changes nothing");
+        }
+    }
+    let mut settings = contact_settings(false, 0.0);
+    let max = crate::limits::MAX_FRICTION;
+    for valid in [0.0, 1.0, max] {
+        assert_eq!(settings.set_combined_friction(valid), Ok(()));
+    }
+    for invalid in [next_up(max), -1.0, f32::NAN] {
+        assert_eq!(
+            settings.set_combined_friction(invalid),
+            Err(ContactSettingsError::Friction)
+        );
+    }
+    assert_eq!(settings.combined_friction(), max);
+}
+
+#[test]
+fn a_contact_with_a_sensor_body_stays_a_sensor_contact() {
+    let mut sensor = contact_settings(true, 0.0);
+    assert!(sensor.is_sensor());
+    assert_eq!(
+        sensor.set_is_sensor(false),
+        Err(ContactSettingsError::SensorBody)
+    );
+    assert_eq!(sensor.set_is_sensor(true), Ok(()));
+    let mut ordinary = contact_settings(false, 0.0);
+    assert_eq!(ordinary.set_is_sensor(true), Ok(()));
+    assert_eq!(ordinary.set_is_sensor(false), Ok(()));
+}
+
+#[test]
+fn surface_velocities_are_bounded_alone_and_together() {
+    let max_linear = crate::limits::MAX_LINEAR_VELOCITY;
+    let max_angular = crate::limits::MAX_ANGULAR_VELOCITY;
+    let x = |value| Vec3::new(value, 0.0, 0.0);
+    let mut settings = contact_settings(false, 0.0);
+    assert_eq!(
+        settings.set_relative_linear_surface_velocity(x(max_linear)),
+        Ok(())
+    );
+    assert_eq!(
+        settings.set_relative_linear_surface_velocity(x(next_up(max_linear))),
+        Err(ContactSettingsError::SurfaceVelocity)
+    );
+    assert_eq!(
+        settings.set_relative_linear_surface_velocity(x(f32::NAN)),
+        Err(ContactSettingsError::SurfaceVelocity)
+    );
+    // With no lever, the angular velocity adds nothing at the contact.
+    assert_eq!(
+        settings.set_relative_angular_surface_velocity(x(max_angular)),
+        Ok(())
+    );
+    assert_eq!(
+        settings.set_relative_angular_surface_velocity(x(next_up(max_angular))),
+        Err(ContactSettingsError::SurfaceVelocity)
+    );
+
+    // At the edge of a 2000 m shape, 0.25 rad/s move the surface by exactly 500 m/s.
+    let lever = f64::from(crate::limits::MAX_SHAPE_EXTENT);
+    let mut settings = contact_settings(false, lever);
+    let refused = Err(ContactSettingsError::SurfaceVelocity);
+    assert_eq!(
+        settings.set_relative_angular_surface_velocity(x(0.25)),
+        Ok(())
+    );
+    assert_eq!(
+        settings.set_relative_linear_surface_velocity(x(0.001)),
+        refused
+    );
+    assert_eq!(
+        settings.set_relative_angular_surface_velocity(x(next_up(0.25))),
+        refused
+    );
+    assert_eq!(
+        settings.set_relative_angular_surface_velocity(x(0.125)),
+        Ok(())
+    );
+    assert_eq!(
+        settings.set_relative_linear_surface_velocity(x(250.0)),
+        Ok(())
+    );
+    assert_eq!(
+        settings.set_relative_linear_surface_velocity(x(next_up(250.0))),
+        refused
+    );
+    assert_eq!(
+        settings.set_relative_angular_surface_velocity(x(next_up(0.125))),
+        refused
+    );
+    assert_eq!(settings.relative_angular_surface_velocity(), x(0.125));
+    assert_eq!(settings.relative_linear_surface_velocity(), x(250.0));
+}
+
+#[test]
+fn soft_body_contact_settings_setters_keep_scales_in_range() {
+    let mut settings = SoftBodyContactSettings::from_jph(&JPH_SoftBodyContactSettings {
+        invMassScale1: 1.0,
+        invMassScale2: 1.0,
+        invInertiaScale2: 1.0,
+        isSensor: false,
+    });
+    type SoftSetter = fn(&mut SoftBodyContactSettings, f32) -> Result<(), ContactSettingsError>;
+    let setters: [SoftSetter; 3] = [
+        SoftBodyContactSettings::set_inv_mass_scale1,
+        SoftBodyContactSettings::set_inv_mass_scale2,
+        SoftBodyContactSettings::set_inv_inertia_scale2,
+    ];
+    for setter in setters {
+        for valid in [0.0, 1.0] {
+            assert_eq!(setter(&mut settings, valid), Ok(()));
+        }
+        for invalid in [next_up(1.0), 2.0, -1.0, f32::NAN] {
+            assert!(setter(&mut settings, invalid).is_err(), "{invalid}");
+        }
+    }
+    settings.set_is_sensor(true);
+    assert!(settings.is_sensor());
 }

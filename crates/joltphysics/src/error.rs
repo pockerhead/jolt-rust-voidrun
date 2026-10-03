@@ -63,6 +63,40 @@ impl fmt::Display for ShapeError {
 
 impl std::error::Error for ShapeError {}
 
+/// Why a [`ContactSettings`](crate::ContactSettings) or
+/// [`SoftBodyContactSettings`](crate::SoftBodyContactSettings) setter refused a value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ContactSettingsError {
+    /// Friction outside `0..=limits::MAX_FRICTION`.
+    Friction,
+    /// Restitution outside `0..=1`.
+    Restitution,
+    /// An inverse mass scale outside `0..=1`.
+    InverseMassScale,
+    /// An inverse inertia scale outside `0..=1`.
+    InverseInertiaScale,
+    /// A contact with a sensor body must stay a sensor contact.
+    SensorBody,
+    /// A surface velocity beyond its bound.
+    SurfaceVelocity,
+}
+
+impl fmt::Display for ContactSettingsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Friction => "contact friction out of range",
+            Self::Restitution => "contact restitution out of range",
+            Self::InverseMassScale => "inverse mass scale out of range",
+            Self::InverseInertiaScale => "inverse inertia scale out of range",
+            Self::SensorBody => "a contact with a sensor body stays a sensor contact",
+            Self::SurfaceVelocity => "surface velocity out of range",
+        })
+    }
+}
+
+impl std::error::Error for ContactSettingsError {}
+
 /// Why a scene query could not run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

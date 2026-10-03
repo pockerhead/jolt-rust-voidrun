@@ -6,7 +6,7 @@ use joltphysics_sys::*;
 
 use super::{Callback, ListenerContext};
 use crate::world::WorldTag;
-use crate::{BodyId, RVec3, SubShapeId, Vec3};
+use crate::{limits, BodyId, ContactSettingsError, RVec3, SubShapeId, Vec3};
 
 /// The two sides of a contact: each body with the sub-shape (compound child, heightfield
 /// triangle) that touches. Jolt orders the sides so that `body1` has the lower id
@@ -50,6 +50,10 @@ pub struct ContactManifold {
 }
 
 /// How Jolt resolves a contact (Jolt `ContactSettings`), with its values for this contact.
+///
+/// A [`ContactListener`](crate::ContactListener) may change them through the setters, which
+/// refuse values outside the ranges they state; `docs/limits.md` (section "Contact settings")
+/// says why.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContactSettings {
     combined_friction: f32,
@@ -61,10 +65,16 @@ pub struct ContactSettings {
     is_sensor: bool,
     relative_linear_surface_velocity: Vec3,
     relative_angular_surface_velocity: Vec3,
+    /// Whether either body is a sensor, which keeps the contact a sensor contact.
+    sensor_body: bool,
+    /// The largest distance from body 1's centre of mass to a contact point, in metres: the
+    /// lever of the angular surface velocity.
+    lever_arm: f64,
 }
 
 impl ContactSettings {
-    pub(super) fn from_jph(settings: &JPH_ContactSettings) -> Self {
+    /// Jolt's settings of a contact, with the facts the setters check against.
+    pub(super) fn new(settings: &JPH_ContactSettings, sensor_body: bool, lever_arm: f64) -> Self {
         Self {
             combined_friction: settings.combinedFriction,
             combined_restitution: settings.combinedRestitution,
@@ -79,7 +89,27 @@ impl ContactSettings {
             relative_angular_surface_velocity: Vec3::from_jph(
                 settings.relativeAngularSurfaceVelocity,
             ),
+            sensor_body,
+            lever_arm,
         }
+    }
+
+    /// Writes every value back to joltc's copy, which joltc then copies to Jolt.
+    pub(super) fn write_to(&self, settings: &mut JPH_ContactSettings) {
+        settings.combinedFriction = self.combined_friction;
+        settings.combinedRestitution = self.combined_restitution;
+        settings.invMassScale1 = self.inv_mass_scale1;
+        settings.invInertiaScale1 = self.inv_inertia_scale1;
+        settings.invMassScale2 = self.inv_mass_scale2;
+        settings.invInertiaScale2 = self.inv_inertia_scale2;
+        settings.isSensor = u32::from(self.is_sensor);
+        settings.relativeLinearSurfaceVelocity = self.relative_linear_surface_velocity.to_jph();
+        settings.relativeAngularSurfaceVelocity = self.relative_angular_surface_velocity.to_jph();
+    }
+
+    /// The setter facts as bits, for the canonical order.
+    pub(super) fn rule_bits(&self) -> (bool, u64) {
+        (self.sensor_body, self.lever_arm.to_bits())
     }
 
     /// The friction of the contact, by default Jolt's `sqrt(friction1 * friction2)` of the two
@@ -88,9 +118,23 @@ impl ContactSettings {
         self.combined_friction
     }
 
+    /// Sets the friction, `0..=`[`limits::MAX_FRICTION`] like a body's.
+    pub fn set_combined_friction(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+        check(limits::is_friction(value), ContactSettingsError::Friction)?;
+        self.combined_friction = value;
+        Ok(())
+    }
+
     /// The restitution of the contact, by default the larger of the two bodies'.
     pub fn combined_restitution(&self) -> f32 {
         self.combined_restitution
+    }
+
+    /// Sets the restitution, `0..=1` like a body's.
+    pub fn set_combined_restitution(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+        check(is_unit_interval(value), ContactSettingsError::Restitution)?;
+        self.combined_restitution = value;
+        Ok(())
     }
 
     /// Factor on body 1's inverse mass for this contact; 1 by default.
@@ -98,9 +142,30 @@ impl ContactSettings {
         self.inv_mass_scale1
     }
 
+    /// Sets the factor on body 1's inverse mass, `0..=1`: 0 makes body 1 immovable for this
+    /// contact.
+    pub fn set_inv_mass_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+        check(
+            is_unit_interval(value),
+            ContactSettingsError::InverseMassScale,
+        )?;
+        self.inv_mass_scale1 = value;
+        Ok(())
+    }
+
     /// Factor on body 1's inverse inertia for this contact; 1 by default.
     pub fn inv_inertia_scale1(&self) -> f32 {
         self.inv_inertia_scale1
+    }
+
+    /// Sets the factor on body 1's inverse inertia, `0..=1`.
+    pub fn set_inv_inertia_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+        check(
+            is_unit_interval(value),
+            ContactSettingsError::InverseInertiaScale,
+        )?;
+        self.inv_inertia_scale1 = value;
+        Ok(())
     }
 
     /// Factor on body 2's inverse mass for this contact; 1 by default.
@@ -108,9 +173,29 @@ impl ContactSettings {
         self.inv_mass_scale2
     }
 
+    /// Sets the factor on body 2's inverse mass, `0..=1`.
+    pub fn set_inv_mass_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+        check(
+            is_unit_interval(value),
+            ContactSettingsError::InverseMassScale,
+        )?;
+        self.inv_mass_scale2 = value;
+        Ok(())
+    }
+
     /// Factor on body 2's inverse inertia for this contact; 1 by default.
     pub fn inv_inertia_scale2(&self) -> f32 {
         self.inv_inertia_scale2
+    }
+
+    /// Sets the factor on body 2's inverse inertia, `0..=1`.
+    pub fn set_inv_inertia_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+        check(
+            is_unit_interval(value),
+            ContactSettingsError::InverseInertiaScale,
+        )?;
+        self.inv_inertia_scale2 = value;
+        Ok(())
     }
 
     /// Whether the contact only reports and does not push the bodies apart; by default when
@@ -119,10 +204,32 @@ impl ContactSettings {
         self.is_sensor
     }
 
+    /// Makes the contact a sensor contact or an ordinary one. A contact with a sensor body
+    /// stays a sensor contact ([`ContactSettingsError::SensorBody`]), as Jolt requires.
+    pub fn set_is_sensor(&mut self, value: bool) -> Result<(), ContactSettingsError> {
+        check(value || !self.sensor_body, ContactSettingsError::SensorBody)?;
+        self.is_sensor = value;
+        Ok(())
+    }
+
     /// Velocity of body 2's surface relative to body 1's at the contact, in m/s in world space
     /// (a conveyor belt); zero by default.
     pub fn relative_linear_surface_velocity(&self) -> Vec3 {
         self.relative_linear_surface_velocity
+    }
+
+    /// Sets the relative linear surface velocity, within [`limits::MAX_LINEAR_VELOCITY`];
+    /// together with the angular one see
+    /// [`set_relative_angular_surface_velocity`](Self::set_relative_angular_surface_velocity).
+    pub fn set_relative_linear_surface_velocity(
+        &mut self,
+        value: Vec3,
+    ) -> Result<(), ContactSettingsError> {
+        let valid = limits::is_linear_velocity(value)
+            && self.is_surface_velocity(value, self.relative_angular_surface_velocity);
+        check(valid, ContactSettingsError::SurfaceVelocity)?;
+        self.relative_linear_surface_velocity = value;
+        Ok(())
     }
 
     /// Angular velocity of body 2's surface relative to body 1's, in rad/s in world space;
@@ -130,6 +237,46 @@ impl ContactSettings {
     pub fn relative_angular_surface_velocity(&self) -> Vec3 {
         self.relative_angular_surface_velocity
     }
+
+    /// Sets the relative angular surface velocity, within [`limits::MAX_ANGULAR_VELOCITY`].
+    ///
+    /// Jolt applies `v + ω × r` at the contact, `r` reaching from body 1's centre of mass to
+    /// the contact, so the two velocities are also bounded together: `|v| + |ω| · R` may not
+    /// exceed [`limits::MAX_LINEAR_VELOCITY`], `R` the largest distance from body 1's centre
+    /// of mass to a point of this contact.
+    pub fn set_relative_angular_surface_velocity(
+        &mut self,
+        value: Vec3,
+    ) -> Result<(), ContactSettingsError> {
+        let valid = limits::is_angular_velocity(value)
+            && self.is_surface_velocity(self.relative_linear_surface_velocity, value);
+        check(valid, ContactSettingsError::SurfaceVelocity)?;
+        self.relative_angular_surface_velocity = value;
+        Ok(())
+    }
+
+    /// Whether `|linear| + |angular| · R <= MAX_LINEAR_VELOCITY`, in `f64`.
+    fn is_surface_velocity(&self, linear: Vec3, angular: Vec3) -> bool {
+        let length = |v: Vec3| {
+            let [x, y, z] = [v.x, v.y, v.z].map(f64::from);
+            (x * x + y * y + z * z).sqrt()
+        };
+        length(linear) + length(angular) * self.lever_arm <= f64::from(limits::MAX_LINEAR_VELOCITY)
+    }
+}
+
+/// `Ok` when `valid`, otherwise `error`.
+pub(super) fn check(valid: bool, error: ContactSettingsError) -> Result<(), ContactSettingsError> {
+    if valid {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
+/// Whether `value` is finite and in `0..=1`.
+pub(super) fn is_unit_interval(value: f32) -> bool {
+    (0.0..=1.0).contains(&value)
 }
 
 /// A change of a rigid body contact in a step.
@@ -241,11 +388,12 @@ enum Kind {
     Persisted,
 }
 
-/// Records an added or persisted contact when the settings ask for it.
+/// Records an added or persisted contact when the settings ask for it, and lets the user
+/// listener change its settings.
 ///
 /// # Safety
 /// The arguments are the live ones of a joltc contact callback.
-unsafe fn record_manifold(
+unsafe fn on_manifold(
     context: &ListenerContext,
     kind: Kind,
     body1: *const JPH_Body,
@@ -257,22 +405,72 @@ unsafe fn record_manifold(
         Kind::Added => context.settings.contacts,
         Kind::Persisted => context.settings.persisted_contacts,
     };
-    if !wanted {
+    if !wanted && context.listener.is_none() {
         return;
     }
     // SAFETY: the arguments are live for the callback (contract); `settings` is joltc's local
-    // copy, only read here.
-    let (manifold, settings) = unsafe {
-        (
-            read_manifold(context.world, body1, body2, manifold),
-            ContactSettings::from_jph(&*settings),
-        )
+    // copy, which joltc copies back to Jolt after the callback.
+    let (manifold, mut contact_settings, settings) = unsafe {
+        let manifold = read_manifold(context.world, body1, body2, manifold);
+        let sensor_body = JPH_Body_IsSensor(body1) || JPH_Body_IsSensor(body2);
+        let lever_arm = lever_arm(body1, &manifold);
+        let settings = &mut *settings;
+        let contact_settings = ContactSettings::new(settings, sensor_body, lever_arm);
+        (manifold, contact_settings, settings)
     };
-    let event = match kind {
-        Kind::Added => ContactEvent::Added { manifold, settings },
-        Kind::Persisted => ContactEvent::Persisted { manifold, settings },
-    };
-    context.batch().contacts.push(event);
+    if let Some(listener) = &context.listener {
+        let mut changed = contact_settings;
+        let returned = context.call_listener(|| match kind {
+            Kind::Added => listener.contact_added(&manifold, &mut changed),
+            Kind::Persisted => listener.contact_persisted(&manifold, &mut changed),
+        });
+        if returned.is_some() {
+            changed.write_to(settings);
+            contact_settings = changed;
+        }
+    }
+    if wanted {
+        let event = match kind {
+            Kind::Added => ContactEvent::Added {
+                manifold,
+                settings: contact_settings,
+            },
+            Kind::Persisted => ContactEvent::Persisted {
+                manifold,
+                settings: contact_settings,
+            },
+        };
+        context.batch().contacts.push(event);
+    }
+}
+
+/// The largest distance from body 1's centre of mass to a point of `manifold`, on either body,
+/// in metres.
+///
+/// # Safety
+/// `body1` is the live body 1 of a contact callback, which may be read.
+unsafe fn lever_arm(body1: *const JPH_Body, manifold: &ContactManifold) -> f64 {
+    let mut com = RVec3::ZERO.to_jph();
+    // SAFETY: `body1` is live (contract); Jolt allows reading bodies in contact callbacks
+    // (`ContactListener.h`), and `com` is a live local.
+    unsafe { JPH_Body_GetCenterOfMassPosition(body1, &mut com) };
+    let com = real_coordinates(RVec3::from_jph(com));
+    manifold
+        .points
+        .iter()
+        .flat_map(|point| [point.on1, point.on2])
+        .map(|point| {
+            let [x, y, z] = real_coordinates(point);
+            let [dx, dy, dz] = [x - com[0], y - com[1], z - com[2]];
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        })
+        .fold(0.0, f64::max)
+}
+
+/// The coordinates of `p` in `f64`.
+#[allow(clippy::unnecessary_cast)] // `Real` is `f32` without the `double-precision` feature.
+fn real_coordinates(p: RVec3) -> [f64; 3] {
+    [p.x as f64, p.y as f64, p.z as f64]
 }
 
 /// joltc's `OnContactAdded`.
@@ -290,7 +488,7 @@ pub(super) unsafe extern "C" fn on_contact_added(
     unsafe {
         let context = ListenerContext::from_user_data(user_data);
         context.guarded((), Callback::ContactAdded, || {
-            record_manifold(context, Kind::Added, body1, body2, manifold, settings)
+            on_manifold(context, Kind::Added, body1, body2, manifold, settings)
         });
     }
 }
@@ -310,7 +508,7 @@ pub(super) unsafe extern "C" fn on_contact_persisted(
     unsafe {
         let context = ListenerContext::from_user_data(user_data);
         context.guarded((), Callback::ContactPersisted, || {
-            record_manifold(context, Kind::Persisted, body1, body2, manifold, settings)
+            on_manifold(context, Kind::Persisted, body1, body2, manifold, settings)
         });
     }
 }

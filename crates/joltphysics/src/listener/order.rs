@@ -82,6 +82,7 @@ fn compare_contacts(a: &ContactEvent, b: &ContactEvent) -> Ordering {
                 },
             ) => settings_bits(s1)
                 .cmp(&settings_bits(s2))
+                .then_with(|| s1.rule_bits().cmp(&s2.rule_bits()))
                 .then_with(|| compare_manifolds(m1, m2)),
             _ => Ordering::Equal,
         })
@@ -215,7 +216,7 @@ mod tests {
             relativeAngularSurfaceVelocity: Vec3::ZERO.to_jph(),
         };
         change(&mut settings);
-        ContactSettings::from_jph(&settings)
+        ContactSettings::new(&settings, false, 0.0)
     }
 
     fn manifold(pair: SubShapeIdPair, depth: f32) -> ContactManifold {

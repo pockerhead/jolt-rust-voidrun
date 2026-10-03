@@ -4,8 +4,9 @@ use std::ffi::c_void;
 
 use joltphysics_sys::*;
 
+use super::contact::{check, is_unit_interval};
 use super::{Callback, ListenerContext};
-use crate::{BodyId, Quat, RVec3, Real, Vec3};
+use crate::{BodyId, ContactSettingsError, Quat, RVec3, Real, Vec3};
 
 /// How Jolt resolves the contacts between a soft body and another body (Jolt
 /// `SoftBodyContactSettings`).
@@ -25,6 +26,48 @@ impl SoftBodyContactSettings {
             inv_inertia_scale2: settings.invInertiaScale2,
             is_sensor: settings.isSensor,
         }
+    }
+
+    fn write_to(&self, settings: &mut JPH_SoftBodyContactSettings) {
+        settings.invMassScale1 = self.inv_mass_scale1;
+        settings.invMassScale2 = self.inv_mass_scale2;
+        settings.invInertiaScale2 = self.inv_inertia_scale2;
+        settings.isSensor = self.is_sensor;
+    }
+
+    /// Sets the factor on the soft body's vertex inverse masses, `0..=1`.
+    pub fn set_inv_mass_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+        check(
+            is_unit_interval(value),
+            ContactSettingsError::InverseMassScale,
+        )?;
+        self.inv_mass_scale1 = value;
+        Ok(())
+    }
+
+    /// Sets the factor on the other body's inverse mass, `0..=1`.
+    pub fn set_inv_mass_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+        check(
+            is_unit_interval(value),
+            ContactSettingsError::InverseMassScale,
+        )?;
+        self.inv_mass_scale2 = value;
+        Ok(())
+    }
+
+    /// Sets the factor on the other body's inverse inertia, `0..=1`.
+    pub fn set_inv_inertia_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+        check(
+            is_unit_interval(value),
+            ContactSettingsError::InverseInertiaScale,
+        )?;
+        self.inv_inertia_scale2 = value;
+        Ok(())
+    }
+
+    /// Makes the other body a sensor for the soft body, or an ordinary obstacle.
+    pub fn set_is_sensor(&mut self, value: bool) {
+        self.is_sensor = value;
     }
 
     /// Factor on the soft body's vertex inverse masses for these contacts; 1 by default.
@@ -120,22 +163,43 @@ pub(super) unsafe extern "C" fn on_soft_body_contact_validate(
     let context = unsafe { ListenerContext::from_user_data(user_data) };
     let accept = JPH_SoftBodyValidateResult_AcceptContact;
     context.guarded(accept, Callback::SoftBodyValidate, || {
-        if !context.settings.soft_body_validations {
+        if !context.settings.soft_body_validations && context.listener.is_none() {
             return accept;
         }
         // SAFETY: the bodies and settings are live for the callback (contract); the id getter
         // reads a member Jolt does not change during a step, and the settings are the
-        // extension's local copy.
-        let validation = unsafe {
-            SoftBodyValidation {
-                soft_body: BodyId::new(JPH_Body_GetID(soft_body), context.world),
-                other: BodyId::new(JPH_Body_GetID(other_body), context.world),
-                settings: SoftBodyContactSettings::from_jph(&*settings),
-                result: SoftBodyValidateResult::AcceptContact,
-            }
+        // extension's local copy, which it copies back to Jolt after the callback.
+        let (soft_body, other, settings) = unsafe {
+            (
+                BodyId::new(JPH_Body_GetID(soft_body), context.world),
+                BodyId::new(JPH_Body_GetID(other_body), context.world),
+                &mut *settings,
+            )
         };
-        context.batch().soft_body_validations.push(validation);
-        accept
+        let mut validation = SoftBodyValidation {
+            soft_body,
+            other,
+            settings: SoftBodyContactSettings::from_jph(settings),
+            result: SoftBodyValidateResult::AcceptContact,
+        };
+        if let Some(listener) = &context.listener {
+            let mut changed = validation.settings;
+            let returned = context.call_listener(|| {
+                listener.soft_body_contact_validate(soft_body, other, &mut changed)
+            });
+            if let Some(result) = returned {
+                changed.write_to(settings);
+                validation.settings = changed;
+                validation.result = result;
+            }
+        }
+        if context.settings.soft_body_validations {
+            context.batch().soft_body_validations.push(validation);
+        }
+        match validation.result {
+            SoftBodyValidateResult::AcceptContact => accept,
+            SoftBodyValidateResult::RejectContact => JPH_SoftBodyValidateResult_RejectContact,
+        }
     })
 }
 

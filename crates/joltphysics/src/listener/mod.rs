@@ -25,7 +25,7 @@ use joltphysics_sys::*;
 
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
-use crate::PhysicsWorld;
+use crate::{BodyId, PhysicsWorld};
 
 pub use activation::ActivationEvent;
 pub use contact::{ContactEvent, ContactManifold, ContactPoint, ContactSettings, SubShapeIdPair};
@@ -33,6 +33,41 @@ pub use soft_body::{
     SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
     SoftBodyVertexContact,
 };
+
+/// Changes how Jolt resolves contacts while a world steps; see
+/// [`PhysicsWorld::set_contact_listener`].
+///
+/// Jolt calls the methods on its worker threads during [`PhysicsWorld::step`], concurrently and
+/// in no fixed order, while it holds every body: a method must not touch the world. For a
+/// deterministic simulation its decision must depend only on its arguments and on data fixed
+/// for the step; a mutex makes shared state safe to use here, not deterministic.
+///
+/// A panic in a method is resumed by `step` after the update. Jolt then keeps its own settings
+/// for that contact, the listener is not called again until the panic is resumed, and the step
+/// that panicked has advanced the world: it is outside the replay guarantee.
+pub trait ContactListener: Send + Sync + 'static {
+    /// A rigid contact appeared; `settings` may be changed for it.
+    fn contact_added(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
+        let _ = (manifold, settings);
+    }
+
+    /// A rigid contact lasted from the previous step; `settings` may be changed for this step.
+    fn contact_persisted(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
+        let _ = (manifold, settings);
+    }
+
+    /// A soft body's bounding box overlaps another body's; `settings` may be changed for the
+    /// contacts of this step, or the contacts rejected.
+    fn soft_body_contact_validate(
+        &self,
+        soft_body: BodyId,
+        other: BodyId,
+        settings: &mut SoftBodyContactSettings,
+    ) -> SoftBodyValidateResult {
+        let _ = (soft_body, other, settings);
+        SoftBodyValidateResult::AcceptContact
+    }
+}
 
 /// Which events a [`PhysicsWorld`] records. The default records nothing.
 ///
@@ -239,6 +274,7 @@ pub(crate) fn first_payload(
 /// configuration never changes, and its buffers are behind mutexes.
 pub(crate) struct ListenerContext {
     settings: EventSettings,
+    listener: Option<Arc<dyn ContactListener>>,
     world: WorldTag,
     /// The events recorded since they were last moved to the world's queue.
     batch: Mutex<WorldEvents>,
@@ -249,9 +285,14 @@ pub(crate) struct ListenerContext {
 }
 
 impl ListenerContext {
-    fn new(settings: EventSettings, world: WorldTag) -> Self {
+    fn new(
+        settings: EventSettings,
+        listener: Option<Arc<dyn ContactListener>>,
+        world: WorldTag,
+    ) -> Self {
         Self {
             settings,
+            listener,
             world,
             batch: Mutex::default(),
             panic: PanicSlot::default(),
@@ -277,6 +318,21 @@ impl ListenerContext {
 
     fn take_batch(&self) -> WorldEvents {
         mem::take(&mut *self.batch())
+    }
+
+    /// Calls the user listener unless a callback panicked since the world last resumed a panic;
+    /// `None` when it did not return.
+    fn call_listener<R>(&self, call: impl FnOnce() -> R) -> Option<R> {
+        if self.panic.panicked.load(Ordering::Acquire) {
+            return None;
+        }
+        match catch_unwind(AssertUnwindSafe(call)) {
+            Ok(result) => Some(result),
+            Err(payload) => {
+                self.panic.record(payload);
+                None
+            }
+        }
     }
 
     /// Runs a callback body; a panic is kept for the world to resume and `fallback` returned.
@@ -393,8 +449,14 @@ impl Listeners {
             .map_or_else(EventSettings::default, |context| context.settings)
     }
 
-    /// Replaces the listeners of `system` with ones for `settings`. Events and a panic of the
-    /// old ones are kept.
+    fn listener(&self) -> Option<Arc<dyn ContactListener>> {
+        self.context
+            .as_ref()
+            .and_then(|context| context.listener.clone())
+    }
+
+    /// Replaces the listeners of `system` with ones for `settings` and `listener`. Events and a
+    /// panic of the old ones are kept.
     ///
     /// # Safety
     /// `system` is the live system these listeners belong to, borrowed mutably by the caller,
@@ -403,6 +465,7 @@ impl Listeners {
         &mut self,
         system: *mut JPH_PhysicsSystem,
         settings: EventSettings,
+        listener: Option<Arc<dyn ContactListener>>,
         world: WorldTag,
     ) {
         // SAFETY: as the caller guarantees.
@@ -415,24 +478,25 @@ impl Listeners {
             let payload = old.panic.take();
             self.pending_panic = first_payload(self.pending_panic.take(), payload);
         }
-        if !settings.needs_any_listener() {
+        let user = listener.is_some();
+        if !settings.needs_any_listener() && !user {
             return;
         }
         install_procs();
-        let context = Arc::new(ListenerContext::new(settings, world));
+        let context = Arc::new(ListenerContext::new(settings, listener, world));
         let user_data: *mut c_void = Arc::as_ptr(&context).cast_mut().cast();
         // SAFETY: Jolt is initialised (the system exists). joltc stores `user_data` in each new
         // listener; the listeners are destroyed before `context` (field order and `configure`),
         // and the `Arc` kept in `self.context` keeps it alive while they are attached. A null
         // listener means joltc could not allocate it, which leaves its events unrecorded.
         unsafe {
-            if settings.needs_contact_listener() {
+            if settings.needs_contact_listener() || user {
                 self.contact = Owned::from_raw(JPH_ContactListener_Create(user_data));
             }
             if settings.body_activation {
                 self.activation = Owned::from_raw(JPH_BodyActivationListener_Create(user_data));
             }
-            if settings.needs_soft_body_listener() {
+            if settings.needs_soft_body_listener() || user {
                 self.soft_body = Owned::from_raw(JPH_SoftBodyContactListener_Create(user_data));
             }
         }
@@ -509,9 +573,27 @@ impl PhysicsWorld {
     /// contacts on while bodies touch reports their next contacts as Persisted or Removed
     /// without an Added, because Jolt reports changes against its contact cache.
     pub fn set_event_settings(&mut self, settings: EventSettings) {
+        let listener = self.listeners.listener();
+        self.configure_listeners(settings, listener);
+    }
+
+    /// Lets `listener` change contact settings from now on, or removes the listener with
+    /// `None`; see [`ContactListener`]. The world keeps the `Arc` while the listener is set.
+    ///
+    /// Events recorded so far stay queued for [`take_events`](Self::take_events).
+    pub fn set_contact_listener(&mut self, listener: Option<Arc<dyn ContactListener>>) {
+        let settings = self.listeners.settings();
+        self.configure_listeners(settings, listener);
+    }
+
+    fn configure_listeners(
+        &mut self,
+        settings: EventSettings,
+        listener: Option<Arc<dyn ContactListener>>,
+    ) {
         let (system, tag) = (self.system.as_ptr(), self.tag);
         // SAFETY: the system is this world's, borrowed mutably, so no step runs.
-        unsafe { self.listeners.configure(system, settings, tag) };
+        unsafe { self.listeners.configure(system, settings, listener, tag) };
     }
 
     /// The events the world records; see [`set_event_settings`](Self::set_event_settings).
