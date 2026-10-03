@@ -251,6 +251,37 @@ impl RagdollRef<'_> {
         Some(reading)
     }
 
+    /// Whether the rotation motors of the joint between `part` and its parent are on, as
+    /// [`RagdollMut::drive_to_pose_using_motors`] leaves them until
+    /// [`RagdollMut::stop_motors`]; `None` for the root part and for parts that do not exist.
+    pub fn joint_motors_on(&self, part: u32) -> Option<bool> {
+        let part = part as usize;
+        if part >= self.entry.bodies.len() {
+            return None;
+        }
+        let (kind, constraint) = self.entry.constraint(part)?;
+        let on = |state: JPH_MotorState| state != JPH_MotorState_Off;
+        // SAFETY: as in `joint`; the getters read the motor state members, which only `&mut`
+        // setters change.
+        let motors_on = unsafe {
+            match kind {
+                JointKind::SwingTwist => {
+                    let constraint = constraint.cast_const().cast();
+                    on(JPH_SwingTwistConstraint_GetSwingMotorState(constraint))
+                        || on(JPH_SwingTwistConstraint_GetTwistMotorState(constraint))
+                }
+                JointKind::Hinge => on(JPH_HingeConstraint_GetMotorState(constraint.cast())),
+                JointKind::SixDof => SixDofConstraintAxis::ROTATIONS.iter().any(|axis| {
+                    on(JPH_SixDOFConstraint_GetMotorState(
+                        constraint.cast(),
+                        axis.to_jph(),
+                    ))
+                }),
+            }
+        };
+        Some(motors_on)
+    }
+
     /// Whether every part moves slower than `max_linear_speed` (m/s) and `max_angular_speed`
     /// (rad/s), strictly. A sleeping part is calm.
     pub fn is_calm(&self, max_linear_speed: f32, max_angular_speed: f32) -> bool {

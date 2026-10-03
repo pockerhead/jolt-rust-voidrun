@@ -259,10 +259,10 @@ fn humanoid_settles_on_a_heightfield_in_a_second_world() {
     eprintln!("{settled:?}");
     assert!(settled.tick < SETTLE_TIMEOUT);
 
-    // At rest every joint is within its limits.
+    // At rest every joint is within its limits. Measured: 0.0037 rad.
     let (violation, part) = worst_limit_violation(&scene.world, ragdoll);
     assert!(
-        violation < LIMIT_TOLERANCE,
+        violation < REST_LIMIT_TOLERANCE,
         "at rest part {part} is {violation} rad outside its joint limits"
     );
     let pose = scene.world.ragdoll(ragdoll).unwrap().pose();
@@ -285,22 +285,64 @@ fn humanoid_settles_on_a_heightfield_in_a_second_world() {
 }
 
 // Jolt solves contacts after constraints, so when the humanoid hits the ground the contacts win
-// and joints overshoot their limits for a few dozen ticks before they recover; at rest they are
-// within 0.02 rad. Measured worst overshoot after a step of this drop: 0.29 rad at the neck;
-// over eight drop positions 0.17 to 0.34 rad, at the neck, shoulders, hips and elbows. Up to
-// 100 velocity and 50 position solver steps, stabilized masses, continuous collision, lower or
-// lying drops, a box floor and other friction coefficients all still overshoot by more than
-// 0.08 rad.
+// and joints overshoot their limits for a few dozen ticks before they recover. Measured worst
+// overshoot after a step of this drop: 0.29 rad at the neck; over other drop positions up to
+// 0.34 rad, at the neck, shoulders, hips and elbows. Up to 100 velocity and 50 position solver
+// steps, stabilized masses, continuous collision, lower or lying drops, a box floor and other
+// friction coefficients all still overshoot by more than 0.08 rad. The bound catches a
+// regression of the overshoot, not a hard per-tick limit.
 #[test]
-#[ignore = "Jolt lets joints overshoot their limits by up to about 0.3 rad on ground impact"]
-fn humanoid_joints_stay_within_limits_during_the_drop() {
+fn humanoid_joints_overshoot_their_limits_only_boundedly_during_the_drop() {
     let (_, _, settled) = settled_scene();
     assert!(
-        settled.worst_violation < LIMIT_TOLERANCE,
+        settled.worst_violation < DROP_LIMIT_OVERSHOOT,
         "part {} was {} rad outside its joint limits",
         settled.worst_part,
         settled.worst_violation
     );
+}
+
+#[test]
+fn limit_check_sees_a_half_turn_swing() {
+    use std::f32::consts::PI;
+    let cone = Limits::Cone {
+        half_angle: 0.6,
+        twist: (-0.3, 0.3),
+    };
+    let pyramid = Limits::Pyramid {
+        twist: (-0.3, 0.3),
+        swing_y: (-0.3, 1.6),
+        swing_z: (-0.2, 0.5),
+    };
+    let swing_twist = |rotation| JointReading::SwingTwist {
+        rotation_in_constraint_space: rotation,
+    };
+    let six_dof = |rotation| JointReading::SixDof {
+        rotation_in_constraint_space: rotation,
+    };
+    let close = |violation: f32, expected: f32| (violation - expected).abs() < 1e-3;
+
+    // A half turn about Y or Z has no X and W part, the singular case of the decomposition.
+    for half_turn in [
+        Quat::from_xyzw(0.0, 1.0, 0.0, 0.0),
+        Quat::from_xyzw(0.0, 0.0, 1.0, 0.0),
+    ] {
+        let violation = limit_violation(swing_twist(half_turn), cone);
+        assert!(close(violation, PI - 0.6), "{half_turn:?}: {violation}");
+    }
+    let violation = limit_violation(six_dof(Quat::from_xyzw(0.0, 1.0, 0.0, 0.0)), pyramid);
+    assert!(close(violation, PI - 1.6), "{violation}");
+    let violation = limit_violation(six_dof(Quat::from_xyzw(0.0, 0.0, 1.0, 0.0)), pyramid);
+    assert!(close(violation, PI - 0.5), "{violation}");
+
+    // Next to the singular case.
+    let near = quat_about(Y, PI - 1e-3);
+    let violation = limit_violation(swing_twist(near), cone);
+    assert!(close(violation, PI - 1e-3 - 0.6), "{violation}");
+
+    // Within the limits.
+    assert_eq!(limit_violation(swing_twist(quat_about(Y, 0.5)), cone), 0.0);
+    assert_eq!(limit_violation(six_dof(quat_about(Y, 1.5)), pyramid), 0.0);
 }
 
 #[test]
@@ -501,6 +543,12 @@ fn motors_drive_each_joint_kind_to_its_target() {
         let ragdoll = world
             .create_ragdoll(&settings, None, Activation::Activate)
             .unwrap();
+        let part = case.part as u32;
+        assert_eq!(
+            world.ragdoll(ragdoll).unwrap().joint_motors_on(part),
+            Some(false)
+        );
+        assert_eq!(world.ragdoll(ragdoll).unwrap().joint_motors_on(0), None);
         let mut target = bind_pose();
         let turn = quat_about(case.axis, case.angle);
         target.joints[case.part].rotation = mul(turn, target.joints[case.part].rotation);
@@ -534,7 +582,15 @@ fn motors_drive_each_joint_kind_to_its_target() {
         }
 
         // Without motors, a kick moves the joint away from the target.
+        assert_eq!(
+            world.ragdoll(ragdoll).unwrap().joint_motors_on(part),
+            Some(true)
+        );
         world.ragdoll_mut(ragdoll).unwrap().stop_motors();
+        assert_eq!(
+            world.ragdoll(ragdoll).unwrap().joint_motors_on(part),
+            Some(false)
+        );
         let ids = world.ragdoll(ragdoll).unwrap().body_ids().to_vec();
         // The joint's world axis now: the bind axis moved with the parent.
         let parent_turn = mul(

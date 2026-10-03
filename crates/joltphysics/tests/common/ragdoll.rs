@@ -15,8 +15,12 @@ use super::walker::{add, f3, norm, rvec3, scale, sub, v3, vec3, V3};
 pub const MASS: f32 = 80.0;
 /// Number of parts.
 pub const PART_COUNT: usize = 12;
-/// How far a joint reading may exceed its limit, radians.
-pub const LIMIT_TOLERANCE: f32 = 0.1;
+/// How far a joint reading of the humanoid at rest may exceed its limit, radians.
+pub const REST_LIMIT_TOLERANCE: f32 = 0.01;
+/// How far a joint reading may exceed its limit on any tick of the humanoid's drop, radians:
+/// on ground impact Jolt lets joints overshoot (see the drop test), so this bounds that
+/// overshoot for the tests' drop, not for every scene.
+pub const DROP_LIMIT_OVERSHOOT: f32 = 0.40;
 /// The hip's rotation motors. The thigh is the heaviest limb, and with Jolt's default 2 Hz
 /// spring a driven hip swings around its target for seconds.
 pub fn hip_motor() -> MotorSettings {
@@ -473,7 +477,9 @@ pub fn apply_gravity(world: &mut PhysicsWorld, ragdoll: RagdollId, centre: [f64;
 // Joint limits.
 
 /// Twist about X and the swing quaternion `(0, y, z, w)` of a constraint-space rotation, with
-/// `w >= 0` (Jolt `SwingTwistConstraintPart::sDecomposeSwingTwist`).
+/// `w >= 0` (Jolt `SwingTwistConstraintPart::sDecomposeSwingTwist`). A rotation with no X and
+/// W part is a half turn about an axis in the YZ plane: no twist, all swing, as in Jolt's
+/// `Quat::GetSwingTwist`.
 fn swing_twist(rotation: Quat) -> (f32, Quat) {
     let r = if rotation.w < 0.0 {
         Quat::from_xyzw(-rotation.x, -rotation.y, -rotation.z, -rotation.w)
@@ -481,7 +487,11 @@ fn swing_twist(rotation: Quat) -> (f32, Quat) {
         rotation
     };
     let twist_length = (r.x * r.x + r.w * r.w).sqrt();
-    let twist = Quat::from_xyzw(r.x / twist_length, 0.0, 0.0, r.w / twist_length);
+    let twist = if twist_length != 0.0 {
+        Quat::from_xyzw(r.x / twist_length, 0.0, 0.0, r.w / twist_length)
+    } else {
+        Quat::IDENTITY
+    };
     let swing = mul(r, conj(twist));
     let swing = if swing.w < 0.0 {
         Quat::from_xyzw(-swing.x, -swing.y, -swing.z, -swing.w)
@@ -495,9 +505,10 @@ fn outside(value: f32, (min, max): (f32, f32)) -> f32 {
     (min - value).max(value - max).max(0.0)
 }
 
-/// How far, in radians, `reading` is outside `limits`; 0 within them.
+/// How far, in radians, `reading` is outside `limits`; 0 within them. Panics on a non-finite
+/// reading.
 pub fn limit_violation(reading: JointReading, limits: Limits) -> f32 {
-    match (reading, limits) {
+    let violation = match (reading, limits) {
         (JointReading::Hinge { current_angle }, Limits::Hinge { min, max }) => {
             outside(current_angle, (min, max))
         }
@@ -531,7 +542,12 @@ pub fn limit_violation(reading: JointReading, limits: Limits) -> f32 {
                 .max(outside(z, swing_z))
         }
         (reading, limits) => panic!("reading {reading:?} does not match limits {limits:?}"),
-    }
+    };
+    assert!(
+        violation.is_finite(),
+        "non-finite joint reading {reading:?}"
+    );
+    violation
 }
 
 /// The largest limit violation over every joint of `ragdoll`, radians, with the part.
