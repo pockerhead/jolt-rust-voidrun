@@ -67,6 +67,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${joltc_cpp}")
 # share its compile definitions (precision, object layer bits, floating-point flags).
 target_sources(${JOLTC_TARGET} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext_listener.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext_material.cpp)
 target_include_directories(${JOLTC_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext ${CMAKE_CURRENT_BINARY_DIR}/joltc_ext_generated)
 

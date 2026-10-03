@@ -108,6 +108,25 @@ static_assert(int(JPH_SoftBodyLRAType_None) == int(JPH::SoftBodySharedSettings::
 static_assert(int(JPH_SoftBodyLRAType_EuclideanDistance) == int(JPH::SoftBodySharedSettings::ELRAType::EuclideanDistance), "JPH_SoftBodyLRAType_EuclideanDistance");
 static_assert(int(JPH_SoftBodyLRAType_GeodesicDistance) == int(JPH::SoftBodySharedSettings::ELRAType::GeodesicDistance), "JPH_SoftBodyLRAType_GeodesicDistance");
 
+// Contact settings. joltc's listener copies JPH_ContactSettings field by field (FromJolt/ToJolt of
+// ContactSettings), and the extension's soft body listener copies JPH_SoftBodyContactSettings the
+// same way, so only the C ABI is pinned here.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ContactSettings, 52, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactSettings, combinedFriction, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactSettings, combinedRestitution, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactSettings, invMassScale1, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactSettings, invInertiaScale1, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactSettings, invMassScale2, 16);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactSettings, invInertiaScale2, 20);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactSettings, isSensor, 24);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactSettings, relativeLinearSurfaceVelocity, 28);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactSettings, relativeAngularSurfaceVelocity, 40);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_SoftBodyContactSettings, 16, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyContactSettings, invMassScale1, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyContactSettings, invMassScale2, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyContactSettings, invInertiaScale2, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyContactSettings, isSensor, 12);
+
 // Scene query settings and results. joltc converts these field by field
 // (ToJolt/FromJolt), so only the C ABI is pinned here, not agreement with the
 // C++ layout.

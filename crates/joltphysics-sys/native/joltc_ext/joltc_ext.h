@@ -284,4 +284,63 @@ JPH_CAPI void JPH_ConvexShapeSettings_SetMaterial(JPH_ConvexShapeSettings* setti
    indices beyond the list when the shape is created. */
 JPH_CAPI JPH_HeightFieldShapeSettings* JPH_HeightFieldShapeSettings_Create2(const float* samples, const JPH_Vec3* offset, const JPH_Vec3* scale, uint32_t sampleCount, const uint8_t* materialIndices, const JPH_PhysicsMaterial* const* materials, uint32_t materialCount);
 
+/* SubShapeIDPair */
+/* pair is the JPH::SubShapeIDPair joltc passes to JPH_ContactListener_Procs::OnContactRemoved, read
+   through Jolt's accessors; callers never read JPH_SubShapeIDPair's fields. */
+JPH_CAPI JPH_BodyID JPH_SubShapeIDPair_GetBody1ID(const JPH_SubShapeIDPair* pair);
+JPH_CAPI JPH_SubShapeID JPH_SubShapeIDPair_GetSubShapeID1(const JPH_SubShapeIDPair* pair);
+JPH_CAPI JPH_BodyID JPH_SubShapeIDPair_GetBody2ID(const JPH_SubShapeIDPair* pair);
+JPH_CAPI JPH_SubShapeID JPH_SubShapeIDPair_GetSubShapeID2(const JPH_SubShapeIDPair* pair);
+
+/* SoftBodyContactListener */
+typedef enum JPH_SoftBodyValidateResult {
+	JPH_SoftBodyValidateResult_AcceptContact = 0,
+	JPH_SoftBodyValidateResult_RejectContact = 1,
+
+	_JPH_SoftBodyValidateResult_Force32 = 0x7fffffff
+} JPH_SoftBodyValidateResult;
+
+/* JPH::SoftBodyContactSettings, copied field by field (not a layout mirror). */
+typedef struct JPH_SoftBodyContactSettings {
+	float invMassScale1;
+	float invMassScale2;
+	float invInertiaScale2;
+	bool isSensor;
+} JPH_SoftBodyContactSettings;
+
+/* JPH::SoftBodyManifold, valid only during OnSoftBodyContactAdded. */
+typedef struct JPH_SoftBodyManifold JPH_SoftBodyManifold;
+typedef struct JPH_SoftBodyContactListener JPH_SoftBodyContactListener;
+
+/* One process-global table, as for joltc's other listeners. A null proc accepts the contact or does
+   nothing. Both are called while Jolt holds the bodies, so they must not lock bodies. */
+typedef struct JPH_SoftBodyContactListener_Procs {
+	JPH_SoftBodyValidateResult(JPH_API_CALL* OnSoftBodyContactValidate)(void* userData,
+		const JPH_Body* softBody,
+		const JPH_Body* otherBody,
+		JPH_SoftBodyContactSettings* settings);
+
+	void(JPH_API_CALL* OnSoftBodyContactAdded)(void* userData,
+		const JPH_Body* softBody,
+		const JPH_SoftBodyManifold* manifold);
+} JPH_SoftBodyContactListener_Procs;
+
+JPH_CAPI void JPH_SoftBodyContactListener_SetProcs(const JPH_SoftBodyContactListener_Procs* procs);
+JPH_CAPI JPH_SoftBodyContactListener* JPH_SoftBodyContactListener_Create(void* userData);
+JPH_CAPI void JPH_SoftBodyContactListener_Destroy(JPH_SoftBodyContactListener* listener);
+/* listener may be null; the system does not own it. */
+JPH_CAPI void JPH_PhysicsSystem_SetSoftBodyContactListener(JPH_PhysicsSystem* system, JPH_SoftBodyContactListener* listener);
+
+/* SoftBodyManifold. An index at or beyond the count gives false, JPH_BodyID 0xFFFFFFFF (invalid) or
+   leaves the output untouched. The contact point and normal are in the soft body's centre of mass
+   frame and are written only for a vertex that has a contact; the normal is Jolt's GetContactNormal,
+   minus the vertex's collision plane normal. */
+JPH_CAPI uint32_t JPH_SoftBodyManifold_GetVertexCount(const JPH_SoftBodyManifold* manifold);
+JPH_CAPI bool JPH_SoftBodyManifold_HasContact(const JPH_SoftBodyManifold* manifold, uint32_t index);
+JPH_CAPI bool JPH_SoftBodyManifold_GetLocalContactPoint(const JPH_SoftBodyManifold* manifold, uint32_t index, JPH_Vec3* result);
+JPH_CAPI bool JPH_SoftBodyManifold_GetContactNormal(const JPH_SoftBodyManifold* manifold, uint32_t index, JPH_Vec3* result);
+JPH_CAPI JPH_BodyID JPH_SoftBodyManifold_GetContactBodyID(const JPH_SoftBodyManifold* manifold, uint32_t index);
+JPH_CAPI uint32_t JPH_SoftBodyManifold_GetNumSensorContacts(const JPH_SoftBodyManifold* manifold);
+JPH_CAPI JPH_BodyID JPH_SoftBodyManifold_GetSensorContactBodyID(const JPH_SoftBodyManifold* manifold, uint32_t index);
+
 #endif /* JOLT_C_EXT_H_ */

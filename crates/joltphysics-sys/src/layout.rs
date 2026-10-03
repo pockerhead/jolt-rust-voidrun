@@ -61,6 +61,25 @@ const _: () = {
     assert!(offset_of!(JPH_SoftBodyVertexAttributes, lraType) == 12);
     assert!(offset_of!(JPH_SoftBodyVertexAttributes, lraMaxDistanceMultiplier) == 16);
 
+    assert!(size_of::<JPH_ContactSettings>() == 52);
+    assert!(align_of::<JPH_ContactSettings>() == 4);
+    assert!(offset_of!(JPH_ContactSettings, combinedFriction) == 0);
+    assert!(offset_of!(JPH_ContactSettings, combinedRestitution) == 4);
+    assert!(offset_of!(JPH_ContactSettings, invMassScale1) == 8);
+    assert!(offset_of!(JPH_ContactSettings, invInertiaScale1) == 12);
+    assert!(offset_of!(JPH_ContactSettings, invMassScale2) == 16);
+    assert!(offset_of!(JPH_ContactSettings, invInertiaScale2) == 20);
+    assert!(offset_of!(JPH_ContactSettings, isSensor) == 24);
+    assert!(offset_of!(JPH_ContactSettings, relativeLinearSurfaceVelocity) == 28);
+    assert!(offset_of!(JPH_ContactSettings, relativeAngularSurfaceVelocity) == 40);
+
+    assert!(size_of::<JPH_SoftBodyContactSettings>() == 16);
+    assert!(align_of::<JPH_SoftBodyContactSettings>() == 4);
+    assert!(offset_of!(JPH_SoftBodyContactSettings, invMassScale1) == 0);
+    assert!(offset_of!(JPH_SoftBodyContactSettings, invMassScale2) == 4);
+    assert!(offset_of!(JPH_SoftBodyContactSettings, invInertiaScale2) == 8);
+    assert!(offset_of!(JPH_SoftBodyContactSettings, isSensor) == 12);
+
     assert!(size_of::<JPH_RayCastSettings>() == 12);
     assert!(align_of::<JPH_RayCastSettings>() == 4);
     assert!(offset_of!(JPH_RayCastSettings, backFaceModeTriangles) == 0);
