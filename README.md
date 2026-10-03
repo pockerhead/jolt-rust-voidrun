@@ -87,7 +87,7 @@ in `crates/joltphysics/src/`.
 | Leak gate for per-call joltc objects (Windows; bounded memory growth, catches only leaks above its threshold) | queries, rebase | `leaks.rs`: `per_call_joltc_objects_do_not_leak` |
 | Character settings with Jolt's defaults, validation | `PhysicsWorld::create_character`, `CharacterSettings`, `CharacterError` | `character.rs`: `invalid_settings_and_poses_are_rejected_without_side_effects`; `src/character.rs`: `default_settings_match_jolt` |
 | Character ids per world, removal | `CharacterId`, `character_ids`, `remove_character` | `character.rs`: `ids_count_from_one_are_never_reused_and_belong_to_their_world`, `removing_a_character_mid_run_leaves_the_others_sound` |
-| Character update: move by velocity, ground state and normal | `update_character`, `CharacterMut::set_linear_velocity`, `CharacterRef::ground_state`, `ground_normal`, `ground_body`, `GroundState` | `character.rs`: `a_character_lands_on_a_floor_and_reports_it`, `linear_velocity_round_trips_and_moves_a_free_character`; `src/character.rs`: `ground_states_convert_and_report_support` |
+| Character update: move by velocity, ground state and normal | `update_character`, `CharacterMut::set_linear_velocity`, `CharacterRef::ground_state`, `ground_normal`, `ground_body`, `GroundState` | `character.rs`: `a_character_lands_on_a_floor_and_reports_it`, `linear_velocity_round_trips_and_moves_a_free_character`, `a_slope_limit_near_zero_turns_the_limit_off`; `src/character.rs`: `ground_states_convert_and_report_support` |
 | Stick to floor and walk stairs | `ExtendedUpdateSettings` | `character.rs`: `walk_stairs_climbs_a_step_that_stops_a_character_without_it`; `walker.rs`: `walking_down_a_30_degree_slope_has_no_hops` (stick to floor as the floor snap) |
 | Up and rotation per update (radial up) | `CharacterMut::set_up`, `set_rotation`, `set_position` | `character.rs`: `up_and_rotation_set_per_update_give_the_same_walk_in_another_frame`; `walker.rs`: `a_rotated_floor_far_from_the_anchor_keeps_the_path`, `a_chunk_seam_is_crossed` |
 | Character contacts: body, layer, compound child group, contact normal; filters | `CharacterRef::active_contacts`, `CharacterContact`, `contact_compound_child`, `contact_object_layer`, `QueryFilter` | `character.rs`: `a_character_lands_on_a_floor_and_reports_it`, `compound_children_report_their_group_and_filters_select_them` |
@@ -127,7 +127,8 @@ state of bodies is in neither layer yet; only a character's state can be saved.
   itself (up to about 0.37 m in the walker tests, measured on a sharp dynamic box).
   The [guide](docs/guide.md#sharp-steps-and-the-games-own-autostep) shows the autostep a game builds
   instead. With walk stairs on, the climbable height is not `walk_stairs_step_up` but about it
-  plus the padding plus `r (1 - cos 45°)` for a capsule of radius `r`. After a rotating rebase,
+  plus the padding plus `r (1 - cos max_slope_angle)` for a capsule of radius `r`, so measure it.
+  A `max_slope_angle` below about 0.81° turns Jolt's slope limit off. After a rotating rebase,
   refresh each character's contacts before its next update. The game's controller
   (`tests/common/walker.rs`) is test support, not API.
 - **Debug lines.** No level of detail: one capsule draws 6528 lines and one cylinder 768 at any

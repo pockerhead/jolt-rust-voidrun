@@ -581,6 +581,46 @@ fn walk_at_a_step(step_up: f32) -> RVec3 {
     world.character(id).unwrap().position()
 }
 
+/// The ground state of a character resting on a 10° slope with the given slope limit.
+fn ground_state_on_a_gentle_slope(max_slope_angle: f32) -> GroundState {
+    let mut world = world(GRAVITY, 1);
+    let angle = 10.0_f32.to_radians();
+    let (sin, cos) = (angle * 0.5).sin_cos();
+    let slope = Shape::new_box(Vec3::new(5.0, 0.5, 5.0)).unwrap();
+    world
+        .create_body(
+            &slope,
+            &BodySettings::new_static().rotation(Quat::from_xyzw(0.0, 0.0, sin, cos)),
+        )
+        .unwrap();
+    let shape = capsule();
+    let top = 0.5 / angle.cos();
+    let id = world
+        .create_character(
+            &settings(&shape).max_slope_angle(max_slope_angle),
+            RVec3::new(0.0, top as Real, 0.0),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    world
+        .refresh_character_contacts(id, &QueryFilter::new())
+        .unwrap();
+    world.character(id).unwrap().ground_state()
+}
+
+#[test]
+fn a_slope_limit_near_zero_turns_the_limit_off() {
+    assert_eq!(
+        ground_state_on_a_gentle_slope(1.0_f32.to_radians()),
+        GroundState::OnSteepGround
+    );
+    assert_eq!(
+        ground_state_on_a_gentle_slope(0.5_f32.to_radians()),
+        GroundState::OnGround
+    );
+    assert_eq!(ground_state_on_a_gentle_slope(0.0), GroundState::OnGround);
+}
+
 #[test]
 fn walk_stairs_climbs_a_step_that_stops_a_character_without_it() {
     let climbed = walk_at_a_step(0.4);

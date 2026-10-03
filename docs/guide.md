@@ -103,7 +103,8 @@ of the update and is not added to the velocity; the caller feeds the vertical sp
   so on a planet up is radial. The `ExtendedUpdateSettings` vectors are in world space and default
   to +Y; with another up, pass them along it.
 - **Ground.** `ground_state` is `OnGround`, `OnSteepGround` (steeper than `max_slope_angle`),
-  `NotSupported` or `InAir`. A new character reports `InAir` until its first update or
+  `NotSupported` or `InAir`. Below about 0.81° Jolt turns the slope limit off, so with
+  `max_slope_angle(0.0)` no ground is too steep. A new character reports `InAir` until its first update or
   `refresh_character_contacts`; refresh one that starts on the ground, or stick to floor (which
   needs support before the update) does nothing on the first tick.
 - **Contacts.** `active_contacts` lists what the last update touched. Normals point toward the
@@ -128,8 +129,9 @@ On a box with sharp edges (`new_box_with_convex_radius(.., 0.0)`) a capsule pres
 touches it at the top edge, where Jolt reports the top face's normal. Walk stairs then never fires,
 while the capsule still creeps onto low sharp edges by itself (up to about 0.37 m in the walker
 tests). No `CharacterSettings` value changes this. On Jolt's default rounded boxes walk stairs works (a 0.25 m step with a 0.4 m
-step-up is climbed), but the height it climbs is about step-up + padding + `r (1 - cos 45°)`, not
-the step-up itself, so measure it for your capsule.
+step-up is climbed), but the height it climbs is about step-up + padding +
+`r (1 - cos max_slope_angle)`, not the step-up itself, and the step's rounding changes it too, so
+measure it for your capsule.
 
 A game with sharp structures turns walk stairs off (`walk_stairs_step_up(Vec3::ZERO)`) and steps
 in its own code after the update, with shape casts, which report the geometry's own normal: when a
@@ -285,7 +287,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## A walking character
 
 A character walks on a planet of radius 50 m, a static sphere at the origin, so up is radial and
-changes every tick. Gravity is applied by the caller. A chunk compound stands in its path: a
+changes every tick. Gravity is applied by the caller. The helpers that turn radial up into a
+rotation and a walking direction work at every point of the sphere, which the example checks by
+starting a short walk at both poles and on the equator. A chunk compound stands in its path: a
 feature (a bush) the character walks through and a structure (a wall) that stops it, told apart by
 the filter's group mask. Halfway through the walk the character's state is saved, and a rebuilt
 world continues from it bit for bit.
@@ -321,15 +325,39 @@ fn up_at(p: RVec3) -> Vec3 {
     normalize(Vec3::new(p.x as f32, p.y as f32, p.z as f32))
 }
 
-/// The shortest rotation from +Y to the unit vector `up`.
+/// A rotation that turns +Y into the unit vector `up`. On the upper half it is the shortest one;
+/// on the lower half it first turns +Y half a turn about X to -Y and then takes the shortest way,
+/// so no division comes near zero.
 fn rotation_to(up: Vec3) -> Quat {
-    let (x, z, w) = (up.z, -up.x, 1.0 + up.y);
-    let length = (x * x + z * z + w * w).sqrt();
-    Quat::from_xyzw(x / length, 0.0, z / length, w / length)
+    let q = if up.y >= 0.0 {
+        Quat::from_xyzw(up.z, 0.0, -up.x, 1.0 + up.y)
+    } else {
+        Quat::from_xyzw(1.0 - up.y, up.x, 0.0, up.z)
+    };
+    let length = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt();
+    Quat::from_xyzw(q.x / length, q.y / length, q.z / length, q.w / length)
 }
 
-/// The planet, a chunk 3 m east of the north pole and a character standing on the pole.
-fn build() -> Result<(PhysicsWorld, CharacterId), Box<dyn std::error::Error>> {
+/// The walking direction at unit `up`: east (+X along the ground), or +Z along the ground near
+/// the two points where up is ±X and east does not exist.
+fn forward_at(up: Vec3) -> Vec3 {
+    let reference = if up.x.abs() < 0.9 {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        Vec3::new(0.0, 0.0, 1.0)
+    };
+    normalize(add(reference, scale(up, -dot(reference, up))))
+}
+
+/// Distance of `p` above the planet's surface.
+fn height(p: RVec3) -> f32 {
+    let p = Vec3::new(p.x as f32, p.y as f32, p.z as f32);
+    dot(p, p).sqrt() - PLANET_RADIUS
+}
+
+/// The planet, a chunk 3 m east of the north pole and a character standing on the ground where
+/// up is `start`.
+fn build(start: Vec3) -> Result<(PhysicsWorld, CharacterId), Box<dyn std::error::Error>> {
     // Radial gravity is the caller's, so the world has none.
     let mut world = PhysicsWorld::new(WorldSettings::default().gravity(Vec3::ZERO))?;
     let planet = Shape::new_sphere(PLANET_RADIUS)?;
@@ -367,8 +395,9 @@ fn build() -> Result<(PhysicsWorld, CharacterId), Box<dyn std::error::Error>> {
     let settings = CharacterSettings::new(&capsule)
         .shape_offset(Vec3::new(0.0, 0.8, 0.0))
         .max_slope_angle(45.0_f32.to_radians());
-    let pole = RVec3::new(0.0, PLANET_RADIUS as Real, 0.0);
-    let id = world.create_character(&settings, pole, Quat::IDENTITY)?;
+    let ground = scale(start, PLANET_RADIUS);
+    let position = RVec3::new(ground.x as Real, ground.y as Real, ground.z as Real);
+    let id = world.create_character(&settings, position, rotation_to(start))?;
     // A new character knows no ground until its contacts are refreshed.
     world.refresh_character_contacts(id, &walk_filter())?;
     Ok((world, id))
@@ -379,7 +408,7 @@ fn walk_filter() -> QueryFilter<'static> {
     QueryFilter::new().child_groups(1 << STRUCTURE)
 }
 
-/// One tick: walk east at 2 m/s along the ground. `vel_up` is the vertical speed the caller
+/// One tick: walk forward at 2 m/s along the ground. `vel_up` is the vertical speed the caller
 /// carries from tick to tick.
 fn tick(
     world: &mut PhysicsWorld,
@@ -394,11 +423,11 @@ fn tick(
     } else {
         *vel_up - GRAVITY * DT
     };
-    let east = normalize(add(Vec3::new(1.0, 0.0, 0.0), scale(up, -up.x)));
+    let forward = forward_at(up);
     let mut character = world.character_mut(id)?;
     character.set_up(up)?;
     character.set_rotation(rotation_to(up))?;
-    character.set_linear_velocity(add(scale(east, 2.0), scale(up, *vel_up)))?;
+    character.set_linear_velocity(add(scale(forward, 2.0), scale(up, *vel_up)))?;
     // Stick to floor along -up; walk stairs off, as for a game with sharp steps.
     let extended = ExtendedUpdateSettings::default()
         .stick_to_floor_step_down(scale(up, -0.3))
@@ -408,7 +437,8 @@ fn tick(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (mut world, id) = build()?;
+    let north = Vec3::new(0.0, 1.0, 0.0);
+    let (mut world, id) = build(north)?;
     assert_eq!(world.character(id)?.ground_state(), GroundState::OnGround);
 
     // One second of walking, then save the state and the caller's vertical speed.
@@ -425,10 +455,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let character = world.character(id)?;
     assert_eq!(character.ground_state(), GroundState::OnGround);
     let p = character.position();
-    let (x, y) = (p.x as f32, p.y as f32);
-    let height = (x * x + y * y).sqrt() - PLANET_RADIUS;
-    assert!(height.abs() < 0.01, "on the ground: {height}");
-    let walked = PLANET_RADIUS * x.atan2(y);
+    let above = height(p);
+    assert!(above.abs() < 0.01, "on the ground: {above}");
+    let walked = PLANET_RADIUS * (p.x as f32).atan2(p.y as f32);
     assert!((2.3..2.5).contains(&walked), "stopped at the wall: {walked}");
     let wall = character
         .active_contacts()
@@ -440,13 +469,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let finished = character.save_state();
 
     // A world built the same way, restored from the saved state, ends the same, bit for bit.
-    let (mut replay, replay_id) = build()?;
+    let (mut replay, replay_id) = build(north)?;
     replay.character_mut(replay_id)?.restore_state(&saved.0)?;
     let mut vel_up = saved.1;
     for _ in 0..60 {
         tick(&mut replay, replay_id, &mut vel_up)?;
     }
     assert_eq!(replay.character(replay_id)?.save_state(), finished);
+
+    // Half a second of walking from the south pole and from the four equator points stays on
+    // the ground and covers about a metre.
+    for start in [
+        Vec3::new(0.0, -1.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(-1.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(0.0, 0.0, -1.0),
+    ] {
+        let (mut world, id) = build(start)?;
+        let mut vel_up = 0.0;
+        for _ in 0..30 {
+            tick(&mut world, id, &mut vel_up)?;
+        }
+        let character = world.character(id)?;
+        assert_eq!(character.ground_state(), GroundState::OnGround);
+        let p = character.position();
+        assert!(height(p).abs() < 0.01, "on the ground from {start:?}: {p:?}");
+        let ground = scale(start, PLANET_RADIUS);
+        let moved = Vec3::new(p.x as f32 - ground.x, p.y as f32 - ground.y, p.z as f32 - ground.z);
+        let moved = dot(moved, moved).sqrt();
+        assert!((0.9..1.1).contains(&moved), "walked from {start:?}: {moved}");
+    }
     Ok(())
 }
 ```
