@@ -417,7 +417,9 @@ pub(crate) fn mass_properties(shape: &Shape, mass: Option<f32>) -> JPH_MassPrope
 
 /// Whether Jolt's `MotionProperties::SetMassProperties` derives a finite inverse mass and
 /// inverse inertia from `properties`. A tiny mass, or a shape whose computed mass or inertia
-/// underflows, would otherwise give infinite inverses and turn the first force into NaN.
+/// underflows, would otherwise give infinite inverses and turn the first force into NaN. A
+/// non-diagonal inertia must also pass [`limits::is_rigid_body_inertia`], so that Jolt's
+/// decomposition neither asserts nor returns a moment near zero.
 pub(crate) fn has_finite_inverse(properties: &JPH_MassProperties) -> bool {
     let inverse_mass = 1.0 / properties.mass;
     // When the inertia is near zero Jolt uses the inertia of a unit sphere, 2.5 / mass.
@@ -439,28 +441,7 @@ pub(crate) fn has_finite_inverse(properties: &JPH_MassProperties) -> bool {
         // fallback.
         return length_sq <= 1.0e-12 || diagonal.iter().all(|value| (1.0 / value).is_finite());
     }
-    has_well_conditioned_principal_moments(tensor.map(|row| row.map(f64::from)))
-}
-
-/// Whether Jolt can decompose a symmetric, non-diagonal inertia tensor into principal moments
-/// that are safe to invert.
-///
-/// The squared Frobenius norm is the sum of the squared principal moments, so a tensor below
-/// Jolt's near-zero limit (`1e-12`, halved to stay clear of f32 rounding) gets Jolt's
-/// unit-sphere inertia. Otherwise `det / |I|_F^2` is a lower bound of the smallest principal
-/// moment (the product of the other two is at most `|I|_F^2`). Jolt decomposes the tensor in
-/// f32, so a principal moment below its rounding error (a few `f32::EPSILON * |I|`) could come
-/// back as zero or negative and give an infinite or negative inverse inertia. The floor of
-/// `1e-5 * |I|_F` is about 80 times that error; it rejects only extremely slender rotated or
-/// offset bodies (aspect ratios of several hundred), which is conservative.
-fn has_well_conditioned_principal_moments(tensor: [[f64; 3]; 3]) -> bool {
-    let frobenius_sq: f64 = tensor.iter().flatten().map(|value| value * value).sum();
-    if frobenius_sq <= 0.5e-12 {
-        return true;
-    }
-    let [[a, b, c], [d, e, f], [g, h, i]] = tensor;
-    let det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
-    det > 0.0 && det / frobenius_sq >= 1.0e-5 * frobenius_sq.sqrt()
+    limits::is_rigid_body_inertia(tensor.map(|row| row.map(f64::from)))
 }
 
 /// Owns a `JPH_BodyCreationSettings`, which holds its own reference to the shape.
@@ -1773,5 +1754,14 @@ mod tests {
         assert!(has_finite_inverse(&rotated_inertia([
             1.0e-7, 2.0e-7, 3.0e-7
         ])));
+    }
+
+    #[test]
+    fn tiny_ill_conditioned_rotated_inertia_is_rejected() {
+        // Jolt decomposes it before it falls back to the unit sphere, and that decomposition
+        // asserts like a large one.
+        let properties = rotated_inertia([1.0e-7, 1.0e-12, 1.0e-7]);
+        assert_ne!(properties.inertia.column[0].y, 0.0);
+        assert!(!has_finite_inverse(&properties));
     }
 }

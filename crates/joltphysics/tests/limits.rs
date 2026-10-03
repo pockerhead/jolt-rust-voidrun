@@ -3213,3 +3213,119 @@ fn soft_body_inertia_at_its_bound_decomposes() {
     }
     assert!(created >= 40, "{created}");
 }
+
+/// A slender shape of half length `length` and relative thickness `thin`: a box of half
+/// extents `thin · length`, `1.5 · thin · length` and `length` (`kind` 0), or a capsule (1) or a
+/// cylinder (2) of half height `length` and radius `thin · length`.
+fn slender_shape(kind: u32, length: f32, thin: f32) -> Shape {
+    let width = thin * length;
+    match kind {
+        0 => Shape::new_box_with_convex_radius(Vec3::new(width, 1.5 * width, length), 0.0),
+        1 => Shape::new_capsule(length, width),
+        _ => Shape::new_cylinder_with_convex_radius(length, width, 0.0),
+    }
+    .unwrap()
+}
+
+/// `v` rotated by the unit quaternion `q`.
+fn rotated(q: Quat, v: [f32; 3]) -> [f32; 3] {
+    let u = [q.x, q.y, q.z];
+    let cross = |a: [f32; 3], b: [f32; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let t = cross(u, v).map(|c| 2.0 * c);
+    let ut = cross(u, t);
+    [0, 1, 2].map(|k| v[k] + q.w * t[k] + ut[k])
+}
+
+/// A seeded unit quaternion.
+fn seeded_rotation(seed: &mut u32) -> Quat {
+    let [x, y, z, w] = [0; 4].map(|_| uniform(seed) - 0.5);
+    let length = (x * x + y * y + z * z + w * w).sqrt();
+    Quat::from_xyzw(x / length, y / length, z / length, w / length)
+}
+
+#[test]
+fn rigid_body_inertia_at_its_bound_decomposes() {
+    // Seeded slender boxes, capsules and cylinders, 2 cm to 20 m long, as a rotated compound
+    // child, as two rotated children side by side along their length, and with a centre of mass
+    // moved nearly along their length; dynamic with computed or overridden masses, and
+    // kinematic. Each is made thinner until the inertia rule refuses it, and the thinnest
+    // accepted one is created and stepped; in the asserts build Jolt decomposes each inertia
+    // there without an assertion.
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let mut seed = 0x2545_f491_u32;
+    let mut created = 0;
+    for case in 0..72_u32 {
+        let kind = case % 3;
+        let length = 10.0_f32.powf(uniform(&mut seed) * 3.0 - 2.0);
+        let rotation = seeded_rotation(&mut seed);
+        let tilt_size = 0.2 * uniform(&mut seed);
+        let tilt = [0; 3].map(|_| (uniform(&mut seed) - 0.5) * tilt_size);
+        let settings = match case % 4 {
+            0 => BodySettings::new_kinematic(),
+            1 => BodySettings::new_dynamic().mass(10.0_f32.powf(uniform(&mut seed) * 6.0 - 3.0)),
+            _ => BodySettings::new_dynamic().mass(1.0),
+        };
+        let shape = |thin: f32| {
+            let leaf = slender_shape(kind, length, thin);
+            let child = |position: Vec3, user_data| CompoundChild {
+                shape: &leaf,
+                position,
+                rotation,
+                user_data,
+            };
+            // The long axis of the leaf, rotated.
+            let axis = if kind == 0 {
+                [0.0, 0.0, 1.0]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
+            let along = rotated(rotation, axis).map(|c| c * length);
+            let offset = [0, 1, 2].map(|k| 0.5 * (along[k] + tilt[k] * length));
+            match (case / 3) % 3 {
+                0 => Shape::new_compound(&[child(Vec3::ZERO, 0)]),
+                1 => Shape::new_compound(&[
+                    child(Vec3::from(along), 0),
+                    child(Vec3::from(along.map(|c| -c)), 1),
+                ]),
+                _ => Shape::new_offset_center_of_mass(
+                    &Shape::new_compound(&[child(Vec3::ZERO, 0)]).unwrap(),
+                    Vec3::from(offset),
+                ),
+            }
+            .unwrap()
+        };
+        let accepts = |world: &mut PhysicsWorld, thin: f32| match world
+            .create_body(&shape(thin), &settings)
+        {
+            Ok(id) => {
+                world.remove_body(id).unwrap();
+                true
+            }
+            Err(BodyError::InvalidValue(_)) => false,
+            Err(other) => panic!("{other:?}"),
+        };
+        let (mut low, mut high) = (1.0e-4_f32, 0.5_f32);
+        if accepts(&mut world, low) || !accepts(&mut world, high) {
+            continue;
+        }
+        while high - low > 1.0e-4 * high {
+            let middle = 0.5 * (low + high);
+            if accepts(&mut world, middle) {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        let id = world.create_body(&shape(high), &settings).unwrap();
+        step(&mut world, 2);
+        world.remove_body(id).unwrap();
+        created += 1;
+    }
+    assert!(created >= 56, "{created}");
+}
