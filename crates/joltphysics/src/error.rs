@@ -1,5 +1,6 @@
 //! Error types. Every value Jolt only checks with debug assertions is validated before it
-//! reaches Jolt and reported through these.
+//! reaches Jolt and reported through these; magnitudes follow [`crate::limits`], which says
+//! which assertion paths are derived and which are covered by tests.
 
 use std::fmt;
 

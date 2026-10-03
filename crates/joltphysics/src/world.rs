@@ -25,6 +25,7 @@ use joltphysics_sys::*;
 use crate::body::with_locked_body;
 use crate::character::CharacterEntry;
 use crate::jolt_assert;
+use crate::limits;
 use crate::owned::{JoltObject, Owned};
 use crate::ragdoll::RagdollEntry;
 use crate::vehicle::VehicleEntry;
@@ -52,6 +53,9 @@ fn lock_joltc_globals() -> MutexGuard<'static, ()> {
     static GLOBALS: Mutex<()> = Mutex::new(());
     GLOBALS.lock().unwrap_or_else(PoisonError::into_inner)
 }
+
+/// What world gravity must satisfy.
+const GRAVITY_RULE: &str = "gravity must be finite and at most limits::MAX_ACCELERATION long";
 
 /// Settings for [`PhysicsWorld::new`]. The defaults are Jolt's and joltc's.
 #[derive(Clone, Debug)]
@@ -88,6 +92,13 @@ impl WorldSettings {
     /// is not a Jolt limit.
     pub const MAX_WORKER_THREADS: u32 = 64;
 
+    /// Largest accepted [`max_contact_constraints`](Self::max_contact_constraints) value: 2²⁰.
+    ///
+    /// A joltphysics bound below Jolt's own limit (`ContactConstraintManager::
+    /// cMaxContactConstraintsLimit`, above which Jolt asserts), which a native compile-time check
+    /// pins.
+    pub const MAX_CONTACT_CONSTRAINTS: u32 = 1 << 20;
+
     /// Maximum number of bodies in the world, at most 2²³. Default 10240.
     #[must_use]
     pub fn max_bodies(mut self, value: u32) -> Self {
@@ -102,7 +113,8 @@ impl WorldSettings {
         self
     }
 
-    /// Maximum number of contact constraints per step. Default 10240.
+    /// Maximum number of contact constraints per step, at least 1 and at most
+    /// [`WorldSettings::MAX_CONTACT_CONSTRAINTS`]. Default 10240.
     #[must_use]
     pub fn max_contact_constraints(mut self, value: u32) -> Self {
         self.max_contact_constraints = value;
@@ -126,7 +138,8 @@ impl WorldSettings {
         self
     }
 
-    /// Gravity in m/s², finite. Default `(0, -9.81, 0)`, Jolt's default. Zero is allowed.
+    /// Gravity in m/s², finite and at most [`limits::MAX_ACCELERATION`] long. Default
+    /// `(0, -9.81, 0)`, Jolt's default. Zero is allowed.
     #[must_use]
     pub fn gravity(mut self, value: Vec3) -> Self {
         self.gravity = value;
@@ -148,8 +161,8 @@ impl WorldSettings {
         if self.max_body_pairs == 0 {
             return invalid("max_body_pairs must be at least 1");
         }
-        if self.max_contact_constraints == 0 {
-            return invalid("max_contact_constraints must be at least 1");
+        if !(1..=Self::MAX_CONTACT_CONSTRAINTS).contains(&self.max_contact_constraints) {
+            return invalid("max_contact_constraints must be between 1 and 2^20");
         }
         if !(1..=Self::MAX_WORKER_THREADS).contains(&self.worker_threads) {
             return invalid("worker_threads must be between 1 and 64");
@@ -157,8 +170,8 @@ impl WorldSettings {
         if self.temp_allocator_size == 0 {
             return invalid("temp_allocator_size must be at least 1");
         }
-        if !self.gravity.is_finite() {
-            return invalid("gravity must be finite");
+        if !limits::is_acceleration(self.gravity) {
+            return invalid(GRAVITY_RULE);
         }
         self.layers.validate()
     }
@@ -521,10 +534,11 @@ impl PhysicsWorld {
         Vec3::from_jph(gravity)
     }
 
-    /// Sets gravity in m/s². It must be finite; zero is allowed. Sleeping bodies stay asleep.
+    /// Sets gravity in m/s². It must be finite and at most [`limits::MAX_ACCELERATION`] long;
+    /// zero is allowed. Sleeping bodies stay asleep.
     pub fn set_gravity(&mut self, gravity: Vec3) -> Result<(), WorldError> {
-        if !gravity.is_finite() {
-            return Err(WorldError::InvalidSettings("gravity must be finite"));
+        if !limits::is_acceleration(gravity) {
+            return Err(WorldError::InvalidSettings(GRAVITY_RULE));
         }
         let gravity = gravity.to_jph();
         // SAFETY: the system is live and borrowed mutably; `gravity` is a live local.
@@ -563,10 +577,12 @@ impl PhysicsWorld {
     /// `bodies_in_key_order` must name every body of the world exactly once, in the caller's
     /// stable key order, which is the order the poses are written in; otherwise
     /// [`BodyError::InvalidValue`], [`BodyError::WrongWorld`] or [`BodyError::NotFound`] is
-    /// returned. `rotation` must be a finite unit quaternion and `translation` finite, and no
-    /// new pose, velocity or gravity may overflow; otherwise [`BodyError::InvalidValue`] is
-    /// returned. Every check runs before the first write, so an error leaves the world
-    /// unchanged.
+    /// returned. `rotation` must be a finite unit quaternion and `translation` finite with every
+    /// component at most `2 *` [`limits::MAX_POSITION`] in absolute value, and no new pose or
+    /// velocity may overflow; otherwise [`BodyError::InvalidValue`] is returned. The new positions
+    /// are only checked to be finite, not to lie within [`limits::MAX_POSITION`]: a rebase
+    /// re-expresses the world's state, and a body the simulation carried out of the frame must not
+    /// block it. Every check runs before the first write, so an error leaves the world unchanged.
     ///
     /// No body is woken or put to sleep. An identity `rotation` leaves rotations, velocities
     /// and gravity untouched, bit for bit; an identity rotation with a zero translation changes
@@ -606,8 +622,10 @@ impl PhysicsWorld {
         if !rotation.is_valid_rotation() {
             return invalid("rebase rotation must be a finite unit quaternion");
         }
-        if !translation.is_finite() {
-            return invalid("rebase translation must be finite");
+        if !limits::is_frame_displacement(translation) {
+            return invalid(
+                "rebase translation must be finite and at most 2 * limits::MAX_POSITION per axis",
+            );
         }
         let frame = FrameChange {
             rotation,
@@ -636,10 +654,8 @@ impl PhysicsWorld {
         if bodies_in_key_order.len() != self.body_count() as usize {
             return invalid("rebase body list must name every body of the world");
         }
+        // A rotation keeps gravity's length, which `set_gravity` bounds, so it stays finite.
         let gravity = frame.vector(self.gravity());
-        if !gravity.is_finite() {
-            return invalid("rebase would give the world a non-finite gravity");
-        }
         if frame.is_noop() {
             return Ok(());
         }
@@ -708,12 +724,15 @@ impl PhysicsWorld {
             let mut character = self
                 .character_mut(id)
                 .unwrap_or_else(|_| unreachable!("listed by the world"));
-            let written = character
-                .set_up(new.up)
-                .and_then(|()| character.set_position(new.position))
-                .and_then(|()| character.set_rotation(new.rotation))
-                .and_then(|()| character.set_linear_velocity(new.linear_velocity));
+            // Position and velocity are re-expressed state, checked finite by
+            // `FrameChange::character`; the frame and velocity bounds of the public setters apply
+            // to caller input only.
+            let written = character.set_up(new.up).and_then(|()| {
+                character.write_position(new.position);
+                character.set_rotation(new.rotation)
+            });
             debug_assert_eq!(written, Ok(()), "checked by `FrameChange::character`");
+            character.write_linear_velocity(new.linear_velocity);
         }
         self.apply_vehicle_rebase(vehicles);
         if frame.rotates() {
@@ -870,6 +889,20 @@ mod tests {
         let mut state = moving_state();
         state.linear_velocity.y = f32::NAN;
         assert_eq!(frame.body(state), None);
+    }
+
+    #[test]
+    fn contact_constraint_capacity_is_bounded() {
+        let settings = |value| WorldSettings::default().max_contact_constraints(value);
+        for valid in [1, WorldSettings::MAX_CONTACT_CONSTRAINTS] {
+            assert_eq!(settings(valid).validate(), Ok(()));
+        }
+        for invalid in [0, WorldSettings::MAX_CONTACT_CONSTRAINTS + 1, u32::MAX] {
+            assert!(matches!(
+                settings(invalid).validate(),
+                Err(WorldError::InvalidSettings(_))
+            ));
+        }
     }
 
     #[test]

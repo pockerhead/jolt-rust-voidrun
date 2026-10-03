@@ -8,7 +8,7 @@ mod common;
 use std::thread;
 
 use common::ragdoll::*;
-use common::walker::{add, norm, rvec3, sub, v3};
+use common::walker::{add, f3, norm, rvec3, sub, v3};
 use common::*;
 use joltphysics::*;
 
@@ -889,4 +889,232 @@ fn one_settings_value_serves_two_worlds() {
     a.remove_ragdoll(in_a).unwrap();
     b.remove_ragdoll(in_b).unwrap();
     assert_eq!(a.body_count() + b.body_count(), 0);
+}
+
+/// Mass of each sphere of [`sphere_pair`], kg.
+const PAIR_MASS: f32 = 2.0;
+/// Radius of each sphere of [`sphere_pair`], metres.
+const PAIR_RADIUS: f32 = 0.5;
+
+/// Two dynamic spheres one above the other, joined by a free swing-twist joint whose motors
+/// have `spring`.
+fn sphere_pair(spring: SpringSettings, stabilized: bool) -> Result<RagdollSettings, RagdollError> {
+    let (_, layers) = ragdoll_layers();
+    let skeleton = Skeleton::new(&[
+        SkeletonJoint {
+            name: "lower",
+            parent: None,
+        },
+        SkeletonJoint {
+            name: "upper",
+            parent: Some(0),
+        },
+    ])
+    .unwrap();
+    let sphere = Shape::new_sphere(PAIR_RADIUS).unwrap();
+    let body = |y: Real| {
+        BodySettings::new_dynamic()
+            .object_layer(layers.ragdoll)
+            .position(RVec3::new(0.0, y, 0.0))
+            .mass(PAIR_MASS)
+    };
+    let motor = MotorSettings::default().spring(spring);
+    let joint = SwingTwistConstraintSettings::new(
+        RVec3::new(0.0, 0.5, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+    )
+    .half_cone_angles(1.0, 1.0)
+    .twist_limits(-1.0, 1.0)
+    .swing_motor(motor)
+    .twist_motor(motor);
+    let parts = [
+        RagdollPart {
+            shape: &sphere,
+            body: body(0.0),
+            joint: None,
+        },
+        RagdollPart {
+            shape: &sphere,
+            body: body(1.0),
+            joint: Some(RagdollJoint::SwingTwist(joint)),
+        },
+    ];
+    if stabilized {
+        RagdollSettings::new_stabilized(&skeleton, &parts)
+    } else {
+        RagdollSettings::new(&skeleton, &parts)
+    }
+}
+
+/// The effective-mass bound the settings use for [`sphere_pair`]: a part's mass and the trace of
+/// its inertia, `3 * 0.4 * m * r²`; after `Stabilize`, the total mass and twice the total mass
+/// times the largest trace per mass.
+fn sphere_pair_mass_bound(stabilized: bool) -> f64 {
+    let (m, r) = (f64::from(PAIR_MASS), f64::from(PAIR_RADIUS));
+    let trace = 1.2 * m * r * r;
+    if stabilized {
+        let total = 2.0 * m;
+        total.max(2.0 * total * trace / m)
+    } else {
+        m.max(trace)
+    }
+}
+
+fn frequency_spring(frequency: f64, damping: f64) -> SpringSettings {
+    SpringSettings::FrequencyAndDamping {
+        frequency: frequency as f32,
+        damping: damping as f32,
+    }
+}
+
+#[test]
+fn motor_springs_are_bounded_by_the_parts_effective_mass() {
+    let coefficient = f64::from(limits::MAX_SPRING_COEFFICIENT);
+    let two_pi = 2.0 * std::f64::consts::PI;
+    for stabilized in [false, true] {
+        let bound = sphere_pair_mass_bound(stabilized);
+        // `B * ω² <= MAX`: the largest frequency with damping 0.
+        let max_frequency = (coefficient / bound).sqrt() / two_pi;
+        // `2 * B * ζ * ω <= MAX`: the largest damping ratio at 1 Hz.
+        let max_damping = coefficient / (2.0 * bound * two_pi);
+        let accepted = [
+            frequency_spring(0.999 * max_frequency, 0.0),
+            frequency_spring(1.0, 0.999 * max_damping),
+        ];
+        for spring in accepted {
+            assert!(sphere_pair(spring, stabilized).is_ok(), "{spring:?}");
+        }
+        let rejected = [
+            frequency_spring(1.001 * max_frequency, 0.0),
+            frequency_spring(1.0, 1.001 * max_damping),
+        ];
+        for spring in rejected {
+            assert!(
+                matches!(
+                    sphere_pair(spring, stabilized),
+                    Err(RagdollError::InvalidValue(_))
+                ),
+                "{spring:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn stiffness_springs_are_bounded_by_the_coefficient() {
+    let bound = limits::MAX_SPRING_COEFFICIENT;
+    let spring = |stiffness, damping| SpringSettings::StiffnessAndDamping { stiffness, damping };
+    assert!(sphere_pair(spring(bound, bound), false).is_ok());
+    for rejected in [spring(bound.next_up(), 0.0), spring(0.0, bound.next_up())] {
+        assert!(matches!(
+            sphere_pair(rejected, false),
+            Err(RagdollError::InvalidValue(_))
+        ));
+    }
+}
+
+#[test]
+fn motor_spring_of_1e20_hz_is_rejected() {
+    // Before the bound, a 1e20 Hz motor overflowed Jolt's spring stiffness during the step and
+    // tripped the finite-velocity assertion in `MotionProperties::ClampAngularVelocity`.
+    let absurd = frequency_spring(1.0e20, 1.0);
+    for stabilized in [false, true] {
+        assert!(matches!(
+            sphere_pair(absurd, stabilized),
+            Err(RagdollError::InvalidValue(_))
+        ));
+    }
+}
+
+#[test]
+fn motor_springs_at_the_coefficient_bound_drive_finitely() {
+    let bound = sphere_pair_mass_bound(false);
+    let max_frequency =
+        (f64::from(limits::MAX_SPRING_COEFFICIENT) / bound).sqrt() / (2.0 * std::f64::consts::PI);
+    let springs = [
+        frequency_spring(0.999 * max_frequency, 0.0),
+        SpringSettings::StiffnessAndDamping {
+            stiffness: limits::MAX_SPRING_COEFFICIENT,
+            damping: limits::MAX_SPRING_COEFFICIENT,
+        },
+    ];
+    for spring in springs {
+        let settings = sphere_pair(spring, false).unwrap();
+        let (mut world, _) = ragdoll_world(1);
+        let ragdoll = world
+            .create_ragdoll(&settings, None, Activation::Activate)
+            .unwrap();
+        let mut target = world.ragdoll(ragdoll).unwrap().pose();
+        target.joints[1].rotation = quat_about(Vec3::new(1.0, 0.0, 0.0), 0.5);
+        for delta_time in [PhysicsWorld::MAX_DELTA_TIME, PhysicsWorld::MIN_DELTA_TIME] {
+            for _ in 0..10 {
+                world
+                    .ragdoll_mut(ragdoll)
+                    .unwrap()
+                    .drive_to_pose_using_motors(&target)
+                    .unwrap();
+                assert!(world.step(delta_time).unwrap().is_complete());
+                for &id in world.ragdoll(ragdoll).unwrap().body_ids() {
+                    let body = world.body(id).unwrap();
+                    let state = [
+                        f3(body.linear_velocity()),
+                        f3(body.angular_velocity()),
+                        v3(body.position()),
+                    ];
+                    assert!(
+                        state.iter().flatten().all(|value| value.is_finite()),
+                        "{spring:?} at {delta_time}: {state:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn part_masses_and_velocities_are_bounded() {
+    let (_, layers) = ragdoll_layers();
+    let shapes = part_shapes();
+    for (mass, ok) in [
+        (limits::MIN_MASS, true),
+        (limits::MAX_MASS, true),
+        (limits::MIN_MASS.next_down(), false),
+        (limits::MAX_MASS.next_up(), false),
+    ] {
+        let mut parts = humanoid_parts(&shapes, layers.ragdoll);
+        parts[HEAD].body = parts[HEAD].body.clone().mass(mass);
+        let result = RagdollSettings::new(&skeleton(), &parts);
+        assert_eq!(result.is_ok(), ok, "mass {mass}");
+    }
+
+    let (mut world, layers) = ragdoll_world(1);
+    let ragdoll = world
+        .create_ragdoll(
+            &humanoid_settings(layers.ragdoll),
+            None,
+            Activation::Activate,
+        )
+        .unwrap();
+    let linear = Vec3::new(0.0, limits::MAX_LINEAR_VELOCITY, 0.0);
+    let angular = Vec3::new(limits::MAX_ANGULAR_VELOCITY, 0.0, 0.0);
+    let mut handle = world.ragdoll_mut(ragdoll).unwrap();
+    handle
+        .set_linear_and_angular_velocity(linear, angular)
+        .unwrap();
+    for (linear, angular) in [
+        (
+            Vec3::new(0.0, limits::MAX_LINEAR_VELOCITY.next_up(), 0.0),
+            angular,
+        ),
+        (
+            linear,
+            Vec3::new(limits::MAX_ANGULAR_VELOCITY.next_up(), 0.0, 0.0),
+        ),
+    ] {
+        assert!(matches!(
+            handle.set_linear_and_angular_velocity(linear, angular),
+            Err(RagdollError::InvalidValue(_))
+        ));
+    }
 }

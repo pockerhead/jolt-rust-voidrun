@@ -220,6 +220,7 @@ mod error;
 mod filter;
 mod jolt_assert;
 mod layers;
+pub mod limits;
 mod math;
 mod owned;
 mod query;

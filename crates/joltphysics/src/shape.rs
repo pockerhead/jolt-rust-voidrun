@@ -5,6 +5,7 @@ use std::ptr::{null, null_mut, NonNull};
 
 use joltphysics_sys::*;
 
+use crate::limits;
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
@@ -296,6 +297,14 @@ impl HeightFieldSettings {
     }
 }
 
+/// The error of a shape that reaches beyond [`limits::MAX_SHAPE_EXTENT`].
+const BEYOND_EXTENT: &str = "shape extends beyond limits::MAX_SHAPE_EXTENT";
+
+/// Whether a positive dimension is at most [`limits::MAX_SHAPE_EXTENT`].
+fn within_extent(dimension: f32) -> bool {
+    dimension <= limits::MAX_SHAPE_EXTENT
+}
+
 /// `sample_count` rounded up to a multiple of `block_size`, as Jolt stores it.
 fn padded_sample_count(sample_count: u32, block_size: u32) -> u64 {
     u64::from(sample_count).div_ceil(u64::from(block_size)) * u64::from(block_size)
@@ -314,16 +323,17 @@ fn height_range(samples: &[f32]) -> Option<(f32, f32)> {
 }
 
 impl Shape {
-    /// A box with the given half extents in metres (each finite and positive) and Jolt's
-    /// default convex radius of 0.05 m; see [`new_box_with_convex_radius`].
+    /// A box with the given half extents in metres (each finite, positive and at most
+    /// [`limits::MAX_SHAPE_EXTENT`]) and Jolt's default convex radius of 0.05 m; see
+    /// [`new_box_with_convex_radius`].
     ///
     /// [`new_box_with_convex_radius`]: Self::new_box_with_convex_radius
     pub fn new_box(half_extent: Vec3) -> Result<Self, ShapeError> {
         Self::new_box_with_convex_radius(half_extent, JPH_DEFAULT_CONVEX_RADIUS as f32)
     }
 
-    /// A box with the given half extents in metres (each finite and positive) and convex
-    /// radius in metres (finite and not negative).
+    /// A box with the given half extents in metres (each finite, positive and at most
+    /// [`limits::MAX_SHAPE_EXTENT`]) and convex radius in metres (finite and not negative).
     ///
     /// Jolt shrinks the box by the convex radius and inflates it again, so the faces stay where
     /// they are while edges and corners are rounded for contacts and shape casts. Jolt clamps
@@ -342,6 +352,9 @@ impl Shape {
                 "box half extents must be finite and positive",
             ));
         }
+        if !components.into_iter().all(within_extent) {
+            return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+        }
         if !is_finite_non_negative(convex_radius) {
             return Err(ShapeError::InvalidDimensions(
                 "convex radius must be finite and not negative",
@@ -355,8 +368,18 @@ impl Shape {
         unsafe { Self::from_raw(JPH_BoxShape_Create(&half_extent, convex_radius).cast()) }
     }
 
-    /// A sphere with the given radius in metres (finite and positive).
+    /// A sphere with the given radius in metres (finite, positive and at most
+    /// [`limits::MAX_SHAPE_EXTENT`]).
     pub fn new_sphere(radius: f32) -> Result<Self, ShapeError> {
+        if radius > limits::MAX_SHAPE_EXTENT {
+            return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+        }
+        Self::sphere(radius)
+    }
+
+    /// A sphere of any finite positive radius, also beyond the extent bound: what
+    /// [`inflated`](Self::inflated) needs for a query shape.
+    fn sphere(radius: f32) -> Result<Self, ShapeError> {
         if !is_finite_positive(radius) {
             return Err(ShapeError::InvalidDimensions(
                 "sphere radius must be finite and positive",
@@ -379,8 +402,8 @@ impl Shape {
 
     /// A cylinder along the local Y axis, centred on the origin, `2 * half_height` metres high.
     ///
-    /// Half height and radius must be finite and positive, the convex radius finite and not
-    /// negative. Like a box's, the convex radius rounds the edges for contacts and shape casts;
+    /// Half height and radius must be finite, positive and at most
+    /// [`limits::MAX_SHAPE_EXTENT`], the convex radius finite and not negative. Like a box's, the convex radius rounds the edges for contacts and shape casts;
     /// Jolt clamps it to `min(half_height, radius)` (`CylinderShape.cpp`) and uses at most
     /// 0.05 m of it there (`ScaleHelpers::ScaleConvexRadius`).
     pub fn new_cylinder_with_convex_radius(
@@ -392,6 +415,9 @@ impl Shape {
             return Err(ShapeError::InvalidDimensions(
                 "cylinder half height and radius must be finite and positive",
             ));
+        }
+        if !(within_extent(half_height) && within_extent(radius)) {
+            return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
         }
         if !is_finite_non_negative(convex_radius) {
             return Err(ShapeError::InvalidDimensions(
@@ -418,8 +444,18 @@ impl Shape {
     /// A capsule along the local Y axis, centred on the origin: a cylinder
     /// `2 * half_height_of_cylinder` metres high with a hemisphere of `radius` at each end, so
     /// `2 * (half_height_of_cylinder + radius)` metres high in total. Both values must be finite
-    /// and positive.
+    /// and positive, and `half_height_of_cylinder + radius` at most
+    /// [`limits::MAX_SHAPE_EXTENT`].
     pub fn new_capsule(half_height_of_cylinder: f32, radius: f32) -> Result<Self, ShapeError> {
+        if half_height_of_cylinder + radius > limits::MAX_SHAPE_EXTENT {
+            return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+        }
+        Self::capsule(half_height_of_cylinder, radius)
+    }
+
+    /// A capsule of any finite positive size, also beyond the extent bound: what
+    /// [`inflated`](Self::inflated) needs for a query shape.
+    fn capsule(half_height_of_cylinder: f32, radius: f32) -> Result<Self, ShapeError> {
         if !(is_finite_positive(half_height_of_cylinder) && is_finite_positive(radius)) {
             return Err(ShapeError::InvalidDimensions(
                 "capsule half height and radius must be finite and positive",
@@ -464,6 +500,11 @@ impl Shape {
     /// # Static only
     /// [`PhysicsWorld::create_body`](crate::PhysicsWorld::create_body) refuses heightfields for
     /// dynamic and kinematic bodies.
+    ///
+    /// # Extent
+    /// The shape's local bounds must lie within [`limits::MAX_SHAPE_EXTENT`] on every axis;
+    /// otherwise [`ShapeError::InvalidDimensions`] is returned. A field of holes only has empty
+    /// bounds and passes.
     pub fn new_height_field(
         sample_count: u32,
         samples: &[f32],
@@ -505,7 +546,8 @@ impl Shape {
             Self::from_created(
                 JPH_HeightFieldShapeSettings_CreateShape(jolt_settings.as_ptr()).cast(),
             )
-        }
+        }?
+        .within_extent_bounds()
     }
 
     /// The stored surface point of heightfield sample `(x, y)` in shape-local space, after
@@ -543,6 +585,11 @@ impl Shape {
     /// `MutableCompoundShape`, because Jolt's static compound replaces a lone child by the
     /// child itself (or a `RotatedTranslatedShape`) and drops its user data
     /// (`StaticCompoundShape.cpp`); joltphysics never changes it after construction.
+    ///
+    /// Every child position must be finite with each component at most
+    /// [`limits::MAX_SHAPE_EXTENT`] in absolute value ([`ShapeError::InvalidSettings`]), and the
+    /// compound's local bounds must lie within [`limits::MAX_SHAPE_EXTENT`] on every axis
+    /// ([`ShapeError::InvalidDimensions`]).
     pub fn new_compound(children: &[CompoundChild<'_>]) -> Result<Self, ShapeError> {
         let invalid = |what| Err(ShapeError::InvalidSettings(what));
         if children.is_empty() {
@@ -552,8 +599,10 @@ impl Shape {
             return invalid("a compound has at most u32::MAX children");
         }
         for child in children {
-            if !child.position.is_finite() {
-                return invalid("compound child position must be finite");
+            if !limits::is_local_offset(child.position) {
+                return invalid(
+                    "compound child position must be finite and within limits::MAX_SHAPE_EXTENT",
+                );
             }
             if !child.rotation.is_valid_rotation() {
                 return invalid("compound child rotation must be a finite unit quaternion");
@@ -597,11 +646,14 @@ impl Shape {
             } else {
                 JPH_StaticCompoundShape_Create(settings.as_ptr()).cast()
             })
-        }
+        }?
+        .within_extent_bounds()
     }
 
-    /// `shape` with its centre of mass moved by `offset` (shape space, metres, finite), a Jolt
-    /// `OffsetCenterOfMassShape`.
+    /// `shape` with its centre of mass moved by `offset` (shape space, metres, each component at
+    /// most [`limits::MAX_SHAPE_EXTENT`] in absolute value), a Jolt `OffsetCenterOfMassShape`.
+    /// The new shape's local bounds, which are relative to the new centre of mass, must lie
+    /// within [`limits::MAX_SHAPE_EXTENT`] on every axis.
     ///
     /// Only the centre of mass moves: the body origin and the collision surface stay where
     /// `shape` puts them, and mass and inertia are computed about the new centre. A vehicle
@@ -610,9 +662,9 @@ impl Shape {
     /// use (a heightfield) stays static-only. [`compound_sub_shape`](Self::compound_sub_shape)
     /// does not look through the decorator: it returns `None` for an offset compound.
     pub fn new_offset_center_of_mass(shape: &Shape, offset: Vec3) -> Result<Self, ShapeError> {
-        if !offset.is_finite() {
+        if !limits::is_local_offset(offset) {
             return Err(ShapeError::InvalidDimensions(
-                "centre of mass offset must be finite",
+                "centre of mass offset must be finite and within limits::MAX_SHAPE_EXTENT",
             ));
         }
         initialize()?;
@@ -622,6 +674,26 @@ impl Shape {
         // reference, which `Self` takes over.
         unsafe {
             Self::from_raw(JPH_OffsetCenterOfMassShape_Create(&offset, shape.as_ptr()).cast())
+        }?
+        .within_extent_bounds()
+    }
+
+    /// `self` when its local bounds lie within [`limits::MAX_SHAPE_EXTENT`] on every axis or are
+    /// empty (a field of holes); otherwise an error, and the shape is released.
+    fn within_extent_bounds(self) -> Result<Self, ShapeError> {
+        let mut bounds = JPH_AABox {
+            min: Vec3::ZERO.to_jph(),
+            max: Vec3::ZERO.to_jph(),
+        };
+        // SAFETY: the shape is live for the call; the getter only reads it, and `bounds` is a
+        // live local.
+        unsafe { JPH_Shape_GetLocalBounds(self.as_ptr(), &mut bounds) };
+        let (min, max) = (Vec3::from_jph(bounds.min), Vec3::from_jph(bounds.max));
+        let empty = min.x > max.x || min.y > max.y || min.z > max.z;
+        if empty || (limits::is_local_offset(min) && limits::is_local_offset(max)) {
+            Ok(self)
+        } else {
+            Err(ShapeError::InvalidDimensions(BEYOND_EXTENT))
         }
     }
 
@@ -700,7 +772,7 @@ impl Shape {
         if sub_type == JPH_ShapeSubType_Sphere {
             // SAFETY: the shape is live and a sphere (checked above); the getter only reads it.
             let radius = unsafe { JPH_SphereShape_GetRadius(self.as_ptr().cast()) };
-            Shape::new_sphere(radius + by).map(Some)
+            Shape::sphere(radius + by).map(Some)
         } else if sub_type == JPH_ShapeSubType_Capsule {
             let capsule: *const JPH_CapsuleShape = self.as_ptr().cast();
             // SAFETY: the shape is live and a capsule (checked above); the getters only read it.
@@ -710,7 +782,7 @@ impl Shape {
                     JPH_CapsuleShape_GetRadius(capsule),
                 )
             };
-            Shape::new_capsule(half_height, radius + by).map(Some)
+            Shape::capsule(half_height, radius + by).map(Some)
         } else {
             Ok(None)
         }
@@ -840,6 +912,52 @@ mod tests {
         assert!(Shape::new_cylinder_with_convex_radius(1.0, 1.0, 0.0).is_ok());
     }
 
+    #[test]
+    fn primitive_extents_are_bounded() {
+        let invalid = |result: Result<Shape, ShapeError>| {
+            matches!(result, Err(ShapeError::InvalidDimensions(_)))
+        };
+        let bound = limits::MAX_SHAPE_EXTENT;
+        let beyond = bound.next_up();
+        assert!(Shape::new_box(Vec3::new(1.0, bound, 1.0)).is_ok());
+        assert!(invalid(Shape::new_box(Vec3::new(1.0, beyond, 1.0))));
+        assert!(Shape::new_sphere(bound).is_ok());
+        assert!(invalid(Shape::new_sphere(beyond)));
+        assert!(Shape::new_cylinder(bound, bound).is_ok());
+        assert!(invalid(Shape::new_cylinder(beyond, 1.0)));
+        assert!(invalid(Shape::new_cylinder(1.0, beyond)));
+        assert!(Shape::new_capsule(bound - 1.0, 1.0).is_ok());
+        let just_beyond = beyond - (bound - 1.0);
+        assert!(invalid(Shape::new_capsule(bound - 1.0, just_beyond)));
+        assert!(invalid(Shape::new_capsule(1.0, f32::MAX)));
+    }
+
+    #[test]
+    fn decorated_and_compound_extents_are_bounded() {
+        let unit_box = unit_box();
+        let bound = limits::MAX_SHAPE_EXTENT;
+        // The bounds around the moved centre of mass reach `offset + 0.5`.
+        let edge = Vec3::new(0.0, bound - 1.0, 0.0);
+        assert!(Shape::new_offset_center_of_mass(&unit_box, edge).is_ok());
+        assert!(matches!(
+            Shape::new_offset_center_of_mass(&unit_box, Vec3::new(0.0, bound, 0.0)),
+            Err(ShapeError::InvalidDimensions(_))
+        ));
+        let large = Shape::new_box(Vec3::new(bound, 1.0, 1.0)).unwrap();
+        let centred = [child(&large, 0.0, 1), child(&large, 0.0, 2)];
+        assert!(Shape::new_compound(&centred).is_ok());
+        let beside = [child(&large, 0.0, 1), child(&large, 2.0, 2)];
+        assert!(matches!(
+            Shape::new_compound(&beside),
+            Err(ShapeError::InvalidDimensions(_))
+        ));
+        let far = [child(&unit_box, bound.next_up(), 1)];
+        assert!(matches!(
+            Shape::new_compound(&far),
+            Err(ShapeError::InvalidSettings(_))
+        ));
+    }
+
     fn box_convex_radius(shape: &Shape) -> f32 {
         assert_eq!(shape.sub_type(), JPH_ShapeSubType_Box);
         // SAFETY: the shape is live and a box (checked above); the getter only reads it.
@@ -905,8 +1023,10 @@ mod tests {
 
         let unit_box = unit_box();
         assert!(unit_box.inflated(0.1).unwrap().is_none());
-        let huge = Shape::new_capsule(1.0, f32::MAX).unwrap();
-        assert!(huge.inflated(f32::MAX).is_err());
+        // A query shape may grow beyond the extent bound; a non-finite size is still rejected.
+        let largest = Shape::new_capsule(limits::MAX_SHAPE_EXTENT - 1.0, 1.0).unwrap();
+        assert!(largest.inflated(1000.0).unwrap().is_some());
+        assert!(largest.inflated(f32::INFINITY).is_err());
     }
 
     #[test]

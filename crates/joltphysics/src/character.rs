@@ -18,6 +18,7 @@ use joltphysics_sys::*;
 
 use crate::body::{has_finite_inverse, mass_properties, MotionType};
 use crate::filter::with_query_filters;
+use crate::limits;
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
@@ -235,8 +236,8 @@ impl<'a> CharacterSettings<'a> {
         self
     }
 
-    /// Mass in kg, at least 0, with which the character presses on what it stands on.
-    /// Default 70.
+    /// Mass in kg, between 0 and [`limits::MAX_MASS`], with which the character presses on what
+    /// it stands on. Default 70.
     #[must_use]
     pub fn mass(mut self, value: f32) -> Self {
         self.mass = value;
@@ -251,8 +252,8 @@ impl<'a> CharacterSettings<'a> {
         self
     }
 
-    /// Offset of the shape from the character position, in the character's local space.
-    /// Default zero.
+    /// Offset of the shape from the character position, in the character's local space, every
+    /// component at most [`limits::MAX_SHAPE_EXTENT`] in absolute value. Default zero.
     #[must_use]
     pub fn shape_offset(mut self, value: Vec3) -> Self {
         self.shape_offset = value;
@@ -267,7 +268,8 @@ impl<'a> CharacterSettings<'a> {
         self
     }
 
-    /// How far beyond the shape to look for contacts, metres, at least 0. Default 0.1.
+    /// How far beyond the shape to look for contacts, metres, between 0 and
+    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.1.
     #[must_use]
     pub fn predictive_contact_distance(mut self, value: f32) -> Self {
         self.predictive_contact_distance = value;
@@ -295,15 +297,17 @@ impl<'a> CharacterSettings<'a> {
         self
     }
 
-    /// How far the character may penetrate geometry, metres, positive. Default 1e-3.
+    /// How far the character may penetrate geometry, metres, positive and at most
+    /// [`limits::MAX_SHAPE_EXTENT`]. Default 1e-3.
     #[must_use]
     pub fn collision_tolerance(mut self, value: f32) -> Self {
         self.collision_tolerance = value;
         self
     }
 
-    /// How far the character keeps away from geometry, metres, at least 0. The shape sits this
-    /// far above the character position along up. Default 0.02.
+    /// How far the character keeps away from geometry, metres, between 0 and
+    /// [`limits::MAX_SHAPE_EXTENT`]. The shape sits this far above the character position along
+    /// up. Default 0.02.
     #[must_use]
     pub fn character_padding(mut self, value: f32) -> Self {
         self.character_padding = value;
@@ -378,17 +382,19 @@ impl<'a> CharacterSettings<'a> {
         {
             return invalid("max slope angle must be between 0 and pi/2");
         }
-        if !is_finite_non_negative(self.mass) {
-            return invalid("mass must be finite and not negative");
+        if !(0.0..=limits::MAX_MASS).contains(&self.mass) {
+            return invalid("mass must be between 0 and limits::MAX_MASS");
         }
         if !is_finite_non_negative(self.max_strength) {
             return invalid("max strength must be finite and not negative");
         }
-        if !self.shape_offset.is_finite() {
-            return invalid("shape offset must be finite");
+        if !limits::is_local_offset(self.shape_offset) {
+            return invalid("shape offset must be finite and within limits::MAX_SHAPE_EXTENT");
         }
-        if !is_finite_non_negative(self.predictive_contact_distance) {
-            return invalid("predictive contact distance must be finite and not negative");
+        if !limits::is_local_distance(self.predictive_contact_distance) {
+            return invalid(
+                "predictive contact distance must be between 0 and limits::MAX_SHAPE_EXTENT",
+            );
         }
         if self.max_collision_iterations == 0 || self.max_constraint_iterations == 0 {
             return invalid("iteration counts must be at least 1");
@@ -396,11 +402,14 @@ impl<'a> CharacterSettings<'a> {
         if !is_finite_positive(self.min_time_remaining) {
             return invalid("min time remaining must be finite and positive");
         }
-        if !is_finite_positive(self.collision_tolerance) {
-            return invalid("collision tolerance must be finite and positive");
+        if !(limits::is_local_distance(self.collision_tolerance) && self.collision_tolerance > 0.0)
+        {
+            return invalid(
+                "collision tolerance must be positive and at most limits::MAX_SHAPE_EXTENT",
+            );
         }
-        if !is_finite_non_negative(self.character_padding) {
-            return invalid("character padding must be finite and not negative");
+        if !limits::is_local_distance(self.character_padding) {
+            return invalid("character padding must be between 0 and limits::MAX_SHAPE_EXTENT");
         }
         if self.max_num_hits == 0 {
             return invalid("max num hits must be at least 1");
@@ -470,6 +479,13 @@ impl<'a> CharacterSettings<'a> {
     }
 }
 
+/// What a caller-given character position must satisfy.
+const POSITION_RULE: &str = "position must be finite and within limits::MAX_POSITION";
+
+/// What a caller-given character velocity must satisfy.
+const LINEAR_VELOCITY_RULE: &str =
+    "linear velocity must be finite and at most limits::MAX_LINEAR_VELOCITY long";
+
 /// Whether `v` is finite and of unit length within Jolt's `Vec3::IsNormalized` tolerance
 /// (`|length² − 1| <= 1e-5`).
 fn is_unit(v: Vec3) -> bool {
@@ -508,14 +524,16 @@ impl Default for ExtendedUpdateSettings {
 
 impl ExtendedUpdateSettings {
     /// How far down the character looks for floor to stick to when it was supported before the
-    /// update and is not after it, without moving up. Default `(0, -0.5, 0)`.
+    /// update and is not after it, without moving up. Every component at most
+    /// [`limits::MAX_SHAPE_EXTENT`] in absolute value. Default `(0, -0.5, 0)`.
     #[must_use]
     pub fn stick_to_floor_step_down(mut self, value: Vec3) -> Self {
         self.stick_to_floor_step_down = value;
         self
     }
 
-    /// How high the character steps up when a step blocks it. Default `(0, 0.4, 0)`.
+    /// How high the character steps up when a step blocks it. Every component at most
+    /// [`limits::MAX_SHAPE_EXTENT`] in absolute value. Default `(0, 0.4, 0)`.
     ///
     /// The highest step climbed is not this length: a capsule of radius `r` climbs about
     /// step-up + padding + `r (1 - cos max_slope_angle)`, and the step's own rounding changes it
@@ -529,15 +547,16 @@ impl ExtendedUpdateSettings {
         self
     }
 
-    /// Least distance, at least 0, the character moves forward after stepping up. Default 0.02.
+    /// Least distance, between 0 and [`limits::MAX_SHAPE_EXTENT`], the character moves forward
+    /// after stepping up. Default 0.02.
     #[must_use]
     pub fn walk_stairs_min_step_forward(mut self, value: f32) -> Self {
         self.walk_stairs_min_step_forward = value;
         self
     }
 
-    /// How far ahead, at least 0, the character tests for floor after stepping up, so it does
-    /// not step onto a slope it would slide off. Default 0.15.
+    /// How far ahead, between 0 and [`limits::MAX_SHAPE_EXTENT`], the character tests for floor
+    /// after stepping up, so it does not step onto a slope it would slide off. Default 0.15.
     #[must_use]
     pub fn walk_stairs_step_forward_test(mut self, value: f32) -> Self {
         self.walk_stairs_step_forward_test = value;
@@ -553,7 +572,8 @@ impl ExtendedUpdateSettings {
     }
 
     /// Extra distance the character moves down after stepping up, to stay on stairs that go
-    /// down. Default zero.
+    /// down. Every component at most [`limits::MAX_SHAPE_EXTENT`] in absolute value. Default
+    /// zero.
     #[must_use]
     pub fn walk_stairs_step_down_extra(mut self, value: Vec3) -> Self {
         self.walk_stairs_step_down_extra = value;
@@ -561,20 +581,24 @@ impl ExtendedUpdateSettings {
     }
 
     fn validate(&self) -> Result<(), CharacterError> {
-        let finite = self.stick_to_floor_step_down.is_finite()
-            && self.walk_stairs_step_up.is_finite()
-            && self.walk_stairs_cos_angle_forward_contact.is_finite()
-            && self.walk_stairs_step_down_extra.is_finite();
-        if !finite {
+        let offsets = limits::is_local_offset(self.stick_to_floor_step_down)
+            && limits::is_local_offset(self.walk_stairs_step_up)
+            && limits::is_local_offset(self.walk_stairs_step_down_extra);
+        if !offsets {
             return Err(CharacterError::InvalidValue(
-                "extended update settings must be finite",
+                "extended update steps must be finite and within limits::MAX_SHAPE_EXTENT",
             ));
         }
-        if !(is_finite_non_negative(self.walk_stairs_min_step_forward)
-            && is_finite_non_negative(self.walk_stairs_step_forward_test))
+        if !self.walk_stairs_cos_angle_forward_contact.is_finite() {
+            return Err(CharacterError::InvalidValue(
+                "walk stairs cos angle forward contact must be finite",
+            ));
+        }
+        if !(limits::is_local_distance(self.walk_stairs_min_step_forward)
+            && limits::is_local_distance(self.walk_stairs_step_forward_test))
         {
             return Err(CharacterError::InvalidValue(
-                "walk stairs forward distances must be finite and not negative",
+                "walk stairs forward distances must be between 0 and limits::MAX_SHAPE_EXTENT",
             ));
         }
         Ok(())
@@ -911,18 +935,26 @@ impl CharacterMut<'_> {
         self.character.as_ptr()
     }
 
-    /// Moves the character to `position` (metres, finite), without collision checks. Also
-    /// moves the inner body.
+    /// Moves the character to `position` (metres, every component at most
+    /// [`limits::MAX_POSITION`] in absolute value), without collision checks. Also moves the
+    /// inner body.
     pub fn set_position(&mut self, position: RVec3) -> Result<(), CharacterError> {
-        if !position.is_finite() {
-            return Err(CharacterError::InvalidValue("position must be finite"));
+        if !limits::is_in_frame(position) {
+            return Err(CharacterError::InvalidValue(POSITION_RULE));
         }
+        self.write_position(position);
+        Ok(())
+    }
+
+    /// Writes a finite position without the frame bound of [`set_position`](Self::set_position),
+    /// for state the world re-expresses ([`PhysicsWorld::rebase`]).
+    pub(crate) fn write_position(&mut self, position: RVec3) {
+        debug_assert!(position.is_finite());
         let position = position.to_jph();
         // SAFETY: the world is borrowed mutably through this view and owns the character. Jolt
         // moves the inner body through the locking body interface; this thread holds no body
         // lock. `position` is a live local.
         unsafe { JPH_CharacterVirtual_SetPosition(self.ptr(), &position) };
-        Ok(())
     }
 
     /// Sets the rotation, a finite unit quaternion. Also rotates the inner body.
@@ -951,17 +983,25 @@ impl CharacterMut<'_> {
         Ok(())
     }
 
-    /// Sets the linear velocity, m/s, finite, that the next update moves the character with.
+    /// Sets the linear velocity, m/s, that the next update moves the character with: finite and
+    /// at most [`limits::MAX_LINEAR_VELOCITY`] long (Jolt's own length). Jolt does not clamp a
+    /// character's velocity; it becomes the displacement the update casts.
     pub fn set_linear_velocity(&mut self, velocity: Vec3) -> Result<(), CharacterError> {
-        if !velocity.is_finite() {
-            return Err(CharacterError::InvalidValue(
-                "linear velocity must be finite",
-            ));
+        if !limits::is_linear_velocity(velocity) {
+            return Err(CharacterError::InvalidValue(LINEAR_VELOCITY_RULE));
         }
+        self.write_linear_velocity(velocity);
+        Ok(())
+    }
+
+    /// Writes a finite velocity without the bound of
+    /// [`set_linear_velocity`](Self::set_linear_velocity), for state the world re-expresses
+    /// ([`PhysicsWorld::rebase`]).
+    pub(crate) fn write_linear_velocity(&mut self, velocity: Vec3) {
+        debug_assert!(velocity.is_finite());
         let velocity = velocity.to_jph();
         // SAFETY: as in `set_up`.
         unsafe { JPH_CharacterVirtual_SetLinearVelocity(self.ptr(), &velocity) };
-        Ok(())
     }
 
     /// Restores a state saved with [`CharacterRef::save_state`]: pose, velocity, up, ground
@@ -1010,7 +1050,8 @@ impl CharacterMut<'_> {
 }
 
 impl PhysicsWorld {
-    /// Creates a character at `position` (metres) with `rotation` and returns its id.
+    /// Creates a character at `position` (metres, every component at most
+    /// [`limits::MAX_POSITION`] in absolute value) with `rotation` and returns its id.
     ///
     /// Fails with [`CharacterError::InvalidValue`] when a setting or the pose is out of range
     /// (see the setters of [`CharacterSettings`]), with [`CharacterError::TooManyBodies`] when an
@@ -1029,8 +1070,8 @@ impl PhysicsWorld {
         rotation: Quat,
     ) -> Result<CharacterId, CharacterError> {
         settings.validate(self.object_layer_count)?;
-        if !position.is_finite() {
-            return Err(CharacterError::InvalidValue("position must be finite"));
+        if !limits::is_in_frame(position) {
+            return Err(CharacterError::InvalidValue(POSITION_RULE));
         }
         if !rotation.is_valid_rotation() {
             return Err(CharacterError::InvalidValue(
@@ -1209,8 +1250,9 @@ impl PhysicsWorld {
     /// hit each other, whatever the filter says.
     ///
     /// `delta_time` must be finite, at least [`MIN_DELTA_TIME`](Self::MIN_DELTA_TIME) and at
-    /// most [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), `gravity` finite, the settings valid and the
-    /// filter's layers in this world; otherwise nothing happens and
+    /// most [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), `gravity` finite and at most
+    /// [`limits::MAX_ACCELERATION`] long, the settings valid and the filter's layers in this
+    /// world; otherwise nothing happens and
     /// [`CharacterError::InvalidValue`] is returned.
     ///
     /// # Panics
@@ -1251,8 +1293,10 @@ impl PhysicsWorld {
                 "delta time must be finite and between MIN_DELTA_TIME and MAX_DELTA_TIME",
             ));
         }
-        if !gravity.is_finite() {
-            return Err(CharacterError::InvalidValue("gravity must be finite"));
+        if !limits::is_acceleration(gravity) {
+            return Err(CharacterError::InvalidValue(
+                "gravity must be finite and at most limits::MAX_ACCELERATION long",
+            ));
         }
         settings.validate()?;
         let character = self.character_entry(id)?.character.as_ptr();

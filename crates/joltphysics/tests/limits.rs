@@ -1,0 +1,938 @@
+//! The magnitude policy of `joltphysics::limits`: every bounded input is accepted at its bound
+//! and rejected just beyond it without changing the world, and scenes with every input at its
+//! bound step with finite state. In a native build with the `asserts` feature these scenes also
+//! show that no Jolt assertion fires for them.
+
+mod common;
+
+use common::vehicle::*;
+use common::walker::{f3, v3};
+use common::*;
+use joltphysics::*;
+
+/// A world without gravity.
+fn empty_world() -> PhysicsWorld {
+    world(Vec3::ZERO, 1)
+}
+
+fn sphere() -> Shape {
+    Shape::new_sphere(0.5).unwrap()
+}
+
+/// The axis-aligned vectors with `value` on one axis, in both directions.
+fn on_axes(value: f32) -> Vec<Vec3> {
+    let mut vectors = Vec::new();
+    for axis in 0..3 {
+        for sign in [1.0, -1.0] {
+            let mut v = [0.0; 3];
+            v[axis] = sign * value;
+            vectors.push(Vec3::from(v));
+        }
+    }
+    vectors
+}
+
+/// The axis-aligned positions with `value` on one axis, in both directions.
+fn real_on_axes(value: Real) -> Vec<RVec3> {
+    let mut vectors = Vec::new();
+    for axis in 0..3 {
+        for sign in [1.0, -1.0] {
+            let mut v = [0.0; 3];
+            v[axis] = sign * value;
+            vectors.push(RVec3::from(v));
+        }
+    }
+    vectors
+}
+
+const NON_FINITE: [f32; 3] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
+
+fn bits(v: Vec3) -> [u32; 3] {
+    <[f32; 3]>::from(v).map(f32::to_bits)
+}
+
+/// `value` as `f64`, which it already is with the `double-precision` feature.
+#[allow(clippy::useless_conversion)]
+fn wide(value: Real) -> f64 {
+    f64::from(value)
+}
+
+fn real_bits(v: RVec3) -> [u64; 3] {
+    <[Real; 3]>::from(v).map(|c| wide(c).to_bits())
+}
+
+/// A body's pose and velocities as bits.
+fn body_bits(world: &PhysicsWorld, id: BodyId) -> ([u64; 3], [u32; 4], [u32; 3], [u32; 3]) {
+    let body = world.body(id).unwrap();
+    (
+        real_bits(body.position()),
+        <[f32; 4]>::from(body.rotation()).map(f32::to_bits),
+        bits(body.linear_velocity()),
+        bits(body.angular_velocity()),
+    )
+}
+
+fn assert_body_finite(world: &PhysicsWorld, id: BodyId, what: &str) {
+    let body = world.body(id).unwrap();
+    let state = [
+        v3(body.position()),
+        f3(body.linear_velocity()),
+        f3(body.angular_velocity()),
+    ];
+    assert!(
+        state.iter().flatten().all(|value| value.is_finite()),
+        "{what}: {state:?}"
+    );
+}
+
+fn body_invalid(result: Result<impl Sized, BodyError>) -> bool {
+    matches!(result, Err(BodyError::InvalidValue(_)))
+}
+
+fn query_invalid(result: Result<impl Sized, QueryError>) -> bool {
+    matches!(result, Err(QueryError::InvalidValue(_)))
+}
+
+#[test]
+fn world_gravity_is_bounded_by_max_acceleration() {
+    let bound = limits::MAX_ACCELERATION;
+    for gravity in on_axes(bound) {
+        assert!(PhysicsWorld::new(WorldSettings::default().gravity(gravity)).is_ok());
+    }
+    let mut world = empty_world();
+    for gravity in on_axes(bound) {
+        world.set_gravity(gravity).unwrap();
+    }
+    let before = bits(world.gravity());
+    let beyond = on_axes(bound.next_up()).into_iter().chain(
+        NON_FINITE
+            .into_iter()
+            .map(|value| Vec3::new(0.0, value, 0.0)),
+    );
+    for gravity in beyond {
+        assert!(matches!(
+            PhysicsWorld::new(WorldSettings::default().gravity(gravity)),
+            Err(WorldError::InvalidSettings(_))
+        ));
+        assert!(matches!(
+            world.set_gravity(gravity),
+            Err(WorldError::InvalidSettings(_))
+        ));
+        assert_eq!(bits(world.gravity()), before);
+    }
+}
+
+#[test]
+fn rebase_translation_is_bounded_by_twice_the_frame() {
+    let mut world = empty_world();
+    let id = world
+        .create_body(&sphere(), &BodySettings::new_dynamic())
+        .unwrap();
+    let span = 2.0 * limits::MAX_POSITION;
+    // The translation is bounded; the resulting position is only checked to be finite.
+    world
+        .rebase(&[id], Quat::IDENTITY, RVec3::new(span, 0.0, 0.0))
+        .unwrap();
+    let before = body_bits(&world, id);
+    for translation in real_on_axes(span.next_up()) {
+        assert!(body_invalid(world.rebase(
+            &[id],
+            Quat::IDENTITY,
+            translation
+        )));
+        assert_eq!(body_bits(&world, id), before);
+    }
+}
+
+#[test]
+fn body_settings_are_bounded() {
+    let mut world = empty_world();
+    let shape = sphere();
+    let dynamic = BodySettings::new_dynamic;
+    let mut accepted = Vec::new();
+    let mut rejected = Vec::new();
+    for p in real_on_axes(limits::MAX_POSITION) {
+        accepted.push(dynamic().position(p));
+    }
+    for p in real_on_axes(limits::MAX_POSITION.next_up()) {
+        rejected.push(dynamic().position(p));
+    }
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY) {
+        accepted.push(dynamic().linear_velocity(v));
+    }
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY.next_up()) {
+        rejected.push(dynamic().linear_velocity(v));
+    }
+    for v in on_axes(limits::MAX_ANGULAR_VELOCITY) {
+        accepted.push(dynamic().angular_velocity(v));
+    }
+    for v in on_axes(limits::MAX_ANGULAR_VELOCITY.next_up()) {
+        rejected.push(dynamic().angular_velocity(v));
+    }
+    for restitution in [0.0, 1.0] {
+        accepted.push(dynamic().restitution(restitution));
+    }
+    for restitution in [-0.1, 1.0f32.next_up(), f32::NAN] {
+        rejected.push(dynamic().restitution(restitution));
+    }
+    let factor = limits::MAX_GRAVITY_FACTOR;
+    for gravity_factor in [-factor, factor] {
+        accepted.push(dynamic().gravity_factor(gravity_factor));
+    }
+    for gravity_factor in [(-factor).next_down(), factor.next_up(), f32::NAN] {
+        rejected.push(dynamic().gravity_factor(gravity_factor));
+    }
+    for mass in [limits::MIN_MASS, limits::MAX_MASS] {
+        accepted.push(dynamic().mass(mass));
+    }
+    for mass in [limits::MIN_MASS.next_down(), limits::MAX_MASS.next_up()] {
+        rejected.push(dynamic().mass(mass));
+    }
+    for settings in &accepted {
+        world.create_body(&shape, settings).unwrap();
+    }
+    let count = world.body_count();
+    for settings in &rejected {
+        assert!(
+            body_invalid(world.create_body(&shape, settings)),
+            "{settings:?}"
+        );
+    }
+    assert_eq!(world.body_count(), count);
+}
+
+#[test]
+fn computed_dynamic_mass_is_bounded_and_kinematic_mass_is_not() {
+    let mut world = empty_world();
+    // Jolt's density 1000 kg/m³: a 10 m cube weighs 1e6 kg, a 1 cm cube 1e-3 kg.
+    let heavy = Shape::new_box(Vec3::new(6.0, 6.0, 6.0)).unwrap();
+    let light = Shape::new_box_with_convex_radius(Vec3::new(0.004, 0.004, 0.004), 0.0).unwrap();
+    for shape in [&heavy, &light] {
+        assert!(body_invalid(
+            world.create_body(shape, &BodySettings::new_dynamic())
+        ));
+        world
+            .create_body(shape, &BodySettings::new_kinematic())
+            .unwrap();
+        world
+            .create_body(shape, &BodySettings::new_dynamic().mass(1.0))
+            .unwrap();
+    }
+}
+
+#[test]
+fn body_setters_are_bounded_and_rejection_changes_nothing() {
+    let mut world = empty_world();
+    let id = world
+        .create_body(&sphere(), &BodySettings::new_dynamic())
+        .unwrap();
+    let mut body = world.body_mut(id).unwrap();
+    for p in real_on_axes(limits::MAX_POSITION) {
+        body.set_position(p, Activation::DontActivate).unwrap();
+        body.set_position_and_rotation(p, Quat::IDENTITY, Activation::DontActivate)
+            .unwrap();
+    }
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY) {
+        body.set_linear_velocity(v).unwrap();
+    }
+    for v in on_axes(limits::MAX_ANGULAR_VELOCITY) {
+        body.set_angular_velocity(v).unwrap();
+    }
+    let before = body_bits(&world, id);
+    let mut body = world.body_mut(id).unwrap();
+    for p in real_on_axes(limits::MAX_POSITION.next_up()) {
+        assert!(body_invalid(body.set_position(p, Activation::DontActivate)));
+        assert!(body_invalid(body.set_position_and_rotation(
+            p,
+            Quat::IDENTITY,
+            Activation::DontActivate
+        )));
+    }
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY.next_up()) {
+        assert!(body_invalid(body.set_linear_velocity(v)));
+    }
+    for v in on_axes(limits::MAX_ANGULAR_VELOCITY.next_up()) {
+        assert!(body_invalid(body.set_angular_velocity(v)));
+    }
+    assert_eq!(body_bits(&world, id), before);
+}
+
+/// The f32 vector along `direction` whose length by Jolt's own `Vec3::Length` is the largest
+/// at most `bound`.
+fn on_the_jolt_bound(direction: Vec3, bound: f32) -> Vec3 {
+    let jolt_length = |v: Vec3| {
+        let raw = joltphysics_sys::JPH_Vec3 {
+            x: v.x,
+            y: v.y,
+            z: v.z,
+        };
+        // SAFETY: a pure function of a live local.
+        unsafe { joltphysics_sys::JPH_Vec3_Length(&raw) }
+    };
+    let length = jolt_length(direction);
+    let mut v = Vec3::new(
+        direction.x * bound / length,
+        direction.y * bound / length,
+        direction.z * bound / length,
+    );
+    let largest = |v: Vec3| {
+        if v.x.abs() >= v.y.abs() && v.x.abs() >= v.z.abs() {
+            0
+        } else if v.y.abs() >= v.z.abs() {
+            1
+        } else {
+            2
+        }
+    };
+    let axis = largest(v);
+    let step = |v: Vec3, up: bool| {
+        let mut c = <[f32; 3]>::from(v);
+        let grow = (c[axis] >= 0.0) == up;
+        c[axis] = if grow {
+            c[axis].next_up()
+        } else {
+            c[axis].next_down()
+        };
+        Vec3::from(c)
+    };
+    while jolt_length(v) > bound {
+        v = step(v, false);
+    }
+    while jolt_length(step(v, true)) <= bound {
+        v = step(v, true);
+    }
+    v
+}
+
+#[test]
+fn creation_velocities_agree_with_jolts_length_in_many_directions() {
+    let mut world = empty_world();
+    let shape = sphere();
+    let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 40) as f32 / (1u64 << 24) as f32 * 2.0 - 1.0
+    };
+    for _ in 0..64 {
+        let direction = Vec3::new(next(), next(), next());
+        if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
+            continue;
+        }
+        for (bound, angular) in [
+            (limits::MAX_LINEAR_VELOCITY, false),
+            (limits::MAX_ANGULAR_VELOCITY, true),
+        ] {
+            let at = on_the_jolt_bound(direction, bound);
+            let mut beyond = <[f32; 3]>::from(at);
+            let axis = (0..3)
+                .max_by(|&a, &b| beyond[a].abs().total_cmp(&beyond[b].abs()))
+                .unwrap();
+            beyond[axis] = if beyond[axis] >= 0.0 {
+                beyond[axis].next_up()
+            } else {
+                beyond[axis].next_down()
+            };
+            let settings = |v: Vec3| {
+                if angular {
+                    BodySettings::new_dynamic().angular_velocity(v)
+                } else {
+                    BodySettings::new_dynamic().linear_velocity(v)
+                }
+            };
+            // With the `asserts` feature Jolt asserts `Length() <= max` on this creation.
+            world.create_body(&shape, &settings(at)).unwrap();
+            assert!(body_invalid(
+                world.create_body(&shape, &settings(Vec3::from(beyond)))
+            ));
+        }
+    }
+}
+
+#[test]
+fn forces_are_bounded_by_the_acceleration_they_give() {
+    let mut world = empty_world();
+    // Mass 2 kg: Jolt's inverse mass 0.5 is exact.
+    let id = world
+        .create_body(&sphere(), &BodySettings::new_dynamic().mass(2.0))
+        .unwrap();
+    let half = limits::MAX_ACCELERATION;
+    let mut body = world.body_mut(id).unwrap();
+    // 2 * MAX_ACCELERATION newtons in total give exactly MAX_ACCELERATION.
+    body.add_force(Vec3::new(half, 0.0, 0.0)).unwrap();
+    body.add_force(Vec3::new(half, 0.0, 0.0)).unwrap();
+    assert!(body_invalid(body.add_force(Vec3::new(1.0e3, 0.0, 0.0))));
+    body.reset_forces();
+    assert!(body_invalid(body.add_force(Vec3::new(
+        0.0,
+        -(2.0 * half).next_up(),
+        0.0
+    ))));
+    body.add_force(Vec3::new(0.0, -2.0 * half, 0.0)).unwrap();
+    for value in NON_FINITE {
+        assert!(body_invalid(body.add_force(Vec3::new(value, 0.0, 0.0))));
+    }
+    assert!(world.step(DT).unwrap().is_complete());
+    assert_body_finite(&world, id, "after the bound force");
+
+    // Static and kinematic bodies ignore loads.
+    for settings in [BodySettings::new_static(), BodySettings::new_kinematic()] {
+        let other = world.create_body(&sphere(), &settings).unwrap();
+        let mut body = world.body_mut(other).unwrap();
+        body.add_force(Vec3::new(1.0e30, 0.0, 0.0)).unwrap();
+        body.add_torque(Vec3::new(1.0e30, 0.0, 0.0)).unwrap();
+    }
+}
+
+#[test]
+fn torques_are_bounded_by_the_angular_acceleration_they_give() {
+    let mut world = empty_world();
+    // A sphere of mass m and radius r has the inertia 0.4 * m * r² about every axis: 1 kg·m² for
+    // 2.5 kg and 1 m, within Jolt's rounding.
+    let shape = Shape::new_sphere(1.0).unwrap();
+    let id = world
+        .create_body(&shape, &BodySettings::new_dynamic().mass(2.5))
+        .unwrap();
+    let bound = limits::MAX_ANGULAR_ACCELERATION;
+    let mut body = world.body_mut(id).unwrap();
+    body.add_torque(Vec3::new(0.0, 0.0, bound * 0.999)).unwrap();
+    assert!(body_invalid(body.add_torque(Vec3::new(
+        0.0,
+        0.0,
+        bound * 0.002
+    ))));
+    body.reset_forces();
+    assert!(body_invalid(body.add_torque(Vec3::new(
+        bound * 1.001,
+        0.0,
+        0.0
+    ))));
+    // A force of F newtons at 1 m from the centre adds F newton-metres.
+    let point = RVec3::new(1.0, 0.0, 0.0);
+    body.add_force_at_point(Vec3::new(0.0, bound * 0.999, 0.0), point)
+        .unwrap();
+    assert!(body_invalid(
+        body.add_force_at_point(Vec3::new(0.0, bound * 0.002, 0.0), point)
+    ));
+    let corner = RVec3::new(limits::MAX_POSITION.next_up(), 0.0, 0.0);
+    assert!(body_invalid(
+        body.add_force_at_point(Vec3::new(0.0, 1.0, 0.0), corner)
+    ));
+    assert!(world.step(DT).unwrap().is_complete());
+    assert_body_finite(&world, id, "after the bound torque");
+}
+
+#[test]
+fn character_settings_and_setters_are_bounded() {
+    let mut world = empty_world();
+    let capsule = Shape::new_capsule(0.5, 0.3).unwrap();
+    let base = || CharacterSettings::new(&capsule);
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let accepted = [
+        base().mass(0.0),
+        base().mass(limits::MAX_MASS),
+        base().shape_offset(Vec3::new(0.0, extent, 0.0)),
+        base().predictive_contact_distance(extent),
+        base().character_padding(extent),
+        base().collision_tolerance(extent),
+    ];
+    for settings in &accepted {
+        world
+            .create_character(settings, RVec3::ZERO, Quat::IDENTITY)
+            .unwrap();
+    }
+    let beyond = extent.next_up();
+    let rejected = [
+        base().mass(limits::MAX_MASS.next_up()),
+        base().shape_offset(Vec3::new(0.0, beyond, 0.0)),
+        base().predictive_contact_distance(beyond),
+        base().character_padding(beyond),
+        base().collision_tolerance(beyond),
+    ];
+    for settings in &rejected {
+        assert!(matches!(
+            world.create_character(settings, RVec3::ZERO, Quat::IDENTITY),
+            Err(CharacterError::InvalidValue(_))
+        ));
+    }
+
+    let corner = RVec3::new(limits::MAX_POSITION, limits::MAX_POSITION, 0.0);
+    let id = world
+        .create_character(&base(), corner, Quat::IDENTITY)
+        .unwrap();
+    assert!(matches!(
+        world.create_character(
+            &base(),
+            RVec3::new(limits::MAX_POSITION.next_up(), 0.0, 0.0),
+            Quat::IDENTITY
+        ),
+        Err(CharacterError::InvalidValue(_))
+    ));
+    let mut character = world.character_mut(id).unwrap();
+    for p in real_on_axes(limits::MAX_POSITION) {
+        character.set_position(p).unwrap();
+    }
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY) {
+        character.set_linear_velocity(v).unwrap();
+    }
+    for p in real_on_axes(limits::MAX_POSITION.next_up()) {
+        assert!(matches!(
+            character.set_position(p),
+            Err(CharacterError::InvalidValue(_))
+        ));
+    }
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY.next_up()) {
+        assert!(matches!(
+            character.set_linear_velocity(v),
+            Err(CharacterError::InvalidValue(_))
+        ));
+    }
+    let reached = world.character(id).unwrap();
+    assert_eq!(
+        real_bits(reached.position()),
+        real_bits(RVec3::new(0.0, 0.0, -limits::MAX_POSITION))
+    );
+    assert_eq!(
+        bits(reached.linear_velocity()),
+        bits(Vec3::new(0.0, 0.0, -limits::MAX_LINEAR_VELOCITY))
+    );
+}
+
+#[test]
+fn character_update_gravity_and_steps_are_bounded() {
+    let mut world = empty_world();
+    let capsule = Shape::new_capsule(0.5, 0.3).unwrap();
+    let id = world
+        .create_character(
+            &CharacterSettings::new(&capsule),
+            RVec3::ZERO,
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    let all = QueryFilter::new();
+    let defaults = ExtendedUpdateSettings::default();
+    let update = |world: &mut PhysicsWorld, gravity: Vec3, settings: &ExtendedUpdateSettings| {
+        world.update_character(id, DT, gravity, settings, &all)
+    };
+    for gravity in on_axes(limits::MAX_ACCELERATION) {
+        update(&mut world, gravity, &defaults).unwrap();
+    }
+    for gravity in on_axes(limits::MAX_ACCELERATION.next_up()) {
+        assert!(matches!(
+            update(&mut world, gravity, &defaults),
+            Err(CharacterError::InvalidValue(_))
+        ));
+    }
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let gravity = Vec3::new(0.0, -9.81, 0.0);
+    let down = Vec3::new(0.0, -extent, 0.0);
+    let accepted = [
+        defaults.stick_to_floor_step_down(down),
+        defaults.walk_stairs_step_up(Vec3::new(0.0, extent, 0.0)),
+        defaults.walk_stairs_step_down_extra(down),
+        defaults.walk_stairs_min_step_forward(extent),
+        defaults.walk_stairs_step_forward_test(extent),
+    ];
+    for settings in &accepted {
+        update(&mut world, gravity, settings).unwrap();
+    }
+    let beyond = extent.next_up();
+    let rejected = [
+        defaults.stick_to_floor_step_down(Vec3::new(0.0, -beyond, 0.0)),
+        defaults.walk_stairs_step_up(Vec3::new(0.0, beyond, 0.0)),
+        defaults.walk_stairs_step_down_extra(Vec3::new(beyond, 0.0, 0.0)),
+        defaults.walk_stairs_min_step_forward(beyond),
+        defaults.walk_stairs_step_forward_test(beyond),
+    ];
+    for settings in &rejected {
+        assert!(matches!(
+            update(&mut world, gravity, settings),
+            Err(CharacterError::InvalidValue(_))
+        ));
+    }
+}
+
+#[test]
+fn constraint_frame_points_are_bounded() {
+    let (_, layers) = common::ragdoll::ragdoll_layers();
+    let skeleton = Skeleton::new(&[
+        SkeletonJoint {
+            name: "a",
+            parent: None,
+        },
+        SkeletonJoint {
+            name: "b",
+            parent: Some(0),
+        },
+    ])
+    .unwrap();
+    let shape = sphere();
+    let build = |anchor: RVec3| {
+        let joint = HingeConstraintSettings::new(
+            anchor,
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        );
+        let body = BodySettings::new_dynamic().object_layer(layers.ragdoll);
+        let parts = [
+            RagdollPart {
+                shape: &shape,
+                body: body.clone(),
+                joint: None,
+            },
+            RagdollPart {
+                shape: &shape,
+                body,
+                joint: Some(RagdollJoint::Hinge(joint)),
+            },
+        ];
+        RagdollSettings::new(&skeleton, &parts)
+    };
+    for anchor in real_on_axes(limits::MAX_POSITION) {
+        assert!(build(anchor).is_ok());
+    }
+    for anchor in real_on_axes(limits::MAX_POSITION.next_up()) {
+        assert!(matches!(build(anchor), Err(RagdollError::InvalidValue(_))));
+    }
+}
+
+/// A flat heightfield of 4 x 4 samples, three cells of `scale` metres per side from `offset`
+/// on x and z.
+fn flat_field(offset: f32, scale: f32) -> Result<Shape, ShapeError> {
+    Shape::new_height_field(
+        4,
+        &[0.0; 16],
+        &HeightFieldSettings::default()
+            .offset(Vec3::new(offset, 0.0, offset))
+            .scale(Vec3::new(scale, 1.0, scale)),
+    )
+}
+
+#[test]
+fn height_field_extent_is_bounded() {
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let field = |offset: f32, scale: f32| flat_field(offset, scale);
+    // Three cells of 1333 m from -1999 m end at 2000 m.
+    assert!(field(-1999.0, 1333.0).is_ok());
+    assert!(matches!(
+        field(-1999.0, 1333.0f32.next_up()),
+        Err(ShapeError::InvalidDimensions(_))
+    ));
+    assert!(matches!(
+        field(-extent.next_up(), 1.0),
+        Err(ShapeError::InvalidDimensions(_))
+    ));
+}
+
+#[test]
+fn query_inputs_are_bounded_by_the_frame() {
+    let mut world = empty_world();
+    add_floor(&mut world);
+    let all = QueryFilter::new();
+    let ball = sphere();
+    let bound = limits::MAX_POSITION;
+    // `Real` is `f32` without the `double-precision` feature, so the cast is a no-op there.
+    #[allow(clippy::unnecessary_cast)]
+    let span = (2.0 * bound) as f32;
+    let corner = RVec3::new(bound, bound, bound);
+    let beyond = RVec3::new(bound.next_up(), 0.0, 0.0);
+    let across = Vec3::new(-span, -span, -span);
+
+    world.cast_ray(RayCast::new(corner, across), &all).unwrap();
+    assert!(query_invalid(world.cast_ray(
+        RayCast::new(beyond, Vec3::new(0.0, -1.0, 0.0)),
+        &all
+    )));
+
+    let cast = |position: RVec3, direction: Vec3| {
+        world.cast_shape(
+            &ShapeCast::new(&ball, position, Quat::IDENTITY, direction),
+            &all,
+        )
+    };
+    cast(corner, across).unwrap();
+    assert!(query_invalid(cast(beyond, Vec3::new(0.0, -1.0, 0.0))));
+    assert!(query_invalid(cast(
+        corner,
+        Vec3::new(-span.next_up(), 0.0, 0.0)
+    )));
+
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let collide = |position: RVec3, separation: f32| {
+        world.collide_shape(
+            &CollideShape::new(&ball, position, Quat::IDENTITY).max_separation_distance(separation),
+            &all,
+        )
+    };
+    collide(corner, extent).unwrap();
+    assert!(query_invalid(collide(beyond, 0.0)));
+    assert!(query_invalid(collide(corner, extent.next_up())));
+}
+
+#[test]
+fn a_ray_with_a_huge_finite_direction_is_cast() {
+    // Ray directions are only checked to be finite and not zero; this one reaches far beyond the
+    // frame and is cast without overflow.
+    let mut world = empty_world();
+    let floor = add_floor(&mut world);
+    let hit = world
+        .cast_ray(
+            RayCast::new(RVec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -1.0e30, 0.0)),
+            &QueryFilter::new(),
+        )
+        .unwrap()
+        .expect("the ray hits the floor");
+    assert_eq!(hit.body, floor);
+    assert!(hit.fraction.is_finite() && hit.fraction > 0.0);
+}
+
+/// Steps `world` ten times at the largest and ten times at the smallest time step, checking
+/// `bodies` finite after each step.
+fn step_at_both_extremes(world: &mut PhysicsWorld, bodies: &[BodyId], what: &str) {
+    for delta_time in [PhysicsWorld::MAX_DELTA_TIME, PhysicsWorld::MIN_DELTA_TIME] {
+        for tick in 0..10 {
+            let _ = world.step(delta_time).unwrap();
+            for &id in bodies {
+                assert_body_finite(world, id, &format!("{what}, dt {delta_time}, tick {tick}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn bodies_at_every_bound_step_finitely() {
+    let gravity = Vec3::new(0.0, -limits::MAX_ACCELERATION, 0.0);
+    let mut world = world(gravity, 1);
+    let bound = limits::MAX_POSITION;
+    let floor_shape = Shape::new_box(Vec3::new(100.0, 1.0, 100.0)).unwrap();
+    world
+        .create_body(
+            &floor_shape,
+            &BodySettings::new_static().position(RVec3::new(bound - 100.0, -bound, 0.0)),
+        )
+        .unwrap();
+    let ball = sphere();
+    let speed = limits::MAX_LINEAR_VELOCITY;
+    let spin = Vec3::new(0.0, limits::MAX_ANGULAR_VELOCITY, 0.0);
+    let factor = limits::MAX_GRAVITY_FACTOR;
+    let mut bodies = Vec::new();
+    // Head-on pairs of the lightest and the heaviest body at a frame corner, both velocity
+    // maxima and both gravity factor extremes.
+    for (mass, gravity_factor, y) in [
+        (limits::MIN_MASS, factor, bound),
+        (limits::MAX_MASS, -factor, bound - 5.0),
+        (limits::MAX_MASS, factor, bound - 10.0),
+        (limits::MIN_MASS, -factor, bound - 15.0),
+    ] {
+        for (x, direction) in [(bound, -1.0), (bound - 1.5, 1.0)] {
+            let settings = BodySettings::new_dynamic()
+                .position(RVec3::new(x, y, bound))
+                .mass(mass)
+                .gravity_factor(gravity_factor)
+                .linear_velocity(Vec3::new(direction * speed, 0.0, 0.0))
+                .angular_velocity(spin)
+                .allow_sleeping(false);
+            bodies.push(world.create_body(&ball, &settings).unwrap());
+        }
+    }
+    // A bouncing body with restitution 1, and two bodies with the largest friction sliding on
+    // each other, on the floor.
+    let on_floor = |x: Real, y: Real| RVec3::new(bound - 100.0 + x, -bound + y, 0.0);
+    let cube = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+    bodies.push(
+        world
+            .create_body(
+                &ball,
+                &BodySettings::new_dynamic()
+                    .position(on_floor(0.0, 3.0))
+                    .restitution(1.0),
+            )
+            .unwrap(),
+    );
+    for (x, y, v) in [(10.0, 1.5, speed), (10.0, 2.6, -speed)] {
+        bodies.push(
+            world
+                .create_body(
+                    &cube,
+                    &BodySettings::new_dynamic()
+                        .position(on_floor(x, y))
+                        .friction(f32::MAX)
+                        .linear_velocity(Vec3::new(v, 0.0, 0.0)),
+                )
+                .unwrap(),
+        );
+    }
+    // Loads at the acceleration bounds, one through a force at a frame corner.
+    let loaded = world
+        .create_body(&ball, &BodySettings::new_dynamic().mass(2.0))
+        .unwrap();
+    let pushed = world
+        .create_body(
+            &ball,
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(bound - 1.0, bound - 1.0, bound - 1.0))
+                .mass(limits::MAX_MASS)
+                .gravity_factor(0.0),
+        )
+        .unwrap();
+    let corner = RVec3::new(bound, bound, bound);
+    bodies.extend([loaded, pushed]);
+    for delta_time in [PhysicsWorld::MAX_DELTA_TIME, PhysicsWorld::MIN_DELTA_TIME] {
+        for tick in 0..10 {
+            let mut body = world.body_mut(loaded).unwrap();
+            body.add_force(Vec3::new(2.0 * limits::MAX_ACCELERATION, 0.0, 0.0))
+                .unwrap();
+            // The torque bound depends on the inertia; Jolt's sphere inertia is 0.4 m r².
+            let torque = 0.999 * limits::MAX_ANGULAR_ACCELERATION * 0.4 * 2.0 * 0.25;
+            body.add_torque(Vec3::new(torque, 0.0, 0.0)).unwrap();
+            // A force along y at the frame corner, sized so that its torque about the moving
+            // centre stays just below the bound (Jolt's sphere inertia, 0.4 m r²).
+            let mut body = world.body_mut(pushed).unwrap();
+            let center = body.position();
+            let lever =
+                (wide(corner.x - center.x).powi(2) + wide(corner.z - center.z).powi(2)).sqrt();
+            let inertia = 0.4 * f64::from(limits::MAX_MASS) * 0.25;
+            let torque = 0.999 * f64::from(limits::MAX_ANGULAR_ACCELERATION) * inertia;
+            let force = (torque / lever.max(1.0)) as f32;
+            body.add_force_at_point(Vec3::new(0.0, force, 0.0), corner)
+                .unwrap();
+            let _ = world.step(delta_time).unwrap();
+            for &id in &bodies {
+                assert_body_finite(&world, id, &format!("dt {delta_time}, tick {tick}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn character_at_its_bounds_pushes_the_lightest_body() {
+    let mut world = empty_world();
+    add_floor(&mut world);
+    let crate_shape = Shape::new_box_with_convex_radius(Vec3::new(0.2, 0.2, 0.2), 0.0).unwrap();
+    let lightest = BodySettings::new_dynamic().mass(limits::MIN_MASS);
+    let under = world
+        .create_body(
+            &crate_shape,
+            &lightest.clone().position(RVec3::new(0.0, 0.2, 0.0)),
+        )
+        .unwrap();
+    let ahead = world
+        .create_body(&crate_shape, &lightest.position(RVec3::new(1.0, 0.6, 0.0)))
+        .unwrap();
+    let capsule = Shape::new_capsule(0.5, 0.3).unwrap();
+    let settings = CharacterSettings::new(&capsule)
+        .mass(limits::MAX_MASS)
+        .max_strength(f32::MAX)
+        .shape_offset(Vec3::new(0.0, 0.8, 0.0));
+    let id = world
+        .create_character(&settings, RVec3::new(0.0, 0.4, 0.0), Quat::IDENTITY)
+        .unwrap();
+    let all = QueryFilter::new();
+    world.refresh_character_contacts(id, &all).unwrap();
+    let gravity = Vec3::new(0.0, -limits::MAX_ACCELERATION, 0.0);
+    let velocity = Vec3::new(limits::MAX_LINEAR_VELOCITY, 0.0, 0.0);
+    for delta_time in [PhysicsWorld::MAX_DELTA_TIME, PhysicsWorld::MIN_DELTA_TIME] {
+        for tick in 0..30 {
+            world
+                .character_mut(id)
+                .unwrap()
+                .set_linear_velocity(velocity)
+                .unwrap();
+            world
+                .update_character(
+                    id,
+                    delta_time,
+                    gravity,
+                    &ExtendedUpdateSettings::default(),
+                    &all,
+                )
+                .unwrap();
+            let _ = world.step(delta_time).unwrap();
+            let what = format!("dt {delta_time}, tick {tick}");
+            for body in [under, ahead] {
+                assert_body_finite(&world, body, &what);
+            }
+            let character = world.character(id).unwrap();
+            let state = [v3(character.position()), f3(character.linear_velocity())];
+            assert!(
+                state.iter().flatten().all(|value| value.is_finite()),
+                "{what}: {state:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn vehicle_gravity_at_the_bound_steps_finitely() {
+    let (mut world, layers) = car_world(Vec3::ZERO, 1);
+    let ground_shape = Shape::new_box(Vec3::new(50.0, 1.0, 50.0)).unwrap();
+    world
+        .create_body(
+            &ground_shape,
+            &BodySettings::new_static()
+                .object_layer(layers.ground)
+                .position(RVec3::new(0.0, -1.0, 0.0)),
+        )
+        .unwrap();
+    let body = chassis_settings(&layers, RVec3::new(0.0, 0.9, 0.0), Quat::IDENTITY);
+    let (chassis, car) = add_car_with(&mut world, &body, VehicleCollisionTester::ray(layers.probe));
+    let mass = world.body(chassis).unwrap().mass().unwrap();
+    for tick in 0..60 {
+        world
+            .vehicle_mut(car)
+            .unwrap()
+            .set_gravity(Vec3::new(0.0, -limits::MAX_ACCELERATION, 0.0))
+            .unwrap();
+        // Within the load bound: the force alone gives at most MAX_ACCELERATION.
+        let force = 0.999 * limits::MAX_ACCELERATION * mass;
+        world
+            .body_mut(chassis)
+            .unwrap()
+            .add_force(Vec3::new(force, 0.0, 0.0))
+            .unwrap();
+        let _ = world.step(DT).unwrap();
+        assert_body_finite(&world, chassis, &format!("tick {tick}"));
+    }
+}
+
+#[test]
+fn largest_shapes_collide_finitely() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let terrain = flat_field(-1999.0, 1333.0).unwrap();
+    world
+        .create_body(&terrain, &BodySettings::new_static())
+        .unwrap();
+    let heaviest = BodySettings::new_dynamic().mass(limits::MAX_MASS);
+    let slab = Shape::new_box(Vec3::new(extent, 1.0, extent)).unwrap();
+    let pole = Shape::new_capsule(extent - 1.0, 1.0).unwrap();
+    let compound = Shape::new_compound(&[
+        CompoundChild {
+            shape: &slab,
+            position: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+            user_data: 1,
+        },
+        CompoundChild {
+            shape: &pole,
+            position: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+            user_data: 2,
+        },
+    ])
+    .unwrap();
+    let mut bodies = Vec::new();
+    for (shape, y) in [
+        (&slab, 2.0),
+        (&pole, Real::from(extent) + 4.0),
+        (&compound, 10.0),
+    ] {
+        bodies.push(
+            world
+                .create_body(shape, &heaviest.clone().position(RVec3::new(0.0, y, 0.0)))
+                .unwrap(),
+        );
+    }
+    step_at_both_extremes(&mut world, &bodies, "largest shapes");
+}

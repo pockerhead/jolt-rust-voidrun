@@ -15,6 +15,7 @@ use std::f32::consts::PI;
 
 use joltphysics_sys::*;
 
+use crate::limits;
 use crate::math::is_unit;
 use crate::{RVec3, Vec3};
 
@@ -74,21 +75,29 @@ impl SwingType {
 /// A spring (Jolt `SpringSettings`). A limit spring with frequency or stiffness 0 is rigid; a
 /// position motor whose spring has frequency or stiffness 0 does nothing (Jolt deactivates it).
 /// The default is rigid: frequency 0, damping 0.
+///
+/// Jolt turns every spring into a stiffness `k` and damping `c`, which must stay at most
+/// [`limits::MAX_SPRING_COEFFICIENT`]. In stiffness mode they are the values given. In frequency
+/// mode Jolt computes `k = m·ω²` and `c = 2·m·ζ·ω` with `ω = 2π·frequency`, where `m` is the
+/// effective mass (or inertia) of the joint's bodies. Only ragdolls use constraints, so
+/// [`RagdollSettings::new`](crate::RagdollSettings::new) checks every joint spring against an
+/// upper bound of `m` computed from the masses and inertias of all its parts.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SpringSettings {
     /// Oscillation frequency in Hz and damping ratio (1 is critical damping), both at least 0.
     FrequencyAndDamping {
-        /// Hz, finite and at least 0.
+        /// Hz, finite and at least 0; with the damping ratio bounded through the parts' masses
+        /// (see [`SpringSettings`]).
         frequency: f32,
-        /// Damping ratio, finite and at least 0.
+        /// Damping ratio, finite and at least 0; bounded with the frequency.
         damping: f32,
     },
     /// Stiffness in N/m (N·m/rad for rotations) and damping in N·s/m (N·m·s/rad), both at
     /// least 0.
     StiffnessAndDamping {
-        /// N/m or N·m/rad, finite and at least 0.
+        /// N/m or N·m/rad, between 0 and [`limits::MAX_SPRING_COEFFICIENT`].
         stiffness: f32,
-        /// N·s/m or N·m·s/rad, finite and at least 0.
+        /// N·s/m or N·m·s/rad, between 0 and [`limits::MAX_SPRING_COEFFICIENT`].
         damping: f32,
     },
 }
@@ -119,11 +128,32 @@ impl SpringSettings {
 
     fn validate(&self) -> Result<(), &'static str> {
         let (strength, damping) = self.values();
-        if non_negative(strength) && non_negative(damping) {
-            Ok(())
-        } else {
-            Err("spring frequency, stiffness and damping must be finite and not negative")
+        if !(non_negative(strength) && non_negative(damping)) {
+            return Err("spring frequency, stiffness and damping must be finite and not negative");
         }
+        if let Self::StiffnessAndDamping { .. } = self {
+            if strength > limits::MAX_SPRING_COEFFICIENT || damping > limits::MAX_SPRING_COEFFICIENT
+            {
+                return Err(
+                    "spring stiffness and damping must be at most limits::MAX_SPRING_COEFFICIENT",
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether the stiffness and damping Jolt derives from this valid spring stay at most
+    /// [`limits::MAX_SPRING_COEFFICIENT`] for an effective mass of at most
+    /// `effective_mass_bound` (kg, or kg·m² for rotations). A stiffness-mode spring is checked by
+    /// [`validate`](Self::validate) alone.
+    pub(crate) fn fits_effective_mass(&self, effective_mass_bound: f64) -> bool {
+        let Self::FrequencyAndDamping { frequency, damping } = *self else {
+            return true;
+        };
+        let omega = 2.0 * std::f64::consts::PI * f64::from(frequency);
+        let bound = f64::from(limits::MAX_SPRING_COEFFICIENT);
+        effective_mass_bound * omega * omega <= bound
+            && 2.0 * effective_mass_bound * f64::from(damping) * omega <= bound
     }
 
     fn to_jph(self) -> JPH_SpringSettings {
@@ -168,11 +198,8 @@ impl Default for MotorSettings {
 }
 
 impl MotorSettings {
-    /// The spring that drives a position motor to its target. Default 2 Hz, damping 1.
-    ///
-    /// Only finiteness and sign are checked, not size. An absurd frequency (about 1e19 Hz and
-    /// above) overflows Jolt's spring coefficient during the step: Jolt clamps the resulting
-    /// velocity, and with `joltphysics-sys/asserts` its finite-velocity assertion fires.
+    /// The spring that drives a position motor to its target. Default 2 Hz, damping 1. Its size
+    /// is bounded as [`SpringSettings`] describes.
     #[must_use]
     pub fn spring(mut self, value: SpringSettings) -> Self {
         self.spring = value;
@@ -231,8 +258,8 @@ fn within(value: f32, min: f32, max: f32) -> bool {
 
 /// Checks one frame: a finite point and two perpendicular unit axes.
 fn validate_frame(point: RVec3, axis_a: Vec3, axis_b: Vec3) -> Result<(), &'static str> {
-    if !point.is_finite() {
-        return Err("constraint frame points must be finite");
+    if !limits::is_in_frame(point) {
+        return Err("constraint frame points must be finite and within limits::MAX_POSITION");
     }
     if !(is_unit(axis_a) && is_unit(axis_b)) {
         return Err("constraint frame axes must be unit vectors");
@@ -394,6 +421,11 @@ impl SwingTwistConstraintSettings {
         self.twist_motor.validate()
     }
 
+    /// The springs of both motors.
+    pub(crate) fn springs(&self) -> impl Iterator<Item = SpringSettings> {
+        [self.swing_motor.spring, self.twist_motor.spring].into_iter()
+    }
+
     pub(crate) fn to_jph(&self) -> JPH_SwingTwistConstraintSettings {
         JPH_SwingTwistConstraintSettings {
             base: constraint_base(),
@@ -539,6 +571,11 @@ impl HingeConstraintSettings {
             return Err("friction torque must be finite and not negative");
         }
         self.motor.validate()
+    }
+
+    /// The limits spring and the motor's spring.
+    pub(crate) fn springs(&self) -> impl Iterator<Item = SpringSettings> {
+        [self.limits_spring, self.motor.spring].into_iter()
     }
 
     pub(crate) fn to_jph(&self) -> JPH_HingeConstraintSettings {
@@ -805,6 +842,14 @@ impl SixDofConstraintSettings {
             }
         }
         Ok(())
+    }
+
+    /// The translation limit springs and the springs of all six motors.
+    pub(crate) fn springs(&self) -> impl Iterator<Item = SpringSettings> + '_ {
+        self.limits_springs[..3]
+            .iter()
+            .copied()
+            .chain(self.motors.iter().map(|motor| motor.spring))
     }
 
     pub(crate) fn to_jph(&self) -> JPH_SixDOFConstraintSettings {

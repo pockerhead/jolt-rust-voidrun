@@ -6,12 +6,14 @@ use std::ffi::CString;
 
 use joltphysics_sys::*;
 
-use crate::body::{has_finite_inverse, mass_properties, CreationSettings};
+use crate::body::{has_finite_inverse, mass_properties, CreationSettings, MASS_RULE};
+use crate::limits;
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
 use crate::{
     BodyError, BodySettings, HingeConstraintSettings, MotionType, ObjectLayer, Quat, RVec3,
-    RagdollError, Real, Shape, SixDofConstraintSettings, SwingTwistConstraintSettings, Vec3,
+    RagdollError, Real, Shape, SixDofConstraintSettings, SpringSettings,
+    SwingTwistConstraintSettings, Vec3,
 };
 
 /// A skeleton, owned with the one reference `JPH_Skeleton_Create` returns. Ragdoll settings hold
@@ -173,6 +175,15 @@ impl RagdollJoint {
             Self::SixDof(settings) => settings.validate(),
         }
     }
+
+    /// Every spring of the joint: limit springs and motor springs.
+    fn springs(&self) -> Box<dyn Iterator<Item = SpringSettings> + '_> {
+        match self {
+            Self::SwingTwist(settings) => Box::new(settings.springs()),
+            Self::Hinge(settings) => Box::new(settings.springs()),
+            Self::SixDof(settings) => Box::new(settings.springs()),
+        }
+    }
 }
 
 /// The kind of constraint between a part and its parent.
@@ -257,9 +268,13 @@ impl RagdollSettings {
     ///
     /// Fails with [`RagdollError::InvalidValue`] when the part count differs from the joint count,
     /// when the root part has a joint or another part has none, when a part is static, uses a
-    /// shape only static bodies may use (a heightfield) or has a mass or inertia too small for
-    /// Jolt to invert, or when a body or joint setting is out of range. Object layers are checked
-    /// when a ragdoll is created.
+    /// shape only static bodies may use (a heightfield), has a mass or inertia too small for
+    /// Jolt to invert or a mass (overridden or computed) outside
+    /// [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`], when a body or joint setting is out of
+    /// range, or when a joint spring would give Jolt a stiffness or damping above
+    /// [`limits::MAX_SPRING_COEFFICIENT`] for the parts' masses (see
+    /// [`SpringSettings`](crate::SpringSettings)). Object layers are checked when a ragdoll is
+    /// created.
     pub fn new(skeleton: &Skeleton, parts: &[RagdollPart<'_>]) -> Result<Self, RagdollError> {
         Self::build(skeleton, parts, false)
     }
@@ -280,6 +295,17 @@ impl RagdollSettings {
         stabilize: bool,
     ) -> Result<Self, RagdollError> {
         validate_parts(skeleton, parts)?;
+        let bound = effective_mass_bound(parts, stabilize);
+        let springs_fit = parts
+            .iter()
+            .filter_map(|part| part.joint.as_ref())
+            .flat_map(RagdollJoint::springs)
+            .all(|spring| spring.fits_effective_mass(bound));
+        if !springs_fit {
+            return Err(RagdollError::InvalidValue(
+                "a joint spring's stiffness or damping exceeds limits::MAX_SPRING_COEFFICIENT for the parts it connects",
+            ));
+        }
         // SAFETY: Jolt is initialised (the skeleton exists). The handles take over the one
         // reference joltc returns for the settings and the table.
         let (settings, table) = unsafe {
@@ -409,14 +435,52 @@ fn validate_parts(skeleton: &Skeleton, parts: &[RagdollPart<'_>]) -> Result<(), 
         if unsafe { JPH_Shape_MustBeStatic(part.shape.as_ptr()) } {
             return invalid("this shape can only be used by static bodies");
         }
-        if !has_finite_inverse(&mass_properties(part.shape, part.body.mass)) {
+        let properties = mass_properties(part.shape, part.body.mass);
+        if !has_finite_inverse(&properties) {
             return invalid("mass and shape give an infinite inverse mass or inertia");
+        }
+        // Also for kinematic parts, which `RagdollMut::set_motion_type` can make dynamic.
+        if !limits::is_mass(properties.mass) {
+            return invalid(MASS_RULE);
         }
         if let Some(joint) = &part.joint {
             joint.validate().map_err(RagdollError::InvalidValue)?;
         }
     }
     Ok(())
+}
+
+/// An upper bound, in kg or kg·m², of the effective mass Jolt derives for a constraint part
+/// between two of `parts`, after `Stabilize` when `stabilize` is set.
+///
+/// The inverse effective mass of a translation part is at least the inverse mass of a dynamic
+/// body it connects, and that of a rotation part at least its smallest principal inverse inertia,
+/// so a part's mass and the trace of its inertia (at least its largest principal moment) bound
+/// both. `Stabilize` (`Ragdoll.cpp:135-185`) gives each part at most its chain's total mass,
+/// scales its inertia with its mass and raises a principal moment to at most twice the largest.
+fn effective_mass_bound(parts: &[RagdollPart<'_>], stabilize: bool) -> f64 {
+    let masses: Vec<(f64, f64)> = parts
+        .iter()
+        .map(|part| {
+            let properties = mass_properties(part.shape, part.body.mass);
+            let [x, y, z, _] = properties.inertia.column;
+            let trace = f64::from(x.x) + f64::from(y.y) + f64::from(z.z);
+            (f64::from(properties.mass), trace)
+        })
+        .collect();
+    if stabilize {
+        let total: f64 = masses.iter().map(|(mass, _)| mass).sum();
+        let ratio = masses
+            .iter()
+            .map(|(mass, trace)| trace / mass)
+            .fold(0.0, f64::max);
+        total.max(2.0 * total * ratio)
+    } else {
+        masses
+            .iter()
+            .map(|&(mass, trace)| mass.max(trace))
+            .fold(0.0, f64::max)
+    }
 }
 
 /// One joint of a [`SkeletonPose`]: a translation relative to the pose's root offset and a world
@@ -456,14 +520,14 @@ impl SkeletonPose {
     }
 
     /// Checks the pose for a ragdoll of `joint_count` parts: one finite transform per joint with
-    /// a unit rotation, and finite world positions.
+    /// a unit rotation, and a root offset and world positions within [`limits::MAX_POSITION`].
     pub(crate) fn validate(&self, joint_count: usize) -> Result<(), RagdollError> {
         let invalid = |what| Err(RagdollError::InvalidValue(what));
         if self.joints.len() != joint_count {
             return invalid("a pose has exactly one transform per ragdoll part");
         }
-        if !self.root_offset.is_finite() {
-            return invalid("pose root offset must be finite");
+        if !limits::is_in_frame(self.root_offset) {
+            return invalid("pose root offset must be finite and within limits::MAX_POSITION");
         }
         for (index, joint) in self.joints.iter().enumerate() {
             if !joint.translation.is_finite() {
@@ -472,8 +536,8 @@ impl SkeletonPose {
             if !joint.rotation.is_valid_rotation() {
                 return invalid("pose rotations must be finite unit quaternions");
             }
-            if !self.position(index).is_finite() {
-                return invalid("pose positions must be finite");
+            if !limits::is_in_frame(self.position(index)) {
+                return invalid("pose positions must be finite and within limits::MAX_POSITION");
             }
         }
         Ok(())
@@ -682,11 +746,14 @@ mod tests {
         let mut bad = pose();
         bad.joints[2].rotation = Quat::from_xyzw(0.0, 0.0, 0.0, 2.0);
         assert_invalid(bad.validate(3));
-        // The sum overflows in single precision; in double precision it rounds to `Real::MAX`.
         let mut far = pose();
         far.root_offset.x = Real::MAX;
-        far.joints[1].translation.x = f32::MAX;
-        assert_eq!(far.validate(3).is_ok(), far.position(1).is_finite());
+        assert_invalid(far.validate(3));
+        let mut edge = pose();
+        edge.root_offset = RVec3::new(limits::MAX_POSITION, 0.0, 0.0);
+        assert_eq!(edge.validate(3), Ok(()));
+        edge.joints[1].translation.x = 1.0;
+        assert_invalid(edge.validate(3));
         assert_eq!(pose().position(0), RVec3::new(1.0, 2.0, 3.0));
     }
 

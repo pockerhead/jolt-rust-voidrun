@@ -9,6 +9,7 @@ use joltphysics_sys::*;
 
 use super::{offset_from, rotation_translation, validate_pose, ResultSlot};
 use crate::filter::with_query_filters;
+use crate::limits;
 use crate::math::is_finite_non_negative;
 use crate::{
     BodyId, CompoundSubShape, ObjectLayer, PhysicsWorld, Quat, QueryError, QueryFilter, RVec3,
@@ -164,8 +165,9 @@ impl PhysicsWorld {
     /// obstacle and moves out of it does not hit it; see [`ShapeCast::collide_with_back_faces`].
     /// See [`ShapeCastHit`] for the normal and depth conventions.
     ///
-    /// The position must be finite, the rotation a finite unit quaternion, the direction finite
-    /// and not zero, the target distance finite, not negative and at most
+    /// The position must be finite and within [`limits::MAX_POSITION`], the rotation a finite unit
+    /// quaternion, the direction finite, not zero and at most `2 *` [`limits::MAX_POSITION`] per
+    /// component, the target distance finite, not negative and at most
     /// [`ShapeCast::MAX_TARGET_DISTANCE`] (and 0 unless the shape is a sphere or capsule), the shape not a heightfield, and the filter valid for this world;
     /// otherwise [`QueryError::InvalidValue`] is returned.
     pub fn cast_shape(
@@ -174,9 +176,9 @@ impl PhysicsWorld {
         filter: &QueryFilter<'_>,
     ) -> Result<Option<ShapeCastHit>, QueryError> {
         validate_pose(cast.shape, cast.position, cast.rotation)?;
-        if !(cast.direction.is_finite() && cast.direction != Vec3::ZERO) {
+        if !(limits::is_frame_span(cast.direction) && cast.direction != Vec3::ZERO) {
             return Err(QueryError::InvalidValue(
-                "cast direction must be finite and not zero",
+                "cast direction must be finite, not zero and at most 2 * limits::MAX_POSITION per axis",
             ));
         }
         let target_distance = cast.target_distance;

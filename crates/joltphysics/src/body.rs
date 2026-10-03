@@ -10,7 +10,10 @@ use std::ptr::{null, NonNull};
 
 use joltphysics_sys::*;
 
-use crate::math::{is_finite_non_negative, is_finite_positive};
+use crate::limits::{
+    self, is_angular_velocity, is_gravity_factor, is_in_frame, is_linear_velocity, is_mass,
+};
+use crate::math::is_finite_non_negative;
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyError, ObjectLayer, PhysicsWorld, Quat, RVec3, Shape, Vec3};
@@ -210,7 +213,8 @@ impl BodySettings {
         }
     }
 
-    /// Initial position of the body origin in metres. Default the origin.
+    /// Initial position of the body origin in metres, every component at most
+    /// [`limits::MAX_POSITION`] in absolute value. Default the origin.
     #[must_use]
     pub fn position(mut self, value: RVec3) -> Self {
         self.position = value;
@@ -224,14 +228,16 @@ impl BodySettings {
         self
     }
 
-    /// Initial linear velocity in m/s. Default zero.
+    /// Initial linear velocity in m/s, finite and at most [`limits::MAX_LINEAR_VELOCITY`] long
+    /// (Jolt's own length, Jolt's default maximum). Default zero.
     #[must_use]
     pub fn linear_velocity(mut self, value: Vec3) -> Self {
         self.linear_velocity = value;
         self
     }
 
-    /// Initial angular velocity in rad/s. Default zero.
+    /// Initial angular velocity in rad/s, finite and at most [`limits::MAX_ANGULAR_VELOCITY`]
+    /// long (Jolt's own length, Jolt's default maximum). Default zero.
     #[must_use]
     pub fn angular_velocity(mut self, value: Vec3) -> Self {
         self.angular_velocity = value;
@@ -253,7 +259,7 @@ impl BodySettings {
         self
     }
 
-    /// Restitution (bounciness), finite and at least 0; usually at most 1. Default 0.
+    /// Restitution (bounciness), between 0 and 1. Default 0.
     #[must_use]
     pub fn restitution(mut self, value: f32) -> Self {
         self.restitution = value;
@@ -276,8 +282,10 @@ impl BodySettings {
         self
     }
 
-    /// Overrides the mass in kg (finite, positive and large enough that Jolt can invert it and
-    /// the scaled inertia; [`PhysicsWorld::create_body`] checks this). The inertia is computed
+    /// Overrides the mass in kg, between [`limits::MIN_MASS`] and [`limits::MAX_MASS`] (and large
+    /// enough that Jolt can invert the scaled inertia; [`PhysicsWorld::create_body`] checks
+    /// this). Without an override, a dynamic body's computed mass must lie in the same range. The
+    /// inertia is computed
     /// from the shape and scaled to this mass (Jolt `EOverrideMassProperties::CalculateInertia`).
     /// By default Jolt computes mass and inertia from the shape with a density of 1000 kg/m³.
     #[must_use]
@@ -293,7 +301,8 @@ impl BodySettings {
         self
     }
 
-    /// Multiplier for the world's gravity on this body, finite. Default 1.
+    /// Multiplier for the world's gravity on this body, at most [`limits::MAX_GRAVITY_FACTOR`] in
+    /// absolute value. Default 1.
     #[must_use]
     pub fn gravity_factor(mut self, value: f32) -> Self {
         self.gravity_factor = value;
@@ -333,23 +342,23 @@ impl BodySettings {
     /// Every check of [`validate`](Self::validate) except the object layer, which needs a world.
     pub(crate) fn validate_values(&self) -> Result<(), BodyError> {
         let invalid = |what| Err(BodyError::InvalidValue(what));
-        if !self.position.is_finite() {
-            return invalid("position must be finite");
+        if !is_in_frame(self.position) {
+            return invalid("position must be finite and within limits::MAX_POSITION");
         }
         if !self.rotation.is_valid_rotation() {
             return invalid("rotation must be a finite unit quaternion");
         }
-        if !self.linear_velocity.is_finite() {
-            return invalid("linear velocity must be finite");
+        if !is_linear_velocity(self.linear_velocity) {
+            return invalid(LINEAR_VELOCITY_RULE);
         }
-        if !self.angular_velocity.is_finite() {
-            return invalid("angular velocity must be finite");
+        if !is_angular_velocity(self.angular_velocity) {
+            return invalid(ANGULAR_VELOCITY_RULE);
         }
         if !is_finite_non_negative(self.friction) {
             return invalid("friction must be finite and not negative");
         }
-        if !is_finite_non_negative(self.restitution) {
-            return invalid("restitution must be finite and not negative");
+        if !(0.0..=1.0).contains(&self.restitution) {
+            return invalid("restitution must be between 0 and 1");
         }
         if !is_finite_non_negative(self.linear_damping) {
             return invalid("linear damping must be finite and not negative");
@@ -357,17 +366,26 @@ impl BodySettings {
         if !is_finite_non_negative(self.angular_damping) {
             return invalid("angular damping must be finite and not negative");
         }
-        if !self.gravity_factor.is_finite() {
-            return invalid("gravity factor must be finite");
+        if !is_gravity_factor(self.gravity_factor) {
+            return invalid("gravity factor must be finite and within limits::MAX_GRAVITY_FACTOR");
         }
         if let Some(mass) = self.mass {
-            if !is_finite_positive(mass) {
-                return invalid("mass must be finite and positive");
+            if !is_mass(mass) {
+                return invalid(MASS_RULE);
             }
         }
         Ok(())
     }
 }
+
+/// What a caller-given linear velocity must satisfy.
+pub(crate) const LINEAR_VELOCITY_RULE: &str =
+    "linear velocity must be finite and at most limits::MAX_LINEAR_VELOCITY long";
+/// What a caller-given angular velocity must satisfy.
+pub(crate) const ANGULAR_VELOCITY_RULE: &str =
+    "angular velocity must be finite and at most limits::MAX_ANGULAR_VELOCITY long";
+/// What a dynamic body's mass must satisfy.
+pub(crate) const MASS_RULE: &str = "mass must be between limits::MIN_MASS and limits::MAX_MASS";
 
 /// Zero mass and a zero inertia tensor.
 const ZERO_MASS_PROPERTIES: JPH_MassProperties = JPH_MassProperties {
@@ -529,9 +547,11 @@ impl PhysicsWorld {
     ///
     /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, when a dynamic or
     /// kinematic body uses a shape that only static bodies may use (a heightfield, or a
-    /// compound that contains one), and when a dynamic or kinematic body's mass or inertia
+    /// compound that contains one), when a dynamic or kinematic body's mass or inertia
     /// (overridden, or computed from a tiny or very slender shape) is too small for Jolt to
-    /// invert.
+    /// invert, and when a dynamic body's mass (overridden or computed) is outside
+    /// [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`]. Kinematic bodies are exempt from the mass
+    /// range: Jolt gives them infinite mass in the solver.
     pub fn create_body(
         &mut self,
         shape: &Shape,
@@ -549,12 +569,16 @@ impl PhysicsWorld {
         }
         // Jolt computes mass properties for every body that is not static
         // (`BodyCreationSettings::HasMassProperties`).
-        if settings.motion_type != MotionType::Static
-            && !has_finite_inverse(&mass_properties(shape, settings.mass))
-        {
-            return Err(BodyError::InvalidValue(
-                "mass and shape give an infinite inverse mass or inertia",
-            ));
+        if settings.motion_type != MotionType::Static {
+            let properties = mass_properties(shape, settings.mass);
+            if !has_finite_inverse(&properties) {
+                return Err(BodyError::InvalidValue(
+                    "mass and shape give an infinite inverse mass or inertia",
+                ));
+            }
+            if settings.motion_type == MotionType::Dynamic && !is_mass(properties.mass) {
+                return Err(BodyError::InvalidValue(MASS_RULE));
+            }
         }
         let creation = CreationSettings::new(shape, settings)?;
         // SAFETY: the body interface belongs to this live world, borrowed mutably; `creation`
@@ -1021,6 +1045,53 @@ impl<'w> Deref for BodyMut<'w> {
     }
 }
 
+/// What a caller-given body position must satisfy.
+const POSITION_RULE: &str = "position must be finite and within limits::MAX_POSITION";
+
+/// Bound on each product `lever_i * force_j` of a point force's torque, so that Jolt's `f32`
+/// cross product (`Body.inl:127-131`) has finite products and a finite difference even when the
+/// two products cancel.
+const F32_PRODUCT_HEADROOM: f64 = 1.0e37;
+
+/// What [`BodyMut::check_load`] reads from a dynamic body.
+struct LoadState {
+    force: Vec3,
+    torque: Vec3,
+    inverse_mass: f32,
+    inverse_inertia: Vec3,
+    center_of_mass: RVec3,
+}
+
+/// The torque, in `f64`, of `force` at `point` on a body whose centre of mass is
+/// `center_of_mass`; an error when Jolt's `f32` arithmetic for it could overflow.
+fn point_torque(force: Vec3, point: RVec3, center_of_mass: RVec3) -> Result<[f64; 3], BodyError> {
+    // Jolt converts the lever to `f32` (`Vec3(inPosition - mPosition)`). `Real` is `f32`
+    // without the `double-precision` feature, so the casts are no-ops there.
+    #[allow(clippy::unnecessary_cast)]
+    let lever = [
+        (point.x - center_of_mass.x) as f32,
+        (point.y - center_of_mass.y) as f32,
+        (point.z - center_of_mass.z) as f32,
+    ];
+    require(
+        lever.iter().all(|c| c.is_finite()),
+        "point is too far from the body's centre of mass",
+    )?;
+    let lever = lever.map(f64::from);
+    let force = [force.x, force.y, force.z].map(f64::from);
+    let products_fit = (0..3)
+        .all(|i| (0..3).all(|j| i == j || (lever[i] * force[j]).abs() <= F32_PRODUCT_HEADROOM));
+    require(
+        products_fit,
+        "force at this point would overflow Jolt's torque arithmetic",
+    )?;
+    Ok([
+        lever[1] * force[2] - lever[2] * force[1],
+        lever[2] * force[0] - lever[0] * force[2],
+        lever[0] * force[1] - lever[1] * force[0],
+    ])
+}
+
 fn require(valid: bool, what: &'static str) -> Result<(), BodyError> {
     if valid {
         Ok(())
@@ -1030,13 +1101,14 @@ fn require(valid: bool, what: &'static str) -> Result<(), BodyError> {
 }
 
 impl BodyMut<'_> {
-    /// Moves the body origin to `position`.
+    /// Moves the body origin to `position`, every component at most [`limits::MAX_POSITION`] in
+    /// absolute value.
     pub fn set_position(
         &mut self,
         position: RVec3,
         activation: Activation,
     ) -> Result<(), BodyError> {
-        require(position.is_finite(), "position must be finite")?;
+        require(is_in_frame(position), POSITION_RULE)?;
         let mut position = position.to_jph();
         // SAFETY: the world is borrowed mutably through this view and holds the body; joltc only
         // reads `position`, a live local.
@@ -1074,14 +1146,15 @@ impl BodyMut<'_> {
         Ok(())
     }
 
-    /// Sets position and rotation together.
+    /// Sets position and rotation together. The position follows the rule of
+    /// [`set_position`](Self::set_position).
     pub fn set_position_and_rotation(
         &mut self,
         position: RVec3,
         rotation: Quat,
         activation: Activation,
     ) -> Result<(), BodyError> {
-        require(position.is_finite(), "position must be finite")?;
+        require(is_in_frame(position), POSITION_RULE)?;
         require(
             rotation.is_valid_rotation(),
             "rotation must be a finite unit quaternion",
@@ -1101,18 +1174,22 @@ impl BodyMut<'_> {
         Ok(())
     }
 
-    /// Sets the linear velocity in m/s. Wakes the body when the velocity is not near zero.
+    /// Sets the linear velocity in m/s, finite and at most [`limits::MAX_LINEAR_VELOCITY`] long
+    /// (Jolt would clamp a faster one; it is rejected, as at creation). Wakes the body when the
+    /// velocity is not near zero.
     pub fn set_linear_velocity(&mut self, velocity: Vec3) -> Result<(), BodyError> {
-        require(velocity.is_finite(), "linear velocity must be finite")?;
+        require(is_linear_velocity(velocity), LINEAR_VELOCITY_RULE)?;
         let velocity = velocity.to_jph();
         // SAFETY: as in `set_position`.
         unsafe { JPH_BodyInterface_SetLinearVelocity(self.interface(), self.id.raw, &velocity) };
         Ok(())
     }
 
-    /// Sets the angular velocity in rad/s. Wakes the body when the velocity is not near zero.
+    /// Sets the angular velocity in rad/s, finite and at most [`limits::MAX_ANGULAR_VELOCITY`]
+    /// long (Jolt would clamp a faster one; it is rejected, as at creation). Wakes the body when
+    /// the velocity is not near zero.
     pub fn set_angular_velocity(&mut self, velocity: Vec3) -> Result<(), BodyError> {
-        require(velocity.is_finite(), "angular velocity must be finite")?;
+        require(is_angular_velocity(velocity), ANGULAR_VELOCITY_RULE)?;
         let mut velocity = velocity.to_jph();
         // SAFETY: as in `set_position`.
         unsafe {
@@ -1125,8 +1202,14 @@ impl BodyMut<'_> {
     ///
     /// Jolt clears accumulated forces after every step, and a body that gets a force every step
     /// never falls asleep.
+    ///
+    /// The force must be finite, and on a dynamic body the force accumulated this step including
+    /// this one may give the body at most [`limits::MAX_ACCELERATION`] (`|F| / mass`); otherwise
+    /// [`BodyError::InvalidValue`] is returned and nothing changes. Static and kinematic bodies
+    /// ignore forces.
     pub fn add_force(&mut self, force: Vec3) -> Result<(), BodyError> {
         require(force.is_finite(), "force must be finite")?;
+        self.check_load(force, None, Vec3::ZERO)?;
         let mut force = force.to_jph();
         // SAFETY: as in `set_position`.
         unsafe { JPH_BodyInterface_AddForce(self.interface(), self.id.raw, &mut force) };
@@ -1135,9 +1218,20 @@ impl BodyMut<'_> {
 
     /// Adds a force in newtons applied at a world-space `point`, which also adds the matching
     /// torque, and wakes the body.
+    ///
+    /// The force must be finite and the point within [`limits::MAX_POSITION`]. On a dynamic body
+    /// the force accumulated this step including this one may give the body at most
+    /// [`limits::MAX_ACCELERATION`], the torque at most [`limits::MAX_ANGULAR_ACCELERATION`]
+    /// (`|τ|` times the largest principal inverse inertia), and Jolt's `f32` torque
+    /// `(point - centre_of_mass) × force` must not overflow; otherwise
+    /// [`BodyError::InvalidValue`] is returned and nothing changes.
     pub fn add_force_at_point(&mut self, force: Vec3, point: RVec3) -> Result<(), BodyError> {
         require(force.is_finite(), "force must be finite")?;
-        require(point.is_finite(), "point must be finite")?;
+        require(
+            is_in_frame(point),
+            "point must be finite and within limits::MAX_POSITION",
+        )?;
+        self.check_load(force, Some(point), Vec3::ZERO)?;
         let mut force = force.to_jph();
         let mut point = point.to_jph();
         // SAFETY: as in `set_position`.
@@ -1148,12 +1242,83 @@ impl BodyMut<'_> {
     }
 
     /// Adds a torque in newton-metres for the next step, and wakes the body.
+    ///
+    /// The torque must be finite, and on a dynamic body the torque accumulated this step
+    /// including this one may give the body at most [`limits::MAX_ANGULAR_ACCELERATION`] (`|τ|`
+    /// times the largest principal inverse inertia); otherwise [`BodyError::InvalidValue`] is
+    /// returned and nothing changes.
     pub fn add_torque(&mut self, torque: Vec3) -> Result<(), BodyError> {
         require(torque.is_finite(), "torque must be finite")?;
+        self.check_load(Vec3::ZERO, None, torque)?;
         let mut torque = torque.to_jph();
         // SAFETY: as in `set_position`.
         unsafe { JPH_BodyInterface_AddTorque(self.interface(), self.id.raw, &mut torque) };
         Ok(())
+    }
+
+    /// Checks that adding `force` (at `point`, or at the centre of mass) and `torque` keeps this
+    /// step's accumulated load within the acceleration bounds of [`limits`]. Reads the body
+    /// under a read lock that is released before the caller adds the load: Jolt's body mutexes
+    /// are not recursive.
+    fn check_load(&self, force: Vec3, point: Option<RVec3>, torque: Vec3) -> Result<(), BodyError> {
+        let state = with_read_locked_body(self.inner.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for reading for the duration of the closure. A dynamic
+            // body has motion properties, so the unchecked getter reads a live member; the
+            // getters only read, and every output is a live local.
+            unsafe {
+                if !JPH_Body_IsDynamic(body.as_ptr()) {
+                    return None;
+                }
+                let motion = JPH_Body_GetMotionProperties(body.as_ptr());
+                let mut accumulated_force = Vec3::ZERO.to_jph();
+                let mut accumulated_torque = Vec3::ZERO.to_jph();
+                let mut inverse_inertia = Vec3::ZERO.to_jph();
+                let mut center_of_mass = RVec3::ZERO.to_jph();
+                JPH_Body_GetAccumulatedForce(body.as_ptr(), &mut accumulated_force);
+                JPH_Body_GetAccumulatedTorque(body.as_ptr(), &mut accumulated_torque);
+                JPH_MotionProperties_GetInverseInertiaDiagonal(motion, &mut inverse_inertia);
+                JPH_Body_GetCenterOfMassPosition(body.as_ptr(), &mut center_of_mass);
+                Some(LoadState {
+                    force: Vec3::from_jph(accumulated_force),
+                    torque: Vec3::from_jph(accumulated_torque),
+                    inverse_mass: JPH_MotionProperties_GetInverseMassUnchecked(motion),
+                    inverse_inertia: Vec3::from_jph(inverse_inertia),
+                    center_of_mass: RVec3::from_jph(center_of_mass),
+                })
+            }
+        })
+        .ok_or(BodyError::NotFound(self.id))?;
+        // Jolt ignores loads on static and kinematic bodies.
+        let Some(state) = state else {
+            return Ok(());
+        };
+        let point_torque = match point {
+            Some(point) => point_torque(force, point, state.center_of_mass)?,
+            None => [0.0; 3],
+        };
+        let sum = |a: Vec3, b: Vec3, c: [f64; 3]| {
+            let [ax, ay, az] = [a.x, a.y, a.z].map(f64::from);
+            let [bx, by, bz] = [b.x, b.y, b.z].map(f64::from);
+            [ax + bx + c[0], ay + by + c[1], az + bz + c[2]]
+        };
+        let length = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let new_force = sum(state.force, force, [0.0; 3]);
+        let new_torque = sum(state.torque, torque, point_torque);
+        let largest_inverse_inertia = state
+            .inverse_inertia
+            .x
+            .max(state.inverse_inertia.y)
+            .max(state.inverse_inertia.z);
+        require(
+            length(new_force) * f64::from(state.inverse_mass)
+                <= f64::from(limits::MAX_ACCELERATION),
+            "accumulated force would exceed limits::MAX_ACCELERATION for this body",
+        )?;
+        require(
+            length(new_torque) * f64::from(largest_inverse_inertia)
+                <= f64::from(limits::MAX_ANGULAR_ACCELERATION),
+            "accumulated torque would exceed limits::MAX_ANGULAR_ACCELERATION for this body",
+        )
     }
 
     /// Discards the force and torque added since the last step. Jolt clears them after every
@@ -1177,6 +1342,7 @@ impl BodyMut<'_> {
 mod tests {
     use super::*;
     use crate::world::ensure_initialized;
+    use crate::Real;
 
     #[test]
     fn default_settings_match_jolt() {
@@ -1231,6 +1397,44 @@ mod tests {
             assert_eq!(JPH_BodyCreationSettings_GetObjectLayer(ptr), 0);
         }
         assert_eq!(ours.object_layer, ObjectLayer::MOVING);
+    }
+
+    #[test]
+    fn velocity_limits_are_jolts_default_maxima() {
+        assert!(ensure_initialized());
+        let shape = Shape::new_sphere(0.5).unwrap();
+        let creation = CreationSettings::new(&shape, &BodySettings::default()).unwrap();
+        // SAFETY: the settings are live and owned by `creation`; the getters only read them.
+        let (linear, angular) = unsafe {
+            (
+                JPH_BodyCreationSettings_GetMaxLinearVelocity(creation.as_ptr()),
+                JPH_BodyCreationSettings_GetMaxAngularVelocity(creation.as_ptr()),
+            )
+        };
+        assert_eq!(linear.to_bits(), limits::MAX_LINEAR_VELOCITY.to_bits());
+        assert_eq!(angular.to_bits(), limits::MAX_ANGULAR_VELOCITY.to_bits());
+    }
+
+    #[test]
+    fn point_torque_rejects_overflowing_products_even_when_they_cancel() {
+        let center = RVec3::ZERO;
+        let torque = point_torque(Vec3::new(0.0, 2.0, 0.0), RVec3::new(3.0, 0.0, 0.0), center);
+        assert_eq!(torque, Ok([0.0, 0.0, 6.0]));
+        // Lever and force are parallel: the cross product is zero in f64, but Jolt's f32
+        // products `lever_x * force_y` and `lever_y * force_x` are infinite.
+        let parallel = point_torque(
+            Vec3::new(1.0e20, 1.0e20, 0.0),
+            RVec3::new(1.0e20, 1.0e20, 0.0),
+            center,
+        );
+        assert!(matches!(parallel, Err(BodyError::InvalidValue(_))));
+        let far = RVec3::new(Real::MAX, 0.0, 0.0);
+        let lever_overflows = point_torque(
+            Vec3::new(0.0, 1.0, 0.0),
+            far,
+            RVec3::new(-Real::MAX, 0.0, 0.0),
+        );
+        assert!(matches!(lever_overflows, Err(BodyError::InvalidValue(_))));
     }
 
     #[test]

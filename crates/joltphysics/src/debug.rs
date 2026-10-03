@@ -14,6 +14,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use joltphysics_sys::*;
 
 use crate::body::with_read_locked_body;
+use crate::limits;
 use crate::owned::{JoltObject, Owned};
 use crate::query::{offset_from, rotation_translation};
 use crate::{BodyId, ObjectLayer, PhysicsWorld, Quat, QueryError, QueryFilter, RVec3, Real, Vec3};
@@ -49,12 +50,15 @@ impl DebugLineSettings {
 
     /// Checks the center and the radius.
     fn validate(&self) -> Result<(), QueryError> {
-        if !self.center.is_finite() {
-            return Err(QueryError::InvalidValue("debug line center must be finite"));
-        }
-        if !(self.radius.is_finite() && self.radius >= 0.0) {
+        if !limits::is_in_frame(self.center) {
             return Err(QueryError::InvalidValue(
-                "debug line radius must be finite and not negative",
+                "debug line center must be finite and within limits::MAX_POSITION",
+            ));
+        }
+        let radius = Real::from(self.radius);
+        if !(radius.is_finite() && (0.0..=2.0 * limits::MAX_POSITION).contains(&radius)) {
+            return Err(QueryError::InvalidValue(
+                "debug line radius must be between 0 and 2 * limits::MAX_POSITION",
             ));
         }
         Ok(())
@@ -141,8 +145,9 @@ impl PhysicsWorld {
     /// one.
     ///
     /// # Errors
-    /// [`QueryError::InvalidValue`] when the center is not finite, the radius is negative or not
-    /// finite, or `filter` names a layer or body of another world.
+    /// [`QueryError::InvalidValue`] when the center is not finite or not within
+    /// [`limits::MAX_POSITION`](crate::limits::MAX_POSITION), the radius is negative, not finite
+    /// or above twice that bound, or `filter` names a layer or body of another world.
     pub fn debug_lines(
         &self,
         settings: &DebugLineSettings,

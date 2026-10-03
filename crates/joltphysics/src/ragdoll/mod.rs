@@ -23,7 +23,9 @@ use std::ptr::NonNull;
 use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
+use crate::body::{ANGULAR_VELOCITY_RULE, LINEAR_VELOCITY_RULE};
 use crate::constraint::SixDofConstraintAxis;
+use crate::limits;
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{Activation, BodyId, MotionType, PhysicsWorld, Quat, RVec3, RagdollError, Vec3};
@@ -486,14 +488,18 @@ impl RagdollMut<'_> {
     }
 
     /// Gives every part the linear velocity `linear` (m/s) and angular velocity `angular`
-    /// (rad/s), both finite: the velocity at death. Wakes the parts when they are not zero.
+    /// (rad/s), the velocity at death: finite and at most [`limits::MAX_LINEAR_VELOCITY`] and
+    /// [`limits::MAX_ANGULAR_VELOCITY`] long. Wakes the parts when they are not zero.
     pub fn set_linear_and_angular_velocity(
         &mut self,
         linear: Vec3,
         angular: Vec3,
     ) -> Result<(), RagdollError> {
-        if !(linear.is_finite() && angular.is_finite()) {
-            return Err(RagdollError::InvalidValue("velocities must be finite"));
+        if !limits::is_linear_velocity(linear) {
+            return Err(RagdollError::InvalidValue(LINEAR_VELOCITY_RULE));
+        }
+        if !limits::is_angular_velocity(angular) {
+            return Err(RagdollError::InvalidValue(ANGULAR_VELOCITY_RULE));
         }
         for &id in &self.entry.bodies {
             let mut linear = linear.to_jph();

@@ -230,6 +230,38 @@ fn invalid_input_is_rejected() {
 }
 
 #[test]
+fn center_and_radius_are_bounded_by_the_frame() {
+    let scene = wireframe_scene();
+    let mut lines = DebugLines::new();
+    let bound = limits::MAX_POSITION;
+    // `Real` is `f32` without the `double-precision` feature, so the cast is a no-op there.
+    #[allow(clippy::unnecessary_cast)]
+    let largest_radius = (2.0 * bound) as f32;
+    let accepted = [
+        DebugLineSettings::new(RVec3::new(bound, -bound, bound), 1.0),
+        DebugLineSettings::new(RVec3::ZERO, largest_radius),
+    ];
+    for settings in accepted {
+        scene
+            .world
+            .debug_lines(&settings, &QueryFilter::new(), &mut lines)
+            .unwrap();
+    }
+    let rejected = [
+        DebugLineSettings::new(RVec3::new(bound.next_up(), 0.0, 0.0), 1.0),
+        DebugLineSettings::new(RVec3::ZERO, largest_radius.next_up()),
+    ];
+    for settings in rejected {
+        assert!(matches!(
+            scene
+                .world
+                .debug_lines(&settings, &QueryFilter::new(), &mut lines),
+            Err(QueryError::InvalidValue(_))
+        ));
+    }
+}
+
+#[test]
 fn radius_edge_far_from_origin() {
     let (mut world, [_, chunk, ..]) = five_layer_world();
     let unit = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();

@@ -429,14 +429,18 @@ fn mass_too_small_to_invert_is_rejected() {
     let mut world = world(Vec3::ZERO, 1);
     let cube = cube_shape();
     let tiny_sphere = Shape::new_sphere(1e-20).unwrap();
-    // Its inertia about the long axis underflows to zero while the other two do not.
-    let needle = Shape::new_box(Vec3::new(1e10, 1e-17, 1e-17)).unwrap();
+    // Its computed inertia about the long axis underflows to zero while the other two do not;
+    // scaled to 1 kg, the long axis stays zero and has no finite inverse. Its own computed
+    // mass is also below `limits::MIN_MASS`.
+    let needle = Shape::new_box(Vec3::new(limits::MAX_SHAPE_EXTENT, 1e-17, 1e-17)).unwrap();
     let rejected = [
         (&cube, BodySettings::new_dynamic().mass(f32::from_bits(1))),
         (&cube, BodySettings::new_dynamic().mass(1e-39)),
+        (&cube, BodySettings::new_dynamic().mass(1e-6)),
         (&tiny_sphere, BodySettings::new_dynamic()),
         (&tiny_sphere, BodySettings::new_kinematic()),
         (&needle, BodySettings::new_dynamic()),
+        (&needle, BodySettings::new_dynamic().mass(1.0)),
     ];
     for (shape, settings) in &rejected {
         assert!(
@@ -456,7 +460,7 @@ fn mass_too_small_to_invert_is_rejected() {
     assert_eq!(wall.to_raw(), 1 << 23, "rejected bodies used no id");
 
     let light = world
-        .create_body(&cube, &BodySettings::new_dynamic().mass(1e-6))
+        .create_body(&cube, &BodySettings::new_dynamic().mass(limits::MIN_MASS))
         .unwrap();
     let mut body = world.body_mut(light).unwrap();
     body.add_force(Vec3::new(1.0, 0.0, 0.0)).unwrap();

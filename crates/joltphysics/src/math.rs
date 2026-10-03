@@ -4,7 +4,7 @@
 //! metres per second and angular velocities in radians per second. Conversions to and from
 //! Jolt copy the fields and never round, so values read back with the same bits.
 
-use joltphysics_sys::{JPH_Quat, JPH_RVec3, JPH_Vec3};
+use joltphysics_sys::{JPH_Quat, JPH_RVec3, JPH_Vec3, JPH_Vec3_Length};
 
 /// Scalar type of world positions: `f64` with the `double-precision` feature, `f32` otherwise.
 pub use joltphysics_sys::Real;
@@ -17,6 +17,14 @@ pub(crate) fn is_finite_positive(value: f32) -> bool {
 /// Whether `value` is finite and not negative.
 pub(crate) fn is_finite_non_negative(value: f32) -> bool {
     value.is_finite() && value >= 0.0
+}
+
+/// The length of `v` as Jolt computes it (`Vec3::Length`), the expression Jolt compares with a
+/// body's maximum velocity when it asserts at creation.
+pub(crate) fn jolt_length(v: Vec3) -> f32 {
+    let v = v.to_jph();
+    // SAFETY: a pure function of a live local; it needs no initialization.
+    unsafe { JPH_Vec3_Length(&v) }
 }
 
 /// Tolerance of the unit-length checks: `|v·v − 1|` at most this, half of Jolt's
@@ -442,6 +450,9 @@ mod tests {
         let v = Vec3::new(3.0, 0.0, 4.0);
         assert_eq!(v.dot(Vec3::new(1.0, 1.0, 1.0)), 7.0);
         assert_eq!(v.length(), 5.0);
+        assert_eq!(jolt_length(v), 5.0);
+        assert_eq!(jolt_length(Vec3::new(f32::MAX, 0.0, 0.0)), f32::INFINITY);
+        assert!(jolt_length(Vec3::new(f32::NAN, 0.0, 0.0)).is_nan());
         assert_eq!(v.scale(2.0), Vec3::new(6.0, 0.0, 8.0));
         assert_eq!(v.normalized_or_zero(), Vec3::new(0.6, 0.0, 0.8));
         assert_eq!(Vec3::ZERO.normalized_or_zero(), Vec3::ZERO);
