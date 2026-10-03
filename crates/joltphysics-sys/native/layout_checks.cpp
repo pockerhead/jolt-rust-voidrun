@@ -23,6 +23,7 @@
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeID.h>
 #include <Jolt/Physics/Constraints/Constraint.h>
+#include <Jolt/Physics/Constraints/ContactConstraintManager.h>
 #include <Jolt/Physics/Constraints/ConstraintPart/SwingTwistConstraintPart.h>
 #include <Jolt/Physics/Constraints/MotorSettings.h>
 #include <Jolt/Physics/Constraints/SixDOFConstraint.h>
@@ -533,3 +534,8 @@ static_assert(int(JPH_SixDOFConstraintAxis_RotationX) == int(JPH::SixDOFConstrai
 static_assert(int(JPH_SixDOFConstraintAxis_RotationY) == int(JPH::SixDOFConstraintSettings::EAxis::RotationY), "JPH_SixDOFConstraintAxis_RotationY");
 static_assert(int(JPH_SixDOFConstraintAxis_RotationZ) == int(JPH::SixDOFConstraintSettings::EAxis::RotationZ), "JPH_SixDOFConstraintAxis_RotationZ");
 static_assert(int(_JPH_SixDOFConstraintAxis_Num) == int(JPH::SixDOFConstraintSettings::EAxis::Num), "_JPH_SixDOFConstraintAxis_Num");
+
+// Not a layout: joltphysics bounds WorldSettings::max_contact_constraints by
+// MAX_CONTACT_CONSTRAINTS (2^20), which must stay within the count above which
+// ContactConstraintManager::Init asserts.
+static_assert(JPH::ContactConstraintManager::cMaxContactConstraintsLimit >= (1u << 20), "joltphysics WorldSettings::MAX_CONTACT_CONSTRAINTS must stay within Jolt's limit; change both together");

@@ -4,6 +4,8 @@
 // Each test file compiles this module on its own and uses a different subset.
 #![allow(dead_code)]
 
+use std::ffi::{c_char, CStr};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use joltphysics_sys::*;
@@ -16,14 +18,48 @@ pub const BPL_NON_MOVING: JPH_BroadPhaseLayer = 0;
 pub const BPL_MOVING: JPH_BroadPhaseLayer = 1;
 const BROAD_PHASE_LAYER_COUNT: u32 = 2;
 
+/// A Jolt assertion handler that prints the failure and aborts, so a failed
+/// assertion fails the test run (with the `asserts` feature) instead of
+/// stopping at joltc's breakpoint.
+///
+/// # Safety
+/// Each pointer is null or a NUL-terminated string that lives for the call,
+/// as Jolt passes them.
+unsafe extern "C" fn abort_on_assert(
+    expression: *const c_char,
+    message: *const c_char,
+    file: *const c_char,
+    line: u32,
+) -> bool {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let text = |text: *const c_char| {
+            // SAFETY: not null, and Jolt passes NUL-terminated strings that
+            // live for this call (contract).
+            (!text.is_null()).then(|| unsafe { CStr::from_ptr(text) }.to_string_lossy())
+        };
+        let (expression, message, file) = (text(expression), text(message), text(file));
+        eprintln!(
+            "Jolt assertion failed: {}:{line}: ({}) {}",
+            file.unwrap_or_default(),
+            expression.unwrap_or_default(),
+            message.unwrap_or_default()
+        );
+    }));
+    std::process::abort()
+}
+
 /// Calls `JPH_Init` once per process. `JPH_Shutdown` is never called because
 /// tests run on parallel threads.
 pub fn init() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
         // SAFETY: `OnceLock` runs this exactly once per process, so the
-        // unsynchronised initialisation in `JPH_Init` never races.
-        let initialized = unsafe { JPH_Init() };
+        // unsynchronised initialisation in `JPH_Init` never races, and the
+        // handler store before it is a plain write of a joltc static.
+        let initialized = unsafe {
+            JPH_SetAssertFailureHandler(Some(abort_on_assert));
+            JPH_Init()
+        };
         assert!(initialized, "JPH_Init failed");
     });
 }

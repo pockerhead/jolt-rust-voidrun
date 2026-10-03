@@ -191,6 +191,19 @@
 //! code that uses `joltphysics-sys` directly must leave them alone (see its notes on the raw
 //! API). With `debug-renderer`, joltphysics also installs joltc's debug renderer procs once and
 //! serializes debug drawing.
+//!
+//! joltphysics installs Jolt's assertion handler once per process, before `JPH_Init`. With the
+//! `asserts` feature, which compiles Jolt with its debug assertions, a failed assertion prints its
+//! expression, message, file and line to stderr and aborts the process. The only exception is the
+//! physics-update-error assertion, whose condition [`PhysicsWorld::step`] returns in its
+//! [`StepReport`]. The handler slot is process-global in joltc: code that calls
+//! `JPH_SetAssertFailureHandler` directly replaces it, which joltphysics does not support.
+//!
+//! # Features
+//! - `double-precision`: world positions ([`Real`], [`RVec3`]) use `f64`.
+//! - `cross-platform-deterministic`: Jolt's cross-platform deterministic floating point settings.
+//! - `debug-renderer`: collider wireframes as line data, see above.
+//! - `asserts`: Jolt's debug assertions, reported as above.
 #![warn(
     missing_docs,
     unsafe_op_in_unsafe_fn,
@@ -205,7 +218,9 @@ mod constraint;
 mod debug;
 mod error;
 mod filter;
+mod jolt_assert;
 mod layers;
+pub mod limits;
 mod math;
 mod owned;
 mod query;

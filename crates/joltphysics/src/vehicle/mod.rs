@@ -23,6 +23,7 @@ use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
 use crate::constraint::constraint_base;
+use crate::limits;
 use crate::math::is_unit;
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
@@ -84,19 +85,8 @@ impl JoltObject for JPH_VehicleConstraint {
 pub(crate) struct VehicleEntry {
     constraint: Owned<JPH_VehicleConstraint>,
     pub(crate) body: BodyId,
-    /// The chassis' inverse mass, positive and finite: the chassis is dynamic and the safe API
-    /// cannot change its mass or motion type.
-    chassis_inverse_mass: f32,
     pub(crate) collision_tester: VehicleCollisionTester,
     wheels: Vec<WheelGeometry>,
-}
-
-/// Whether the force `gravity / inverse mass` that Jolt adds to an awake chassis on every step
-/// (`VehicleConstraint::OnStep`) is finite, divided per component as Jolt does.
-fn gravity_force_is_finite(gravity: Vec3, chassis_inverse_mass: f32) -> bool {
-    [gravity.x, gravity.y, gravity.z]
-        .iter()
-        .all(|component| (component / chassis_inverse_mass).is_finite())
 }
 
 /// What the driver asks of a vehicle (Jolt `WheeledVehicleController::SetDriverInput`).
@@ -372,8 +362,9 @@ impl VehicleMut<'_> {
     }
 
     /// Replaces the world's gravity for this vehicle by `gravity`, m/s² (Jolt
-    /// `VehicleConstraint::OverrideGravity`). It must be finite, and so must each component
-    /// times the chassis mass.
+    /// `VehicleConstraint::OverrideGravity`). It must be finite and at most
+    /// [`limits::MAX_ACCELERATION`] long. The chassis is a dynamic body, so its mass is at most
+    /// [`limits::MAX_MASS`] and the force Jolt derives from the override stays finite.
     ///
     /// On every step while the chassis is awake, Jolt sets the chassis' gravity factor to 0 and
     /// adds the force `gravity / inverse mass` at its centre of mass; a sleeping chassis gets no
@@ -381,12 +372,9 @@ impl VehicleMut<'_> {
     /// The override stays until it is set again; there is no reset, because Jolt's reset writes
     /// gravity factor 1 to the chassis. For radial gravity, set it every tick.
     pub fn set_gravity(&mut self, gravity: Vec3) -> Result<(), VehicleError> {
-        if !gravity.is_finite() {
-            return Err(VehicleError::InvalidValue("gravity must be finite"));
-        }
-        if !gravity_force_is_finite(gravity, self.entry.chassis_inverse_mass) {
+        if !limits::is_acceleration(gravity) {
             return Err(VehicleError::InvalidValue(
-                "gravity times the chassis mass must be finite",
+                "gravity must be finite and at most limits::MAX_ACCELERATION long",
             ));
         }
         let gravity = gravity.to_jph();
@@ -546,16 +534,6 @@ impl PhysicsWorld {
             antiRollBars: anti_roll_bars.as_ptr(),
             controller: controller.as_ptr().cast(),
         };
-        let chassis_inverse_mass = with_locked_body(self.body_lock_interface, body, |chassis| {
-            // SAFETY: the chassis is locked for writing and dynamic, so it has motion
-            // properties; the getters read members.
-            unsafe {
-                JPH_MotionProperties_GetInverseMassUnchecked(JPH_Body_GetMotionProperties(
-                    chassis.as_ptr(),
-                ))
-            }
-        })
-        .unwrap_or_else(|| unreachable!("`check` found the body and `&mut self` keeps it"));
         let constraint = with_locked_body(self.body_lock_interface, body, |chassis| {
             // SAFETY: the chassis is locked for writing and dynamic. The constructor stores the
             // body pointer and reads its id; Jolt bodies stay at their address until destroyed,
@@ -575,7 +553,6 @@ impl PhysicsWorld {
         let mut entry = VehicleEntry {
             constraint,
             body,
-            chassis_inverse_mass,
             collision_tester: settings.collision_tester,
             wheels: settings.wheels.iter().map(WheelGeometry::of).collect(),
         };
@@ -719,12 +696,8 @@ impl PhysicsWorld {
                 id: VehicleId::new(raw, self.tag),
                 entry,
             };
+            // A rotation keeps the override's length, which `set_gravity` bounds.
             let gravity = vehicle.gravity().map(&rotate);
-            if !gravity.is_none_or(|gravity| {
-                gravity.is_finite() && gravity_force_is_finite(gravity, entry.chassis_inverse_mass)
-            }) {
-                return Err("rebase would give a vehicle a non-finite gravity or gravity force");
-            }
             let collision_tester = match entry.collision_tester.up() {
                 Some(up) => {
                     let up = rotate(up).normalized_or_zero();

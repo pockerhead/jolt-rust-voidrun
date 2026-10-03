@@ -873,18 +873,15 @@ fn invalid_rebase_changes_nothing() {
         |e| matches!(e, BodyError::NotFound(_)),
     );
 
-    world
-        .set_gravity(Vec3::new(f32::MAX, f32::MAX, 0.0))
-        .unwrap();
-    let eighth_turn_about_z = quat_about(Vec3::new(0.0, 0.0, 1.0), 45.0_f32.to_radians());
-    assert_rejected(
-        &mut world,
-        &ids,
-        &ids,
-        eighth_turn_about_z,
-        RVec3::ZERO,
-        invalid_value,
-    );
+    // A gravity whose rotation could overflow is no longer accepted, so a rebase cannot meet
+    // one.
+    let gravity = world.gravity();
+    assert!(matches!(
+        world.set_gravity(Vec3::new(f32::MAX, f32::MAX, 0.0)),
+        Err(WorldError::InvalidSettings(_))
+    ));
+    let bits = |v: Vec3| <[f32; 3]>::from(v).map(f32::to_bits);
+    assert_eq!(bits(world.gravity()), bits(gravity));
 }
 
 #[test]

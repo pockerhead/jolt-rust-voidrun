@@ -12,6 +12,9 @@ cross-platform-deterministic = ["joltphysics-sys/cross-platform-deterministic"]
 # Debug wireframe of colliders as line data (`PhysicsWorld::debug_lines`); also compiles Jolt's
 # debug renderer into the native libraries.
 debug-renderer = ["joltphysics-sys/debug-renderer"]
+# Compiles Jolt with its debug assertions (`joltphysics-sys/asserts`); a failed assertion prints its
+# message and aborts the process.
+asserts = ["joltphysics-sys/asserts"]
 
 [dependencies]
 joltphysics-sys = { version = "0.4.0", path = "../joltphysics-sys" }

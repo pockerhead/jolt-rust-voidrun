@@ -23,10 +23,13 @@ use std::ptr::NonNull;
 use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
+use crate::body::{ANGULAR_VELOCITY_RULE, LINEAR_VELOCITY_RULE};
 use crate::constraint::SixDofConstraintAxis;
+use crate::limits;
+use crate::math::{jolt_angular_velocity, jolt_product, jolt_rotate};
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
-use crate::{Activation, BodyId, MotionType, PhysicsWorld, Quat, RVec3, RagdollError, Vec3};
+use crate::{Activation, BodyId, MotionType, PhysicsWorld, Quat, RVec3, RagdollError, Real, Vec3};
 
 use settings::JointKind;
 pub use settings::{
@@ -326,11 +329,59 @@ impl RagdollMut<'_> {
         Ok(())
     }
 
+    /// The linear and angular velocity Jolt's `Body::MoveKinematic` gives part `id` to reach
+    /// `position` and `rotation` in `delta_time` (`Body.cpp:81-95`, `MotionProperties.inl:9-21`),
+    /// computed with Jolt's own operations so that they have the bits Jolt writes. `None` when
+    /// the rotation from the part's rotation to `rotation` is not a unit quaternion within
+    /// Jolt's tolerance, for which Jolt asserts.
+    fn kinematic_velocities(
+        &self,
+        id: BodyId,
+        position: RVec3,
+        rotation: Quat,
+        delta_time: f32,
+    ) -> Option<(Vec3, Vec3)> {
+        let interface = self.interface();
+        let (mut center_of_mass, mut part_rotation) =
+            (RVec3::new(0.0, 0.0, 0.0).to_jph(), Quat::IDENTITY.to_jph());
+        let mut shape_center_of_mass = Vec3::ZERO.to_jph();
+        // SAFETY: the world is borrowed mutably through this view and holds the part; this
+        // thread holds no body lock, so the getters can lock it. They write live locals. The
+        // shape pointer is the part's own shape, which the body keeps alive during the call
+        // that reads its centre of mass.
+        unsafe {
+            JPH_BodyInterface_GetCenterOfMassPosition(interface, id.to_raw(), &mut center_of_mass);
+            JPH_BodyInterface_GetRotation(interface, id.to_raw(), &mut part_rotation);
+            let shape = JPH_BodyInterface_GetShape(interface, id.to_raw());
+            JPH_Shape_GetCenterOfMass(shape, &mut shape_center_of_mass);
+        }
+        let center_of_mass = RVec3::from_jph(center_of_mass);
+        let offset = jolt_rotate(rotation, Vec3::from_jph(shape_center_of_mass));
+        let delta = |target: Real, offset: f32, current: Real| {
+            // Jolt narrows the position difference to `f32` (`Vec3(new_com - mPosition)`).
+            #[allow(clippy::unnecessary_cast)]
+            let delta = (target + Real::from(offset) - current) as f32;
+            delta / delta_time
+        };
+        let linear = Vec3::new(
+            delta(position.x, offset.x, center_of_mass.x),
+            delta(position.y, offset.y, center_of_mass.y),
+            delta(position.z, offset.z, center_of_mass.z),
+        );
+        let turn = jolt_product(rotation, Quat::from_jph(part_rotation).conjugated());
+        let angular = jolt_angular_velocity(turn, delta_time)?;
+        Some((linear, angular))
+    }
+
     /// Sets each part's velocities so that it reaches `pose` in `delta_time` seconds (Jolt
     /// `Ragdoll::DriveToPoseUsingKinematics`), waking it when it moves. Meant for kinematic
     /// parts ([`set_motion_type`](Self::set_motion_type)); a dynamic part gets the velocity
     /// too, and collisions and joints change it. `delta_time` follows the rule of
     /// [`PhysicsWorld::step`].
+    ///
+    /// Jolt writes the velocities without clamping them, so every part's velocity is checked
+    /// first: at most [`limits::MAX_LINEAR_VELOCITY`] and [`limits::MAX_ANGULAR_VELOCITY`] long,
+    /// as Jolt computes them. If one part fails, no part changes.
     pub fn drive_to_pose_using_kinematics(
         &mut self,
         pose: &SkeletonPose,
@@ -341,6 +392,17 @@ impl RagdollMut<'_> {
             return Err(RagdollError::InvalidValue(
                 "delta time must be finite and between MIN_DELTA_TIME and MAX_DELTA_TIME",
             ));
+        }
+        for (index, &id) in self.entry.bodies.iter().enumerate() {
+            let rotation = pose.joints[index].rotation;
+            let velocities =
+                self.kinematic_velocities(id, pose.position(index), rotation, delta_time);
+            let within_limits = velocities.is_some_and(|(linear, angular)| {
+                limits::is_linear_velocity(linear) && limits::is_angular_velocity(angular)
+            });
+            if !within_limits {
+                return Err(RagdollError::InvalidValue(KINEMATIC_DRIVE_RULE));
+            }
         }
         for (index, &id) in self.entry.bodies.iter().enumerate() {
             let mut position = pose.position(index).to_jph();
@@ -486,14 +548,18 @@ impl RagdollMut<'_> {
     }
 
     /// Gives every part the linear velocity `linear` (m/s) and angular velocity `angular`
-    /// (rad/s), both finite: the velocity at death. Wakes the parts when they are not zero.
+    /// (rad/s), the velocity at death: finite and at most [`limits::MAX_LINEAR_VELOCITY`] and
+    /// [`limits::MAX_ANGULAR_VELOCITY`] long. Wakes the parts when they are not zero.
     pub fn set_linear_and_angular_velocity(
         &mut self,
         linear: Vec3,
         angular: Vec3,
     ) -> Result<(), RagdollError> {
-        if !(linear.is_finite() && angular.is_finite()) {
-            return Err(RagdollError::InvalidValue("velocities must be finite"));
+        if !limits::is_linear_velocity(linear) {
+            return Err(RagdollError::InvalidValue(LINEAR_VELOCITY_RULE));
+        }
+        if !limits::is_angular_velocity(angular) {
+            return Err(RagdollError::InvalidValue(ANGULAR_VELOCITY_RULE));
         }
         for &id in &self.entry.bodies {
             let mut linear = linear.to_jph();
@@ -518,6 +584,9 @@ impl RagdollMut<'_> {
         unsafe { JPH_Ragdoll_Activate(self.entry.ragdoll.as_ptr(), true) };
     }
 }
+
+/// What a kinematic drive must satisfy.
+const KINEMATIC_DRIVE_RULE: &str = "a kinematic drive must give every part a linear velocity within limits::MAX_LINEAR_VELOCITY and an angular velocity within limits::MAX_ANGULAR_VELOCITY";
 
 /// Places each body of `bodies` at its transform in the validated `pose`, without waking it.
 fn place_parts(body_interface: NonNull<JPH_BodyInterface>, bodies: &[BodyId], pose: &SkeletonPose) {

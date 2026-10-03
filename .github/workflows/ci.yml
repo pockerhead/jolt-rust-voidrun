@@ -8,15 +8,22 @@ jobs:
   test:
     name: Windows MSVC (${{ matrix.features || 'default' }})
     runs-on: windows-latest
+    # A backstop in case a runner attaches a debugger to a failed assertion's fail-fast.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        features: ["", "cross-platform-deterministic", "double-precision", "debug-renderer"]
+        features: ["", "cross-platform-deterministic", "double-precision", "debug-renderer", "asserts"]
         # The debug renderer is a feature of the safe crate (it forwards to joltphysics-sys);
         # enabling only the sys feature would leave the debug module and its tests unbuilt.
         include:
           - features: debug-renderer
             feature_args: --features joltphysics/debug-renderer
+          # Jolt's debug assertions through the safe crate's feature (it forwards to
+          # joltphysics-sys), so a failed assertion aborts with its message. The native cache key
+          # below contains matrix.features, so this leg builds and caches its own library.
+          - features: asserts
+            feature_args: --features joltphysics/asserts
     defaults:
       run:
         shell: bash
@@ -82,6 +89,7 @@ jobs:
 
       - run: cargo build --workspace --all-targets $FEATURE_ARGS
       - run: cargo test --workspace $FEATURE_ARGS
+      - run: cargo run -p joltphysics --example hello_world $FEATURE_ARGS
       - run: cargo clippy --workspace --all-targets $FEATURE_ARGS -- -D warnings
       - run: cargo doc --workspace --no-deps $FEATURE_ARGS
 

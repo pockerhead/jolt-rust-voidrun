@@ -367,20 +367,21 @@ fn gravity_override_replaces_world_gravity() {
 }
 
 #[test]
-fn gravity_whose_force_overflows_is_rejected() {
+fn gravity_is_bounded_by_max_acceleration() {
     let (mut world, layers) = car_world(Vec3::ZERO, 1);
     let ground = add_ground(&mut world, &layers, false);
     let body = chassis_settings(&layers, RVec3::new(0.0, 0.9, 0.0), Quat::IDENTITY);
     let (chassis, car) = add_car_with(&mut world, &body, VehicleCollisionTester::ray(layers.probe));
-    // Jolt adds `gravity / inverse mass` per component: 1500 kg times 2.3e35 m/s² is past
-    // f32::MAX, 1500 kg times 2e35 m/s² is not.
-    let accepted = Vec3::new(2.0e35, -2.0e35, 0.0);
+    let accepted = Vec3::new(0.0, -limits::MAX_ACCELERATION, 0.0);
     world
         .vehicle_mut(car)
         .unwrap()
         .set_gravity(accepted)
         .unwrap();
-    for rejected in [Vec3::new(0.0, -2.3e35, 0.0), Vec3::new(0.0, -1.0e36, 0.0)] {
+    for rejected in [
+        Vec3::new(0.0, -limits::MAX_ACCELERATION.next_up(), 0.0),
+        Vec3::new(f32::MAX, 0.0, 0.0),
+    ] {
         assert!(matches!(
             world.vehicle_mut(car).unwrap().set_gravity(rejected),
             Err(VehicleError::InvalidValue(_))
@@ -388,15 +389,15 @@ fn gravity_whose_force_overflows_is_rejected() {
     }
     assert_eq!(world.vehicle(car).unwrap().gravity(), Some(accepted));
 
-    // An eighth turn about z turns that gravity onto the x axis with a component of 2.8e35,
-    // whose force would overflow, so the rebase is refused and changes nothing.
+    // A rotation keeps the override's length, so rotating the bound-length override succeeds.
     let angle = std::f32::consts::FRAC_PI_8;
     let eighth_turn_about_z = Quat::from_xyzw(0.0, 0.0, angle.sin(), angle.cos());
-    assert!(matches!(
-        world.rebase(&[ground, chassis], eighth_turn_about_z, RVec3::ZERO),
-        Err(BodyError::InvalidValue(_))
-    ));
-    assert_eq!(world.vehicle(car).unwrap().gravity(), Some(accepted));
+    world
+        .rebase(&[ground, chassis], eighth_turn_about_z, RVec3::ZERO)
+        .unwrap();
+    let rotated = world.vehicle(car).unwrap().gravity().unwrap();
+    assert!(rotated.x.is_finite() && rotated.y.is_finite() && rotated.z.is_finite());
+    assert!(rotated.x != 0.0, "{rotated:?}");
 
     world
         .vehicle_mut(car)

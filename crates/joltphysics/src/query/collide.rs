@@ -10,7 +10,7 @@ use joltphysics_sys::*;
 
 use super::{offset_from, rotation_translation, validate_pose};
 use crate::filter::{with_query_filters, FilterState};
-use crate::math::is_finite_non_negative;
+use crate::limits;
 use crate::{
     BodyId, CompoundSubShape, ObjectLayer, PhysicsWorld, Quat, QueryError, QueryFilter, RVec3,
     Shape, SubShapeId, Vec3,
@@ -157,18 +157,19 @@ impl PhysicsWorld {
     /// (Jolt docs, "Deterministic Simulation"). Sort them (for example by body id and sub-shape
     /// id) when order matters.
     ///
-    /// The position must be finite, the rotation a finite unit quaternion, the maximum
-    /// separation distance finite and not negative, the shape not a heightfield, and the filter
-    /// valid for this world; otherwise [`QueryError::InvalidValue`] is returned.
+    /// The position must be finite and within [`limits::MAX_POSITION`], the rotation a finite unit
+    /// quaternion, the maximum separation distance between 0 and [`limits::MAX_SHAPE_EXTENT`], the
+    /// shape not a heightfield, and the filter valid for this world; otherwise
+    /// [`QueryError::InvalidValue`] is returned.
     pub fn collide_shape(
         &self,
         query: &CollideShape<'_>,
         filter: &QueryFilter<'_>,
     ) -> Result<Vec<CollideShapeHit>, QueryError> {
         validate_pose(query.shape, query.position, query.rotation)?;
-        if !is_finite_non_negative(query.max_separation_distance) {
+        if !limits::is_local_distance(query.max_separation_distance) {
             return Err(QueryError::InvalidValue(
-                "max separation distance must be finite and not negative",
+                "max separation distance must be between 0 and limits::MAX_SHAPE_EXTENT",
             ));
         }
         filter.validate(self)?;

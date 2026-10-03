@@ -9,9 +9,10 @@ use std::f32::consts::PI;
 
 use joltphysics_sys::*;
 
+use crate::limits::{self, is_local_distance, is_local_offset};
 use crate::math::{is_finite_non_negative, is_finite_positive, is_unit};
 use crate::owned::{JoltObject, Owned};
-use crate::{ObjectLayer, PhysicsWorld, Vec3, VehicleError};
+use crate::{ObjectLayer, PhysicsWorld, SpringSettings, Vec3, VehicleError};
 
 /// Jolt's default longitudinal friction curve of a wheel (`WheelSettingsWV`): friction
 /// coefficient over longitudinal slip ratio.
@@ -432,6 +433,24 @@ impl SuspensionSpring {
         };
         is_finite_positive(value) && is_finite_non_negative(damping)
     }
+
+    /// Whether the stiffness and damping Jolt uses for this valid spring stay at most
+    /// [`limits::MAX_SPRING_COEFFICIENT`]. A stiffness-mode spring is used as given. In
+    /// frequency mode Jolt multiplies by the suspension's effective mass
+    /// (`VehicleConstraint::SetupVelocityConstraint`), which is at most the chassis mass and so
+    /// at most [`limits::MAX_MASS`].
+    fn fits_the_coefficient_bound(self) -> bool {
+        match self {
+            Self::FrequencyAndDamping { frequency, damping } => {
+                SpringSettings::FrequencyAndDamping { frequency, damping }
+                    .fits_effective_mass(f64::from(limits::MAX_MASS))
+            }
+            Self::StiffnessAndDamping { stiffness, damping } => {
+                stiffness <= limits::MAX_SPRING_COEFFICIENT
+                    && damping <= limits::MAX_SPRING_COEFFICIENT
+            }
+        }
+    }
 }
 
 /// One wheel of a wheeled vehicle (Jolt `WheelSettings` and `WheelSettingsWV`). Positions and
@@ -461,7 +480,8 @@ pub struct WheelSettings {
 }
 
 impl WheelSettings {
-    /// A wheel whose suspension is attached to the chassis at `position` (body space, finite).
+    /// A wheel whose suspension is attached to the chassis at `position` (body space, each
+    /// component within [`limits::MAX_SHAPE_EXTENT`]).
     pub fn new(position: Vec3) -> Self {
         Self {
             position,
@@ -486,7 +506,8 @@ impl WheelSettings {
         }
     }
 
-    /// Where suspension and tire forces act on the chassis (body space, finite). `None`, the
+    /// Where suspension and tire forces act on the chassis (body space, each component within
+    /// [`limits::MAX_SHAPE_EXTENT`]). `None`, the
     /// default, applies them at the contact point, which is more accurate against dynamic
     /// ground but less stable (Jolt `mEnableSuspensionForcePoint`).
     #[must_use]
@@ -525,44 +546,49 @@ impl WheelSettings {
         self
     }
 
-    /// Suspension length when fully raised, from the attachment point, not negative. Default
-    /// 0.3.
+    /// Suspension length when fully raised, from the attachment point, between 0 and
+    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.3.
     #[must_use]
     pub fn suspension_min_length(mut self, value: f32) -> Self {
         self.suspension_min_length = value;
         self
     }
 
-    /// Suspension length when fully extended, at least the minimum length. Default 0.5.
+    /// Suspension length when fully extended, at least the minimum length and at most
+    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.5.
     #[must_use]
     pub fn suspension_max_length(mut self, value: f32) -> Self {
         self.suspension_max_length = value;
         self
     }
 
-    /// How far the spring is already compressed at full extension, not negative. Default 0.
+    /// How far the spring is already compressed at full extension, between 0 and
+    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.
     #[must_use]
     pub fn suspension_preload_length(mut self, value: f32) -> Self {
         self.suspension_preload_length = value;
         self
     }
 
-    /// The suspension spring. Default [`SuspensionSpring::default`].
+    /// The suspension spring. Default [`SuspensionSpring::default`]. The stiffness and damping
+    /// Jolt derives from it must stay at most [`limits::MAX_SPRING_COEFFICIENT`] for a chassis of
+    /// [`limits::MAX_MASS`]: in frequency mode `MAX_MASS·ω²` and `2·MAX_MASS·ζ·ω` with
+    /// `ω = 2π·frequency`, in stiffness mode the values themselves.
     #[must_use]
     pub fn suspension_spring(mut self, value: SuspensionSpring) -> Self {
         self.suspension_spring = value;
         self
     }
 
-    /// Wheel radius, positive. Default 0.3.
+    /// Wheel radius, positive and at most [`limits::MAX_SHAPE_EXTENT`]. Default 0.3.
     #[must_use]
     pub fn radius(mut self, value: f32) -> Self {
         self.radius = value;
         self
     }
 
-    /// Wheel width, not negative; positive with [`VehicleCollisionTester::CastCylinder`].
-    /// Default 0.1.
+    /// Wheel width, between 0 and [`limits::MAX_SHAPE_EXTENT`]; positive with
+    /// [`VehicleCollisionTester::CastCylinder`]. Default 0.1.
     #[must_use]
     pub fn width(mut self, value: f32) -> Self {
         self.width = value;
@@ -624,11 +650,13 @@ impl WheelSettings {
 
     fn validate(&self) -> Result<(), VehicleError> {
         let invalid = |what| Err(VehicleError::InvalidValue(what));
-        if !self.position.is_finite() {
-            return invalid("wheel position must be finite");
+        if !is_local_offset(self.position) {
+            return invalid("wheel position must be finite and within limits::MAX_SHAPE_EXTENT");
         }
-        if !self.suspension_force_point.is_none_or(|p| p.is_finite()) {
-            return invalid("wheel suspension force point must be finite");
+        if !self.suspension_force_point.is_none_or(is_local_offset) {
+            return invalid(
+                "wheel suspension force point must be finite and within limits::MAX_SHAPE_EXTENT",
+            );
         }
         let directions = [
             self.suspension_direction,
@@ -642,27 +670,40 @@ impl WheelSettings {
         if self.wheel_up.dot(self.wheel_forward).abs() > PERPENDICULAR_TOLERANCE {
             return invalid("wheel up and wheel forward must be perpendicular");
         }
-        if !is_finite_non_negative(self.suspension_min_length) {
-            return invalid("suspension min length must be finite and not negative");
+        if !is_local_distance(self.suspension_min_length) {
+            return invalid(
+                "suspension min length must be finite and between 0 and limits::MAX_SHAPE_EXTENT",
+            );
         }
-        if !(self.suspension_max_length.is_finite()
+        if !(is_local_distance(self.suspension_max_length)
             && self.suspension_max_length >= self.suspension_min_length)
         {
-            return invalid("suspension max length must be finite and at least the min length");
+            return invalid(
+                "suspension max length must be at least the min length and at most limits::MAX_SHAPE_EXTENT",
+            );
         }
-        if !is_finite_non_negative(self.suspension_preload_length) {
-            return invalid("suspension preload length must be finite and not negative");
+        if !is_local_distance(self.suspension_preload_length) {
+            return invalid(
+                "suspension preload length must be finite and between 0 and limits::MAX_SHAPE_EXTENT",
+            );
         }
         if !self.suspension_spring.is_valid() {
             return invalid(
                 "suspension spring frequency or stiffness must be positive, damping not negative",
             );
         }
-        if !is_finite_positive(self.radius) {
-            return invalid("wheel radius must be finite and positive");
+        if !self.suspension_spring.fits_the_coefficient_bound() {
+            return invalid(
+                "suspension spring stiffness or damping exceeds limits::MAX_SPRING_COEFFICIENT",
+            );
         }
-        if !is_finite_non_negative(self.width) {
-            return invalid("wheel width must be finite and not negative");
+        if !(self.radius > 0.0 && is_local_distance(self.radius)) {
+            return invalid("wheel radius must be positive and at most limits::MAX_SHAPE_EXTENT");
+        }
+        if !is_local_distance(self.width) {
+            return invalid(
+                "wheel width must be finite and between 0 and limits::MAX_SHAPE_EXTENT",
+            );
         }
         // Jolt asserts only `>= 0` but divides by the inertia
         // (`WheeledVehicleController::PostCollide`).
@@ -1124,6 +1165,17 @@ pub struct VehicleAntiRollBar {
 }
 
 impl VehicleAntiRollBar {
+    /// Largest anti-roll bar stiffness, N/m: about 2.5e11.
+    ///
+    /// Each step Jolt computes `stiffness · suspension length difference · dt`
+    /// (`VehicleConstraint::OnStep`) and uses it as the velocity bias of both wheels'
+    /// suspension constraints, which the constraint's effective mass turns into an impulse.
+    /// With a length difference of at most [`limits::MAX_SHAPE_EXTENT`] this bound keeps the
+    /// bias at most about 5e14 for `dt <= 1`, so the velocity change it gives stays finite;
+    /// see [`limits`](crate::limits#derived-bounds).
+    pub const MAX_STIFFNESS: f32 =
+        limits::MAX_ACCELERATION * limits::MAX_MASS / limits::MAX_SHAPE_EXTENT;
+
     /// A bar between two different wheels, by index.
     pub fn new(left_wheel: u32, right_wheel: u32) -> Self {
         Self {
@@ -1133,7 +1185,8 @@ impl VehicleAntiRollBar {
         }
     }
 
-    /// Spring constant, N/m, not negative; 0 disables the bar. Default 1000.
+    /// Spring constant, N/m, between 0 and [`MAX_STIFFNESS`](Self::MAX_STIFFNESS); 0 disables
+    /// the bar. Default 1000.
     #[must_use]
     pub fn stiffness(mut self, value: f32) -> Self {
         self.stiffness = value;
@@ -1148,8 +1201,8 @@ impl VehicleAntiRollBar {
         if self.left_wheel == self.right_wheel {
             return invalid("an anti-roll bar needs two different wheels");
         }
-        if !is_finite_non_negative(self.stiffness) {
-            return invalid("anti-roll bar stiffness must be finite and not negative");
+        if !(0.0..=Self::MAX_STIFFNESS).contains(&self.stiffness) {
+            return invalid("anti-roll bar stiffness must be between 0 and MAX_STIFFNESS");
         }
         Ok(())
     }
@@ -1288,15 +1341,11 @@ impl VehicleCollisionTester {
                 max_slope_angle,
                 ..
             } => {
+                // The ray length `max length + radius` (`VehicleCollisionTesterRay::Collide`)
+                // is finite: wheel lengths are at most `limits::MAX_SHAPE_EXTENT`.
                 if !(is_unit(up) && slope_ok(max_slope_angle)) {
                     return invalid(
                         "ray tester needs a unit up and a max slope angle between 0 and pi",
-                    );
-                }
-                // The ray length (`VehicleCollisionTesterRay::Collide`).
-                if !wheels.all(|w| (w.suspension_max_length + w.radius).is_finite()) {
-                    return invalid(
-                        "every wheel's max suspension length plus radius must be finite",
                     );
                 }
             }
@@ -1314,11 +1363,9 @@ impl VehicleCollisionTester {
                 if !is_finite_positive(radius) {
                     return invalid("sphere tester radius must be finite and positive");
                 }
-                // The cast length (`VehicleCollisionTesterCastSphere::Collide`).
-                if !wheels.all(|w| {
-                    let cast_length = w.suspension_max_length + w.radius - radius;
-                    cast_length.is_finite() && cast_length > 0.0
-                }) {
+                // The cast length (`VehicleCollisionTesterCastSphere::Collide`), finite because
+                // wheel lengths are at most `limits::MAX_SHAPE_EXTENT`.
+                if !wheels.all(|w| w.suspension_max_length + w.radius - radius > 0.0) {
                     return invalid(
                         "sphere tester radius must be below every wheel's max suspension length plus radius",
                     );
@@ -1860,6 +1907,70 @@ mod tests {
     }
 
     #[test]
+    fn wheel_magnitudes_are_bounded_by_the_policy() {
+        let extent = limits::MAX_SHAPE_EXTENT;
+        let beyond = extent.next_up();
+        let at = |x: f32| Vec3::new(x, -0.1, 0.0);
+        let placed = |p: Vec3| move |_: WheelSettings| WheelSettings::new(p).radius(0.35);
+        assert_eq!(with_wheel(placed(at(extent))).validate(LAYERS), Ok(()));
+        assert_rejected(with_wheel(placed(at(beyond))));
+        assert_eq!(
+            with_wheel(|w| w.suspension_force_point(Some(at(-extent)))).validate(LAYERS),
+            Ok(())
+        );
+        assert_rejected(with_wheel(|w| w.suspension_force_point(Some(at(-beyond)))));
+        type Edit = fn(WheelSettings, f32) -> WheelSettings;
+        let lengths: [Edit; 5] = [
+            |w, v| {
+                w.suspension_min_length(v)
+                    .suspension_max_length(limits::MAX_SHAPE_EXTENT)
+            },
+            |w, v| w.suspension_max_length(v),
+            |w, v| w.suspension_preload_length(v),
+            |w, v| w.radius(v),
+            |w, v| w.width(v),
+        ];
+        for edit in lengths {
+            assert_eq!(with_wheel(|w| edit(w, extent)).validate(LAYERS), Ok(()));
+            assert_rejected(with_wheel(|w| edit(w, beyond)));
+        }
+    }
+
+    #[test]
+    fn suspension_springs_are_bounded_by_the_coefficient() {
+        let bound = limits::MAX_SPRING_COEFFICIENT;
+        let stiffness =
+            |stiffness, damping| SuspensionSpring::StiffnessAndDamping { stiffness, damping };
+        let spring = |spring: SuspensionSpring| with_wheel(move |w| w.suspension_spring(spring));
+        assert_eq!(spring(stiffness(bound, bound)).validate(LAYERS), Ok(()));
+        assert_rejected(spring(stiffness(bound.next_up(), 0.0)));
+        assert_rejected(spring(stiffness(1.0, bound.next_up())));
+        // Frequency mode with the effective mass at most `MAX_MASS`: `MAX_MASS * ω² <= bound`
+        // gives the largest frequency, `2 * MAX_MASS * ζ * ω <= bound` the largest damping ratio
+        // at 1 Hz.
+        let mass = f64::from(limits::MAX_MASS);
+        let two_pi = 2.0 * std::f64::consts::PI;
+        let max_frequency = (f64::from(bound) / mass).sqrt() / two_pi;
+        let max_damping = f64::from(bound) / (2.0 * mass * two_pi);
+        let frequency = |frequency: f64, damping: f64| SuspensionSpring::FrequencyAndDamping {
+            frequency: frequency as f32,
+            damping: damping as f32,
+        };
+        for (factor, accepted) in [(0.999, true), (1.001, false)] {
+            for candidate in [
+                frequency(factor * max_frequency, 0.0),
+                frequency(1.0, factor * max_damping),
+            ] {
+                assert_eq!(
+                    spring(candidate).validate(LAYERS).is_ok(),
+                    accepted,
+                    "{candidate:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn wheel_inertia_must_be_positive() {
         // Jolt asserts only `>= 0`, but divides by the wheel inertia.
         assert_rejected(with_wheel(|w| w.inertia(0.0)));
@@ -2010,6 +2121,14 @@ mod tests {
         assert_rejected(car().anti_roll_bars(vec![VehicleAntiRollBar::new(0, 4)]));
         assert_rejected(car().anti_roll_bars(vec![VehicleAntiRollBar::new(1, 1)]));
         assert_rejected(car().anti_roll_bars(vec![VehicleAntiRollBar::new(0, 1).stiffness(-1.0)]));
+        let bar = |stiffness| {
+            car().anti_roll_bars(vec![VehicleAntiRollBar::new(0, 1).stiffness(stiffness)])
+        };
+        let bound = VehicleAntiRollBar::MAX_STIFFNESS;
+        assert_eq!(bar(bound).validate(LAYERS), Ok(()));
+        for stiffness in [bound.next_up(), f32::MAX, f32::NAN] {
+            assert_rejected(bar(stiffness));
+        }
     }
 
     #[test]
@@ -2037,27 +2156,17 @@ mod tests {
             with(VehicleCollisionTester::cast_sphere(layer, 0.84)).validate(LAYERS),
             Ok(())
         );
-        // Each length is finite, the ray or cast length `max length + radius` is not. The
-        // inertia keeps every step coefficient finite, `inertia / MIN_DELTA_TIME` included.
-        let huge = |w: WheelSettings| {
-            w.suspension_max_length(f32::MAX)
-                .radius(f32::MAX)
+        // A sphere as large as a wheel at the length bound leaves no cast.
+        let largest = |w: WheelSettings| {
+            w.suspension_max_length(limits::MAX_SHAPE_EXTENT)
+                .radius(limits::MAX_SHAPE_EXTENT)
                 .inertia(1.0e30)
         };
-        assert_eq!(
-            with_wheel(huge).validate(LAYERS),
-            Err(VehicleError::InvalidValue(
-                "every wheel's max suspension length plus radius must be finite"
-            ))
-        );
-        let mut huge_sphere = with_wheel(huge);
-        huge_sphere.collision_tester = VehicleCollisionTester::cast_sphere(layer, 0.2);
-        assert_eq!(
-            huge_sphere.validate(LAYERS),
-            Err(VehicleError::InvalidValue(
-                "sphere tester radius must be below every wheel's max suspension length plus radius"
-            ))
-        );
+        assert_eq!(with_wheel(largest).validate(LAYERS), Ok(()));
+        let mut largest_sphere = with_wheel(largest);
+        largest_sphere.collision_tester =
+            VehicleCollisionTester::cast_sphere(layer, 2.0 * limits::MAX_SHAPE_EXTENT);
+        assert_rejected(largest_sphere);
         assert_rejected(with(VehicleCollisionTester::CastCylinder {
             object_layer: layer,
             convex_radius_fraction: 1.5,

@@ -18,6 +18,7 @@ use joltphysics_sys::*;
 
 use crate::body::with_read_locked_body;
 use crate::filter::{with_query_filters, FilterState};
+use crate::limits;
 use crate::shape::compound_sub_shape_of;
 use crate::{
     BodyError, BodyId, CompoundSubShape, ObjectLayer, PhysicsWorld, Quat, QueryError, QueryFilter,
@@ -134,15 +135,18 @@ impl PhysicsWorld {
     /// faces whatever its convex radius. [`RayHit::normal`] is the outward normal of the hit
     /// face.
     ///
-    /// The origin must be finite, the direction finite and not zero, and the filter valid for
-    /// this world; otherwise [`QueryError::InvalidValue`] is returned.
+    /// The origin must be finite with every component at most [`limits::MAX_POSITION`] in
+    /// absolute value, the direction finite and not zero, and the filter valid for this world;
+    /// otherwise [`QueryError::InvalidValue`] is returned.
     pub fn cast_ray(
         &self,
         ray: RayCast,
         filter: &QueryFilter<'_>,
     ) -> Result<Option<RayHit>, QueryError> {
-        if !ray.origin.is_finite() {
-            return Err(QueryError::InvalidValue("ray origin must be finite"));
+        if !limits::is_in_frame(ray.origin) {
+            return Err(QueryError::InvalidValue(
+                "ray origin must be finite and within limits::MAX_POSITION",
+            ));
         }
         if !(ray.direction.is_finite() && ray.direction != Vec3::ZERO) {
             return Err(QueryError::InvalidValue(
@@ -279,9 +283,9 @@ pub(crate) fn validate_pose(
     position: RVec3,
     rotation: Quat,
 ) -> Result<(), QueryError> {
-    if !position.is_finite() {
+    if !limits::is_in_frame(position) {
         return Err(QueryError::InvalidValue(
-            "query shape position must be finite",
+            "query shape position must be finite and within limits::MAX_POSITION",
         ));
     }
     if !rotation.is_valid_rotation() {
