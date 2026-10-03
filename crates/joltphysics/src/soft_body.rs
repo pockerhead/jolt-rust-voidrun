@@ -18,8 +18,9 @@ use crate::body::{
 };
 use crate::limits::{
     self, is_compliance, is_friction, is_gravity_factor, is_in_frame, is_linear_velocity,
-    is_local_distance, is_local_offset, is_soft_body_force, is_soft_body_pressure,
-    is_vertex_inverse_mass, SoftBodyPressureGeometry,
+    is_local_distance, is_local_offset, is_soft_body_force, is_soft_body_inertia,
+    is_soft_body_pressure, is_vertex_inverse_mass, SoftBodyMassDistribution,
+    SoftBodyPressureGeometry,
 };
 use crate::math::{is_finite_non_negative, jolt_length};
 use crate::owned::{JoltObject, Owned};
@@ -30,7 +31,8 @@ use crate::{BodyError, BodyId, ObjectLayer, PhysicsWorld, Quat, RVec3, Real, Sof
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SoftBodyVertex {
     /// Position relative to the body origin, in metres, every component at most
-    /// [`limits::MAX_SHAPE_EXTENT`] in absolute value.
+    /// [`limits::MAX_SHAPE_EXTENT`] in absolute value. The vertices of a body without a
+    /// kinematic vertex belong around the origin (see [`PhysicsWorld::create_soft_body`]).
     pub position: Vec3,
     /// Initial velocity relative to the body, in m/s, at most
     /// [`limits::MAX_LINEAR_VELOCITY`] long.
@@ -265,6 +267,7 @@ pub struct SoftBodyVolume {
 pub struct SoftBodySharedSettings {
     settings: Owned<JPH_SoftBodySharedSettings>,
     pressure_geometry: SoftBodyPressureGeometry,
+    mass_distribution: SoftBodyMassDistribution,
 }
 
 // SAFETY: the settings are never changed after `build` returns (no method takes `&mut self`, and
@@ -450,6 +453,9 @@ impl SoftBodySharedSettingsBuilder {
         self.validate()?;
         let positions: Vec<Vec3> = self.vertices.iter().map(|v| v.position).collect();
         let pressure_geometry = SoftBodyPressureGeometry::new(&positions, &self.faces);
+        let mass_distribution = SoftBodyMassDistribution::new(
+            self.vertices.iter().map(|v| (v.position, v.inverse_mass)),
+        );
         // SAFETY: Jolt is initialised. The handle takes over the one reference joltc's
         // `_Create` adds.
         let owned = unsafe { Owned::from_raw(JPH_SoftBodySharedSettings_Create()) }
@@ -457,6 +463,7 @@ impl SoftBodySharedSettingsBuilder {
         let settings = SoftBodySharedSettings {
             settings: owned,
             pressure_geometry,
+            mass_distribution,
         };
         let ptr = settings.settings.as_ptr();
         let vertices: Vec<JPH_SoftVertex> = self.vertices.iter().map(|v| v.to_jph()).collect();
@@ -700,6 +707,9 @@ const VERTEX_INVERSE_MASS_RULE: &str =
 /// What the vertex masses of a soft body must satisfy together.
 const TOTAL_MASS_RULE: &str =
     "the masses of the movable vertices must add up to at most limits::MAX_MASS";
+/// What the movable vertices of a soft body without a kinematic vertex must satisfy.
+const INERTIA_RULE: &str =
+    "without a kinematic vertex, the vertices must spread around the body origin so that Jolt can decompose their inertia (see limits)";
 /// What an edge between two vertices must satisfy.
 const EDGE_LENGTH_RULE: &str = "an edge must be at least limits::MIN_SOFT_BODY_EDGE_LENGTH long";
 
@@ -1045,6 +1055,13 @@ impl PhysicsWorld {
     /// `shared` enclose (see [`SoftBodySettings::pressure`]), and with
     /// [`BodyError::TooManyBodies`] when the world is full; then nothing changes.
     ///
+    /// Jolt computes the body's inertia in `f32` about the body origin from every vertex and
+    /// decomposes it (unless a vertex is kinematic), which fails for vertices far from the
+    /// origin compared with their spread, or on one line. Such a body is refused with
+    /// [`BodyError::InvalidValue`] (see [Derived bounds](crate::limits#derived-bounds)): an
+    /// 11 × 11 cloth of 1 m is accepted up to about 10 m from its origin. Give the vertices
+    /// around the origin and place the body with [`SoftBodySettings::position`].
+    ///
     /// ```
     /// use joltphysics::*;
     ///
@@ -1097,6 +1114,10 @@ impl PhysicsWorld {
                 "pressure needs faces around the body origin that enclose a volume large \
                  enough for it, wound counter-clockwise seen from outside (see limits)",
             ));
+        }
+        let baked_rotation = settings.make_rotation_identity.then_some(settings.rotation);
+        if !is_soft_body_inertia(&shared.mass_distribution, baked_rotation) {
+            return Err(BodyError::InvalidValue(INERTIA_RULE));
         }
         let creation = creation_settings(shared, settings)?;
         if !self.has_room_for_bodies(1) {
@@ -1250,6 +1271,26 @@ impl SoftBodyRef<'_> {
         })
         .unwrap_or_default()
     }
+
+    /// Every vertex position as Jolt stores it, relative to the body's centre of mass in the
+    /// body frame, copied under one body read lock.
+    fn local_positions(&self) -> Vec<Vec3> {
+        with_read_locked_body(self.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for reading for the duration of the closure. joltc writes
+            // at most `count` elements to the output, which holds exactly `count`.
+            unsafe {
+                let count = JPH_Body_GetSoftBodyVertexCount(body.as_ptr());
+                let mut positions = vec![Vec3::ZERO.to_jph(); count as usize];
+                JPH_Body_GetSoftBodyVertexLocalPositions(
+                    body.as_ptr(),
+                    positions.as_mut_ptr(),
+                    count,
+                );
+                positions.into_iter().map(Vec3::from_jph).collect()
+            }
+        })
+        .unwrap_or_default()
+    }
 }
 
 /// Read and write access to the vertices of one soft body, borrowed mutably from its world.
@@ -1288,9 +1329,13 @@ impl SoftBodyMut<'_> {
     /// still add up to at most [`limits::MAX_MASS`], and the force added to the body this step
     /// ([`BodyMut::add_force`](crate::BodyMut::add_force)) must stay within its bound for the
     /// new inverse masses, so unpinning a vertex cannot release a force that was accepted
-    /// while every vertex was pinned. Jolt recomputes the body's mass from the
-    /// vertices; while any vertex is kinematic the body's mass is infinite
-    /// ([`BodyRef::mass`](crate::BodyRef::mass) is `None`).
+    /// while every vertex was pinned. Jolt recomputes the body's mass and inertia from the
+    /// vertices at their current positions; while any vertex is kinematic the body's mass is
+    /// infinite ([`BodyRef::mass`](crate::BodyRef::mass) is `None`). Without a kinematic vertex
+    /// the vertices must spread around the body origin for Jolt to decompose the inertia, as at
+    /// creation ([`PhysicsWorld::create_soft_body`]): unpinning the last kinematic vertex of a
+    /// body whose vertices drifted far from its origin
+    /// ([`SoftBodySettings::update_position`]`(false)`) is refused.
     pub fn set_vertex_inverse_mass(
         &mut self,
         index: u32,
@@ -1309,6 +1354,12 @@ impl SoftBodyMut<'_> {
             .map(|&w| vertex_mass(w))
             .sum();
         require_body(total_mass <= f64::from(limits::MAX_MASS), TOTAL_MASS_RULE)?;
+        let distribution = SoftBodyMassDistribution::new(
+            self.local_positions()
+                .into_iter()
+                .zip(inverse_masses.iter().copied()),
+        );
+        require_body(is_soft_body_inertia(&distribution, None), INERTIA_RULE)?;
         let largest_inverse_mass = inverse_masses.iter().copied().fold(0.0, f32::max);
         let vertex_count = inverse_masses.len() as u32;
         let written = with_locked_body(self.body_lock_interface, self.id, |body| {

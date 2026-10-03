@@ -2953,3 +2953,263 @@ fn soft_body_explicit_constraints_are_bounded() {
         assert!(soft_invalid(edge(1.0, compliance)));
     }
 }
+
+/// The vertices of an 11 × 11 cloth of 1 kg vertices, 0.1 m apart, centred `distance` from the
+/// body origin along (1, 0, 1), its first vertex kinematic when `pinned`.
+fn offset_cloth_vertices(distance: f32, pinned: bool) -> Vec<SoftBodyVertex> {
+    let offset = distance / 2.0_f32.sqrt();
+    let mut vertices = common::soft_body::Cloth::new(11, 0.1).vertices;
+    for vertex in &mut vertices {
+        vertex.position = Vec3::new(
+            vertex.position.x + offset,
+            vertex.position.y,
+            vertex.position.z + offset,
+        );
+    }
+    if pinned {
+        vertices[0].inverse_mass = 0.0;
+    }
+    vertices
+}
+
+/// Shared settings of free particles (no faces, no constraints).
+fn particles(vertices: Vec<SoftBodyVertex>) -> SoftBodySharedSettings {
+    SoftBodySharedSettings::builder(vertices, Vec::new())
+        .build()
+        .unwrap()
+}
+
+#[test]
+fn soft_body_inertia_is_checked_at_creation() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let turned = quat_about(Vec3::new(0.6, 0.0, 0.8), 1.0);
+    // Jolt sums the inertia about the body origin: a cloth near its origin is accepted, also
+    // with a rotation Jolt bakes into the vertices, and decomposed without an assertion.
+    for distance in [0.0, 1.0, 5.0, 10.0] {
+        for rotation in [Quat::IDENTITY, turned] {
+            let shared = particles(offset_cloth_vertices(distance, false));
+            let id = world
+                .create_soft_body(&shared, &SoftBodySettings::default().rotation(rotation))
+                .unwrap();
+            step(&mut world, 2);
+            world.remove_body(id).unwrap();
+        }
+    }
+    // Far from it (Jolt's decomposition asserted at 50 m) it is refused, changing nothing.
+    for distance in [15.0, 50.0, 100.0, 1000.0] {
+        let shared = particles(offset_cloth_vertices(distance, false));
+        for rotation in [Quat::IDENTITY, turned] {
+            let settings = SoftBodySettings::default().rotation(rotation);
+            assert!(body_invalid(world.create_soft_body(&shared, &settings)));
+        }
+        assert_eq!(world.body_count(), 0);
+    }
+    // A kinematic vertex gives the body infinite inertia without a decomposition.
+    let pinned = particles(offset_cloth_vertices(1000.0, true));
+    world
+        .create_soft_body(&pinned, &SoftBodySettings::default())
+        .unwrap();
+    step(&mut world, 2);
+    // Free vertices on one line have no inertia about it: refused on an axis and off it.
+    let line = |direction: [f32; 3]| {
+        particles(
+            (1..=4)
+                .map(|i| {
+                    let [x, y, z] = direction.map(|c| c * i as f32);
+                    SoftBodyVertex::new(Vec3::new(x, y, z))
+                })
+                .collect(),
+        )
+    };
+    for direction in [[1.0, 0.0, 0.0], [0.6, 0.8, 0.0], [0.48, 0.6, 0.64]] {
+        let settings = SoftBodySettings::default();
+        assert!(body_invalid(
+            world.create_soft_body(&line(direction), &settings)
+        ));
+    }
+    // One vertex at the origin: Jolt gives the zero tensor the inertia of a unit sphere.
+    let single = particles(vec![SoftBodyVertex::new(Vec3::ZERO)]);
+    world
+        .create_soft_body(&single, &SoftBodySettings::default())
+        .unwrap();
+    // Eight vertices within 1 cm of (10, 0, 0) with masses from 2 g to 50 t, on which Jolt's
+    // decomposition asserted, are refused.
+    let cluster = [
+        ([10.001002, 0.0021947764, -0.00030142843], 0.024279153),
+        ([9.998484, -0.0011584508, 0.004818453], 2.1364938e-5),
+        ([10.0024, -0.0009066194, 0.0030977945], 144.5319),
+        ([9.998568, 0.00448157, -0.0006148457], 0.017587047),
+        ([9.999195, -0.0018897026, 0.003035497], 0.02039532),
+        ([10.001087, 0.002987452, 0.000934242], 0.23255065),
+        ([9.996244, -0.0009508091, 0.004369754], 0.17152376),
+        ([9.995533, 0.0035093676, 0.0048835487], 0.0006062472),
+    ]
+    .map(|([x, y, z], inverse_mass)| SoftBodyVertex {
+        inverse_mass,
+        ..SoftBodyVertex::new(Vec3::new(x, y, z))
+    })
+    .to_vec();
+    assert!(body_invalid(world.create_soft_body(
+        &particles(cluster),
+        &SoftBodySettings::default()
+    )));
+    step(&mut world, 2);
+}
+
+#[test]
+fn unpinning_checks_the_inertia_at_the_current_positions() {
+    // A cloth authored 50 m from its origin is accepted while a vertex is pinned; unpinning it
+    // is refused and changes nothing. Near its origin the same unpinning is accepted.
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    for (distance, accepted) in [(50.0, false), (1.0, true)] {
+        let shared = particles(offset_cloth_vertices(distance, true));
+        let id = world
+            .create_soft_body(&shared, &SoftBodySettings::default())
+            .unwrap();
+        let before = world.soft_body(id).unwrap().vertices();
+        let result = world
+            .soft_body_mut(id)
+            .unwrap()
+            .set_vertex_inverse_mass(0, 1.0);
+        if accepted {
+            result.unwrap();
+            let mass = world.body(id).unwrap().mass().unwrap();
+            assert!((mass - 121.0).abs() < 1.0e-3, "{mass}");
+            step(&mut world, 2);
+        } else {
+            assert!(body_invalid(result));
+            assert_eq!(world.soft_body(id).unwrap().vertices(), before);
+            assert_eq!(world.body(id).unwrap().mass(), None);
+        }
+        world.remove_body(id).unwrap();
+    }
+
+    // Kinematic vertices carried about 50 m from an origin that stays put
+    // (`update_position(false)`): the last unpinning is checked at the positions then.
+    for update_position in [false, true] {
+        let mut world = empty_world();
+        let shared = particles(
+            common::soft_body::Cloth::new(4, 0.1)
+                .vertices
+                .into_iter()
+                .map(|vertex| SoftBodyVertex::kinematic(vertex.position))
+                .collect(),
+        );
+        let id = world
+            .create_soft_body(
+                &shared,
+                &SoftBodySettings::default().update_position(update_position),
+            )
+            .unwrap();
+        for velocity in [Vec3::new(60.0, 0.0, 80.0), Vec3::ZERO] {
+            for index in 0..16 {
+                let mut soft = world.soft_body_mut(id).unwrap();
+                soft.set_vertex_velocity(index, velocity).unwrap();
+            }
+            step(&mut world, 30);
+        }
+        for index in 0..15 {
+            let mut soft = world.soft_body_mut(id).unwrap();
+            soft.set_vertex_inverse_mass(index, 1.0).unwrap();
+        }
+        let last = world
+            .soft_body_mut(id)
+            .unwrap()
+            .set_vertex_inverse_mass(15, 1.0);
+        if update_position {
+            last.unwrap();
+            step(&mut world, 2);
+        } else {
+            assert!(body_invalid(last));
+            let vertices = world.soft_body(id).unwrap().vertices();
+            assert_eq!(vertices[15].inverse_mass, 0.0);
+        }
+    }
+}
+
+/// A seeded generator of `f32` in [0, 1).
+fn uniform(seed: &mut u32) -> f32 {
+    *seed ^= *seed << 13;
+    *seed ^= *seed >> 17;
+    *seed ^= *seed << 5;
+    (*seed >> 8) as f32 / (1u32 << 24) as f32
+}
+
+#[test]
+fn soft_body_inertia_at_its_bound_decomposes() {
+    // Seeded clouds of free particles, flat or stretched, with masses from 1 g to 1 t, moved
+    // away from the body origin until the inertia rule refuses them. The last accepted offset
+    // is created, also with baked rotations; in the asserts build Jolt decomposes each inertia
+    // there without an assertion.
+    let mut world = empty_world();
+    let mut seed = 0x9e37_79b9_u32;
+    let mut created = 0;
+    for _ in 0..24 {
+        let count = 3 + (uniform(&mut seed) * 30.0) as usize;
+        let extents = [0; 3].map(|_| 10.0_f32.powf(uniform(&mut seed) * 4.0 - 3.0));
+        let positions: Vec<[f32; 3]> = (0..count)
+            .map(|_| extents.map(|e| e * (uniform(&mut seed) - 0.5)))
+            .collect();
+        let inverse_masses: Vec<f32> = (0..count)
+            .map(|_| 10.0_f32.powf(uniform(&mut seed) * 6.0 - 3.0))
+            .collect();
+        let direction = [0; 3].map(|_| uniform(&mut seed) - 0.5);
+        let length = direction
+            .iter()
+            .map(|c| c * c)
+            .sum::<f32>()
+            .sqrt()
+            .max(1.0e-3);
+        let at = |distance: f32| {
+            particles(
+                positions
+                    .iter()
+                    .zip(&inverse_masses)
+                    .map(|(p, &inverse_mass)| {
+                        let [x, y, z] = [0, 1, 2].map(|k| p[k] + direction[k] / length * distance);
+                        SoftBodyVertex {
+                            inverse_mass,
+                            ..SoftBodyVertex::new(Vec3::new(x, y, z))
+                        }
+                    })
+                    .collect(),
+            )
+        };
+        let accepts = |world: &mut PhysicsWorld, distance: f32| match world
+            .create_soft_body(&at(distance), &SoftBodySettings::default())
+        {
+            Ok(id) => {
+                world.remove_body(id).unwrap();
+                true
+            }
+            Err(BodyError::InvalidValue(_)) => false,
+            Err(other) => panic!("{other:?}"),
+        };
+        let (mut low, mut high) = (0.0_f32, 0.5 * limits::MAX_SHAPE_EXTENT);
+        if !accepts(&mut world, low) || accepts(&mut world, high) {
+            continue;
+        }
+        while high - low > 1.0e-6 * high {
+            let middle = 0.5 * (low + high);
+            if accepts(&mut world, middle) {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        for _ in 0..4 {
+            let [x, y, z, w] = [0; 4].map(|_| uniform(&mut seed) - 0.5);
+            let length = (x * x + y * y + z * z + w * w).sqrt();
+            let rotation = Quat::from_xyzw(x / length, y / length, z / length, w / length);
+            for rotation in [Quat::IDENTITY, rotation] {
+                let settings = SoftBodySettings::default().rotation(rotation);
+                if let Ok(id) = world.create_soft_body(&at(low), &settings) {
+                    step(&mut world, 1);
+                    world.remove_body(id).unwrap();
+                    created += 1;
+                }
+            }
+        }
+    }
+    assert!(created >= 40, "{created}");
+}
