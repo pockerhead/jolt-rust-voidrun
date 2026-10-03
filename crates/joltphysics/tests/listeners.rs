@@ -598,12 +598,15 @@ fn character_inner_bodies_and_vehicle_chassis_report_rigid_contacts() {
     );
     let crate_ahead = obstacle(&mut world, 0.0, 8.0);
     let capsule = Shape::new_capsule(0.5, 0.3).unwrap();
+    // The inner body is 10 cm wider than the character, so it overlaps what the character
+    // walks into instead of stopping at the character's padding.
+    let wider = Shape::new_capsule(0.5, 0.4).unwrap();
     let settings = CharacterSettings::new(&capsule).inner_body(Some(InnerBody {
-        shape: &capsule,
+        shape: &wider,
         object_layer: layers.moving,
     }));
     let character = world
-        .create_character(&settings, RVec3::new(-10.0, 0.0, 0.0), Quat::IDENTITY)
+        .create_character(&settings, RVec3::new(-10.0, 0.8, 0.0), Quat::IDENTITY)
         .unwrap();
     let inner = world.character(character).unwrap().inner_body().unwrap();
     let crate_beside = obstacle(&mut world, -8.0, 0.0);
