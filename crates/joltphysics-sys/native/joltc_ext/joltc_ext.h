@@ -57,8 +57,135 @@ JPH_CAPI void JPH_SwingTwistConstraint_SetTwistMotorState(JPH_SwingTwistConstrai
 JPH_CAPI JPH_MotorState JPH_SwingTwistConstraint_GetTwistMotorState(const JPH_SwingTwistConstraint* constraint);
 JPH_CAPI void JPH_SwingTwistConstraint_SetTargetOrientationBS(JPH_SwingTwistConstraint* constraint, const JPH_Quat* orientation);
 JPH_CAPI void JPH_SwingTwistConstraint_GetRotationInConstraintSpace(const JPH_SwingTwistConstraint* constraint, JPH_Quat* result);
+JPH_CAPI void JPH_SwingTwistConstraint_SetTargetAngularVelocityCS(JPH_SwingTwistConstraint* constraint, const JPH_Vec3* angularVelocity);
+JPH_CAPI void JPH_SwingTwistConstraint_GetTargetAngularVelocityCS(const JPH_SwingTwistConstraint* constraint, JPH_Vec3* result);
+JPH_CAPI void JPH_SwingTwistConstraint_SetTargetOrientationCS(JPH_SwingTwistConstraint* constraint, const JPH_Quat* orientation);
+JPH_CAPI void JPH_SwingTwistConstraint_GetTargetOrientationCS(const JPH_SwingTwistConstraint* constraint, JPH_Quat* result);
+JPH_CAPI void JPH_SwingTwistConstraint_SetSwingMotorSettings(JPH_SwingTwistConstraint* constraint, const JPH_MotorSettings* settings);
+JPH_CAPI void JPH_SwingTwistConstraint_GetSwingMotorSettings(const JPH_SwingTwistConstraint* constraint, JPH_MotorSettings* result);
+JPH_CAPI void JPH_SwingTwistConstraint_SetTwistMotorSettings(JPH_SwingTwistConstraint* constraint, const JPH_MotorSettings* settings);
+JPH_CAPI void JPH_SwingTwistConstraint_GetTwistMotorSettings(const JPH_SwingTwistConstraint* constraint, JPH_MotorSettings* result);
+JPH_CAPI void JPH_SwingTwistConstraint_SetMaxFrictionTorque(JPH_SwingTwistConstraint* constraint, float frictionTorque);
+JPH_CAPI float JPH_SwingTwistConstraint_GetMaxFrictionTorque(const JPH_SwingTwistConstraint* constraint);
+JPH_CAPI float JPH_SwingTwistConstraint_GetPlaneHalfConeAngle(const JPH_SwingTwistConstraint* constraint);
+JPH_CAPI float JPH_SwingTwistConstraint_GetTwistMinAngle(const JPH_SwingTwistConstraint* constraint);
+JPH_CAPI float JPH_SwingTwistConstraint_GetTwistMaxAngle(const JPH_SwingTwistConstraint* constraint);
 
 /* HingeConstraint */
 JPH_CAPI void JPH_HingeConstraint_SetTargetOrientationBS(JPH_HingeConstraint* constraint, const JPH_Quat* orientation);
+
+/* SixDOFConstraint */
+JPH_CAPI void JPH_SixDOFConstraint_SetMotorSettings(JPH_SixDOFConstraint* constraint, JPH_SixDOFConstraintAxis axis, const JPH_MotorSettings* settings);
+
+/* PathConstraintPath */
+/* A path for a path constraint (JPH::PathConstraintPath). JPH_PathConstraintPathHermite_Create returns
+   it holding one reference, which JPH_PathConstraintPath_Destroy releases; the path constraint settings
+   and every path constraint created from them take their own reference (RefConst). */
+typedef struct JPH_PathConstraintPath JPH_PathConstraintPath; /* JPH::PathConstraintPath */
+
+JPH_CAPI void JPH_PathConstraintPath_Destroy(JPH_PathConstraintPath* path);
+JPH_CAPI void JPH_PathConstraintPath_SetIsLooping(JPH_PathConstraintPath* path, bool isLooping);
+JPH_CAPI bool JPH_PathConstraintPath_IsLooping(const JPH_PathConstraintPath* path);
+JPH_CAPI float JPH_PathConstraintPath_GetPathMaxFraction(const JPH_PathConstraintPath* path);
+JPH_CAPI float JPH_PathConstraintPath_GetClosestPoint(const JPH_PathConstraintPath* path, const JPH_Vec3* position, float fractionHint);
+
+/* A JPH::PathConstraintPathHermite, as its JPH::PathConstraintPath base. */
+JPH_CAPI JPH_PathConstraintPath* JPH_PathConstraintPathHermite_Create(void);
+/* path must come from JPH_PathConstraintPathHermite_Create. */
+JPH_CAPI void JPH_PathConstraintPathHermite_AddPoint(JPH_PathConstraintPath* path, const JPH_Vec3* position, const JPH_Vec3* tangent, const JPH_Vec3* normal);
+
+/* PathConstraint */
+typedef enum JPH_PathRotationConstraintType {
+	JPH_PathRotationConstraintType_Free = 0,
+	JPH_PathRotationConstraintType_ConstrainAroundTangent = 1,
+	JPH_PathRotationConstraintType_ConstrainAroundNormal = 2,
+	JPH_PathRotationConstraintType_ConstrainAroundBinormal = 3,
+	JPH_PathRotationConstraintType_ConstrainToPath = 4,
+	JPH_PathRotationConstraintType_FullyConstrained = 5,
+
+	_JPH_PathRotationConstraintType_Count,
+	_JPH_PathRotationConstraintType_Force32 = 0x7fffffff
+} JPH_PathRotationConstraintType;
+
+typedef struct JPH_PathConstraintSettings {
+	JPH_ConstraintSettings			base;    /* Inherits JPH_ConstraintSettings */
+
+	const JPH_PathConstraintPath*	path;
+	JPH_Vec3						pathPosition;
+	JPH_Quat						pathRotation;
+	float							pathFraction;
+	float							maxFrictionForce;
+	JPH_PathRotationConstraintType	rotationConstraintType;
+	JPH_MotorSettings				positionMotorSettings;
+} JPH_PathConstraintSettings;
+
+typedef struct JPH_PathConstraint JPH_PathConstraint; /* JPH::PathConstraint */
+
+/* Jolt's defaults, with a null path. */
+JPH_CAPI void JPH_PathConstraintSettings_Init(JPH_PathConstraintSettings* settings);
+JPH_CAPI JPH_PathConstraint* JPH_PathConstraint_Create(const JPH_PathConstraintSettings* settings, JPH_Body* body1, JPH_Body* body2);
+/* The constraint's path, borrowed from the constraint. */
+JPH_CAPI const JPH_PathConstraintPath* JPH_PathConstraint_GetPath(const JPH_PathConstraint* constraint);
+JPH_CAPI float JPH_PathConstraint_GetPathFraction(const JPH_PathConstraint* constraint);
+JPH_CAPI void JPH_PathConstraint_SetMaxFrictionForce(JPH_PathConstraint* constraint, float frictionForce);
+JPH_CAPI float JPH_PathConstraint_GetMaxFrictionForce(const JPH_PathConstraint* constraint);
+JPH_CAPI void JPH_PathConstraint_SetPositionMotorSettings(JPH_PathConstraint* constraint, const JPH_MotorSettings* settings);
+JPH_CAPI void JPH_PathConstraint_GetPositionMotorSettings(const JPH_PathConstraint* constraint, JPH_MotorSettings* result);
+JPH_CAPI void JPH_PathConstraint_SetPositionMotorState(JPH_PathConstraint* constraint, JPH_MotorState state);
+JPH_CAPI JPH_MotorState JPH_PathConstraint_GetPositionMotorState(const JPH_PathConstraint* constraint);
+JPH_CAPI void JPH_PathConstraint_SetTargetVelocity(JPH_PathConstraint* constraint, float velocity);
+JPH_CAPI float JPH_PathConstraint_GetTargetVelocity(const JPH_PathConstraint* constraint);
+JPH_CAPI void JPH_PathConstraint_SetTargetPathFraction(JPH_PathConstraint* constraint, float fraction);
+JPH_CAPI float JPH_PathConstraint_GetTargetPathFraction(const JPH_PathConstraint* constraint);
+JPH_CAPI void JPH_PathConstraint_GetTotalLambdaPosition(const JPH_PathConstraint* constraint, float result[2]);
+JPH_CAPI float JPH_PathConstraint_GetTotalLambdaPositionLimits(const JPH_PathConstraint* constraint);
+JPH_CAPI float JPH_PathConstraint_GetTotalLambdaMotor(const JPH_PathConstraint* constraint);
+JPH_CAPI void JPH_PathConstraint_GetTotalLambdaRotationHinge(const JPH_PathConstraint* constraint, float result[2]);
+JPH_CAPI void JPH_PathConstraint_GetTotalLambdaRotation(const JPH_PathConstraint* constraint, JPH_Vec3* result);
+
+/* PulleyConstraint */
+typedef struct JPH_PulleyConstraintSettings {
+	JPH_ConstraintSettings		base;    /* Inherits JPH_ConstraintSettings */
+
+	JPH_ConstraintSpace			space;
+	JPH_RVec3					bodyPoint1;
+	JPH_RVec3					fixedPoint1;
+	JPH_RVec3					bodyPoint2;
+	JPH_RVec3					fixedPoint2;
+	float						ratio;
+	float						minLength;
+	float						maxLength;
+} JPH_PulleyConstraintSettings;
+
+typedef struct JPH_PulleyConstraint JPH_PulleyConstraint; /* JPH::PulleyConstraint */
+
+JPH_CAPI void JPH_PulleyConstraintSettings_Init(JPH_PulleyConstraintSettings* settings);
+JPH_CAPI JPH_PulleyConstraint* JPH_PulleyConstraint_Create(const JPH_PulleyConstraintSettings* settings, JPH_Body* body1, JPH_Body* body2);
+/* The body points come back relative to the centres of mass (LocalToBodyCOM), the fixed points in
+   world space, and the lengths as resolved when the constraint was created. */
+JPH_CAPI void JPH_PulleyConstraint_GetSettings(const JPH_PulleyConstraint* constraint, JPH_PulleyConstraintSettings* settings);
+JPH_CAPI void JPH_PulleyConstraint_SetLength(JPH_PulleyConstraint* constraint, float minLength, float maxLength);
+JPH_CAPI float JPH_PulleyConstraint_GetMinLength(const JPH_PulleyConstraint* constraint);
+JPH_CAPI float JPH_PulleyConstraint_GetMaxLength(const JPH_PulleyConstraint* constraint);
+JPH_CAPI float JPH_PulleyConstraint_GetCurrentLength(const JPH_PulleyConstraint* constraint);
+JPH_CAPI float JPH_PulleyConstraint_GetTotalLambdaPosition(const JPH_PulleyConstraint* constraint);
+
+/* RackAndPinionConstraint */
+typedef struct JPH_RackAndPinionConstraintSettings {
+	JPH_ConstraintSettings		base;    /* Inherits JPH_ConstraintSettings */
+
+	JPH_ConstraintSpace			space;
+	JPH_Vec3					hingeAxis;
+	JPH_Vec3					sliderAxis;
+	float						ratio;
+} JPH_RackAndPinionConstraintSettings;
+
+typedef struct JPH_RackAndPinionConstraint JPH_RackAndPinionConstraint; /* JPH::RackAndPinionConstraint */
+
+JPH_CAPI void JPH_RackAndPinionConstraintSettings_Init(JPH_RackAndPinionConstraintSettings* settings);
+JPH_CAPI JPH_RackAndPinionConstraint* JPH_RackAndPinionConstraint_Create(const JPH_RackAndPinionConstraintSettings* settings, JPH_Body* body1, JPH_Body* body2);
+/* pinion must be a hinge and rack a slider constraint; the constraint takes a reference to each. */
+JPH_CAPI void JPH_RackAndPinionConstraint_SetConstraints(JPH_RackAndPinionConstraint* constraint, const JPH_Constraint* pinion, const JPH_Constraint* rack);
+JPH_CAPI float JPH_RackAndPinionConstraint_GetTotalLambda(const JPH_RackAndPinionConstraint* constraint);
 
 #endif /* JOLT_C_EXT_H_ */
