@@ -333,6 +333,52 @@ fn gravity_override_replaces_world_gravity() {
 }
 
 #[test]
+fn gravity_whose_force_overflows_is_rejected() {
+    let (mut world, layers) = car_world(Vec3::ZERO, 1);
+    let ground = add_ground(&mut world, &layers, false);
+    let body = chassis_settings(&layers, RVec3::new(0.0, 0.9, 0.0), Quat::IDENTITY);
+    let (chassis, car) = add_car_with(&mut world, &body, VehicleCollisionTester::ray(layers.probe));
+    // Jolt adds `gravity / inverse mass` per component: 1500 kg times 2.3e35 m/s² is past
+    // f32::MAX, 1500 kg times 2e35 m/s² is not.
+    let accepted = Vec3::new(2.0e35, -2.0e35, 0.0);
+    world
+        .vehicle_mut(car)
+        .unwrap()
+        .set_gravity(accepted)
+        .unwrap();
+    for rejected in [Vec3::new(0.0, -2.3e35, 0.0), Vec3::new(0.0, -1.0e36, 0.0)] {
+        assert!(matches!(
+            world.vehicle_mut(car).unwrap().set_gravity(rejected),
+            Err(VehicleError::InvalidValue(_))
+        ));
+    }
+    assert_eq!(world.vehicle(car).unwrap().gravity(), Some(accepted));
+
+    // An eighth turn about z turns that gravity onto the x axis with a component of 2.8e35,
+    // whose force would overflow, so the rebase is refused and changes nothing.
+    let angle = std::f32::consts::FRAC_PI_8;
+    let eighth_turn_about_z = Quat::from_xyzw(0.0, 0.0, angle.sin(), angle.cos());
+    assert!(matches!(
+        world.rebase(&[ground, chassis], eighth_turn_about_z, RVec3::ZERO),
+        Err(BodyError::InvalidValue(_))
+    ));
+    assert_eq!(world.vehicle(car).unwrap().gravity(), Some(accepted));
+
+    world
+        .vehicle_mut(car)
+        .unwrap()
+        .set_gravity(GRAVITY)
+        .unwrap();
+    step(&mut world, 10);
+    let chassis = world.body(chassis).unwrap();
+    let state = [v3(chassis.position()), f3(chassis.linear_velocity())];
+    assert!(
+        state.iter().flatten().all(|value| value.is_finite()),
+        "{state:?}"
+    );
+}
+
+#[test]
 fn sleeping_chassis_gets_no_override_force() {
     let (mut world, layers) = car_world(Vec3::ZERO, 1);
     add_ground(&mut world, &layers, false);

@@ -82,8 +82,19 @@ impl JoltObject for JPH_VehicleConstraint {
 pub(crate) struct VehicleEntry {
     constraint: Owned<JPH_VehicleConstraint>,
     pub(crate) body: BodyId,
+    /// The chassis' inverse mass, positive and finite: the chassis is dynamic and the safe API
+    /// cannot change its mass or motion type.
+    chassis_inverse_mass: f32,
     pub(crate) collision_tester: VehicleCollisionTester,
     wheels: Vec<WheelGeometry>,
+}
+
+/// Whether the force `gravity / inverse mass` that Jolt adds to an awake chassis on every step
+/// (`VehicleConstraint::OnStep`) is finite, divided per component as Jolt does.
+fn gravity_force_is_finite(gravity: Vec3, chassis_inverse_mass: f32) -> bool {
+    [gravity.x, gravity.y, gravity.z]
+        .iter()
+        .all(|component| (component / chassis_inverse_mass).is_finite())
 }
 
 /// What the driver asks of a vehicle (Jolt `WheeledVehicleController::SetDriverInput`).
@@ -356,8 +367,9 @@ impl VehicleMut<'_> {
         Ok(())
     }
 
-    /// Replaces the world's gravity for this vehicle by `gravity`, m/s², finite (Jolt
-    /// `VehicleConstraint::OverrideGravity`).
+    /// Replaces the world's gravity for this vehicle by `gravity`, m/s² (Jolt
+    /// `VehicleConstraint::OverrideGravity`). It must be finite, and so must each component
+    /// times the chassis mass.
     ///
     /// On every step while the chassis is awake, Jolt sets the chassis' gravity factor to 0 and
     /// adds the force `gravity / inverse mass` at its centre of mass; a sleeping chassis gets no
@@ -367,6 +379,11 @@ impl VehicleMut<'_> {
     pub fn set_gravity(&mut self, gravity: Vec3) -> Result<(), VehicleError> {
         if !gravity.is_finite() {
             return Err(VehicleError::InvalidValue("gravity must be finite"));
+        }
+        if !gravity_force_is_finite(gravity, self.entry.chassis_inverse_mass) {
+            return Err(VehicleError::InvalidValue(
+                "gravity times the chassis mass must be finite",
+            ));
         }
         let gravity = gravity.to_jph();
         // SAFETY: as in `set_driver_input`; `gravity` is a live local.
@@ -533,6 +550,16 @@ impl PhysicsWorld {
             antiRollBars: anti_roll_bars.as_ptr(),
             controller: controller.as_ptr().cast(),
         };
+        let chassis_inverse_mass = with_locked_body(self.body_lock_interface, body, |chassis| {
+            // SAFETY: the chassis is locked for writing and dynamic, so it has motion
+            // properties; the getters read members.
+            unsafe {
+                JPH_MotionProperties_GetInverseMassUnchecked(JPH_Body_GetMotionProperties(
+                    chassis.as_ptr(),
+                ))
+            }
+        })
+        .unwrap_or_else(|| unreachable!("`check` found the body and `&mut self` keeps it"));
         let constraint = with_locked_body(self.body_lock_interface, body, |chassis| {
             // SAFETY: the chassis is locked for writing and dynamic. The constructor stores the
             // body pointer and reads its id; Jolt bodies stay at their address until destroyed,
@@ -552,6 +579,7 @@ impl PhysicsWorld {
         let mut entry = VehicleEntry {
             constraint,
             body,
+            chassis_inverse_mass,
             collision_tester: settings.collision_tester,
             wheels: settings.wheels.iter().map(WheelGeometry::of).collect(),
         };
@@ -696,8 +724,10 @@ impl PhysicsWorld {
                 entry,
             };
             let gravity = vehicle.gravity().map(&rotate);
-            if !gravity.is_none_or(|gravity| gravity.is_finite()) {
-                return Err("rebase would give a vehicle a non-finite gravity");
+            if !gravity.is_none_or(|gravity| {
+                gravity.is_finite() && gravity_force_is_finite(gravity, entry.chassis_inverse_mass)
+            }) {
+                return Err("rebase would give a vehicle a non-finite gravity or gravity force");
             }
             let collision_tester = match entry.collision_tester.up() {
                 Some(up) => {
