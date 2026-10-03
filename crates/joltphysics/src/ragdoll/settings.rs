@@ -668,10 +668,11 @@ mod tests {
         let mut bad = pose();
         bad.joints[2].rotation = Quat::from_xyzw(0.0, 0.0, 0.0, 2.0);
         assert_invalid(bad.validate(3));
-        let mut bad = pose();
-        bad.root_offset.x = Real::MAX;
-        bad.joints[1].translation.x = f32::MAX;
-        assert_invalid(bad.validate(3));
+        // The sum overflows in single precision; in double precision it rounds to `Real::MAX`.
+        let mut far = pose();
+        far.root_offset.x = Real::MAX;
+        far.joints[1].translation.x = f32::MAX;
+        assert_eq!(far.validate(3).is_ok(), far.position(1).is_finite());
         assert_eq!(pose().position(0), RVec3::new(1.0, 2.0, 3.0));
     }
 
