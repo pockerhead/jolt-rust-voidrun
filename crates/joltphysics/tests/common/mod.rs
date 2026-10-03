@@ -6,6 +6,7 @@
 pub mod determinism;
 #[cfg(windows)]
 pub mod memory;
+pub mod ragdoll;
 pub mod vehicle;
 pub mod walker;
 
