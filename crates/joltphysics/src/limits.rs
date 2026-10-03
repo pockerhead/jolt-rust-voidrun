@@ -49,11 +49,11 @@
 //!   the body origin, and when `V > 0` adds `w · pressure · dt / V · ((x2 - x1) × (x3 - x1))` to
 //!   the velocity of each vertex of every face (`SoftBodyMotionProperties.cpp:107-118,291-322`);
 //!   nothing bounds `1 / V`. [`PhysicsWorld::create_soft_body`] accepts a pressure only when
-//!   `pressure · A <= MAX_ACCELERATION · MIN_MASS · V_low`, where `V_low` is a lower bound of
+//!   `pressure · A <= MAX_ACCELERATION / MAX_VERTEX_INVERSE_MASS · V_low`, where `V_low` is a lower bound of
 //!   the six-volume Jolt computes before the first step and `A` the largest sum, over the faces
 //!   of one vertex, of an upper bound of `|x2 - x1| · |x3 - x1|` in Jolt's arithmetic. So the
 //!   faces must enclose a positive volume, wound counter-clockwise seen from outside, and no
-//!   vertex, whatever its inverse mass (at most `1 / MIN_MASS`, also after
+//!   vertex, whatever its inverse mass (at most [`MAX_VERTEX_INVERSE_MASS`], also after
 //!   [`SoftBodyMut::set_vertex_inverse_mass`](crate::SoftBodyMut::set_vertex_inverse_mass)),
 //!   gains more than `MAX_ACCELERATION · dt` per sub-step from the pressure at the start
 //!   geometry; the pressure coefficient and impulses stay finite, so a kinematic vertex gets
@@ -102,9 +102,14 @@
 //!   A tensor Jolt sums exactly diagonal (no rotation, every vertex on a coordinate axis) is
 //!   decomposed exactly; it is accepted as a rigid body's is, when its moments are all above
 //!   1e-30 or it is near zero. The rule refuses a body whose vertices lie far from its origin
-//!   compared with their spread: an 11 × 11 cloth of 1 m with 1 kg vertices is accepted up to
-//!   about 10 m from its origin and refused from 15 m (Jolt asserted at 50 m), and a free
-//!   straight line of vertices, whose smallest moment is zero.
+//!   compared with their spread: an 11 × 11 cloth of 1 m with 1 kg vertices is accepted at
+//!   11 m from its origin and refused from 12 m (Jolt asserted at 50 m), and a free straight
+//!   line of vertices, whose smallest moment is zero. The rule does not know the shape, so it
+//!   also refuses free bodies thinner than about 1/70 of their length (ribbons) or with a
+//!   radius below about 1/130 of their length (tubes, ropes), which Jolt decomposes: centred
+//!   on the origin, a 2.5 m ribbon 1, 2 or 3 cm wide and a 3 m tube of radius 1 or 2 cm were
+//!   refused, and Jolt created and stepped them without an assert at baked rotations of 0,
+//!   0.001 and 0.3 rad. A kinematic vertex skips the check.
 //! - **Vehicle gravity.** Jolt adds `gravity / inverse_mass` to the chassis
 //!   (`VehicleConstraint::OnStep`); the chassis is a dynamic body, so the force is at most
 //!   `5e8 · 1e6`, about 5e14 N.
@@ -260,7 +265,13 @@
 //!   155 m/s and an accepted force of 3.7e6 N, had NaN vertices after its first step in the
 //!   release build and asserted that a squared velocity is finite (`MotionProperties.inl:28`)
 //!   in the asserts build. With a tenth of the force, 5 iterations, no volume constraints or
-//!   uniform attributes it stayed finite. No input bound in this module excludes it.
+//!   uniform attributes it stayed finite. No input bound in this module excludes it. Two more
+//!   seeded scenes of the same kind failed in the asserts build: a cube of 1 g vertices with
+//!   six volume constraints, 37 iterations, a step of 0.1 s, friction 1000, a vertex radius of
+//!   2000 m, a force of 3.7e6 N and a vertex unpinned to 1 kg asserted at
+//!   `MotionProperties.inl:28`; a cube with pressure 1e5 under gravity of about 1000 m/s²,
+//!   pushed by repeated forces of 3.8e9 N and resting against rigid bodies (without them it
+//!   did not fail), grew bounds beyond `cLargeFloat` (`QuadTree.cpp:68`).
 //! - `RagdollSettings::new_stabilized` reports Jolt's `Stabilize` failing to decompose an
 //!   inertia tensor as an error, but Jolt asserts on that path first (`Ragdoll.cpp:158`).
 //! - The assertion `errors == EPhysicsUpdateError::None` at the end of every step that drops
@@ -456,6 +467,12 @@ pub const MAX_FRICTION: f32 = 1000.0;
 /// Crate policy.
 pub const MIN_MASS: f32 = 1.0e-3;
 
+/// Largest inverse mass of a movable soft body vertex, in 1/kg: 1000, whose inverse Jolt
+/// computes in `f32` as exactly [`MIN_MASS`]. `1.0 / MIN_MASS` itself rounds to 999.99994.
+///
+/// Derived from [`MIN_MASS`].
+pub const MAX_VERTEX_INVERSE_MASS: f32 = 1000.0;
+
 /// Largest mass of a dynamic body, ragdoll part or character, in kg: a 10 m cube of water, the
 /// top of the dynamic object sizes Jolt documents.
 ///
@@ -590,9 +607,9 @@ pub const MAX_COMPLIANCE: f32 = 1.0e20;
 pub const MAX_SOFT_BODY_PRESSURE: f32 = 1.0e6;
 
 /// Largest force in newtons that the pressure of a new soft body may give a vertex in Jolt's
-/// formula: [`MAX_ACCELERATION`] for a vertex of [`MIN_MASS`], 5e5 N (see
+/// formula: [`MAX_ACCELERATION`] for a vertex of [`MAX_VERTEX_INVERSE_MASS`], 5e5 N (see
 /// [Derived bounds](self#derived-bounds)).
-const MAX_PRESSURE_VERTEX_FORCE: f64 = MAX_ACCELERATION as f64 * MIN_MASS as f64;
+const MAX_PRESSURE_VERTEX_FORCE: f64 = MAX_ACCELERATION as f64 / MAX_VERTEX_INVERSE_MASS as f64;
 
 /// Unit roundoff of `f32`, `2^-24`.
 const F32_UNIT_ROUNDOFF: f64 = f32::EPSILON as f64 / 2.0;
@@ -896,7 +913,7 @@ pub(crate) fn is_mass(mass: f32) -> bool {
 /// Whether `inverse_mass` is the inverse of a mass within `MIN_MASS..=MAX_MASS`, the range of
 /// a movable soft body vertex.
 pub(crate) fn is_vertex_inverse_mass(inverse_mass: f32) -> bool {
-    (1.0 / MAX_MASS..=1.0 / MIN_MASS).contains(&inverse_mass)
+    (1.0 / MAX_MASS..=MAX_VERTEX_INVERSE_MASS).contains(&inverse_mass)
 }
 
 /// Whether `compliance` is finite and within `0..=MAX_COMPLIANCE`.
@@ -1035,6 +1052,12 @@ mod tests {
     }
 
     #[test]
+    fn the_largest_vertex_inverse_mass_is_the_smallest_mass_for_jolt() {
+        assert_eq!(1.0 / MAX_VERTEX_INVERSE_MASS, MIN_MASS);
+        assert!(1.0 / MAX_VERTEX_INVERSE_MASS.next_up() < MIN_MASS);
+    }
+
+    #[test]
     fn scalar_checks_accept_their_range_and_reject_beyond() {
         type Check = fn(f32) -> bool;
         let checks: [(Check, &[f32], &[f32]); 6] = [
@@ -1063,11 +1086,11 @@ mod tests {
             ),
             (
                 is_vertex_inverse_mass,
-                &[1.0 / MAX_MASS, 1.0 / MIN_MASS],
+                &[1.0 / MAX_MASS, 1.0 / MIN_MASS, MAX_VERTEX_INVERSE_MASS],
                 &[
                     0.0,
                     (1.0 / MAX_MASS).next_down(),
-                    (1.0 / MIN_MASS).next_up(),
+                    MAX_VERTEX_INVERSE_MASS.next_up(),
                 ],
             ),
             (

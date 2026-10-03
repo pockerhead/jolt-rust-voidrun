@@ -88,6 +88,7 @@ fn wheel_contacts_match_the_ground_geometry() {
                 // For a vertical suspension over a plane each is the distance minus the wheel
                 // radius.
                 let expected = distance - f64::from(WHEEL_RADIUS);
+                // A tester that stopped skipping the vehicle's own chassis reports it here.
                 assert_eq!(contact.body, ground, "{case}");
                 let normal = f3(contact.normal);
                 assert!(

@@ -38,7 +38,8 @@ pub struct SoftBodyVertex {
     /// [`limits::MAX_LINEAR_VELOCITY`] long.
     pub velocity: Vec3,
     /// Inverse mass in 1/kg: 0 for a kinematic vertex, which only moves by its velocity, or the
-    /// inverse of a mass within [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`].
+    /// inverse of a mass within [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`], at most
+    /// [`limits::MAX_VERTEX_INVERSE_MASS`] (1000).
     ///
     /// The 1 g floor applies per vertex, so a light, finely divided body is refused at its real
     /// masses: a 1 m² cotton cloth of 0.15 kg at 21 × 21 vertices (0.34 g each), a 2 m flag of
@@ -1067,8 +1068,12 @@ impl PhysicsWorld {
     /// decomposes it (unless a vertex is kinematic), which fails for vertices far from the
     /// origin compared with their spread, or on one line. Such a body is refused with
     /// [`BodyError::InvalidValue`] (see [Derived bounds](crate::limits#derived-bounds)): an
-    /// 11 × 11 cloth of 1 m is accepted up to about 10 m from its origin. Give the vertices
-    /// around the origin and place the body with [`SoftBodySettings::position`].
+    /// 11 × 11 cloth of 1 m is accepted at 11 m from its origin and refused from 12 m. Give the
+    /// vertices around the origin and place the body with [`SoftBodySettings::position`]. The
+    /// check is conservative for thin bodies: a free ribbon narrower than about 1/70 of its
+    /// length or a tube of radius below about 1/130 of its length (a 2.5 m strip 2 cm wide, a
+    /// 3 m rope of radius 2 cm) is refused even centred on the origin, although Jolt decomposes
+    /// it. Widen it or make a vertex kinematic, which skips the check.
     ///
     /// ```
     /// use joltphysics::*;
