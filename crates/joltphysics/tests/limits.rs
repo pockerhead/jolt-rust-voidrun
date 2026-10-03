@@ -3213,3 +3213,271 @@ fn soft_body_inertia_at_its_bound_decomposes() {
     }
     assert!(created >= 40, "{created}");
 }
+
+/// A slender shape of half length `length` and relative thickness `thin`: a box of half
+/// extents `thin · length`, `1.5 · thin · length` and `length` (`kind` 0), or a capsule (1) or a
+/// cylinder (2) of half height `length` and radius `thin · length`.
+fn slender_shape(kind: u32, length: f32, thin: f32) -> Shape {
+    let width = thin * length;
+    match kind {
+        0 => Shape::new_box_with_convex_radius(Vec3::new(width, 1.5 * width, length), 0.0),
+        1 => Shape::new_capsule(length, width),
+        _ => Shape::new_cylinder_with_convex_radius(length, width, 0.0),
+    }
+    .unwrap()
+}
+
+/// `v` rotated by the unit quaternion `q`.
+fn rotated(q: Quat, v: [f32; 3]) -> [f32; 3] {
+    let u = [q.x, q.y, q.z];
+    let cross = |a: [f32; 3], b: [f32; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let t = cross(u, v).map(|c| 2.0 * c);
+    let ut = cross(u, t);
+    [0, 1, 2].map(|k| v[k] + q.w * t[k] + ut[k])
+}
+
+/// A seeded unit quaternion.
+fn seeded_rotation(seed: &mut u32) -> Quat {
+    let [x, y, z, w] = [0; 4].map(|_| uniform(seed) - 0.5);
+    let length = (x * x + y * y + z * z + w * w).sqrt();
+    Quat::from_xyzw(x / length, y / length, z / length, w / length)
+}
+
+#[test]
+fn rigid_body_inertia_at_its_bound_decomposes() {
+    // Seeded slender boxes, capsules and cylinders, 2 cm to 20 m long, as a rotated compound
+    // child, as two rotated children side by side along their length, and with a centre of mass
+    // moved nearly along their length; dynamic with computed or overridden masses, and
+    // kinematic. Each is made thinner until the inertia rule refuses it; the thinnest accepted
+    // one is created and stepped, and one just thinner is refused. In the asserts build Jolt
+    // decomposes each inertia there without an assertion.
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let mut seed = 0x2545_f491_u32;
+    // Boundaries found, by shape kind (rows) and arrangement (columns).
+    let mut boundaries = [[0_u32; 3]; 3];
+    let mut accepted_at_the_thin_end = 0;
+    for case in 0..72_u32 {
+        let kind = case % 3;
+        let arrangement = (case / 3) % 3;
+        let length = 10.0_f32.powf(uniform(&mut seed) * 3.0 - 2.0);
+        let rotation = seeded_rotation(&mut seed);
+        let tilt_size = 0.2 * uniform(&mut seed);
+        let tilt = [0; 3].map(|_| (uniform(&mut seed) - 0.5) * tilt_size);
+        let settings = match case % 4 {
+            0 => BodySettings::new_kinematic(),
+            1 => BodySettings::new_dynamic().mass(10.0_f32.powf(uniform(&mut seed) * 6.0 - 3.0)),
+            _ => BodySettings::new_dynamic().mass(1.0),
+        };
+        let shape = |thin: f32| {
+            let leaf = slender_shape(kind, length, thin);
+            let child = |position: Vec3, user_data| CompoundChild {
+                shape: &leaf,
+                position,
+                rotation,
+                user_data,
+            };
+            // The long axis of the leaf, rotated.
+            let axis = if kind == 0 {
+                [0.0, 0.0, 1.0]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
+            let along = rotated(rotation, axis).map(|c| c * length);
+            let offset = [0, 1, 2].map(|k| 0.5 * (along[k] + tilt[k] * length));
+            match arrangement {
+                0 => Shape::new_compound(&[child(Vec3::ZERO, 0)]),
+                1 => Shape::new_compound(&[
+                    child(Vec3::from(along), 0),
+                    child(Vec3::from(along.map(|c| -c)), 1),
+                ]),
+                _ => Shape::new_offset_center_of_mass(
+                    &Shape::new_compound(&[child(Vec3::ZERO, 0)]).unwrap(),
+                    Vec3::from(offset),
+                ),
+            }
+            .unwrap()
+        };
+        let create = |world: &mut PhysicsWorld, thin: f32| match world
+            .create_body(&shape(thin), &settings)
+        {
+            Ok(id) => Some(id),
+            Err(BodyError::InvalidValue(_)) => None,
+            Err(other) => panic!("{other:?}"),
+        };
+        let mut accepts = |thin: f32| {
+            let id = create(&mut world, thin);
+            id.map(|id| world.remove_body(id).unwrap()).is_some()
+        };
+        let thinnest = if accepts(THINNEST) {
+            // The part of the centre of mass offset across the long axis adds a moment about
+            // that axis that does not shrink with the thickness, so the thinnest shape passes.
+            assert_eq!(arrangement, 2, "case {case}: thinnest shape accepted");
+            accepted_at_the_thin_end += 1;
+            THINNEST
+        } else {
+            let (thinnest, refused) = thinnest_accepted(accepts);
+            assert!(create(&mut world, refused).is_none(), "case {case}");
+            // Jolt computes no mass properties for a static body, so the rule does not apply.
+            let fixed = world
+                .create_body(&shape(THINNEST), &BodySettings::new_static())
+                .unwrap();
+            world.remove_body(fixed).unwrap();
+            boundaries[kind as usize][arrangement as usize] += 1;
+            thinnest
+        };
+        let id = create(&mut world, thinnest).unwrap();
+        step(&mut world, 2);
+        world.remove_body(id).unwrap();
+    }
+    // Every kind in every arrangement reaches its boundary in several of its 8 cases.
+    assert!(
+        boundaries.iter().flatten().all(|&count| count >= 3),
+        "{boundaries:?}, {accepted_at_the_thin_end} accepted at the thin end"
+    );
+}
+
+/// The thinnest relative thickness the boundary tests try.
+const THINNEST: f32 = 1.0e-4;
+
+/// A compound with one child, the slender shape of `kind` (see [`slender_shape`]) of half
+/// length `length` and relative thickness `thin`, rotated by `rotation` about its centre.
+fn rotated_slender_child(kind: u32, length: f32, thin: f32, rotation: Quat) -> Shape {
+    let leaf = slender_shape(kind, length, thin);
+    Shape::new_compound(&[CompoundChild {
+        shape: &leaf,
+        position: Vec3::ZERO,
+        rotation,
+        user_data: 0,
+    }])
+    .unwrap()
+}
+
+/// The thinnest relative thickness between [`THINNEST`] and 0.5 that `accepts`, to a relative
+/// 1e-4, and the thickness just below it that it refuses. Panics unless `accepts` takes 0.5 and
+/// refuses [`THINNEST`].
+fn thinnest_accepted(mut accepts: impl FnMut(f32) -> bool) -> (f32, f32) {
+    let (mut low, mut high) = (THINNEST, 0.5_f32);
+    assert!(accepts(high), "thick shape refused");
+    assert!(!accepts(low), "thinnest shape accepted");
+    while high - low > 1.0e-4 * high {
+        let middle = 0.5 * (low + high);
+        if accepts(middle) {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    (high, low)
+}
+
+#[test]
+fn inner_body_inertia_at_its_bound_decomposes() {
+    // Jolt creates a character's inner body as a kinematic body of the inner body shape. Seeded
+    // slender boxes, capsules and cylinders, 2 cm to 20 m long, in a rotated compound child are
+    // made thinner until the inertia rule refuses the character; the thinnest accepted one is
+    // created and stepped, and one just thinner is refused. In the asserts build Jolt decomposes
+    // each inertia there without an assertion.
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let capsule = Shape::new_capsule(0.5, 0.3).unwrap();
+    let mut seed = 0x1b87_3593_u32;
+    for case in 0..12_u32 {
+        let kind = case % 3;
+        let length = 10.0_f32.powf(uniform(&mut seed) * 3.0 - 2.0);
+        let rotation = seeded_rotation(&mut seed);
+        let create = |world: &mut PhysicsWorld, thin: f32| {
+            let inner = rotated_slender_child(kind, length, thin, rotation);
+            let settings = CharacterSettings::new(&capsule).inner_body(Some(InnerBody {
+                shape: &inner,
+                object_layer: ObjectLayer::MOVING,
+            }));
+            match world.create_character(&settings, RVec3::ZERO, Quat::IDENTITY) {
+                Ok(id) => Some(id),
+                Err(CharacterError::InvalidValue(_)) => None,
+                Err(other) => panic!("{other:?}"),
+            }
+        };
+        let (thinnest, refused) = thinnest_accepted(|thin| {
+            let id = create(&mut world, thin);
+            id.map(|id| world.remove_character(id).unwrap()).is_some()
+        });
+        let id = create(&mut world, thinnest).unwrap();
+        step(&mut world, 2);
+        world.remove_character(id).unwrap();
+        assert!(create(&mut world, refused).is_none(), "case {case}");
+    }
+}
+
+#[test]
+fn stabilized_ragdoll_inertia_at_its_bound_decomposes() {
+    // A chain of three parts, each a seeded slender box, capsule or cylinder in a rotated
+    // compound child, with masses that `Stabilize` redistributes: it scales each part's inertia
+    // to its new mass and decomposes it, then rebuilds the parents' with raised moments; the
+    // leaf part keeps its scaled tensor. The parts are made thinner until the inertia rule
+    // refuses the settings; the ragdoll at the thinnest accepted shape is created and stepped,
+    // and one just thinner is refused. In the asserts build Jolt decomposes each inertia there
+    // without an assertion.
+    let skeleton = Skeleton::new(&[
+        SkeletonJoint {
+            name: "root",
+            parent: None,
+        },
+        SkeletonJoint {
+            name: "middle",
+            parent: Some(0),
+        },
+        SkeletonJoint {
+            name: "leaf",
+            parent: Some(1),
+        },
+    ])
+    .unwrap();
+    let mut seed = 0x68e3_1da4_u32;
+    for case in 0..6_u32 {
+        let kind = case % 3;
+        let length = 10.0_f32.powf(uniform(&mut seed) * 2.0 - 1.0);
+        let rotations = [0; 3].map(|_| seeded_rotation(&mut seed));
+        let (mut world, layers) = common::ragdoll::ragdoll_world(1);
+        let build = |thin: f32| {
+            let shapes =
+                rotations.map(|rotation| rotated_slender_child(kind, length, thin, rotation));
+            let parts: Vec<RagdollPart> = [8.0, 2.0, 0.5]
+                .into_iter()
+                .enumerate()
+                .map(|(index, mass)| {
+                    let height = 3.0 * length * index as f32;
+                    let joint = HingeConstraintSettings::new(
+                        common::walker::rvec3([0.0, f64::from(height - 1.5 * length), 0.0]),
+                        Vec3::new(0.0, 0.0, 1.0),
+                        Vec3::new(1.0, 0.0, 0.0),
+                    );
+                    RagdollPart {
+                        shape: &shapes[index],
+                        body: BodySettings::new_dynamic()
+                            .object_layer(layers.ragdoll)
+                            .position(common::walker::rvec3([0.0, f64::from(height), 0.0]))
+                            .mass(mass),
+                        joint: (index > 0).then_some(RagdollJoint::Hinge(joint)),
+                    }
+                })
+                .collect();
+            match RagdollSettings::new_stabilized(&skeleton, &parts) {
+                Ok(settings) => Some(settings),
+                Err(RagdollError::InvalidValue(_)) => None,
+                Err(other) => panic!("{other:?}"),
+            }
+        };
+        let (thinnest, refused) = thinnest_accepted(|thin| build(thin).is_some());
+        let id = world
+            .create_ragdoll(&build(thinnest).unwrap(), None, Activation::Activate)
+            .unwrap();
+        step(&mut world, 2);
+        world.remove_ragdoll(id).unwrap();
+        assert!(build(refused).is_none(), "case {case}");
+    }
+}

@@ -70,6 +70,41 @@
 //!   `1.0001 · (|e| + 15 u (|pa| + |pb|))`. A tetrahedron with three 1 m edges at a right
 //!   corner takes a pressure of up to about 9e4; the ball of radius 0.5 m in
 //!   `pressure_at_the_bound_steps_finitely` takes [`MAX_SOFT_BODY_PRESSURE`].
+//! - **Rigid body inertia.** Jolt decomposes the inertia tensor of every body that is not static
+//!   with `EigenValueSymmetric` when it creates the body (`MotionProperties::SetMassProperties`,
+//!   also for a ragdoll part in `Ragdoll::Stabilize`), before it checks whether the moments are
+//!   near zero. A tensor that is not exactly diagonal comes from a compound child's rotation or
+//!   position, or from an offset centre of mass. Its decomposition asserts as the soft body
+//!   inertia's below does, and the same floor applies: [`PhysicsWorld::create_body`], the inner
+//!   body of [`PhysicsWorld::create_character`](crate::PhysicsWorld::create_character), and the
+//!   parts of [`RagdollSettings::new`](crate::RagdollSettings::new) and
+//!   [`RagdollSettings::new_stabilized`](crate::RagdollSettings::new_stabilized) accept such a
+//!   tensor only when `det I / (sum of the principal 2 × 2 minors)`, a lower bound of its smallest
+//!   principal moment, is at least `1001 · 8 · u · |I|_F`, about 4.8e-4 of its Frobenius norm. The
+//!   check reads the `f32` tensor Jolt computes itself (joltc's `JPH_Shape_GetMassProperties` and
+//!   `JPH_MassProperties_ScaleToMass`), so it needs no error term for the tensor. `Stabilize`
+//!   (`Ragdoll.cpp:133-183`) multiplies each part's tensor by its new mass over its old, one
+//!   rounding per element, before it decomposes it, and rebuilds a parent's tensor from that
+//!   decomposition with every moment raised to at least the smaller of twice its largest and
+//!   its children's sum; neither moves the smallest moment down by more than a few `u |I|_F`,
+//!   far inside the margin. An exactly diagonal tensor is decomposed exactly and only needs
+//!   invertible moments or Jolt's near-zero fallback.
+//!   In the asserts build, seeded thin boxes, capsules and cylinders in rotated compound children,
+//!   pairs of such children, and offset centres of mass, with half lengths from 1 nm to 50 m and
+//!   masses from 1 g to 1000 t, asserted for `λ_min / |I|_F` up to 8.2e-5 under the earlier rule
+//!   (`det I / |I|_F² >= 1e-5 |I|_F`, skipped for a tensor below Jolt's near-zero limit), and none
+//!   of the 5 271 accepted at or above 1e-4 did. Made thinner until this floor refuses them, 2 703
+//!   such shapes were created and stepped without an assertion, and about 2 500 with the floor
+//!   divided by 3; divided by 4 one of ten seeded runs asserted, divided by 6 all ten did, so the
+//!   margin over Jolt's onset is 3 to 4, as for soft bodies. The floor refuses a square needle box
+//!   in a rotated child when it is about 54 times longer than wide, a capsule or cylinder about 47
+//!   times longer than its diameter, also where Jolt decomposed it without an assertion.
+//!   In the asserts leg, `rigid_body_inertia_at_its_bound_decomposes` (bodies),
+//!   `inner_body_inertia_at_its_bound_decomposes` (character inner bodies) and
+//!   `stabilized_ragdoll_inertia_at_its_bound_decomposes` (a three-part chain whose masses
+//!   `Stabilize` redistributes) create and step seeded rotated slender shapes at the thinnest
+//!   thickness the floor accepts and check that one 1e-4 thinner is refused; each aborts with
+//!   the floor divided by 6 and passes with it divided by 3.
 //! - **Soft body inertia.** Jolt sums a soft body's inertia tensor about the body origin in
 //!   `f32` from its vertices (`SoftBodyMotionProperties::CalculateMassAndInertia`) when the body
 //!   is created and after every
@@ -205,10 +240,14 @@
 //!   carries out of the frame, the positions a rebase computes (only checked to be finite), or a
 //!   character state restored with [`CharacterMut::restore_state`](crate::CharacterMut::restore_state),
 //!   which can only come from [`CharacterRef::save_state`](crate::CharacterRef::save_state).
-//! - Bodies with a principal inverse inertia above `√3 · 1e6`, such as a needle-thin shape or a
-//!   centre of mass far from the shape: [`PhysicsWorld::create_body`] only requires the inverse
-//!   inertia to be finite, and no test steps such a body, so impulses at a lever arm on it,
-//!   including a character's weight impulse, are neither derived nor tested. The same holds
+//! - Bodies with a principal inverse inertia above `√3 · 1e6`, such as a light needle-thin shape
+//!   or a centre of mass far from the shape. [`PhysicsWorld::create_body`] bounds no inverse
+//!   inertia from above: an exactly diagonal tensor (an unrotated shape, or a centre of mass
+//!   moved along a principal axis) only needs finite inverse moments, and the rigid body
+//!   inertia floor (see [Derived bounds](#derived-bounds)) bounds how badly conditioned any
+//!   other tensor is, not how small it is. The boundary tests of that floor step slender
+//!   bodies for two ticks without contacts or impulses, so impulses at a lever arm on such a
+//!   body, including a character's weight impulse, are neither derived nor tested. The same holds
 //!   for the suspension effective mass Jolt forms from a wheel's force point and the chassis's
 //!   inverse inertia (`VehicleConstraint.cpp:448-451`).
 //! - Constraints whose solver diverges for reasons the lever-arm ratio does not measure. In the
@@ -298,6 +337,7 @@
 //! | `BodySettings::restitution` | `0..=1` | new: `body_settings_are_bounded` |
 //! | `BodySettings::gravity_factor` | [`MAX_GRAVITY_FACTOR`] | new: `body_settings_are_bounded` |
 //! | `BodySettings::mass`, `PhysicsWorld::create_body` computed mass | [`MIN_MASS`]`..=`[`MAX_MASS`] for dynamic bodies | new: `body_settings_are_bounded`, `computed_dynamic_mass_is_bounded_and_kinematic_mass_is_not` |
+//! | `PhysicsWorld::create_body` computed inertia of a dynamic or kinematic body (also a character's inner body and a part of `RagdollSettings::new`, `new_stabilized`) | an exactly diagonal tensor with invertible moments or near zero; otherwise smallest principal moment bounded from below at least `MIN_INERTIA_RATIO` (4.8e-4) of its Frobenius norm (see [Derived bounds](#derived-bounds)) | new: `rigid_body_inertia_floor_holds_at_its_boundary`, `rigid_body_inertia_at_its_bound_decomposes`, `inner_body_inertia_at_its_bound_decomposes`, `stabilized_ragdoll_inertia_at_its_bound_decomposes` |
 //! | `BodySettings::friction` | `0..=`[`MAX_FRICTION`] | new: `body_settings_are_bounded`, `friction_at_the_bound_keeps_contacts_finite` |
 //! | `BodySettings::linear_damping`, `angular_damping` | finite, at least 0: Jolt scales by `max(0, 1 - c·dt)` (`MotionProperties.inl:144-145`) | existing: `invalid_damping_is_rejected` |
 //! | `BodySettings::rotation`, `BodyMut::set_rotation` | finite unit quaternion | existing: `invalid_body_settings_are_rejected` |
@@ -386,7 +426,7 @@
 //! | `SoftBodySettings::num_iterations` | `1..=SoftBodySettings::MAX_ITERATIONS`; Jolt divides the step by it | new: `soft_body_settings_are_bounded` |
 //! | `SoftBodySettings::linear_damping`, `max_linear_velocity`, `vertex_radius` | finite, at least 0; `(0, `[`MAX_LINEAR_VELOCITY`]`]`; `0..=`[`MAX_SHAPE_EXTENT`] | new: `soft_body_settings_are_bounded` |
 //! | `SoftBodySettings::pressure` | `0..=`[`MAX_SOFT_BODY_PRESSURE`]; above 0 only when the faces enclose a volume large enough for it (see [Derived bounds](#derived-bounds)) | new: `soft_body_settings_are_bounded`, `pressure_at_the_bound_steps_finitely`, `pressure_needs_a_volume_for_its_faces`, `a_sliver_at_the_pressure_bound_steps_finitely` |
-//! | `PhysicsWorld::create_soft_body` vertices (positions about the origin, masses) | without a kinematic vertex: smallest principal moment of the inertia at least `MIN_SOFT_BODY_INERTIA_RATIO` (4.8e-4) of its Frobenius norm after Jolt's `f32` error, or an exactly diagonal tensor that is near zero or has every moment above 1e-30 (see [Derived bounds](#derived-bounds)) | new: `soft_body_inertia_is_checked_at_creation`, `soft_body_inertia_at_its_bound_decomposes` |
+//! | `PhysicsWorld::create_soft_body` vertices (positions about the origin, masses) | without a kinematic vertex: smallest principal moment of the inertia at least `MIN_INERTIA_RATIO` (4.8e-4) of its Frobenius norm after Jolt's `f32` error, or an exactly diagonal tensor that is near zero or has every moment above 1e-30 (see [Derived bounds](#derived-bounds)) | new: `soft_body_inertia_is_checked_at_creation`, `soft_body_inertia_at_its_bound_decomposes` |
 //! | `SoftBodyMut::set_vertex_velocity` | [`MAX_LINEAR_VELOCITY`] | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing` |
 //! | `SoftBodyMut::set_vertex_inverse_mass` | 0 or the inverse of a mass within [`MIN_MASS`]`..=`[`MAX_MASS`]; total movable mass at most [`MAX_MASS`]; the force accumulated this step within the soft body force bound for the new inverse masses; the inertia rule of `create_soft_body` at the current vertex positions | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing`, `unpinning_cannot_release_an_accumulated_force`, `unpinning_checks_the_inertia_at_the_current_positions` |
 //! | `SoftBodyMut::move_kinematic_vertex` | target within [`MAX_POSITION`]; a time step `step` accepts; the implied velocity within [`MAX_LINEAR_VELOCITY`] | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing` |
@@ -706,10 +746,25 @@ pub(crate) fn is_soft_body_force(
         && length * per_vertex <= f64::from(MAX_ACCELERATION)
 }
 
-/// Smallest principal moment of a soft body's inertia tensor, relative to the tensor's Frobenius
-/// norm, that [`is_soft_body_inertia`] accepts: `1001 · 8 · u`, about 4.8e-4 (see
+/// Smallest principal moment of an inertia tensor Jolt decomposes, relative to the tensor's
+/// Frobenius norm, that [`is_rigid_body_inertia`] and [`is_soft_body_inertia`] accept:
+/// `1001 · 8 · u`, about 4.8e-4 (see [Derived bounds](self#derived-bounds)).
+const MIN_INERTIA_RATIO: f64 = 1001.0 * 8.0 * F32_UNIT_ROUNDOFF;
+
+/// Whether Jolt decomposes the non-diagonal inertia `tensor` of a rigid body (Jolt's own `f32`
+/// tensor, widened to `f64`) without an assertion and into positive principal moments (see
 /// [Derived bounds](self#derived-bounds)).
-const MIN_SOFT_BODY_INERTIA_RATIO: f64 = 1001.0 * 8.0 * F32_UNIT_ROUNDOFF;
+///
+/// The rule is scale-free: a tensor small enough for Jolt's unit-sphere fallback is decomposed
+/// first all the same, so it is checked like any other.
+pub(crate) fn is_rigid_body_inertia(tensor: [[f64; 3]; 3]) -> bool {
+    let [[a, b, c], [d, e, f], [g, h, i]] = tensor;
+    let det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    let minors = (a * e - b * d) + (a * i - c * g) + (e * i - f * h);
+    let frobenius = tensor.iter().flatten().map(|v| v * v).sum::<f64>().sqrt();
+    // `det / minors` is at most the smallest principal moment (see `is_soft_body_inertia`).
+    a + e + i > 0.0 && det > 0.0 && minors > 0.0 && det / minors >= MIN_INERTIA_RATIO * frobenius
+}
 
 /// The vertices of a soft body as Jolt's inertia computation sees them, reduced to what
 /// [`is_soft_body_inertia`] needs.
@@ -805,7 +860,7 @@ pub(crate) fn is_soft_body_inertia(
     }
     // `det / minors` is at most the smallest principal moment: the sum of the principal
     // minors, the products of two moments, exceeds the product of the two larger ones.
-    det / minors - error >= MIN_SOFT_BODY_INERTIA_RATIO * (frobenius + error)
+    det / minors - error >= MIN_INERTIA_RATIO * (frobenius + error)
 }
 
 /// The matrix of Jolt's `Mat44::sRotation(q)`, in `f64`.
@@ -1311,6 +1366,44 @@ mod tests {
             let z = (i / 11) as f32 * 0.1 - 0.5 + offset;
             (Vec3::new(x, 0.0, z), 1.0)
         }))
+    }
+
+    /// `scale · R diag(1, 1, moment) Rᵀ` for a fixed general rotation `R`.
+    fn rotated_needle(moment: f64, scale: f64) -> [[f64; 3]; 3] {
+        let r = jolt_rotation_matrix(crate::Quat::from_xyzw(0.3, -0.2, 0.5, 0.78).normalized());
+        let d = [1.0, 1.0, moment];
+        std::array::from_fn(|i| {
+            std::array::from_fn(|j| scale * (0..3).map(|k| r[i][k] * d[k] * r[j][k]).sum::<f64>())
+        })
+    }
+
+    #[test]
+    fn rigid_body_inertia_floor_holds_at_its_boundary() {
+        // For diag(1, 1, m), det / minors = m / (1 + 2m) and |I|_F = sqrt(2 + m²).
+        let (mut low, mut high) = (0.0_f64, 1.0_f64);
+        for _ in 0..200 {
+            let m = 0.5 * (low + high);
+            if m / (1.0 + 2.0 * m) >= MIN_INERTIA_RATIO * (2.0 + m * m).sqrt() {
+                high = m;
+            } else {
+                low = m;
+            }
+        }
+        assert!((6.7e-4..6.9e-4).contains(&high), "{high}");
+        // The rule does not depend on the scale, also below Jolt's near-zero limit.
+        for scale in [1.0e-30, 1.0e-9, 1.0, 1.0e9] {
+            assert!(is_rigid_body_inertia(rotated_needle(
+                high * (1.0 + 1e-6),
+                scale
+            )));
+            assert!(!is_rigid_body_inertia(rotated_needle(
+                high * (1.0 - 1e-6),
+                scale
+            )));
+        }
+        // Not positive definite.
+        assert!(!is_rigid_body_inertia(rotated_needle(0.0, 1.0)));
+        assert!(!is_rigid_body_inertia(rotated_needle(-0.1, 1.0)));
     }
 
     #[test]
