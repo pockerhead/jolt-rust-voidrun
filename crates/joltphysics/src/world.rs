@@ -446,7 +446,9 @@ unsafe impl Send for PhysicsWorld {}
 // `BodyManager::SaveState` takes every body lock (`LockAllBodies`, in mutex-array order, so
 // concurrent saves do not deadlock), `ConstraintManager::SaveState` takes its mutex, and the
 // contact cache it reads is written only by `step` and `restore_state`, both behind `&mut self`.
-// The characters' `SaveState` is const as well.
+// The characters' `SaveState` is const as well. Soft body reads through `&self` copy the vertices
+// under Jolt's body read lock; vertices are written only by `step` and the `&mut` soft body and
+// body setters.
 unsafe impl Sync for PhysicsWorld {}
 
 /// One body's pose and velocities in a frame.
@@ -780,6 +782,11 @@ impl PhysicsWorld {
     ///
     /// Ragdoll parts are bodies of the world, which the list names. Joint frames and motor
     /// targets are relative to the bodies, so they need no change.
+    ///
+    /// Soft bodies are bodies of the world too, which the list names. Their vertices are stored
+    /// relative to the body, so they move with it: a rotation turns the vertices and their
+    /// velocities with the body and leaves the body's rotation non-identity from then on, which
+    /// [`BodyMut::add_force`](crate::BodyMut::add_force) takes into account.
     ///
     /// Constraint frames are relative to the bodies and need no change, except pulleys, whose
     /// fixed points are world points: a rebase recreates each pulley in the new frame, in id

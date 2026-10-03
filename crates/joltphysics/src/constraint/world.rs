@@ -657,6 +657,8 @@ impl PhysicsWorld {
     ///
     /// Fails with [`ConstraintError::InvalidValue`] when a setting or a lever-arm ratio is out of
     /// range, with [`ConstraintError::NotDynamic`] as above, with
+    /// [`ConstraintError::Body`]`(`[`BodyError::SoftBody`]`)` for a soft body (Jolt's constraints
+    /// cannot operate on soft bodies; pin a vertex and move it instead), with
     /// [`ConstraintError::NotFound`] or [`ConstraintError::WrongWorld`] for a referenced
     /// constraint that is not in this world, and with [`ConstraintError::TooManyConstraints`]
     /// when the world has run out of ids. Nothing changes on failure.
@@ -718,6 +720,14 @@ impl PhysicsWorld {
             }
             if self.is_ragdoll_body(body) {
                 return Err(ConstraintError::Body(BodyError::OwnedByRagdoll(body)));
+            }
+            // Jolt's constraints cannot operate on soft bodies (`Docs/Architecture.md:462`).
+            if self
+                .body(body)
+                .map_err(ConstraintError::Body)?
+                .is_soft_body()
+            {
+                return Err(ConstraintError::Body(BodyError::SoftBody(body)));
             }
             if S::NEEDS_DYNAMIC_BODIES
                 && self

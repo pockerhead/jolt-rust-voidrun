@@ -171,6 +171,17 @@
 //! is typed by the kind, which selects the motor, target, limit and readout methods of
 //! [`ConstraintRef`] and [`ConstraintMut`]. A body cannot be removed while a constraint uses it.
 //!
+//! # Soft bodies
+//! [`PhysicsWorld::create_soft_body`] creates a soft body (cloth, a pressurised ball) from
+//! [`SoftBodySharedSettings`]: vertices, the faces between them and constraints that
+//! [`SoftBodySharedSettingsBuilder::create_constraints`] generates (edges, shear edges, bend
+//! constraints and long range attachments). It is an ordinary body with a [`BodyId`];
+//! [`PhysicsWorld::soft_body`] reads its vertices in world space, and
+//! [`PhysicsWorld::soft_body_mut`] sets vertex velocities and inverse masses and moves kinematic
+//! (pinned) vertices. Soft bodies collide with rigid bodies, not with each other (Jolt does not
+//! implement that yet); constraints and vehicles refuse them, and so do the body-level velocity,
+//! torque and point-force setters, which Jolt ignores on soft bodies.
+//!
 //! # Threads
 //! Changing a world, including [`PhysicsWorld::step`], takes `&mut PhysicsWorld`; reading it
 //! takes `&PhysicsWorld`. `PhysicsWorld` is `Send` and `Sync`, so many threads may read one
@@ -278,6 +289,7 @@ mod owned;
 mod query;
 mod ragdoll;
 mod shape;
+mod soft_body;
 mod state;
 mod vehicle;
 mod world;
@@ -302,8 +314,8 @@ pub use constraint::{
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, ConstraintError, QueryError, RagdollError, ShapeError, StateError,
-    StepError, VehicleError, WorldError,
+    BodyError, CharacterError, ConstraintError, QueryError, RagdollError, ShapeError,
+    SoftBodyError, StateError, StepError, VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
@@ -315,6 +327,11 @@ pub use ragdoll::{
     RagdollSettings, SettleDetector, Skeleton, SkeletonJoint, SkeletonPose,
 };
 pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
+pub use soft_body::{
+    LongRangeAttachment, SoftBodyBendType, SoftBodyMut, SoftBodyRef, SoftBodySettings,
+    SoftBodySharedSettings, SoftBodySharedSettingsBuilder, SoftBodyVertex,
+    SoftBodyVertexAttributes, SoftBodyVertexState,
+};
 pub use state::WorldState;
 pub use vehicle::{
     DriverInput, SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester,

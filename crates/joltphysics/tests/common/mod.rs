@@ -8,6 +8,7 @@ pub mod jobs;
 #[cfg(windows)]
 pub mod memory;
 pub mod ragdoll;
+pub mod soft_body;
 pub mod vehicle;
 pub mod walker;
 

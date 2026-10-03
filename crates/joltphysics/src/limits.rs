@@ -179,6 +179,10 @@
 //!   directions, damping, motor force and torque limits, ragdoll joint friction (world
 //!   constraint friction is probed as above), wheel friction curves
 //!   and the wheel and drivetrain values that only have to give finite step coefficients.
+//! - A closed soft body with pressure crushed to a tiny positive volume: Jolt divides the
+//!   pressure by the enclosed volume (`SoftBodyMotionProperties.cpp:300-307`).
+//! - Soft body constraint stability: [`MAX_COMPLIANCE`] keeps Jolt's compliance terms finite,
+//!   not the solver convergent.
 //! - `RagdollSettings::new_stabilized` reports Jolt's `Stabilize` failing to decompose an
 //!   inertia tensor as an error, but Jolt asserts on that path first (`Ragdoll.cpp:158`).
 //! - The assertion `errors == EPhysicsUpdateError::None` at the end of every step that drops
@@ -283,6 +287,19 @@
 //! | `ShapeCast` direction | `2 *` [`MAX_POSITION`] per axis | new: `query_inputs_are_bounded_by_the_frame` |
 //! | `ShapeCast::target_distance` | `ShapeCast::MAX_TARGET_DISTANCE` | existing: `target_distance_at_the_bound_gives_a_finite_depth` |
 //! | `CollideShape::max_separation_distance` | `0..=`[`MAX_SHAPE_EXTENT`] | new: `query_inputs_are_bounded_by_the_frame` |
+//! | `SoftBodySharedSettingsBuilder::build` vertices | at least one; position within [`MAX_SHAPE_EXTENT`] per axis; velocity within [`MAX_LINEAR_VELOCITY`]; inverse mass 0 or the inverse of a mass within [`MIN_MASS`]`..=`[`MAX_MASS`] | new: `soft_body_shared_settings_are_bounded`, `invalid_vertices_are_rejected` |
+//! | `SoftBodySharedSettingsBuilder::build` total mass | masses of the movable vertices (`1 / w` in `f32`, as Jolt) add up to at most [`MAX_MASS`] | new: `soft_body_total_mass_is_bounded`, `total_movable_mass_is_bounded` |
+//! | `SoftBodySharedSettingsBuilder::build` faces | indices name vertices, three different ones; every edge at least [`MIN_SOFT_BODY_EDGE_LENGTH`] in `f32`; area above 0; with distance bends the vertices opposite a shared edge as far apart | new: `soft_body_shared_settings_are_bounded`, `invalid_faces_are_rejected`, `edge_lengths_are_measured_in_f32_like_jolt`, `distance_bends_need_separate_opposite_vertices` |
+//! | `SoftBodyVertexAttributes` compliances | `0..=`[`MAX_COMPLIANCE`] | new: `soft_body_shared_settings_are_bounded`, `attributes_are_validated` |
+//! | `SoftBodyVertexAttributes::long_range_attachment` multiplier | `1..=`[`MAX_RATIO`] (see there for why Jolt's square of the distance stays finite) | new: `soft_body_shared_settings_are_bounded` |
+//! | `SoftBodySettings` position, rotation, object layer, friction, restitution, gravity factor | as for `BodySettings` | new: `soft_body_settings_are_bounded` |
+//! | `SoftBodySettings::num_iterations` | `1..=SoftBodySettings::MAX_ITERATIONS`; Jolt divides the step by it | new: `soft_body_settings_are_bounded` |
+//! | `SoftBodySettings::linear_damping`, `max_linear_velocity`, `vertex_radius` | finite, at least 0; `(0, `[`MAX_LINEAR_VELOCITY`]`]`; `0..=`[`MAX_SHAPE_EXTENT`] | new: `soft_body_settings_are_bounded` |
+//! | `SoftBodySettings::pressure` | `0..=`[`MAX_SOFT_BODY_PRESSURE`] | new: `soft_body_settings_are_bounded`, `pressure_at_the_bound_steps_finitely` |
+//! | `SoftBodyMut::set_vertex_velocity` | [`MAX_LINEAR_VELOCITY`] | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing` |
+//! | `SoftBodyMut::set_vertex_inverse_mass` | 0 or the inverse of a mass within [`MIN_MASS`]`..=`[`MAX_MASS`]; total movable mass at most [`MAX_MASS`] | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing` |
+//! | `SoftBodyMut::move_kinematic_vertex` | target within [`MAX_POSITION`]; a time step `step` accepts; the implied velocity within [`MAX_LINEAR_VELOCITY`] | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing` |
+//! | `BodyMut::add_force` on a soft body | accumulated `|F| · w_max / N <=` [`MAX_ACCELERATION`], `N` the vertex count (Jolt's divisor) | new: `soft_body_forces_are_bounded_by_the_acceleration_of_a_vertex` |
 //! | `DebugLineSettings` (feature `debug-renderer`) | centre within [`MAX_POSITION`], radius at most twice it | new: `center_and_radius_are_bounded_by_the_frame` |
 //!
 //! [`WorldSettings::MAX_CONTACT_CONSTRAINTS`]: crate::WorldSettings::MAX_CONTACT_CONSTRAINTS
@@ -460,6 +477,36 @@ pub const MAX_GEAR_RATIO: f32 = 10.0;
 /// lie on the bodies.
 pub const MAX_LEVER_ARM_RATIO: f32 = 1000.0;
 
+/// Shortest distance between two soft body vertices that a face edge or an explicit edge
+/// joins, in metres: 1 mm, measured as Jolt measures a rest length (an `f32` difference and an
+/// `f32` length).
+///
+/// Crate policy. Jolt only asserts that a rest length is above zero
+/// (`SoftBodySharedSettings.cpp:226,377`) and divides by edge lengths while it solves; the
+/// bound keeps a degenerate edge out of the solver with a margin.
+pub const MIN_SOFT_BODY_EDGE_LENGTH: f32 = 1.0e-3;
+
+/// Largest compliance (inverse stiffness) of a soft body constraint, in the units of the
+/// constraint's own equation; 0 is rigid.
+///
+/// Crate policy, derived. Jolt divides each compliance by the squared sub-step
+/// (`SoftBodyMotionProperties.cpp:371,445,496,577,594`). [`PhysicsWorld::step`] always runs one
+/// collision step, so a sub-step is at least [`PhysicsWorld::MIN_DELTA_TIME`] divided by
+/// [`SoftBodySettings::MAX_ITERATIONS`](crate::SoftBodySettings::MAX_ITERATIONS), 1e-8 s, and
+/// `compliance / dt²` is at most `1e20 · 1e16 = 1e36`, below `f32::MAX`; Jolt's average of two
+/// compliances, `0.5 · (c1 + c2)`, stays finite as well. This proves that the product is finite,
+/// not that the solver is stable at every compliance.
+pub const MAX_COMPLIANCE: f32 = 1.0e20;
+
+/// Largest pressure coefficient of a soft body (`n · R · T` in Jolt's terms, N·m).
+///
+/// Crate policy, measured. Jolt applies `pressure · dt / (6 · volume)` times each face's area
+/// as an impulse (`SoftBodyMotionProperties.cpp:290-312`). A closed ball of 1 m with vertex
+/// masses at [`MIN_MASS`] and at the total-mass bound, at this pressure, stepped 600 times on a
+/// floor in the `asserts` build, stays finite (`pressure_at_the_bound_steps_finitely`). Not
+/// covered: a closed body crushed to a tiny positive volume, which Jolt divides by.
+pub const MAX_SOFT_BODY_PRESSURE: f32 = 1.0e6;
+
 /// Whether every component of `position` is at most [`MAX_POSITION`] in absolute value.
 pub(crate) fn is_in_frame(position: RVec3) -> bool {
     [position.x, position.y, position.z]
@@ -530,6 +577,17 @@ pub(crate) fn is_weight_impulse(mass: f32, gravity: Vec3, delta_time: f32) -> bo
 /// Whether `mass` is finite and within `MIN_MASS..=MAX_MASS`.
 pub(crate) fn is_mass(mass: f32) -> bool {
     (MIN_MASS..=MAX_MASS).contains(&mass)
+}
+
+/// Whether `inverse_mass` is the inverse of a mass within `MIN_MASS..=MAX_MASS`, the range of
+/// a movable soft body vertex.
+pub(crate) fn is_vertex_inverse_mass(inverse_mass: f32) -> bool {
+    (1.0 / MAX_MASS..=1.0 / MIN_MASS).contains(&inverse_mass)
+}
+
+/// Whether `compliance` is finite and within `0..=MAX_COMPLIANCE`.
+pub(crate) fn is_compliance(compliance: f32) -> bool {
+    (0.0..=MAX_COMPLIANCE).contains(&compliance)
 }
 
 /// Whether `ratio` is finite and its magnitude within `1 / MAX_RATIO..=MAX_RATIO`.
@@ -665,7 +723,7 @@ mod tests {
     #[test]
     fn scalar_checks_accept_their_range_and_reject_beyond() {
         type Check = fn(f32) -> bool;
-        let checks: [(Check, &[f32], &[f32]); 4] = [
+        let checks: [(Check, &[f32], &[f32]); 6] = [
             (
                 is_friction,
                 &[0.0, MAX_FRICTION],
@@ -688,6 +746,20 @@ mod tests {
                 is_mass,
                 &[MIN_MASS, MAX_MASS],
                 &[0.0, MIN_MASS.next_down(), MAX_MASS.next_up()],
+            ),
+            (
+                is_vertex_inverse_mass,
+                &[1.0 / MAX_MASS, 1.0 / MIN_MASS],
+                &[
+                    0.0,
+                    (1.0 / MAX_MASS).next_down(),
+                    (1.0 / MIN_MASS).next_up(),
+                ],
+            ),
+            (
+                is_compliance,
+                &[0.0, MAX_COMPLIANCE],
+                &[-f32::MIN_POSITIVE, MAX_COMPLIANCE.next_up()],
             ),
         ];
         for (check, accepted, rejected) in checks {

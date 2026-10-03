@@ -132,6 +132,11 @@ pub enum BodyError {
     OwnedByRagdoll(BodyId),
     /// The body is used by a constraint; remove the constraint first.
     UsedByConstraint(BodyId),
+    /// The operation needs a rigid body and the body is a soft body; Jolt ignores it on soft
+    /// bodies or cannot attach it to one.
+    SoftBody(BodyId),
+    /// The operation needs a soft body and the body is a rigid body.
+    NotSoftBody(BodyId),
 }
 
 impl fmt::Display for BodyError {
@@ -158,6 +163,13 @@ impl fmt::Display for BodyError {
                 f,
                 "body {id:?} is used by a constraint; remove the constraint first"
             ),
+            Self::SoftBody(id) => {
+                write!(
+                    f,
+                    "body {id:?} is a soft body; this operation needs a rigid body"
+                )
+            }
+            Self::NotSoftBody(id) => write!(f, "body {id:?} is not a soft body"),
         }
     }
 }
@@ -337,6 +349,27 @@ impl std::error::Error for ConstraintError {
         }
     }
 }
+
+/// Why [`SoftBodySharedSettings`](crate::SoftBodySharedSettings) could not be built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SoftBodyError {
+    /// Jolt's one-time global initialisation failed.
+    InitFailed,
+    /// A vertex, face, constraint or attribute is out of range; the payload names the rule.
+    InvalidValue(&'static str),
+}
+
+impl fmt::Display for SoftBodyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InitFailed => f.write_str("Jolt initialisation failed"),
+            Self::InvalidValue(what) => write!(f, "invalid soft body value: {what}"),
+        }
+    }
+}
+
+impl std::error::Error for SoftBodyError {}
 
 /// Why [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) refused or failed.
 /// On [`WrongWorld`](Self::WrongWorld) and [`WorldChanged`](Self::WorldChanged) the world is
