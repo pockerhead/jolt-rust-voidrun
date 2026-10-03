@@ -19,6 +19,26 @@ JPH_CAPI size_t JPH_StateRecorder_GetDataSize(JPH_StateRecorder* recorder);
 JPH_CAPI void JPH_StateRecorder_CopyData(JPH_StateRecorder* recorder, void* data, size_t size);
 JPH_CAPI bool JPH_StateRecorder_IsFailed(const JPH_StateRecorder* recorder);
 
+/* Which parts of a physics system's state JPH_PhysicsSystem_SaveState writes (JPH::EStateRecorderState). */
+typedef enum JPH_StateRecorderState {
+	JPH_StateRecorderState_None = 0,
+	JPH_StateRecorderState_Global = 1 << 0,
+	JPH_StateRecorderState_Bodies = 1 << 1,
+	JPH_StateRecorderState_Contacts = 1 << 2,
+	JPH_StateRecorderState_Constraints = 1 << 3,
+	JPH_StateRecorderState_All = 15,
+
+	_JPH_StateRecorderState_Force32 = 0x7fffffff
+} JPH_StateRecorderState;
+
+/* PhysicsSystem state */
+/* bodies null: every body is saved; otherwise only the bodies whose id is among the bodyCount ids
+   (any order, duplicates allowed). Contacts and constraints are never filtered. */
+JPH_CAPI void JPH_PhysicsSystem_SaveState(const JPH_PhysicsSystem* system, JPH_StateRecorder* recorder, JPH_StateRecorderState state, const JPH_BodyID* bodies, uint32_t bodyCount);
+/* Reads from the recorder's current read position (rewind it first). Never validating. Returns
+   false when Jolt could not restore; the system may then be partly restored. */
+JPH_CAPI bool JPH_PhysicsSystem_RestoreState(JPH_PhysicsSystem* system, JPH_StateRecorder* recorder);
+
 /* CharacterVirtual */
 JPH_CAPI void JPH_CharacterVirtual_SaveState(const JPH_CharacterVirtual* character, JPH_StateRecorder* recorder);
 JPH_CAPI void JPH_CharacterVirtual_RestoreState(JPH_CharacterVirtual* character, JPH_StateRecorder* recorder);
