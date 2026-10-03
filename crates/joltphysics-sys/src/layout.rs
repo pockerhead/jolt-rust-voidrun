@@ -135,10 +135,27 @@ const _: () = {
     assert!(offset_of!(JPH_PhysicsSettings, stepListenersBatchSize) == 4);
     assert!(offset_of!(JPH_PhysicsSettings, stepListenerBatchesPerJob) == 8);
     assert!(offset_of!(JPH_PhysicsSettings, baumgarte) == 12);
+    assert!(offset_of!(JPH_PhysicsSettings, speculativeContactDistance) == 16);
+    assert!(offset_of!(JPH_PhysicsSettings, penetrationSlop) == 20);
+    assert!(offset_of!(JPH_PhysicsSettings, linearCastThreshold) == 24);
+    assert!(offset_of!(JPH_PhysicsSettings, linearCastMaxPenetration) == 28);
+    assert!(offset_of!(JPH_PhysicsSettings, manifoldTolerance) == 32);
+    assert!(offset_of!(JPH_PhysicsSettings, maxPenetrationDistance) == 36);
+    assert!(offset_of!(JPH_PhysicsSettings, bodyPairCacheMaxDeltaPositionSq) == 40);
+    assert!(offset_of!(JPH_PhysicsSettings, bodyPairCacheCosMaxDeltaRotationDiv2) == 44);
+    assert!(offset_of!(JPH_PhysicsSettings, contactNormalCosMaxDeltaRotation) == 48);
+    assert!(offset_of!(JPH_PhysicsSettings, contactPointPreserveLambdaMaxDistSq) == 52);
     assert!(offset_of!(JPH_PhysicsSettings, numVelocitySteps) == 56);
     assert!(offset_of!(JPH_PhysicsSettings, numPositionSteps) == 60);
+    assert!(offset_of!(JPH_PhysicsSettings, minVelocityForRestitution) == 64);
+    assert!(offset_of!(JPH_PhysicsSettings, timeBeforeSleep) == 68);
     assert!(offset_of!(JPH_PhysicsSettings, pointVelocitySleepThreshold) == 72);
     assert!(offset_of!(JPH_PhysicsSettings, deterministicSimulation) == 76);
+    assert!(offset_of!(JPH_PhysicsSettings, constraintWarmStart) == 77);
+    assert!(offset_of!(JPH_PhysicsSettings, useBodyPairContactCache) == 78);
+    assert!(offset_of!(JPH_PhysicsSettings, useManifoldReduction) == 79);
+    assert!(offset_of!(JPH_PhysicsSettings, useLargeIslandSplitter) == 80);
+    assert!(offset_of!(JPH_PhysicsSettings, allowSleeping) == 81);
     assert!(offset_of!(JPH_PhysicsSettings, checkActiveEdges) == 82);
 
     assert!(size_of::<JobSystemThreadPoolConfig>() == 12);
