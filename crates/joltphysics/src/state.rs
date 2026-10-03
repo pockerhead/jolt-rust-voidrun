@@ -50,7 +50,16 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 ///
 /// Body properties set at creation (shape, mass, friction, layers, ...) are not saved either;
 /// the body setters change only poses and velocities. A setting the caller applies again before every
-/// [`step`](PhysicsWorld::step), such as a vehicle's gravity on a planet, replays exactly.
+/// [`step`](PhysicsWorld::step), such as a vehicle's gravity on a planet, replays exactly, as long
+/// as that gravity is not zero (see the vehicle world up below).
+///
+/// A vehicle's [`world_up`](crate::VehicleRef::world_up) is not saved either. Every step sets it
+/// to the opposite of the gravity the vehicle uses, but a zero gravity (world gravity or
+/// [`set_gravity`](crate::VehicleMut::set_gravity)) keeps the world up of the step before, so a
+/// restore leaves the one the run before the restore ended with. A vehicle with a pitch and roll
+/// limit ([`VehicleSettings::max_pitch_roll_angle`](crate::VehicleSettings::max_pitch_roll_angle))
+/// in zero gravity then replays differently when that run's gravity pointed elsewhere. Jolt has
+/// no setter for the world up, so a restore cannot put it back.
 ///
 /// The wheel contacts a vehicle reports ([`WheelState::contact`](crate::WheelState)) are empty
 /// right after a restore until the next step, because Jolt clears a wheel's contact body on
@@ -144,8 +153,10 @@ impl PhysicsWorld {
     /// is unchanged then. [`StateError::RestoreFailed`] is not expected for a state the world
     /// accepts; if it happens, the world may be partly restored.
     ///
-    /// After a restore, the same calls as in the original run give bit-identical results; the
-    /// tests check this with 1 and 4 worker threads, in one process and across two.
+    /// After a restore, the same calls as in the original run give bit-identical results, with
+    /// the configuration and the vehicle world up in zero gravity that [`WorldState`] lists as
+    /// not saved left aside; the tests check this with 1 and 4 worker threads, in one process
+    /// and across two.
     pub fn restore_state(&mut self, state: &WorldState) -> Result<(), StateError> {
         if state.world != self.tag {
             return Err(StateError::WrongWorld);

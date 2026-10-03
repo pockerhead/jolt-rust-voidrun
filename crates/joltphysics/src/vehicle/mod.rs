@@ -295,7 +295,9 @@ impl VehicleRef<'_> {
     }
 
     /// The world up of the last step: the opposite of the gravity the vehicle used, normalized.
-    /// The pitch and roll limit keeps the vehicle's up within its angle of this direction.
+    /// The pitch and roll limit keeps the vehicle's up within its angle of this direction. A step
+    /// in zero gravity keeps the previous world up; it is not part of
+    /// [`WorldState`](crate::WorldState).
     pub fn world_up(&self) -> Vec3 {
         let mut value = Vec3::ZERO.to_jph();
         // SAFETY: as in `gravity`.
@@ -368,7 +370,9 @@ impl VehicleMut<'_> {
     ///
     /// On every step while the chassis is awake, Jolt sets the chassis' gravity factor to 0 and
     /// adds the force `gravity / inverse mass` at its centre of mass; a sleeping chassis gets no
-    /// force. The opposite of `gravity` also becomes the world up of the pitch and roll limit.
+    /// force. The opposite of `gravity` also becomes the world up of the pitch and roll limit;
+    /// a zero `gravity` keeps the last world up, which a restore does not undo (see
+    /// [`WorldState`](crate::WorldState)).
     /// The override stays until it is set again; there is no reset, because Jolt's reset writes
     /// gravity factor 1 to the chassis. For radial gravity, set it every tick.
     /// Not part of [`WorldState`](crate::WorldState):

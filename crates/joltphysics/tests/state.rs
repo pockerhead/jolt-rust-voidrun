@@ -6,12 +6,16 @@ mod common;
 
 use common::determinism::{assert_same, child_request, digest_in_child, finish_child, Digest};
 use common::ragdoll::{bind_pose, humanoid_settings, transformed_pose};
-use common::vehicle::{add_car, car_world, record_vehicle, CarLayers, GRAVITY};
+use common::vehicle::{
+    add_car, car_settings, car_world, chassis_settings, chassis_shape, record_vehicle, CarLayers,
+    GRAVITY,
+};
 use common::*;
 use joltphysics::*;
 
 const X: Vec3 = Vec3::new(1.0, 0.0, 0.0);
 const Y: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+const Z: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 /// Ticks before the save point.
 const BEFORE_SAVE: usize = 30;
 /// Ticks of each run after the save point.
@@ -662,6 +666,39 @@ fn a_failed_create_on_a_full_world_keeps_a_state_restorable() {
     ));
     assert_eq!(world.character_ids().count(), 0);
     assert_eq!(world.restore_state(&saved), Ok(()));
+}
+
+/// Jolt does not save a vehicle's world up, and a step in zero gravity keeps the previous one:
+/// after a detour under another gravity, the restored car keeps the detour's world up and its
+/// pitch and roll limit replays differently.
+#[test]
+fn a_vehicle_in_zero_gravity_keeps_its_world_up_across_a_restore() {
+    let (mut world, layers) = car_world(Vec3::ZERO, 1);
+    let chassis = world
+        .create_body(
+            &chassis_shape(),
+            &chassis_settings(&layers, RVec3::new(0.0, 10.0, 0.0), quat_about(Z, 0.6)),
+        )
+        .unwrap();
+    let car = world
+        .create_vehicle(
+            chassis,
+            &car_settings(VehicleCollisionTester::ray(layers.probe)).max_pitch_roll_angle(0.2),
+        )
+        .unwrap();
+    step(&mut world, 5);
+    let saved = world.save_state();
+    assert_eq!(world.vehicle(car).unwrap().world_up(), Y);
+    let first = run_digest(&mut world, &[chassis], 30);
+
+    world.restore_state(&saved).unwrap();
+    world.set_gravity(Vec3::new(-9.81, 0.0, 0.0)).unwrap();
+    step(&mut world, 3);
+    world.restore_state(&saved).unwrap();
+    assert_eq!(world.gravity(), Vec3::ZERO);
+    assert_eq!(world.vehicle(car).unwrap().world_up(), X);
+    let replay = run_digest(&mut world, &[chassis], 30);
+    assert_ne!(first, replay);
 }
 
 #[test]
