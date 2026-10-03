@@ -555,3 +555,18 @@ fn worlds_sharing_a_height_field_draw_it_concurrently() {
         assert!(calls.iter().all(|lines| *lines == reference));
     }
 }
+
+#[test]
+fn a_cloth_is_drawn_as_the_edges_of_its_faces() {
+    let mut world = world(Vec3::ZERO, 1);
+    let cloth = common::soft_body::Cloth::new(4, 0.5);
+    let shared = cloth.builder().build().unwrap();
+    let id = world
+        .create_soft_body(&shared, &SoftBodySettings::default())
+        .unwrap();
+    let lines = lines_near(&world, 10.0, usize::MAX, &QueryFilter::new());
+    let drawn = lines_of(&lines, id, None);
+    // Three lines per face.
+    assert_eq!(drawn.len(), 3 * cloth.faces.len());
+    assert_inside(&drawn, [0.0, 0.0, 0.0], [0.75, 0.0, 0.75], "cloth");
+}

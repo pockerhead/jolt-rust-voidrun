@@ -15,7 +15,9 @@
 //! humanoid ragdolls into a pit, in contact with each other from the first tick, so that their
 //! joints and contacts form an island large enough for Jolt to split it for parallel solving.
 //! The constraints scene runs a hinge chain, a motor-driven slider, a gear pair, a pulley and a
-//! path, and removes and re-creates a constraint halfway.
+//! path, and removes and re-creates a constraint halfway. The soft body scene drapes a cloth
+//! pinned at two corners over a sphere and drops a pressurised ball on a box, unpins one corner
+//! and moves the other halfway, and records every vertex.
 //!
 //! Each scene is also gated with caller job systems: a Rayon pool of 4 threads and an inline job
 //! system must record what Jolt's thread pool with 1 worker records.
@@ -912,6 +914,7 @@ fn determinism_child() {
         "fleet" => run_fleet(threads, &variant),
         "ragdoll_pile" => run_ragdoll_pile(threads),
         "constraints" => run_constraints(threads),
+        "soft_bodies" => run_soft_bodies(threads),
         scenario => panic!("unknown scenario {scenario}"),
     };
     // Without these checks a choice that never reached the worlds, or a Rayon pool that never
@@ -1006,6 +1009,11 @@ fn ragdoll_pile_digest_is_identical_with_caller_job_systems() {
 #[test]
 fn constraint_digest_is_identical_with_caller_job_systems() {
     assert_caller_job_systems_agree("constraints", "forward");
+}
+
+#[test]
+fn soft_body_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("soft_bodies", "forward");
 }
 
 fn stacks_in_child(threads: u32, variant: &str) -> Digest {
@@ -1650,6 +1658,117 @@ fn constraint_digest_is_identical_across_thread_counts() {
     assert_eq!(one_thread.ticks.len(), CONSTRAINT_TICKS);
     assert_same(
         "constraints, 1 vs 4 worker threads",
+        &one_thread,
+        &four_threads,
+    );
+}
+
+/// Ticks of the soft body scene.
+const SOFT_BODY_TICKS: usize = 300;
+/// The tick before which the soft body scene unpins one cloth corner and moves the other.
+const SOFT_BODY_EVENT_TICK: usize = 120;
+
+/// Appends soft body `id`: its body record, then every vertex's position and velocity bits.
+fn record_soft_body(world: &PhysicsWorld, id: BodyId, out: &mut Vec<u8>) {
+    record_body(world, id, out);
+    for vertex in world.soft_body(id).unwrap().vertices() {
+        let position: [Real; 3] = vertex.position.into();
+        for value in position {
+            out.extend_from_slice(&value.to_bits().to_le_bytes());
+        }
+        put_f32s(out, <[f32; 3]>::from(vertex.velocity));
+    }
+}
+
+fn run_soft_bodies(worker_threads: u32) -> Digest {
+    use common::soft_body::{sphere, Cloth};
+
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), worker_threads);
+    let mut rigid = vec![add_floor(&mut world)];
+    let ball_shape = Shape::new_sphere(0.5).unwrap();
+    rigid.push(
+        world
+            .create_body(
+                &ball_shape,
+                &BodySettings::new_static().position(RVec3::new(0.0, 1.0, 0.0)),
+            )
+            .unwrap(),
+    );
+    let box_shape = Shape::new_box(Vec3::new(0.4, 0.4, 0.4)).unwrap();
+    rigid.push(
+        world
+            .create_body(
+                &box_shape,
+                &BodySettings::new_dynamic()
+                    .position(RVec3::new(3.0, 0.4, 0.0))
+                    .allow_sleeping(false),
+            )
+            .unwrap(),
+    );
+
+    let cloth = Cloth::new(21, 0.1);
+    let [left, right] = cloth.first_row_corners();
+    let cloth_settings = cloth.pin(&[left, right]).settings();
+    let awake = SoftBodySettings::default().allow_sleeping(false);
+    let cloth = world
+        .create_soft_body(
+            &cloth_settings,
+            &awake
+                .clone()
+                .position(RVec3::new(0.0, 1.65, 0.0))
+                .linear_damping(2.0),
+        )
+        .unwrap();
+    let (vertices, faces) = sphere(0.3, 6, 10);
+    let ball_settings = SoftBodySharedSettings::builder(vertices, faces)
+        .create_constraints(
+            SoftBodyBendType::None,
+            SoftBodyVertexAttributes::default().compliance(1.0e-4),
+        )
+        .build()
+        .unwrap();
+    let ball = world
+        .create_soft_body(
+            &ball_settings,
+            &awake.position(RVec3::new(3.0, 2.0, 0.0)).pressure(500.0),
+        )
+        .unwrap();
+
+    let mut digest = Digest::new();
+    for tick in 0..SOFT_BODY_TICKS {
+        if tick == SOFT_BODY_EVENT_TICK {
+            let mut body = world.soft_body_mut(cloth).unwrap();
+            body.set_vertex_inverse_mass(left, 1.0).unwrap();
+            let at = body.vertices()[right as usize].position;
+            let target = RVec3::new(at.x, at.y + 0.05, at.z);
+            body.move_kinematic_vertex(right, target, DT).unwrap();
+        }
+        if tick == SOFT_BODY_EVENT_TICK + 1 {
+            world
+                .soft_body_mut(cloth)
+                .unwrap()
+                .set_vertex_velocity(right, Vec3::ZERO)
+                .unwrap();
+        }
+        assert!(world.step(DT).unwrap().is_complete());
+        let record = digest.push();
+        for &body in &rigid {
+            record_body(&world, body, &mut record.state);
+        }
+        for body in [cloth, ball] {
+            record_soft_body(&world, body, &mut record.state);
+        }
+    }
+    digest
+}
+
+#[test]
+fn soft_body_digest_is_identical_across_thread_counts() {
+    let one_thread = digest_in_child("determinism_child", "soft_bodies", 1, "forward");
+    let four_threads = digest_in_child("determinism_child", "soft_bodies", 4, "forward");
+    assert_eq!(one_thread.ticks.len(), SOFT_BODY_TICKS);
+    assert_same(
+        "soft bodies, 1 vs 4 worker threads",
         &one_thread,
         &four_threads,
     );

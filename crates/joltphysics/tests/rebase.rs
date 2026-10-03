@@ -1019,3 +1019,91 @@ fn vehicle_drives_across_a_rotating_rebase() {
     let (_, _, _, wheels_down_c) = drive_across(Some(&frame), TesterAfterRebase::OldUp);
     assert_eq!(wheels_down_c[0], 0, "{wheels_down_c:?}");
 }
+
+/// `v` rotated by the unit quaternion `q`, in `f64`.
+fn rotate(q: Quat, v: V) -> V {
+    let [x, y, z, w] = quat4(q);
+    let axis = [x, y, z];
+    let t = cross(axis, v).map(|c| 2.0 * c);
+    let u = cross(axis, t);
+    [
+        v[0] + w * t[0] + u[0],
+        v[1] + w * t[1] + u[1],
+        v[2] + w * t[2] + u[2],
+    ]
+}
+
+#[test]
+fn a_resting_cloth_moves_with_a_rebase_and_stays_at_rest() {
+    use common::soft_body::Cloth;
+
+    let mut world = world(Vec3::new(0.0, -GRAVITY, 0.0), 1);
+    let floor = add_floor(&mut world);
+    let cloth = Cloth::new(6, 0.2);
+    let shared = cloth.settings();
+    let resting = world
+        .create_soft_body(
+            &shared,
+            &SoftBodySettings::default().position(RVec3::new(0.0, 0.05, 0.0)),
+        )
+        .unwrap();
+    let free = world
+        .create_soft_body(
+            &shared,
+            &SoftBodySettings::default()
+                .position(RVec3::new(5.0, 3.0, 0.0))
+                .gravity_factor(0.0),
+        )
+        .unwrap();
+    let mut ticks = 0;
+    while !world.body(resting).unwrap().is_sleeping() {
+        step(&mut world, 1);
+        ticks += 1;
+        assert!(ticks < 600, "the cloth does not come to rest");
+    }
+    let before = world.soft_body(resting).unwrap().vertices();
+
+    let rotation = tilted_rotation();
+    let translation = RVec3::new(100.0, -50.0, 30.0);
+    world
+        .rebase(&[floor, resting, free], rotation, translation)
+        .unwrap();
+    assert!(world.body(resting).unwrap().is_sleeping(), "nothing wakes");
+    let after = world.soft_body(resting).unwrap().vertices();
+    for (old, new) in before.iter().zip(&after) {
+        let expected = rotate(rotation, real3(old.position));
+        let expected = [
+            expected[0] + real3(translation)[0],
+            expected[1] + real3(translation)[1],
+            expected[2] + real3(translation)[2],
+        ];
+        let error = norm(sub(real3(new.position), expected));
+        assert!(
+            error < 1.0e-4,
+            "vertex moved {error} m off the mapped position"
+        );
+        let velocity = rotate(rotation, vec3(old.velocity));
+        assert!(norm(sub(vec3(new.velocity), velocity)) < 1.0e-5);
+    }
+
+    step(&mut world, 30);
+    let body = world.body(resting).unwrap();
+    let speed = common::soft_body::max_vertex_speed(&world, resting);
+    assert!(
+        body.is_sleeping() || speed < 0.05,
+        "{speed} m/s after the rebase"
+    );
+
+    // The free cloth's body is turned by the rebase; a world force still pushes along itself.
+    let force = Vec3::new(3.0, 4.0, 0.0);
+    world.body_mut(free).unwrap().add_force(force).unwrap();
+    step(&mut world, 1);
+    let vertices = world.soft_body(free).unwrap().vertices();
+    let mean = vertices.iter().fold([0.0; 3], |m, v| {
+        let v = vec3(v.velocity);
+        [m[0] + v[0], m[1] + v[1], m[2] + v[2]]
+    });
+    let direction = mean.map(|c| c / norm(mean));
+    let along = (direction[0] * 3.0 + direction[1] * 4.0) / 5.0;
+    assert!(along > 0.99, "{direction:?}");
+}

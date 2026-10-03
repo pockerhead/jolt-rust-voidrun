@@ -883,3 +883,140 @@ fn a_selection_with_an_unknown_body_is_refused() {
         BodyError::WrongWorld(foreign)
     );
 }
+
+/// A cloth pinned at two corners above the floor and a pressurised ball, both soft.
+fn soft_scene() -> (PhysicsWorld, [BodyId; 2]) {
+    use common::soft_body::{sphere, Cloth};
+
+    let mut world = PhysicsWorld::new(WorldSettings::default().gravity(GRAVITY)).unwrap();
+    add_floor(&mut world);
+    let cloth = Cloth::new(10, 0.1);
+    let pins = cloth.first_row_corners();
+    let cloth = world
+        .create_soft_body(
+            &cloth.pin(&pins).settings(),
+            &SoftBodySettings::default().position(RVec3::new(0.0, 1.0, 0.0)),
+        )
+        .unwrap();
+    let (vertices, faces) = sphere(0.3, 6, 10);
+    let shared = SoftBodySharedSettings::builder(vertices, faces)
+        .create_constraints(
+            SoftBodyBendType::None,
+            SoftBodyVertexAttributes::default().compliance(1.0e-4),
+        )
+        .build()
+        .unwrap();
+    let ball = world
+        .create_soft_body(
+            &shared,
+            &SoftBodySettings::default()
+                .position(RVec3::new(2.0, 1.0, 0.0))
+                .pressure(500.0),
+        )
+        .unwrap();
+    (world, [cloth, ball])
+}
+
+/// The vertex readouts of `bodies` as bits.
+fn soft_bits(world: &PhysicsWorld, bodies: &[BodyId]) -> Vec<u8> {
+    let mut bits = Vec::new();
+    for &id in bodies {
+        for vertex in world.soft_body(id).unwrap().vertices() {
+            let position: [Real; 3] = vertex.position.into();
+            for value in position {
+                bits.extend_from_slice(&value.to_bits().to_le_bytes());
+            }
+            let velocity: [f32; 3] = vertex.velocity.into();
+            for value in velocity.into_iter().chain([vertex.inverse_mass]) {
+                bits.extend_from_slice(&value.to_bits().to_le_bytes());
+            }
+        }
+    }
+    bits
+}
+
+/// The scripted ticks after the restore point: a push on the ball at tick 10.
+fn soft_replay(world: &mut PhysicsWorld, bodies: [BodyId; 2]) -> Vec<Vec<u8>> {
+    let mut ticks = Vec::new();
+    for tick in 0..60 {
+        if tick == 10 {
+            world
+                .body_mut(bodies[1])
+                .unwrap()
+                .add_force(Vec3::new(200.0, 0.0, 0.0))
+                .unwrap();
+        }
+        step(world, 1);
+        ticks.push(soft_bits(world, &bodies));
+    }
+    ticks
+}
+
+#[test]
+fn soft_bodies_replay_after_a_detour_restore() {
+    let (mut world, bodies) = soft_scene();
+    step(&mut world, 20);
+    let saved = world.save_state();
+    let first = soft_replay(&mut world, bodies);
+
+    world.restore_state(&saved).unwrap();
+    let mut cloth = world.soft_body_mut(bodies[0]).unwrap();
+    cloth
+        .set_vertex_velocity(50, Vec3::new(0.0, 3.0, 1.0))
+        .unwrap();
+    world
+        .body_mut(bodies[1])
+        .unwrap()
+        .add_force(Vec3::new(0.0, 500.0, 0.0))
+        .unwrap();
+    world
+        .body_mut(bodies[0])
+        .unwrap()
+        .set_position(RVec3::new(1.0, 2.0, 3.0), Activation::Activate)
+        .unwrap();
+    world.set_gravity(Vec3::new(2.0, -3.0, 0.0)).unwrap();
+    step(&mut world, 30);
+
+    world.restore_state(&saved).unwrap();
+    let second = soft_replay(&mut world, bodies);
+    assert_eq!(first.len(), second.len());
+    for (tick, (a, b)) in first.iter().zip(&second).enumerate() {
+        assert!(a == b, "tick {tick} differs after the detour");
+    }
+}
+
+#[test]
+fn restore_does_not_undo_a_vertex_inverse_mass() {
+    let (mut world, [cloth, _]) = soft_scene();
+    step(&mut world, 5);
+    let saved = world.save_state();
+    world
+        .soft_body_mut(cloth)
+        .unwrap()
+        .set_vertex_inverse_mass(50, 0.0)
+        .unwrap();
+    world.restore_state(&saved).unwrap();
+    assert_eq!(
+        world.soft_body(cloth).unwrap().vertices()[50].inverse_mass,
+        0.0
+    );
+}
+
+#[test]
+fn creating_or_removing_a_soft_body_refuses_earlier_states() {
+    let (mut world, [cloth, _]) = soft_scene();
+    step(&mut world, 5);
+    let saved = world.save_state();
+    let shared = common::soft_body::Cloth::new(3, 0.5)
+        .builder()
+        .build()
+        .unwrap();
+    world
+        .create_soft_body(&shared, &SoftBodySettings::default())
+        .unwrap();
+    assert_eq!(world.restore_state(&saved), Err(StateError::WorldChanged));
+
+    let saved = world.save_state();
+    world.remove_body(cloth).unwrap();
+    assert_eq!(world.restore_state(&saved), Err(StateError::WorldChanged));
+}
