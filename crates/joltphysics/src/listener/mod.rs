@@ -174,7 +174,10 @@ impl EventSettings {
 /// [`SubShapeIdPair`] (body ids first) and then by kind, Added before Persisted before Removed;
 /// activations by body id; soft body events by soft body id. Equal keys keep every event, so a
 /// pair can appear twice in one step (a [`MotionQuality::LinearCast`](crate::MotionQuality)
-/// body's discrete and continuous contact). Events of different steps are not separated.
+/// body's discrete and continuous contact). Events of different steps are not separated. The
+/// determinism tests compare the events of complete steps
+/// ([`StepReport::is_complete`](crate::StepReport::is_complete)) for 1 and 4 worker threads and
+/// caller job systems; `docs/events.md` has the details.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct WorldEvents {
