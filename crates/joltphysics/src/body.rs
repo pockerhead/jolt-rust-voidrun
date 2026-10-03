@@ -79,7 +79,7 @@ pub enum MotionType {
 }
 
 impl MotionType {
-    fn to_jph(self) -> JPH_MotionType {
+    pub(crate) fn to_jph(self) -> JPH_MotionType {
         match self {
             Self::Static => JPH_MotionType_Static,
             Self::Kinematic => JPH_MotionType_Kinematic,
@@ -127,7 +127,7 @@ pub enum Activation {
 }
 
 impl Activation {
-    fn to_jph(self) -> JPH_Activation {
+    pub(crate) fn to_jph(self) -> JPH_Activation {
         match self {
             Self::Activate => JPH_Activation_Activate,
             Self::DontActivate => JPH_Activation_DontActivate,
@@ -145,15 +145,17 @@ impl Activation {
 /// [`CollisionLayers::default`]: crate::CollisionLayers::default
 #[derive(Clone, Debug, PartialEq)]
 pub struct BodySettings {
-    motion_type: MotionType,
-    object_layer: ObjectLayer,
+    pub(crate) motion_type: MotionType,
+    pub(crate) object_layer: ObjectLayer,
     position: RVec3,
     rotation: Quat,
     linear_velocity: Vec3,
     angular_velocity: Vec3,
     friction: f32,
     restitution: f32,
-    mass: Option<f32>,
+    linear_damping: f32,
+    angular_damping: f32,
+    pub(crate) mass: Option<f32>,
     motion_quality: MotionQuality,
     gravity_factor: f32,
     allow_sleeping: bool,
@@ -173,6 +175,8 @@ impl Default for BodySettings {
             angular_velocity: Vec3::ZERO,
             friction: 0.2,
             restitution: 0.0,
+            linear_damping: 0.05,
+            angular_damping: 0.05,
             mass: None,
             motion_quality: MotionQuality::Discrete,
             gravity_factor: 1.0,
@@ -256,6 +260,22 @@ impl BodySettings {
         self
     }
 
+    /// Linear damping, finite and at least 0: Jolt scales the linear velocity by
+    /// `max(0, 1 - c * dt)` every step. Default 0.05.
+    #[must_use]
+    pub fn linear_damping(mut self, value: f32) -> Self {
+        self.linear_damping = value;
+        self
+    }
+
+    /// Angular damping, finite and at least 0: Jolt scales the angular velocity by
+    /// `max(0, 1 - c * dt)` every step. Default 0.05.
+    #[must_use]
+    pub fn angular_damping(mut self, value: f32) -> Self {
+        self.angular_damping = value;
+        self
+    }
+
     /// Overrides the mass in kg (finite, positive and large enough that Jolt can invert it and
     /// the scaled inertia; [`PhysicsWorld::create_body`] checks this). The inertia is computed
     /// from the shape and scaled to this mass (Jolt `EOverrideMassProperties::CalculateInertia`).
@@ -307,6 +327,11 @@ impl BodySettings {
         if self.object_layer.get() >= object_layer_count {
             return Err(BodyError::UnknownObjectLayer(self.object_layer));
         }
+        self.validate_values()
+    }
+
+    /// Every check of [`validate`](Self::validate) except the object layer, which needs a world.
+    pub(crate) fn validate_values(&self) -> Result<(), BodyError> {
         let invalid = |what| Err(BodyError::InvalidValue(what));
         if !self.position.is_finite() {
             return invalid("position must be finite");
@@ -325,6 +350,12 @@ impl BodySettings {
         }
         if !is_finite_non_negative(self.restitution) {
             return invalid("restitution must be finite and not negative");
+        }
+        if !is_finite_non_negative(self.linear_damping) {
+            return invalid("linear damping must be finite and not negative");
+        }
+        if !is_finite_non_negative(self.angular_damping) {
+            return invalid("angular damping must be finite and not negative");
         }
         if !self.gravity_factor.is_finite() {
             return invalid("gravity factor must be finite");
@@ -414,7 +445,7 @@ fn has_well_conditioned_principal_moments(tensor: [[f64; 3]; 3]) -> bool {
 }
 
 /// Owns a `JPH_BodyCreationSettings`, which holds its own reference to the shape.
-struct CreationSettings(Owned<JPH_BodyCreationSettings>);
+pub(crate) struct CreationSettings(Owned<JPH_BodyCreationSettings>);
 
 /// Body creation settings, owned whole by their owner.
 impl JoltObject for JPH_BodyCreationSettings {
@@ -426,7 +457,8 @@ impl JoltObject for JPH_BodyCreationSettings {
 }
 
 impl CreationSettings {
-    fn new(shape: &Shape, settings: &BodySettings) -> Result<Self, BodyError> {
+    /// Jolt's settings for a body of `shape` made from `settings`, which the caller validated.
+    pub(crate) fn new(shape: &Shape, settings: &BodySettings) -> Result<Self, BodyError> {
         let position = settings.position.to_jph();
         let rotation = settings.rotation.to_jph();
         // SAFETY: `shape` is live for the call and the settings take their own reference to
@@ -454,6 +486,8 @@ impl CreationSettings {
             JPH_BodyCreationSettings_SetAngularVelocity(ptr, &angular_velocity);
             JPH_BodyCreationSettings_SetFriction(ptr, settings.friction);
             JPH_BodyCreationSettings_SetRestitution(ptr, settings.restitution);
+            JPH_BodyCreationSettings_SetLinearDamping(ptr, settings.linear_damping);
+            JPH_BodyCreationSettings_SetAngularDamping(ptr, settings.angular_damping);
             JPH_BodyCreationSettings_SetMotionQuality(ptr, settings.motion_quality.to_jph());
             JPH_BodyCreationSettings_SetGravityFactor(ptr, settings.gravity_factor);
             JPH_BodyCreationSettings_SetAllowSleeping(ptr, settings.allow_sleeping);
@@ -478,6 +512,11 @@ impl CreationSettings {
             }
         }
         Ok(this)
+    }
+
+    /// The settings object, still owned by `self`.
+    pub(crate) fn as_ptr(&self) -> *mut JPH_BodyCreationSettings {
+        self.0.as_ptr()
     }
 }
 
@@ -523,7 +562,7 @@ impl PhysicsWorld {
         let raw = unsafe {
             JPH_BodyInterface_CreateAndAddBody(
                 self.body_interface.as_ptr(),
-                creation.0.as_ptr(),
+                creation.as_ptr(),
                 settings.activation.to_jph(),
             )
         };
@@ -557,6 +596,7 @@ impl PhysicsWorld {
         self.check(id)?;
         Ok(BodyRef {
             body_interface: self.body_interface,
+            body_lock_interface: self.body_lock_interface,
             id,
             _world: PhantomData,
         })
@@ -568,10 +608,10 @@ impl PhysicsWorld {
         Ok(BodyMut {
             inner: BodyRef {
                 body_interface: self.body_interface,
+                body_lock_interface: self.body_lock_interface,
                 id,
                 _world: PhantomData,
             },
-            body_lock_interface: self.body_lock_interface,
             _world: PhantomData,
         })
     }
@@ -625,7 +665,7 @@ impl PhysicsWorld {
     /// Jolt's broad phase keeps widened bounds for moved bodies until its next maintenance, so
     /// which bodies it reports depends on that history (Jolt docs, "Deterministic Simulation").
     /// Here it only proposes candidates; each is kept only when its exact bounds overlap.
-    fn wake_bodies_overlapping(&mut self, bounds: &JPH_AABox) {
+    pub(crate) fn wake_bodies_overlapping(&mut self, bounds: &JPH_AABox) {
         let candidates = self.broad_phase_bodies(bounds);
         let woken = self.overlapping_movable_bodies(bounds, &candidates);
         if woken.is_empty() {
@@ -852,6 +892,7 @@ pub(crate) fn with_read_locked_body<R>(
 /// position involves arithmetic.
 pub struct BodyRef<'w> {
     body_interface: NonNull<JPH_BodyInterface>,
+    body_lock_interface: NonNull<JPH_BodyLockInterface>,
     id: BodyId,
     _world: PhantomData<&'w PhysicsWorld>,
 }
@@ -917,6 +958,26 @@ impl BodyRef<'_> {
     pub fn is_sleeping(&self) -> bool {
         self.motion_type() != MotionType::Static && !self.is_active()
     }
+
+    /// Mass in kg of a dynamic body; `None` for static and kinematic bodies, whose mass is
+    /// infinite. For the caller's own gravity `g` (m/s²) on a body created with
+    /// [`gravity_factor(0.0)`](BodySettings::gravity_factor), add the force `g * mass` every
+    /// step with [`BodyMut::add_force`].
+    pub fn mass(&self) -> Option<f32> {
+        with_read_locked_body(self.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for reading for the duration of the closure. A dynamic body
+            // has motion properties, so the unchecked getter reads a live member; the getters
+            // only read.
+            unsafe {
+                JPH_Body_IsDynamic(body.as_ptr()).then(|| {
+                    1.0 / JPH_MotionProperties_GetInverseMassUnchecked(
+                        JPH_Body_GetMotionProperties(body.as_ptr()),
+                    )
+                })
+            }
+        })
+        .flatten()
+    }
 }
 
 /// Read and write access to one body, borrowed mutably from its world.
@@ -926,7 +987,6 @@ impl BodyRef<'_> {
 /// and force writes. Not `Send` or `Sync`.
 pub struct BodyMut<'w> {
     inner: BodyRef<'w>,
-    body_lock_interface: NonNull<JPH_BodyLockInterface>,
     _world: PhantomData<&'w mut PhysicsWorld>,
 }
 
@@ -1076,7 +1136,7 @@ impl BodyMut<'_> {
     /// Discards the force and torque added since the last step. Jolt clears them after every
     /// step anyway. Does nothing for static and kinematic bodies.
     pub fn reset_forces(&mut self) {
-        with_locked_body(self.body_lock_interface, self.id, |body| {
+        with_locked_body(self.inner.body_lock_interface, self.id, |body| {
             // SAFETY: `body` is locked for writing for the duration of the closure. Jolt's
             // `ResetForce` and `ResetTorque` need motion properties, which only dynamic bodies
             // are guaranteed to have here, hence the `IsDynamic` check first.
@@ -1135,6 +1195,14 @@ mod tests {
                 JPH_BodyCreationSettings_GetEnhancedInternalEdgeRemoval(ptr),
                 ours.enhanced_internal_edge_removal
             );
+            assert_eq!(
+                JPH_BodyCreationSettings_GetLinearDamping(ptr),
+                ours.linear_damping
+            );
+            assert_eq!(
+                JPH_BodyCreationSettings_GetAngularDamping(ptr),
+                ours.angular_damping
+            );
             assert!(ours.mass.is_none());
             // The one documented difference: Jolt's default layer is 0.
             assert_eq!(JPH_BodyCreationSettings_GetObjectLayer(ptr), 0);
@@ -1159,6 +1227,61 @@ mod tests {
                 unsafe { JPH_Body_GetEnhancedInternalEdgeRemoval(body.as_ptr()) }
             });
             assert_eq!(stored, Some(value));
+        }
+    }
+
+    #[test]
+    fn damping_reaches_the_body() {
+        let mut world = PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+        let shape = Shape::new_sphere(0.5).unwrap();
+        let settings = BodySettings::new_dynamic()
+            .linear_damping(0.3)
+            .angular_damping(0.7);
+        let id = world.create_body(&shape, &settings).unwrap();
+        let stored = with_read_locked_body(world.body_lock_interface, id, |body| {
+            // SAFETY: `body` is locked for the duration of the closure and dynamic, so it has
+            // motion properties; the getters only read.
+            unsafe {
+                let motion = JPH_Body_GetMotionProperties(body.as_ptr());
+                (
+                    JPH_MotionProperties_GetLinearDamping(motion),
+                    JPH_MotionProperties_GetAngularDamping(motion),
+                )
+            }
+        });
+        assert_eq!(stored, Some((0.3, 0.7)));
+    }
+
+    #[test]
+    fn invalid_damping_is_rejected() {
+        let mut world = PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+        let shape = Shape::new_sphere(0.5).unwrap();
+        for value in [-0.1, f32::NAN, f32::INFINITY] {
+            for settings in [
+                BodySettings::new_dynamic().linear_damping(value),
+                BodySettings::new_dynamic().angular_damping(value),
+            ] {
+                assert!(matches!(
+                    world.create_body(&shape, &settings),
+                    Err(BodyError::InvalidValue(_))
+                ));
+            }
+        }
+        assert_eq!(world.body_count(), 0);
+    }
+
+    #[test]
+    fn mass_is_reported_for_dynamic_bodies_only() {
+        let mut world = PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+        let shape = Shape::new_sphere(0.5).unwrap();
+        let dynamic = world
+            .create_body(&shape, &BodySettings::new_dynamic().mass(12.5))
+            .unwrap();
+        let mass = world.body(dynamic).unwrap().mass().unwrap();
+        assert!((mass - 12.5).abs() <= 12.5 * 1.0e-6, "{mass}");
+        for settings in [BodySettings::new_static(), BodySettings::new_kinematic()] {
+            let id = world.create_body(&shape, &settings).unwrap();
+            assert_eq!(world.body(id).unwrap().mass(), None);
         }
     }
 

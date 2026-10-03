@@ -9,7 +9,7 @@ use std::f32::consts::PI;
 
 use joltphysics_sys::*;
 
-use crate::math::{is_finite_non_negative, is_finite_positive};
+use crate::math::{is_finite_non_negative, is_finite_positive, is_unit};
 use crate::owned::{JoltObject, Owned};
 use crate::{ObjectLayer, PhysicsWorld, Vec3, VehicleError};
 
@@ -347,21 +347,11 @@ impl VehicleSettings {
 /// Jolt's `VehicleEngine::cAngularVelocityToRPM`.
 const ANGULAR_VELOCITY_TO_RPM: f32 = 60.0 / (2.0 * PI);
 
-/// Tolerance of the unit-length checks: `|v·v − 1|` at most this, half of Jolt's
-/// `Vec3::IsNormalized` tolerance 1e-6, so a rounding difference between the check here and
-/// Jolt's cannot let a vector through that Jolt's assertion rejects.
-const UNIT_TOLERANCE: f32 = 5.0e-7;
-
 /// Tolerance of the perpendicularity checks on unit vectors, `|a·b|` at most this.
 const PERPENDICULAR_TOLERANCE: f32 = 1.0e-3;
 
 /// Tolerance of the engine torque ratio sum, `|sum − 1|` below this, half of Jolt's 1e-6.
 const SUM_TOLERANCE: f32 = 5.0e-7;
-
-/// Whether `v` is finite and of unit length within [`UNIT_TOLERANCE`].
-pub(crate) fn is_unit(v: Vec3) -> bool {
-    v.is_finite() && (v.dot(v) - 1.0).abs() <= UNIT_TOLERANCE
-}
 
 /// Whether `value` is a valid limited slip ratio: finite and above 1 (`f32::MAX` is open).
 fn is_limited_slip_ratio(value: f32) -> bool {

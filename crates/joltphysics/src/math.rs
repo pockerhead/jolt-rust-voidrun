@@ -19,6 +19,16 @@ pub(crate) fn is_finite_non_negative(value: f32) -> bool {
     value.is_finite() && value >= 0.0
 }
 
+/// Tolerance of the unit-length checks: `|v·v − 1|` at most this, half of Jolt's
+/// `Vec3::IsNormalized` tolerance 1e-6, so a rounding difference between the check here and
+/// Jolt's cannot let a vector through that Jolt's assertion rejects.
+pub(crate) const UNIT_TOLERANCE: f32 = 5.0e-7;
+
+/// Whether `v` is finite and of unit length within [`UNIT_TOLERANCE`].
+pub(crate) fn is_unit(v: Vec3) -> bool {
+    v.is_finite() && (v.dot(v) - 1.0).abs() <= UNIT_TOLERANCE
+}
+
 /// A 3D vector of `f32`, used for directions, velocities, forces and extents.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec3 {

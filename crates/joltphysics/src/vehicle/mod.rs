@@ -22,11 +22,12 @@ use std::fmt;
 use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
+use crate::math::is_unit;
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyError, BodyId, MotionType, PhysicsWorld, RVec3, SubShapeId, Vec3, VehicleError};
 
-use settings::{is_unit, WheelGeometry};
+use settings::WheelGeometry;
 pub use settings::{
     SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings,
     VehicleEngineSettings, VehicleSettings, VehicleTransmissionSettings, WheelSettings,
