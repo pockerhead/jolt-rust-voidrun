@@ -34,4 +34,9 @@ JPH_CAPI void JPH_CharacterVirtual_RefreshContacts2(JPH_CharacterVirtual* charac
 	const JPH_BroadPhaseLayerFilter* broadPhaseLayerFilter, const JPH_ObjectLayerFilter* objectLayerFilter,
 	const JPH_BodyFilter* bodyFilter, const JPH_ShapeFilter* shapeFilter, JPH_TempAllocator* tempAllocator);
 
+/* VehicleConstraint */
+/* The Constraint base of the vehicle constraint, for JPH_PhysicsSystem_AddConstraint, _RemoveConstraint
+   and JPH_Constraint_Destroy; counterpart of JPH_VehicleConstraint_AsPhysicsStepListener. */
+JPH_CAPI JPH_Constraint* JPH_VehicleConstraint_AsConstraint(JPH_VehicleConstraint* constraint);
+
 #endif /* JOLT_C_EXT_H_ */

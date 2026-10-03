@@ -4,9 +4,10 @@
 //! fork's `native/joltc_ext/joltc_ext.h`, and keeps their `JPH_*` names. The
 //! extension adds functions in joltc's naming that are compiled into the joltc
 //! archive: a `JPH_StateRecorder`, `JPH_CharacterVirtual_SaveState` and
-//! `RestoreState`, and `JPH_CharacterVirtual_ExtendedUpdate2` and
-//! `RefreshContacts2` with explicit gravity, filters and temp allocator. The safe
-//! API lives in the `joltphysics` crate.
+//! `RestoreState`, `JPH_CharacterVirtual_ExtendedUpdate2` and
+//! `RefreshContacts2` with explicit gravity, filters and temp allocator, and
+//! `JPH_VehicleConstraint_AsConstraint`, the `Constraint` base of a vehicle
+//! constraint. The safe API lives in the `joltphysics` crate.
 //!
 //! # Features
 //! - `asserts`: compile Jolt with its debug assertions.
@@ -55,6 +56,17 @@
 //!   both crates must not call `JPH_*Filter_SetProcs` for these three types, and must not pass
 //!   filters it created with `JPH_*Filter_Create` to queries, because the callbacks of
 //!   `joltphysics` would receive their `userData`.
+//! - A vehicle constraint must be registered both as a constraint
+//!   (`JPH_PhysicsSystem_AddConstraint` with `JPH_VehicleConstraint_AsConstraint`) and as a
+//!   step listener (`JPH_PhysicsSystem_AddStepListener` with
+//!   `JPH_VehicleConstraint_AsPhysicsStepListener`), and its collision tester must be set
+//!   before the first step. Remove it from both before its last reference is released
+//!   (`JPH_Constraint_Destroy` on the `AsConstraint` pointer) and before its body is
+//!   destroyed.
+//! - `JPH_VehicleEngineSettings_Init` allocates a `JPH_LinearCurve` for `normalizedTorque`
+//!   that the caller must destroy with `JPH_LinearCurve_Destroy`.
+//! - The `JPH_Wheel_GetContact*` getters are meaningful only while `JPH_Wheel_HasContact`
+//!   returns true.
 //! - These joltc functions are not bound: `JPH_RagdollSettings_DisableParentChildCollisions`,
 //!   `JPH_Ragdoll_SetPose2`, `JPH_Ragdoll_GetPose2`, `JPH_SkeletonMapper_Initialize`,
 //!   `JPH_SkeletonMapper_LockAllTranslations`, `JPH_SkeletonMapper_LockTranslations`,

@@ -22,8 +22,11 @@
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeID.h>
+#include <Jolt/Physics/Constraints/Constraint.h>
+#include <Jolt/Physics/Constraints/SpringSettings.h>
 #include <Jolt/Physics/EActivation.h>
 #include <Jolt/Physics/EPhysicsUpdateError.h>
+#include <Jolt/Physics/Vehicle/VehicleTransmission.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -120,6 +123,44 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ExtendedUpdateSettings, walkStairsStepForwardT
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ExtendedUpdateSettings, walkStairsCosAngleForwardContact, 32);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ExtendedUpdateSettings, walkStairsStepDownExtra, 36);
 
+// Vehicle, constraint and physics settings values. joltc converts these field
+// by field, so only the C ABI is pinned here, not agreement with the C++ layout.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_Point, 8, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_Point, x, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_Point, y, 4);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_SpringSettings, 12, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SpringSettings, mode, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SpringSettings, frequencyOrStiffness, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SpringSettings, damping, 8);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_VehicleAntiRollBar, 12, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleAntiRollBar, leftWheel, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleAntiRollBar, rightWheel, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleAntiRollBar, stiffness, 8);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_VehicleDifferentialSettings, 24, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleDifferentialSettings, leftWheel, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleDifferentialSettings, rightWheel, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleDifferentialSettings, differentialRatio, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleDifferentialSettings, leftRightSplit, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleDifferentialSettings, limitedSlipRatio, 16);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleDifferentialSettings, engineTorqueRatio, 20);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ConstraintSettings, 32, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, enabled, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, constraintPriority, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, numVelocityStepsOverride, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, numPositionStepsOverride, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, drawConstraintSize, 16);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ConstraintSettings, userData, 24);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_PhysicsSettings, 84, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, maxInFlightBodyPairs, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, stepListenersBatchSize, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, stepListenerBatchesPerJob, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, baumgarte, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, numVelocitySteps, 56);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, numPositionSteps, 60);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, pointVelocitySleepThreshold, 72);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, deterministicSimulation, 76);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_PhysicsSettings, checkActiveEdges, 82);
+
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JobSystemThreadPoolConfig, 12, 4);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JobSystemThreadPoolConfig, numThreads, 8);
 
@@ -188,6 +229,26 @@ JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, penetrationRecoveryS
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, innerBodyShape, 112);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, innerBodyIDOverride, 120);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterVirtualSettings, innerBodyLayer, 124);
+// Vehicle settings, which hold pointers. joltc converts these field by field,
+// so only the C ABI is pinned here.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_VehicleConstraintSettings, 96, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleConstraintSettings, base, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleConstraintSettings, up, 32);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleConstraintSettings, forward, 44);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleConstraintSettings, maxPitchRollAngle, 56);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleConstraintSettings, wheelsCount, 60);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleConstraintSettings, wheels, 64);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleConstraintSettings, antiRollBarsCount, 72);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleConstraintSettings, antiRollBars, 80);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleConstraintSettings, controller, 88);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_VehicleEngineSettings, 32, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, maxTorque, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, minRPM, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, maxRPM, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, normalizedTorque, 16);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, inertia, 24);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, angularDamping, 28);
+
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, hash, 0);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, bodyB, 8);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_CharacterContact, characterIDB, 12);
@@ -259,6 +320,9 @@ static_assert(sizeof(JPH_ActiveEdgeMode) == 4, "JPH_ActiveEdgeMode: unexpected s
 static_assert(sizeof(JPH_CollectFacesMode) == 4, "JPH_CollectFacesMode: unexpected size");
 static_assert(sizeof(JPH_CollisionCollectorType) == 4, "JPH_CollisionCollectorType: unexpected size");
 static_assert(sizeof(JPH_GroundState) == 4, "JPH_GroundState: unexpected size");
+static_assert(sizeof(JPH_SpringMode) == 4, "JPH_SpringMode: unexpected size");
+static_assert(sizeof(JPH_TransmissionMode) == 4, "JPH_TransmissionMode: unexpected size");
+static_assert(sizeof(JPH_ConstraintSubType) == 4, "JPH_ConstraintSubType: unexpected size");
 
 static_assert(int(JPH_MotionType_Static) == int(JPH::EMotionType::Static), "JPH_MotionType_Static");
 static_assert(int(JPH_MotionType_Kinematic) == int(JPH::EMotionType::Kinematic), "JPH_MotionType_Kinematic");
@@ -309,3 +373,11 @@ static_assert(int(JPH_GroundState_OnGround) == int(JPH::CharacterBase::EGroundSt
 static_assert(int(JPH_GroundState_OnSteepGround) == int(JPH::CharacterBase::EGroundState::OnSteepGround), "JPH_GroundState_OnSteepGround");
 static_assert(int(JPH_GroundState_NotSupported) == int(JPH::CharacterBase::EGroundState::NotSupported), "JPH_GroundState_NotSupported");
 static_assert(int(JPH_GroundState_InAir) == int(JPH::CharacterBase::EGroundState::InAir), "JPH_GroundState_InAir");
+
+// Jolt declares ESpringMode and ETransmissionMode as uint8 enums; joltc casts the
+// 4-byte C values.
+static_assert(int(JPH_SpringMode_FrequencyAndDamping) == int(JPH::ESpringMode::FrequencyAndDamping), "JPH_SpringMode_FrequencyAndDamping");
+static_assert(int(JPH_SpringMode_StiffnessAndDamping) == int(JPH::ESpringMode::StiffnessAndDamping), "JPH_SpringMode_StiffnessAndDamping");
+static_assert(int(JPH_TransmissionMode_Auto) == int(JPH::ETransmissionMode::Auto), "JPH_TransmissionMode_Auto");
+static_assert(int(JPH_TransmissionMode_Manual) == int(JPH::ETransmissionMode::Manual), "JPH_TransmissionMode_Manual");
+static_assert(int(JPH_ConstraintSubType_Vehicle) == int(JPH::EConstraintSubType::Vehicle), "JPH_ConstraintSubType_Vehicle");

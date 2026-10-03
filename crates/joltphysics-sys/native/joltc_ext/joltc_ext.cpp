@@ -5,7 +5,9 @@
 // This translation unit does not include joltc.cpp. It converts joltc handles the way joltc
 // does: filters, the temp allocator and the character are reinterpret_casts of the Jolt objects
 // they stand for (joltc's DEF_MAP_DECL and its Managed*Filter classes, which derive from the
-// Jolt filter classes with single inheritance).
+// Jolt filter classes with single inheritance). The vehicle constraint is a reinterpret_cast of
+// the most derived object, as in joltc; its bases are reached with static_cast, because
+// VehicleConstraint inherits from both Constraint and PhysicsStepListener.
 
 #include <Jolt/Jolt.h>
 
@@ -16,6 +18,7 @@
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/ShapeFilter.h>
 #include <Jolt/Physics/StateRecorderImpl.h>
+#include <Jolt/Physics/Vehicle/VehicleConstraint.h>
 
 #include <algorithm>
 #include <cstring>
@@ -175,4 +178,13 @@ void JPH_CharacterVirtual_RefreshContacts2(JPH_CharacterVirtual* character,
 		ToJolt(shapeFilter),
 		AsTempAllocator(tempAllocator)
 	);
+}
+
+/* VehicleConstraint */
+JPH_Constraint* JPH_VehicleConstraint_AsConstraint(JPH_VehicleConstraint* constraint)
+{
+	JPH_ASSERT(constraint);
+
+	JPH::Constraint* joltConstraint = static_cast<JPH::Constraint*>(reinterpret_cast<JPH::VehicleConstraint*>(constraint));
+	return reinterpret_cast<JPH_Constraint*>(joltConstraint);
 }
