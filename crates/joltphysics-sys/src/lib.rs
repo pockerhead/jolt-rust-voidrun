@@ -13,8 +13,10 @@
 //! the swing-twist motor states (`JPH_SwingTwistConstraint_SetSwingMotorState`,
 //! `_GetSwingMotorState`, `_SetTwistMotorState`, `_GetTwistMotorState`), its
 //! `SetTargetOrientationBS` and `GetRotationInConstraintSpace`, and
-//! `JPH_HingeConstraint_SetTargetOrientationBS`. The safe API lives in the
-//! `joltphysics` crate.
+//! `JPH_HingeConstraint_SetTargetOrientationBS`, and materials with user data
+//! (`JPH_PhysicsMaterial_Create2`, `JPH_PhysicsMaterial_GetUserData`,
+//! `JPH_ConvexShapeSettings_SetMaterial`, `JPH_HeightFieldShapeSettings_Create2`). The safe API
+//! lives in the `joltphysics` crate.
 //!
 //! # Features
 //! - `asserts`: compile Jolt with its debug assertions. joltc's default handler prints a failed

@@ -51,7 +51,7 @@
 #include <vector>
 
 #include "joltc_ext.h"
-#include "joltc_physics_system.h"
+#include "joltc_ext_internal.h"
 
 // joltc's own conversions of the constraint settings, defined in joltc.cpp at global scope with C++
 // linkage but not declared in joltc.h. Declaring them here keeps one conversion shared with joltc's
@@ -62,14 +62,11 @@ void JPH_SixDOFConstraintSettings_ToJolt(JPH::SixDOFConstraintSettings* joltSett
 void JPH_ConstraintSettings_Init(const JPH::ConstraintSettings& joltSettings, JPH_ConstraintSettings* settings);
 void JPH_ConstraintSettings_ToJolt(JPH::ConstraintSettings* joltSettings, const JPH_ConstraintSettings* settings);
 
+using joltc_ext::AsJoltPhysicsSystem;
+using joltc_ext::ToVec3;
+
 namespace
 {
-	// JPH_Vec3 is three floats; JPH::Vec3 is a 16-byte SIMD type, so it is built, never cast.
-	JPH::Vec3 ToVec3(const JPH_Vec3& vec)
-	{
-		return JPH::Vec3(vec.x, vec.y, vec.z);
-	}
-
 	// A null filter accepts everything, as in joltc.
 	const JPH::BroadPhaseLayerFilter& ToJolt(const JPH_BroadPhaseLayerFilter* filter)
 	{
@@ -106,16 +103,6 @@ namespace
 	const JPH::StateRecorderImpl* AsStateRecorder(const JPH_StateRecorder* recorder)
 	{
 		return reinterpret_cast<const JPH::StateRecorderImpl*>(recorder);
-	}
-
-	JPH::PhysicsSystem& AsJoltPhysicsSystem(JPH_PhysicsSystem* system)
-	{
-		return *system->physicsSystem;
-	}
-
-	const JPH::PhysicsSystem& AsJoltPhysicsSystem(const JPH_PhysicsSystem* system)
-	{
-		return *system->physicsSystem;
 	}
 
 	// Saves only the bodies whose id is in the list. The list is copied, sorted and deduplicated

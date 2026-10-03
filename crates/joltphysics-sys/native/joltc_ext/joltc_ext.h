@@ -268,4 +268,20 @@ JPH_CAPI void JPH_Body_SetSoftBodyVertexVelocity(JPH_Body* body, uint32_t index,
    inertia (JPH::SoftBodyMotionProperties::CalculateMassAndInertia). */
 JPH_CAPI void JPH_Body_SetSoftBodyVertexInvMass(JPH_Body* body, uint32_t index, float invMass);
 
+/* PhysicsMaterial */
+/* A JPH::PhysicsMaterialSimple that also carries userData. Returns one reference, released by
+   JPH_PhysicsMaterial_Destroy. Not serializable. */
+JPH_CAPI JPH_PhysicsMaterial* JPH_PhysicsMaterial_Create2(const char* name, uint32_t color, uint64_t userData);
+/* true and *userData set for a material made by JPH_PhysicsMaterial_Create2; false, *userData
+   untouched, for null, JPH::PhysicsMaterial::sDefault and every other material. */
+JPH_CAPI bool JPH_PhysicsMaterial_GetUserData(const JPH_PhysicsMaterial* material, uint64_t* userData);
+/* Sets JPH::ConvexShapeSettings::mMaterial (null selects the default material); the settings keep their
+   own reference. Call it before the first CreateShape: Jolt caches the created shape. */
+JPH_CAPI void JPH_ConvexShapeSettings_SetMaterial(JPH_ConvexShapeSettings* settings, const JPH_PhysicsMaterial* material);
+/* Like JPH_HeightFieldShapeSettings_Create, with materials: materialIndices holds (sampleCount - 1)^2
+   indices into materials[0..materialCount). Returns null when materialCount is 0 or materialIndices or
+   materials is null. Each list entry keeps its own reference. Jolt refuses more than 256 materials and
+   indices beyond the list when the shape is created. */
+JPH_CAPI JPH_HeightFieldShapeSettings* JPH_HeightFieldShapeSettings_Create2(const float* samples, const JPH_Vec3* offset, const JPH_Vec3* scale, uint32_t sampleCount, const uint8_t* materialIndices, const JPH_PhysicsMaterial* const* materials, uint32_t materialCount);
+
 #endif /* JOLT_C_EXT_H_ */
