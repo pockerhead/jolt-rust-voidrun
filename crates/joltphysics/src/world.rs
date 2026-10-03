@@ -551,6 +551,13 @@ impl PhysicsWorld {
     /// update reads only cached normals and velocities; after a rotation call
     /// [`refresh_character_contacts`](Self::refresh_character_contacts) for every character
     /// before its next update.
+    ///
+    /// Vehicles move with their chassis, which the list names as bodies. A rotation also
+    /// rotates each vehicle's gravity override and the world-space up of a ray or sphere
+    /// collision tester, in id order after the characters; a translation changes neither. The
+    /// wheel contacts a vehicle reports stay in the old frame until the next step tests the
+    /// wheels again, and the world up of the pitch and roll limit follows the rotated gravity on
+    /// that step.
     pub fn rebase(
         &mut self,
         bodies_in_key_order: &[BodyId],
@@ -614,6 +621,12 @@ impl PhysicsWorld {
             };
             characters.push((id, new));
         }
+        let vehicles = if frame.rotates() {
+            self.rotated_vehicles(|v| frame.vector(v))
+                .map_err(BodyError::InvalidValue)?
+        } else {
+            Vec::new()
+        };
 
         for (id, motion_type, old, new) in changes {
             let position = new.position.to_jph();
@@ -664,6 +677,7 @@ impl PhysicsWorld {
                 .and_then(|()| character.set_linear_velocity(new.linear_velocity));
             debug_assert_eq!(written, Ok(()), "checked by `FrameChange::character`");
         }
+        self.apply_vehicle_rebase(vehicles);
         if frame.rotates() {
             let gravity = gravity.to_jph();
             // SAFETY: the system is live and borrowed mutably; `gravity` is a live local.

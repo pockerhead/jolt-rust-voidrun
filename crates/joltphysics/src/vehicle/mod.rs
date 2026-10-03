@@ -26,7 +26,7 @@ use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyError, BodyId, MotionType, PhysicsWorld, RVec3, SubShapeId, Vec3, VehicleError};
 
-use settings::WheelGeometry;
+use settings::{is_unit, WheelGeometry};
 pub use settings::{
     SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings,
     VehicleEngineSettings, VehicleSettings, VehicleTransmissionSettings, WheelSettings,
@@ -670,6 +670,73 @@ impl PhysicsWorld {
     /// Whether `body` is the chassis of a vehicle of this world.
     pub(crate) fn is_vehicle_body(&self, body: BodyId) -> bool {
         self.vehicle_of_body(body).is_some()
+    }
+}
+
+/// A vehicle's gravity override and collision tester in the new frame of a rotating
+/// [`PhysicsWorld::rebase`], computed before the rebase writes anything.
+pub(crate) struct VehicleRebase {
+    raw: u32,
+    gravity: Option<Vec3>,
+    collision_tester: VehicleCollisionTester,
+}
+
+impl PhysicsWorld {
+    /// Every vehicle's gravity override and tester rotated by `rotate`, in id order; an error
+    /// names the value that would not be valid in the new frame.
+    pub(crate) fn rotated_vehicles(
+        &self,
+        rotate: impl Fn(Vec3) -> Vec3,
+    ) -> Result<Vec<VehicleRebase>, &'static str> {
+        let mut rebased = Vec::with_capacity(self.vehicles.len());
+        for (&raw, entry) in &self.vehicles {
+            let vehicle = VehicleRef {
+                world: self,
+                id: VehicleId::new(raw, self.tag),
+                entry,
+            };
+            let gravity = vehicle.gravity().map(&rotate);
+            if !gravity.is_none_or(|gravity| gravity.is_finite()) {
+                return Err("rebase would give a vehicle a non-finite gravity");
+            }
+            let collision_tester = match entry.collision_tester.up() {
+                Some(up) => {
+                    let up = rotate(up).normalized_or_zero();
+                    if !is_unit(up) {
+                        return Err("rebase would give a vehicle tester an up that is not unit");
+                    }
+                    entry.collision_tester.with_up(up)
+                }
+                None => entry.collision_tester,
+            };
+            rebased.push(VehicleRebase {
+                raw,
+                gravity,
+                collision_tester,
+            });
+        }
+        Ok(rebased)
+    }
+
+    /// Writes what [`rotated_vehicles`](Self::rotated_vehicles) computed.
+    pub(crate) fn apply_vehicle_rebase(&mut self, rebased: Vec<VehicleRebase>) {
+        for vehicle in rebased {
+            let entry = self
+                .vehicles
+                .get_mut(&vehicle.raw)
+                .unwrap_or_else(|| unreachable!("computed from this world's vehicles"));
+            if let Some(gravity) = vehicle.gravity {
+                let gravity = gravity.to_jph();
+                // SAFETY: the world is borrowed mutably and owns the constraint; no step runs.
+                // `gravity` is a live local.
+                unsafe {
+                    JPH_VehicleConstraint_OverrideGravity(entry.constraint.as_ptr(), &gravity)
+                };
+            }
+            if vehicle.collision_tester != entry.collision_tester {
+                install_tester(entry, vehicle.collision_tester);
+            }
+        }
     }
 }
 

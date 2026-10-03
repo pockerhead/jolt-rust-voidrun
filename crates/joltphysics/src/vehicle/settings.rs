@@ -1160,6 +1160,33 @@ impl VehicleCollisionTester {
         }
     }
 
+    /// This tester with its up replaced by `up`; the cylinder has none and stays as it is.
+    pub(crate) fn with_up(self, new_up: Vec3) -> Self {
+        match self {
+            Self::Ray {
+                object_layer,
+                max_slope_angle,
+                ..
+            } => Self::Ray {
+                object_layer,
+                up: new_up,
+                max_slope_angle,
+            },
+            Self::CastSphere {
+                object_layer,
+                radius,
+                max_slope_angle,
+                ..
+            } => Self::CastSphere {
+                object_layer,
+                radius,
+                up: new_up,
+                max_slope_angle,
+            },
+            cylinder @ Self::CastCylinder { .. } => cylinder,
+        }
+    }
+
     /// Checks the tester against the world's layers and the wheels it serves.
     pub(crate) fn validate(
         &self,

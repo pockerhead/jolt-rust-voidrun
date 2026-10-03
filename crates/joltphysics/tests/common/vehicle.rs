@@ -261,8 +261,12 @@ pub fn route_world(threads: u32) -> (PhysicsWorld, BodyId, VehicleId) {
     (world, chassis, car)
 }
 
-/// Drives the route, recording the vehicle after every tick into `digest` when given.
-pub fn drive_route(threads: u32, mut digest: Option<&mut Vec<u8>>) -> RouteReport {
+/// Drives the route with `threads` workers, calling `after_tick` with the world and the vehicle
+/// after every tick.
+pub fn drive_route(
+    threads: u32,
+    mut after_tick: impl FnMut(&PhysicsWorld, VehicleId),
+) -> RouteReport {
     let (mut world, chassis, car) = route_world(threads);
     let mut report = RouteReport {
         min_up_dot: 1.0,
@@ -300,9 +304,7 @@ pub fn drive_route(threads: u32, mut digest: Option<&mut Vec<u8>>) -> RouteRepor
         if in_contact >= 2 {
             report.ticks_with_two_wheels += 1;
         }
-        if let Some(digest) = digest.as_deref_mut() {
-            record_vehicle(&world, car, digest);
-        }
+        after_tick(&world, car);
     }
     report
 }

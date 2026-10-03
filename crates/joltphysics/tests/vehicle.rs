@@ -598,7 +598,7 @@ fn collision_tester_can_be_replaced() {
 
 #[test]
 fn drive_a_route_over_terrain() {
-    let report = drive_route(1, None);
+    let report = drive_route(1, |_, _| {});
     assert_eq!(
         report.reached.len(),
         WAYPOINTS.len(),
@@ -618,8 +618,8 @@ fn drive_a_route_over_terrain() {
 fn drive_a_route_twice_gives_identical_bits() {
     let mut first = Vec::new();
     let mut second = Vec::new();
-    drive_route(1, Some(&mut first));
-    drive_route(1, Some(&mut second));
+    drive_route(1, |world, car| record_vehicle(world, car, &mut first));
+    drive_route(1, |world, car| record_vehicle(world, car, &mut second));
     assert!(!first.is_empty());
     assert!(first == second, "the two drives differ");
 }
