@@ -618,3 +618,129 @@ fn a_state_of_another_world_is_refused() {
         "the refusal changed the world"
     );
 }
+
+/// The structural calls of the id test at fixed ticks of a recorded run: a cube created at tick
+/// 5, a stack cube removed at 10, a point constraint created at 12 and a second cube created at
+/// 15, which takes the removed cube's index. Returns the digest and the first created, the
+/// removed and the second created cube.
+fn structural_run(scene: &mut Scene, ticks: usize) -> (Digest, [BodyId; 3]) {
+    let mut digest = Digest::new();
+    let mut ids = Vec::new();
+    for tick in 0..ticks {
+        match tick {
+            5 => ids.push(extra_cube(scene, 9.0)),
+            10 => {
+                let cube = scene.bodies.remove(3);
+                scene.world.remove_body(cube).unwrap();
+                ids.push(cube);
+            }
+            12 => {
+                let (a, b) = (scene.bodies[1], scene.bodies[2]);
+                let point = scene.world.body(a).unwrap().position();
+                scene
+                    .world
+                    .create_constraint(a, b, &PointConstraintSettings::new(point))
+                    .unwrap();
+            }
+            15 => ids.push(extra_cube(scene, 11.0)),
+            _ => {}
+        }
+        scene.tick();
+        scene.record(&mut digest);
+    }
+    (digest, [ids[0], ids[1], ids[2]])
+}
+
+// This shows how ids are allocated after a restore the world accepted: the same calls as in the
+// uninterrupted run give the same ids. It is not a rollback across creation or removal, which
+// `restore_state` refuses.
+#[test]
+fn bodies_created_after_the_restore_point_get_the_original_ids() {
+    let mut uninterrupted = Scene::new(1);
+    uninterrupted.run(BEFORE_SAVE);
+    let (expected, expected_ids) = structural_run(&mut uninterrupted, AFTER_SAVE);
+
+    let mut rolled_back = Scene::new(1);
+    rolled_back.run(BEFORE_SAVE);
+    let saved = rolled_back.world.save_state();
+    rolled_back.run(AFTER_SAVE);
+    rolled_back.restore(&saved);
+    let (replay, ids) = structural_run(&mut rolled_back, AFTER_SAVE);
+
+    assert_same("structural calls after a restore", &expected, &replay);
+    assert_eq!(ids.map(BodyId::to_raw), expected_ids.map(BodyId::to_raw));
+    let [_, removed, reused] = ids;
+    assert_eq!(reused.index(), removed.index());
+    assert_ne!(reused.sequence(), removed.sequence());
+}
+
+#[test]
+fn a_selected_bodies_state_replays_when_the_rest_is_static() {
+    let mut scene = Scene::new(1);
+    scene.run(BEFORE_SAVE);
+    let floor = scene.bodies[0];
+    assert_eq!(
+        scene.world.body(floor).unwrap().motion_type(),
+        MotionType::Static
+    );
+    let moving: Vec<BodyId> = scene.all_bodies()[1..].to_vec();
+    let partial = scene.world.save_state_of(&moving).unwrap();
+    assert!(partial.as_bytes().len() < scene.world.save_state().as_bytes().len());
+
+    let first = scene.recorded_run(AFTER_SAVE);
+    scene.world.restore_state(&partial).unwrap();
+    let replay = scene.recorded_run(AFTER_SAVE);
+    assert_same("replay from a selected bodies state", &first, &replay);
+}
+
+fn body_bits(world: &PhysicsWorld, id: BodyId) -> Vec<u8> {
+    let mut bits = Vec::new();
+    record_body(world, id, &mut bits);
+    bits
+}
+
+#[test]
+fn bodies_left_out_of_a_state_keep_their_current_state() {
+    let mut scene = Scene::new(1);
+    scene.run(BEFORE_SAVE);
+    // The second hinge cube, which the motor keeps turning.
+    let left_out = scene.bodies[10];
+    let selected: Vec<BodyId> = scene
+        .all_bodies()
+        .into_iter()
+        .filter(|&id| id != left_out)
+        .collect();
+    let partial = scene.world.save_state_of(&selected).unwrap();
+    let saved: Vec<Vec<u8>> = selected
+        .iter()
+        .map(|&id| body_bits(&scene.world, id))
+        .collect();
+
+    scene.run(20);
+    let current = body_bits(&scene.world, left_out);
+    scene.world.restore_state(&partial).unwrap();
+    assert_eq!(body_bits(&scene.world, left_out), current);
+    for (&id, saved) in selected.iter().zip(&saved) {
+        assert_eq!(&body_bits(&scene.world, id), saved, "{id:?}");
+    }
+}
+
+#[test]
+fn a_selection_with_an_unknown_body_is_refused() {
+    let mut scene = Scene::new(1);
+    let removed = extra_cube(&mut scene, 9.0);
+    scene.world.remove_body(removed).unwrap();
+    assert_eq!(
+        scene
+            .world
+            .save_state_of(&[scene.bodies[1], removed])
+            .unwrap_err(),
+        BodyError::NotFound(removed)
+    );
+    let other = Scene::new(1);
+    let foreign = other.bodies[1];
+    assert_eq!(
+        scene.world.save_state_of(&[foreign]).unwrap_err(),
+        BodyError::WrongWorld(foreign)
+    );
+}
