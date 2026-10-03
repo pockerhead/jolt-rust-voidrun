@@ -60,6 +60,15 @@ JPH_CAPI void JPH_CharacterVirtual_RefreshContacts2(JPH_CharacterVirtual* charac
    and JPH_Constraint_Destroy; counterpart of JPH_VehicleConstraint_AsPhysicsStepListener. */
 JPH_CAPI JPH_Constraint* JPH_VehicleConstraint_AsConstraint(JPH_VehicleConstraint* constraint);
 
+/* VehicleCollisionTester */
+/* Like JPH_VehicleCollisionTesterRay_Create, _CastSphere_Create and _CastCylinder_Create, but the tester
+   skips soft bodies as well as the chassis vehicleBody (Jolt's default body filter skips only the
+   chassis): Jolt's VehicleConstraint treats the body under a wheel as rigid. Each returns a new tester
+   holding one reference. */
+JPH_CAPI JPH_VehicleCollisionTesterRay* JPH_VehicleCollisionTesterRay_Create2(JPH_ObjectLayer layer, const JPH_Vec3* up, float maxSlopeAngle, JPH_BodyID vehicleBody);
+JPH_CAPI JPH_VehicleCollisionTesterCastSphere* JPH_VehicleCollisionTesterCastSphere_Create2(JPH_ObjectLayer layer, float radius, const JPH_Vec3* up, float maxSlopeAngle, JPH_BodyID vehicleBody);
+JPH_CAPI JPH_VehicleCollisionTesterCastCylinder* JPH_VehicleCollisionTesterCastCylinder_Create2(JPH_ObjectLayer layer, float convexRadiusFraction, JPH_BodyID vehicleBody);
+
 /* RagdollSettings */
 /* Copies every BodyCreationSettings field (shape reference, collision group, damping, velocities, mass
    override, ...) into part partIndex; the part's constraint to its parent is kept. */
@@ -250,6 +259,9 @@ JPH_CAPI uint32_t JPH_SoftBodySharedSettings_GetLRAConstraintCount(const JPH_Sof
    space with Real precision, velocities in world space, inverse masses; any output may be null. */
 JPH_CAPI void JPH_Body_GetSoftBodyVertices(const JPH_Body* body, JPH_RVec3* outPositions,
 	JPH_Vec3* outVelocities, float* outInvMasses, uint32_t count);
+/* Does nothing unless body is a soft body. Copies min(count, vertex count) vertex positions as Jolt
+   stores them: relative to the centre of mass, in the body frame. */
+JPH_CAPI void JPH_Body_GetSoftBodyVertexLocalPositions(const JPH_Body* body, JPH_Vec3* outPositions, uint32_t count);
 /* Does nothing unless body is a soft body and index < vertex count; velocity in world space. */
 JPH_CAPI void JPH_Body_SetSoftBodyVertexVelocity(JPH_Body* body, uint32_t index, const JPH_Vec3* velocity);
 /* Does nothing unless body is a soft body and index < vertex count; then recomputes the body's mass and

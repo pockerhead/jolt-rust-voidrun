@@ -47,6 +47,7 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "joltc_ext.h"
@@ -458,6 +459,79 @@ JPH_Constraint* JPH_VehicleConstraint_AsConstraint(JPH_VehicleConstraint* constr
 
 	JPH::Constraint* joltConstraint = static_cast<JPH::Constraint*>(reinterpret_cast<JPH::VehicleConstraint*>(constraint));
 	return reinterpret_cast<JPH_Constraint*>(joltConstraint);
+}
+
+/* VehicleCollisionTester */
+namespace
+{
+	// What a wheel may stand on: neither the chassis (what Jolt's default IgnoreSingleBodyFilter
+	// skips) nor a soft body, which VehicleConstraint would solve as a rigid body (Body::AddPositionStep
+	// asserts IsRigidBody, and BuildIslands reads its index in the soft body active list).
+	class RigidGroundBodyFilter final : public JPH::BodyFilter
+	{
+	public:
+		explicit RigidGroundBodyFilter(JPH::BodyID vehicleBody) : mVehicleBody(vehicleBody) {}
+
+		bool ShouldCollide(const JPH::BodyID& bodyID) const override
+		{
+			return bodyID != mVehicleBody;
+		}
+
+		bool ShouldCollideLocked(const JPH::Body& body) const override
+		{
+			return !body.IsSoftBody();
+		}
+
+	private:
+		JPH::BodyID mVehicleBody;
+	};
+
+	// A Jolt tester that owns its body filter, so the filter lives exactly as long as the tester.
+	template <class Tester>
+	class RigidGroundTester final : public Tester
+	{
+	public:
+		template <class... Args>
+		explicit RigidGroundTester(JPH::BodyID vehicleBody, Args&&... args) :
+			Tester(std::forward<Args>(args)...),
+			mFilter(vehicleBody)
+		{
+			Tester::SetBodyFilter(&mFilter);
+		}
+
+	private:
+		RigidGroundBodyFilter mFilter;
+	};
+
+	template <class Tester, class Result, class... Args>
+	Result* CreateRigidGroundTester(JPH_BodyID vehicleBody, Args&&... args)
+	{
+		auto tester = new RigidGroundTester<Tester>(JPH::BodyID(vehicleBody), std::forward<Args>(args)...);
+		tester->AddRef();
+		return reinterpret_cast<Result*>(static_cast<JPH::VehicleCollisionTester*>(tester));
+	}
+}
+
+JPH_VehicleCollisionTesterRay* JPH_VehicleCollisionTesterRay_Create2(JPH_ObjectLayer layer, const JPH_Vec3* up, float maxSlopeAngle, JPH_BodyID vehicleBody)
+{
+	JPH_ASSERT(up);
+
+	return CreateRigidGroundTester<JPH::VehicleCollisionTesterRay, JPH_VehicleCollisionTesterRay>(vehicleBody,
+		static_cast<JPH::ObjectLayer>(layer), ToVec3(*up), maxSlopeAngle);
+}
+
+JPH_VehicleCollisionTesterCastSphere* JPH_VehicleCollisionTesterCastSphere_Create2(JPH_ObjectLayer layer, float radius, const JPH_Vec3* up, float maxSlopeAngle, JPH_BodyID vehicleBody)
+{
+	JPH_ASSERT(up);
+
+	return CreateRigidGroundTester<JPH::VehicleCollisionTesterCastSphere, JPH_VehicleCollisionTesterCastSphere>(vehicleBody,
+		static_cast<JPH::ObjectLayer>(layer), radius, ToVec3(*up), maxSlopeAngle);
+}
+
+JPH_VehicleCollisionTesterCastCylinder* JPH_VehicleCollisionTesterCastCylinder_Create2(JPH_ObjectLayer layer, float convexRadiusFraction, JPH_BodyID vehicleBody)
+{
+	return CreateRigidGroundTester<JPH::VehicleCollisionTesterCastCylinder, JPH_VehicleCollisionTesterCastCylinder>(vehicleBody,
+		static_cast<JPH::ObjectLayer>(layer), convexRadiusFraction);
 }
 
 /* RagdollSettings */
@@ -1051,6 +1125,20 @@ void JPH_Body_GetSoftBodyVertices(const JPH_Body* body, JPH_RVec3* outPositions,
 		if (outInvMasses != nullptr)
 			outInvMasses[i] = v.mInvMass;
 	}
+}
+
+void JPH_Body_GetSoftBodyVertexLocalPositions(const JPH_Body* body, JPH_Vec3* outPositions, uint32_t count)
+{
+	JPH_ASSERT(outPositions || count == 0);
+
+	const JPH::SoftBodyMotionProperties* mp = AsSoftBodyMotionProperties(reinterpret_cast<const JPH::Body*>(body));
+	if (mp == nullptr)
+		return;
+
+	const JPH::Array<JPH::SoftBodyVertex>& vertices = mp->GetVertices();
+	const uint32_t n = std::min(count, (uint32_t)vertices.size());
+	for (uint32_t i = 0; i < n; ++i)
+		FromVec3(vertices[i].mPosition, &outPositions[i]);
 }
 
 void JPH_Body_SetSoftBodyVertexVelocity(JPH_Body* body, uint32_t index, const JPH_Vec3* velocity)
