@@ -15,7 +15,10 @@ below). The first run builds Jolt and joltc in Release under `target/release` un
 `JOLTC_LIB_DIR` points at a matching prebuilt prefix. Without the `--bench` argument that
 `cargo bench` passes (for example under `cargo test --benches`) the binary returns at once. Words
 after `--` run only the cases whose names contain one of them, for example
-`cargo bench -p joltphysics --bench budgets -- tick`.
+`cargo bench -p joltphysics --bench budgets -- tick`. The names are `update_character`, `near step`,
+`landing`, `steady step`, `ray` and `tick`, and a word matches any part of a name: `-- step` runs
+both the near step and the steady step. A word that matches no case prints an empty table, without
+a warning.
 
 ## Machine
 
@@ -111,7 +114,9 @@ sample `ceil(p * n)`, counting from 1.
 | tick: 30 near steps + 60 mid-band rays, every mid actor on a structure top | one tick | 5000 | 202.8 | 301.5 | 405.9 | p99 <= 2000 us | within | grounded after 100% of steps; 100% of mid rays hit a structure top; the walker update and queries run on the calling thread, the world's 4 worker threads take no part; refresh is zero work (queries see bodies immediately) |
 
 The tick rows come from a separate run of the tick case alone (`-- tick`), on the same machine and
-day as the rest of the table.
+day as the rest of the table. The other rows were measured at commit `fb07618`. Later changes to the
+bench touched only the labels, limits and one note text of those cases (the spawn ray's filter
+description), not what they time, and the table shows the labels and notes the bench prints now.
 
 ## Reading
 
@@ -130,7 +135,9 @@ day as the rest of the table.
   to share, and the job system's overhead dominates.
 - The character rows compare with Rapier's 86-156 us per character with terrain in the query: one
   `update_character` costs 2.7 us at the median and 6.0 us at p99 with terrain, and a whole near step
-  5.1 / 9.7 us. With the terrain left out of the flat scene's filter the characters find nothing to
-  stand on and fall, so that row is cheap, only shows what the terrain adds, and is not compared
-  with the reference.
+  5.1 / 9.7 us. Rapier's reference without terrain in the query is 5-15.5 us per character; the row
+  without terrain (0.2 us median, 0.3 us p99) is far below it, but it is not the same scene: with the
+  terrain left out of the flat scene's filter the characters find nothing to stand on and fall
+  through the world, so the update has almost nothing to collide with. That row only shows what the
+  terrain adds; the bench prints no reference for it.
 - Maximum values are single outliers (the machine's scheduler) and vary most between runs.

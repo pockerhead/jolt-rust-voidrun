@@ -114,7 +114,7 @@ pub use query::{CollideShape, CollideShapeHit, RayCast, RayHit, ShapeCast, Shape
 pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
 pub use world::{PhysicsWorld, StepReport, WorldSettings};
 
-/// The repository's guide, `docs/guide.md`, whose example runs as a doctest.
+/// The repository's guide, `docs/guide.md`, whose examples run as doctests.
 #[cfg(doctest)]
 #[doc = include_str!("../../../docs/guide.md")]
 pub struct Guide;

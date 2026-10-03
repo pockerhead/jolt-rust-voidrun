@@ -217,6 +217,10 @@ impl<'a> CharacterSettings<'a> {
     }
 
     /// The steepest ground the character can stand on, radians in `[0, π/2]`. Default 50°.
+    ///
+    /// Jolt turns the slope limit off when its cosine is 0.9999 or above, that is for angles below
+    /// about 0.81° (0.0141 rad): then no ground is too steep, so `0.0` means "no limit", not
+    /// "flat ground only".
     #[must_use]
     pub fn max_slope_angle(mut self, radians: f32) -> Self {
         self.max_slope_angle = radians;
@@ -512,6 +516,13 @@ impl ExtendedUpdateSettings {
     }
 
     /// How high the character steps up when a step blocks it. Default `(0, 0.4, 0)`.
+    ///
+    /// The highest step climbed is not this length: a capsule of radius `r` climbs about
+    /// step-up + padding + `r (1 - cos max_slope_angle)`, and the step's own rounding changes it
+    /// too, so measure it. Jolt judges a step by the surface normal at the contact; on a box with
+    /// sharp edges (convex radius 0) the contact sits on the top edge, where float rounding
+    /// decides between the top face's normal and the side's, so walk stairs climbs such a step
+    /// unreliably.
     #[must_use]
     pub fn walk_stairs_step_up(mut self, value: Vec3) -> Self {
         self.walk_stairs_step_up = value;
@@ -1006,6 +1017,11 @@ impl PhysicsWorld {
     /// inner body was asked for and the world is full, and with
     /// [`CharacterError::TooManyCharacters`] when the world has run out of character ids.
     /// Nothing is created on failure.
+    ///
+    /// The new character knows no contacts and reports [`GroundState::InAir`] until its first
+    /// update or [`refresh_character_contacts`](Self::refresh_character_contacts). Refresh a
+    /// character that starts on the ground: stick to floor acts only when the character was
+    /// supported before the update.
     pub fn create_character(
         &mut self,
         settings: &CharacterSettings<'_>,
