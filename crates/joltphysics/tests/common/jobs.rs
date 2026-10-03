@@ -2,6 +2,7 @@
 //! jobs they were handed in one process-wide counter, and the process-wide choice of job system
 //! that a determinism child reads from [`JOBS_ENV`].
 
+use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -10,34 +11,70 @@ use joltphysics::*;
 /// Jobs handed to any [`RayonJobs`] or [`InlineJobs`] of this process.
 static QUEUED: AtomicUsize = AtomicUsize::new(0);
 
+/// Jobs handed to any [`RayonJobs`] of this process from inside a job its pool ran.
+static QUEUED_FROM_POOL_JOBS: AtomicUsize = AtomicUsize::new(0);
+
+thread_local! {
+    /// Whether this thread is inside a [`Job::run`] that a [`RayonJobs`] pool started.
+    static IN_POOL_JOB: Cell<bool> = const { Cell::new(false) };
+}
+
 /// How many jobs the caller job systems of this process were handed so far.
 pub fn queued() -> usize {
     QUEUED.load(Ordering::Relaxed)
 }
 
+/// How many jobs the [`RayonJobs`] of this process were handed from inside a job one of their
+/// pools ran; see [`RayonJobs::queued_from_pool_jobs`].
+pub fn queued_from_pool_jobs() -> usize {
+    QUEUED_FROM_POOL_JOBS.load(Ordering::Relaxed)
+}
+
 /// Jolt's jobs on a Rayon pool of its own.
-pub struct RayonJobs(pub rayon::ThreadPool);
+pub struct RayonJobs {
+    pub pool: rayon::ThreadPool,
+    queued_from_pool_jobs: AtomicUsize,
+}
 
 impl RayonJobs {
     /// A pool of `threads` threads.
     pub fn new(threads: usize) -> Self {
-        Self(
-            rayon::ThreadPoolBuilder::new()
+        Self {
+            pool: rayon::ThreadPoolBuilder::new()
                 .num_threads(threads)
                 .build()
                 .unwrap(),
-        )
+            queued_from_pool_jobs: AtomicUsize::new(0),
+        }
+    }
+
+    /// How many jobs this job system was handed from inside a job its pool ran.
+    ///
+    /// Jolt queues a job from a pool thread only while a Jolt job function runs there: a job
+    /// releases the jobs that depend on it as it executes. More than zero therefore proves that
+    /// the pool executed Jolt work, which counting the handed jobs or the pool's calls of
+    /// [`Job::run`] cannot: Jolt's update barrier runs every job the pool drops or runs late.
+    pub fn queued_from_pool_jobs(&self) -> usize {
+        self.queued_from_pool_jobs.load(Ordering::Relaxed)
     }
 }
 
 impl JobSystem for RayonJobs {
     fn max_concurrency(&self) -> u32 {
-        u32::try_from(self.0.current_num_threads()).map_or(u32::MAX, |n| n.saturating_add(1))
+        u32::try_from(self.pool.current_num_threads()).map_or(u32::MAX, |n| n.saturating_add(1))
     }
 
     fn queue_job(&self, job: Job) {
         QUEUED.fetch_add(1, Ordering::Relaxed);
-        self.0.spawn(move || job.run());
+        if IN_POOL_JOB.get() {
+            self.queued_from_pool_jobs.fetch_add(1, Ordering::Relaxed);
+            QUEUED_FROM_POOL_JOBS.fetch_add(1, Ordering::Relaxed);
+        }
+        self.pool.spawn(move || {
+            IN_POOL_JOB.set(true);
+            job.run();
+            IN_POOL_JOB.set(false);
+        });
     }
 }
 

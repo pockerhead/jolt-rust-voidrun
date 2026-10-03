@@ -875,13 +875,20 @@ fn determinism_child() {
         "constraints" => run_constraints(threads),
         scenario => panic!("unknown scenario {scenario}"),
     };
-    // Without this check a choice that never reached the worlds would pass as the native run.
+    // Without these checks a choice that never reached the worlds, or a Rayon pool that never
+    // ran a job, would pass as the native run: Jolt's update barrier runs every job itself.
     match job_choice {
         JobChoice::Native => assert_eq!(jobs::queued(), 0, "a caller job system was used"),
         _ => assert!(
             jobs::queued() > 0,
-            "the {job_choice:?} job system ran no job"
+            "the {job_choice:?} job system was handed no job"
         ),
+    }
+    if job_choice == JobChoice::Rayon {
+        assert!(
+            jobs::queued_from_pool_jobs() > 0,
+            "the Rayon pool executed no Jolt job"
+        );
     }
     finish_child(&digest);
 }
