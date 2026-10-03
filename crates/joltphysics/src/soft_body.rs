@@ -1606,7 +1606,7 @@ mod tests {
         let mut fast = triangle();
         fast[1].velocity.y = limits::MAX_LINEAR_VELOCITY.next_up();
         assert_eq!(build(fast), LINEAR_VELOCITY_RULE);
-        for inverse_mass in [-1.0, f32::NAN, (1.0 / limits::MIN_MASS).next_up()] {
+        for inverse_mass in [-1.0, f32::NAN, limits::MAX_VERTEX_INVERSE_MASS.next_up()] {
             let mut heavy = triangle();
             heavy[2].inverse_mass = inverse_mass;
             assert_eq!(build(heavy), VERTEX_INVERSE_MASS_RULE);
