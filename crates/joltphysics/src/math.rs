@@ -254,6 +254,11 @@ impl Quat {
         )
     }
 
+    /// The conjugate: the vector part negated. For a unit quaternion, the inverse rotation.
+    pub(crate) fn conjugated(self) -> Quat {
+        Quat::from_xyzw(-self.x, -self.y, -self.z, self.w)
+    }
+
     /// This quaternion divided by its length. Non-finite when the length is zero or not
     /// finite; callers check the result with `is_valid_rotation`.
     pub(crate) fn normalized(self) -> Quat {
@@ -397,6 +402,14 @@ mod tests {
 
         let v = Vec3::new(1.5, -2.0, 0.25);
         assert_vec_near(a.product(b).rotate(v), a.rotate(b.rotate(v)), 1e-5);
+    }
+
+    #[test]
+    fn conjugated_is_the_inverse_rotation() {
+        let q = Quat::from_xyzw(0.1, -0.2, 0.3, 0.9).normalized();
+        assert_quat_near(q.product(q.conjugated()), Quat::IDENTITY, 1e-6);
+        assert_quat_near(q.conjugated().product(q), Quat::IDENTITY, 1e-6);
+        assert_eq!(q.conjugated().w.to_bits(), q.w.to_bits());
     }
 
     #[test]

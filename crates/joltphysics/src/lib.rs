@@ -98,6 +98,65 @@
 //! # }
 //! ```
 //!
+//! # Ragdolls
+//! [`PhysicsWorld::create_ragdoll`] creates a ragdoll (Jolt `Ragdoll`) from [`RagdollSettings`]:
+//! a [`Skeleton`], one body per joint and a [`RagdollJoint`] to each part's parent, a
+//! [`SwingTwistConstraintSettings`], [`HingeConstraintSettings`] with limits or
+//! [`SixDofConstraintSettings`] with asymmetric limits. Parts of one ragdoll never collide with
+//! each other. A ragdoll reports its [`SkeletonPose`] and joint readings, can be posed, driven to
+//! a pose with motors or kinematically, and a [`SettleDetector`] tells when it has come to rest.
+//!
+//! Ragdolls usually live in a second world next to the main one; give both worlds static bodies
+//! made from the same [`Shape`]s, which Jolt shares. For the caller's own gravity, create the
+//! parts with [`BodySettings::gravity_factor`] 0 and add `g * mass` ([`BodyRef::mass`]) to each
+//! part every tick.
+//!
+//! ```
+//! use joltphysics::*;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut world = PhysicsWorld::new(WorldSettings::default())?;
+//! let floor = Shape::new_box(Vec3::new(20.0, 1.0, 20.0))?;
+//! world.create_body(&floor, &BodySettings::new_static().position(RVec3::new(0.0, -1.0, 0.0)))?;
+//!
+//! // Three capsules stacked along Y, joined by swing-twist joints at their ends.
+//! let skeleton = Skeleton::new(&[
+//!     SkeletonJoint { name: "root", parent: None },
+//!     SkeletonJoint { name: "middle", parent: Some(0) },
+//!     SkeletonJoint { name: "top", parent: Some(1) },
+//! ])?;
+//! let capsule = Shape::new_capsule(0.25, 0.15)?;
+//! let up = Vec3::new(0.0, 1.0, 0.0);
+//! let side = Vec3::new(1.0, 0.0, 0.0);
+//! let parts: Vec<RagdollPart<'_>> = (0..3)
+//!     .map(|i| RagdollPart {
+//!         shape: &capsule,
+//!         body: BodySettings::new_dynamic().position(RVec3::new(0.0, 1.0 + 0.7 * i as Real, 0.0)),
+//!         joint: (i > 0).then(|| {
+//!             let anchor = RVec3::new(0.0, 0.65 + 0.7 * i as Real, 0.0);
+//!             RagdollJoint::SwingTwist(
+//!                 SwingTwistConstraintSettings::new(anchor, up, side)
+//!                     .half_cone_angles(0.6, 0.6)
+//!                     .twist_limits(-0.3, 0.3),
+//!             )
+//!         }),
+//!     })
+//!     .collect();
+//! let settings = RagdollSettings::new(&skeleton, &parts)?;
+//! let ragdoll = world.create_ragdoll(&settings, None, Activation::Activate)?;
+//!
+//! let mut detector = SettleDetector::default();
+//! let settled = (0..600).any(|_| {
+//!     world.step(1.0 / 60.0).unwrap();
+//!     detector.update(&world.ragdoll(ragdoll).unwrap())
+//! });
+//! assert!(settled);
+//! let pose = world.ragdoll(ragdoll)?.pose();
+//! assert!(pose.root_offset.y < 0.5);
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # Threads
 //! Changing a world, including [`PhysicsWorld::step`], takes `&mut PhysicsWorld`; reading it
 //! takes `&PhysicsWorld`. `PhysicsWorld` is `Send` and `Sync`, so many threads may read one
@@ -137,6 +196,7 @@
 
 mod body;
 mod character;
+mod constraint;
 #[cfg(feature = "debug-renderer")]
 mod debug;
 mod error;
@@ -145,6 +205,7 @@ mod layers;
 mod math;
 mod owned;
 mod query;
+mod ragdoll;
 mod shape;
 mod vehicle;
 mod world;
@@ -154,15 +215,24 @@ pub use character::{
     CharacterContact, CharacterId, CharacterMut, CharacterRef, CharacterSettings, CharacterState,
     ExtendedUpdateSettings, GroundState, InnerBody,
 };
+pub use constraint::{
+    ConstraintSpace, HingeConstraintSettings, MotorSettings, SixDofAxis, SixDofConstraintAxis,
+    SixDofConstraintSettings, SpringSettings, SwingTwistConstraintSettings, SwingType,
+};
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, QueryError, ShapeError, StepError, VehicleError, WorldError,
+    BodyError, CharacterError, QueryError, RagdollError, ShapeError, StepError, VehicleError,
+    WorldError,
 };
 pub use filter::QueryFilter;
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{CollideShape, CollideShapeHit, RayCast, RayHit, ShapeCast, ShapeCastHit};
+pub use ragdoll::{
+    JointReading, JointTransform, RagdollId, RagdollJoint, RagdollMut, RagdollPart, RagdollRef,
+    RagdollSettings, SettleDetector, Skeleton, SkeletonJoint, SkeletonPose,
+};
 pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
 pub use vehicle::{
     DriverInput, SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester,

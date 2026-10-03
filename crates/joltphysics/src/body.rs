@@ -627,7 +627,8 @@ impl PhysicsWorld {
     /// ([`BodyError::OwnedByCharacter`]); it goes with
     /// [`remove_character`](Self::remove_character). The chassis of a vehicle cannot be removed
     /// while the vehicle exists ([`BodyError::UsedByVehicle`]); remove the vehicle first with
-    /// [`remove_vehicle`](Self::remove_vehicle).
+    /// [`remove_vehicle`](Self::remove_vehicle). A part of a ragdoll goes only with its ragdoll
+    /// ([`BodyError::OwnedByRagdoll`], [`remove_ragdoll`](Self::remove_ragdoll)).
     pub fn remove_body(&mut self, id: BodyId) -> Result<(), BodyError> {
         self.check(id)?;
         // The character's destructor destroys its inner body, and Jolt does not validate ids in
@@ -641,6 +642,11 @@ impl PhysicsWorld {
         // the same way.
         if self.is_vehicle_body(id) {
             return Err(BodyError::UsedByVehicle(id));
+        }
+        // A ragdoll destroys its parts when it is released, and Jolt does not validate ids in
+        // `DestroyBody`, so removing a part here would make that a double destroy.
+        if self.is_ragdoll_body(id) {
+            return Err(BodyError::OwnedByRagdoll(id));
         }
         let mut bounds = JPH_AABox {
             min: Vec3::ZERO.to_jph(),
@@ -658,6 +664,23 @@ impl PhysicsWorld {
         unsafe { JPH_BodyInterface_RemoveAndDestroyBody(self.body_interface.as_ptr(), id.raw) };
         self.wake_bodies_overlapping(&bounds);
         Ok(())
+    }
+
+    /// Whether bodies `a` and `b` touched in the last [`step`](Self::step) (Jolt
+    /// `PhysicsSystem::WereBodiesInContact`).
+    ///
+    /// Jolt answers from the contact cache of the last step, and only for pairs of which at
+    /// least one body was awake in it; bodies removed since are allowed. Fails with
+    /// [`BodyError::WrongWorld`] for an id of another world.
+    pub fn were_bodies_in_contact(&self, a: BodyId, b: BodyId) -> Result<bool, BodyError> {
+        for id in [a, b] {
+            if id.world != self.tag {
+                return Err(BodyError::WrongWorld(id));
+            }
+        }
+        // SAFETY: the system is live and no step runs (`step` needs `&mut self`); Jolt looks the
+        // pair up in its contact cache and never dereferences a body, so any id is safe.
+        Ok(unsafe { JPH_PhysicsSystem_WereBodiesInContact(self.system.as_ptr(), a.raw, b.raw) })
     }
 
     /// Wakes every non-static body whose world bounds overlap `bounds`, in body-id order.
