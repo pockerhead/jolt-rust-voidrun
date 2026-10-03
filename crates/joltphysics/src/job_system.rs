@@ -3,6 +3,7 @@
 
 use std::any::Any;
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::fmt;
 use std::io::Write;
@@ -103,9 +104,8 @@ pub trait JobSystem: Send + Sync + 'static {
     /// Jolt calls this from the stepping thread and from threads that run jobs, from inside a
     /// running job. Calling [`Job::run`] here, before returning, is allowed but does not start
     /// the job: it is left to the stepping thread (see above). This must not block waiting for
-    /// any job. Every job must be run or dropped soon: each one holds a slot of a pool of 2048
-    /// jobs per world, and when that pool is empty Jolt waits for a free slot (and asserts with
-    /// the `asserts` feature).
+    /// any job. A job the pool has not run when the step ends is handed back to Jolt by the step
+    /// itself; running it later does nothing.
     ///
     /// A panic here does not unwind into Jolt; see
     /// [`PhysicsWorld::step`](crate::PhysicsWorld::step).
@@ -114,18 +114,20 @@ pub trait JobSystem: Send + Sync + 'static {
 
 /// One Jolt job handed to a [`JobSystem`].
 ///
-/// Run it with [`run`](Self::run). Dropping it runs it as well, so a job that is never run is
-/// still finished. A job may be sent to any thread and may outlive its world.
+/// Run it with [`run`](Self::run); dropping it runs it as well. The step that queued it waits
+/// until Jolt has run every one of its jobs, so a job run after its step does nothing. A job may
+/// be sent to any thread and may outlive its world; until it is dropped it keeps its world's
+/// native job system allocated.
 pub struct Job {
-    task: JobTask,
-    /// Keeps the native job system alive until the job has run and been released.
+    /// The key of this job's Jolt reference in `native`'s table of queued jobs.
+    id: u64,
     native: Arc<CallbackJobSystem>,
 }
 
 impl Job {
-    /// Runs the Jolt job unless the stepping thread already ran it, then hands the job back to
-    /// Jolt. Called while [`JobSystem::queue_job`] is on this thread's stack, it leaves the job
-    /// to the stepping thread instead.
+    /// Runs the Jolt job unless it already ran, then hands it back to Jolt. While
+    /// [`JobSystem::queue_job`] is on this thread's stack it does nothing: the job is left to the
+    /// stepping thread.
     pub fn run(self) {
         drop(self);
     }
@@ -134,14 +136,14 @@ impl Job {
 impl Drop for Job {
     fn drop(&mut self) {
         if in_queue_callback() {
-            self.native.park(self.task);
-        } else {
-            // SAFETY: `task` holds the one reference joltc's `QueueJob(s)` added for this
-            // hand-off; this value is its only owner and is dropped once. The native job system
-            // it belongs to stays alive: `self.native` is a field and drops only after this body
-            // returns. No queue callback is on this thread's stack, so no Jolt job is running
-            // on this thread.
-            unsafe { self.task.run() }
+            return;
+        }
+        if let Some(task) = self.native.take_queued(self.id) {
+            // SAFETY: `take_queued` removed the job's one reference from the table and handed it
+            // to this call, so nothing else releases it. `self.native` is the live native job
+            // system the job belongs to; it is a field and drops only after this body returns.
+            // No queue callback is on this thread's stack, so no Jolt job runs on this thread.
+            unsafe { task.run() }
         }
     }
 }
@@ -172,11 +174,6 @@ impl JobTask {
         unsafe { (self.function)(self.arg.as_ptr()) }
     }
 }
-
-// SAFETY: Jolt lets a queued job run on any thread ("If you want to implement your own job
-// system", `JobSystem.h`); its execution and release are atomic. The `Arc` is `Send` because
-// `CallbackJobSystem` is `Send + Sync`. `Job` is not `Sync`: it is run by value, once.
-unsafe impl Send for Job {}
 
 thread_local! {
     /// How many queue callbacks are on this thread's stack.
@@ -213,32 +210,49 @@ impl fmt::Debug for Job {
 }
 
 /// joltc's callback job system of one world, destroyed by its last owner: the world's
-/// [`QueueContext`] or a [`Job`] that is still queued.
+/// [`QueueContext`] or a [`Job`].
 pub(crate) struct CallbackJobSystem {
-    // Field order: `Drop` releases the parked jobs, then `native` is destroyed.
-    /// Jobs run or dropped inside a queue callback, left to the update barrier; their
-    /// references are released after the update.
-    parked: Mutex<Vec<JobTask>>,
+    // Field order: `Drop` releases the queued jobs, then `native` is destroyed.
+    queued: Mutex<QueuedJobs>,
     native: Owned<JPH_JobSystem>,
 }
 
+/// The Jolt references of the jobs handed to the caller and not taken back yet, by job id. A
+/// step releases the ones left once its update returned, so the caller's pool never keeps
+/// Jolt's job slots beyond the step.
+#[derive(Default)]
+struct QueuedJobs {
+    next_id: u64,
+    tasks: BTreeMap<u64, JobTask>,
+}
+
 impl CallbackJobSystem {
-    fn park(&self, task: JobTask) {
-        self.parked
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(task);
+    /// Takes over a job reference joltc queued and returns its id.
+    fn add_queued(&self, task: JobTask) -> u64 {
+        let mut queued = self.queued.lock().unwrap_or_else(PoisonError::into_inner);
+        let id = queued.next_id;
+        queued.next_id = id.wrapping_add(1);
+        queued.tasks.insert(id, task);
+        id
     }
 
-    /// Releases the parked jobs. Called when no update of this job system runs, so every
-    /// parked job has run and only its reference is released.
-    fn release_parked(&self) {
-        let parked = mem::take(&mut *self.parked.lock().unwrap_or_else(PoisonError::into_inner));
-        for task in parked {
-            // SAFETY: a parked task holds its job's reference, which `park` took over from the
-            // `Job` and this loop gives up once (`mem::take` emptied the list). `self` is the
-            // live native job system the job belongs to. No update of it runs (caller), so the
-            // update barrier has run the job and it does not start here.
+    /// Hands over the reference of job `id`, unless the step released it already.
+    fn take_queued(&self, id: u64) -> Option<JobTask> {
+        let mut queued = self.queued.lock().unwrap_or_else(PoisonError::into_inner);
+        queued.tasks.remove(&id)
+    }
+
+    /// Releases every reference not taken back. Called when no update of this job system runs:
+    /// Jolt's update barrier has run every job, so only the references are released.
+    fn release_queued(&self) {
+        let tasks = {
+            let mut queued = self.queued.lock().unwrap_or_else(PoisonError::into_inner);
+            mem::take(&mut queued.tasks)
+        };
+        for task in tasks.into_values() {
+            // SAFETY: the table owned the task's reference and `mem::take` handed it to this
+            // loop, which gives it up once. `self` is the live native job system the job belongs
+            // to. No update of it runs (caller), so the job has run and does not start here.
             unsafe { task.run() };
         }
     }
@@ -246,19 +260,20 @@ impl CallbackJobSystem {
 
 impl Drop for CallbackJobSystem {
     fn drop(&mut self) {
-        // The last owner holds no update in progress: the world, if it still exists, does not
-        // step (it would own a reference), and a parked job of an earlier update has run.
-        self.release_parked();
+        // The last owner holds no update in progress: a world that steps with this job system
+        // owns a reference to it.
+        self.release_queued();
     }
 }
 
 // SAFETY: Jolt calls `QueueJob`, `FreeJob` and the barrier methods of one job system from many
 // threads (lock-free free list, atomic barrier state), and `GetMaxConcurrency` reads a field
-// set at creation. The parked tasks are Jolt jobs, which may be released on any thread, behind
-// a mutex. The object is destroyed only by the last `Arc`, so no call overlaps the
-// destruction, and destruction has no thread affinity.
+// set at creation. The queued tasks are Jolt jobs, which may be run and released on any thread
+// ("If you want to implement your own job system", `JobSystem.h`), behind a mutex. The object
+// is destroyed only by the last `Arc`, so no call overlaps the destruction, and destruction has
+// no thread affinity.
 unsafe impl Send for CallbackJobSystem {}
-// SAFETY: as for `Send`; shared references only hand the pointer to Jolt or lock `parked`.
+// SAFETY: as for `Send`; shared references only hand the pointer to Jolt or lock `queued`.
 unsafe impl Sync for CallbackJobSystem {}
 
 /// What joltc's queue callbacks of one world get as their `context`: the caller's job system,
@@ -298,7 +313,7 @@ impl QueueContext {
     fn job(&self, function: JPH_JobFunction, arg: *mut c_void) -> Job {
         match (function, NonNull::new(arg), self.native.get()) {
             (Some(function), Some(arg), Some(native)) => Job {
-                task: JobTask { function, arg },
+                id: native.add_queued(JobTask { function, arg }),
                 native: Arc::clone(native),
             },
             _ => abort_in_callback("joltc queued a job without a function or argument"),
@@ -335,13 +350,13 @@ impl QueueContext {
         }
     }
 
-    /// Finishes an update: releases the jobs left to the stepping thread and returns the first
-    /// panic of the caller's `queue_job` since the last call, after which the caller's job
-    /// system is used again. Called by `step` after the update returned, when no queue callback
-    /// of this world runs.
+    /// Finishes an update: releases the jobs the caller's job system has not taken back and
+    /// returns the first panic of its `queue_job` since the last call, after which the caller's
+    /// job system is used again. Called by `step` after the update returned, when no queue
+    /// callback of this world runs.
     pub(crate) fn finish_update(&self) -> Option<Box<dyn Any + Send>> {
         if let Some(native) = self.native.get() {
-            native.release_parked();
+            native.release_queued();
         }
         let payload = self
             .panic
@@ -424,7 +439,7 @@ pub(crate) fn create_caller_job_system(
         .ok_or(WorldError::AllocationFailed("job system"))?;
     // A fresh `OnceLock` is empty, so this always stores.
     let _ = context.native.set(Arc::new(CallbackJobSystem {
-        parked: Mutex::new(Vec::new()),
+        queued: Mutex::default(),
         native,
     }));
     Ok(context)
@@ -468,12 +483,14 @@ mod tests {
     }
 
     fn counting_job(context: &QueueContext, runs: &AtomicUsize) -> Job {
+        let native = context.native.get().unwrap();
+        let task = JobTask {
+            function: count_run,
+            arg: NonNull::from(runs).cast(),
+        };
         Job {
-            task: JobTask {
-                function: count_run,
-                arg: NonNull::from(runs).cast(),
-            },
-            native: Arc::clone(context.native.get().unwrap()),
+            id: native.add_queued(task),
+            native: Arc::clone(native),
         }
     }
 
@@ -516,6 +533,19 @@ mod tests {
         }
         assert!(context.finish_update().is_none());
         assert_eq!(count(&runs), 2);
+    }
+
+    #[test]
+    fn a_job_released_by_its_update_does_nothing_when_run_later() {
+        let context = context(Arc::new(AlwaysPanics {
+            calls: AtomicUsize::new(0),
+        }));
+        let runs = AtomicUsize::new(0);
+        let late = counting_job(&context, &runs);
+        assert!(context.finish_update().is_none());
+        assert_eq!(count(&runs), 1);
+        late.run();
+        assert_eq!(count(&runs), 1);
     }
 
     #[test]

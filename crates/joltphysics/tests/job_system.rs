@@ -303,6 +303,29 @@ fn a_deferred_job_may_finish_on_another_thread_while_the_world_drops() {
     runner.join().unwrap();
 }
 
+#[test]
+fn a_job_system_that_keeps_every_job_does_not_run_out_of_jolt_jobs() {
+    // Jolt has 2048 job slots per world; jobs the pool keeps past their step must not hold them.
+    let queued = with_timeout(TIMEOUT_SECS, || {
+        let jobs = Arc::new(Counting::new(DeferredJobs::default()));
+        let mut world =
+            PhysicsWorld::new(WorldSettings::default().job_system(jobs.clone())).unwrap();
+        add_floor(&mut world);
+        let shape = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        for i in 0..8 {
+            let settings = BodySettings::new_dynamic()
+                .position(RVec3::new(1.5 * i as Real, 2.0, 0.0))
+                .allow_sleeping(false);
+            world.create_body(&shape, &settings).unwrap();
+        }
+        step(&mut world, 600);
+        drop(world);
+        jobs.inner.take();
+        jobs.queued()
+    });
+    assert!(queued > 3 * 2048, "{queued}");
+}
+
 /// The step that panics, the drained jobs and 30 more steps; the result must equal a native
 /// world stepped as often.
 fn panicking_job_system_case(mode: PanicMode) {
