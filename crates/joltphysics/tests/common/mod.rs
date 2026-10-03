@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 pub mod determinism;
+pub mod jobs;
 #[cfg(windows)]
 pub mod memory;
 pub mod ragdoll;

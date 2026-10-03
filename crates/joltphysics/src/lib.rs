@@ -177,9 +177,13 @@
 //! world while nobody steps it, and different worlds may be stepped on different threads at
 //! the same time.
 //!
+//! A world runs Jolt's jobs on Jolt's own thread pool ([`WorldSettings::worker_threads`]) or on
+//! the caller's pool, such as Rayon or a game's own, through a [`JobSystem`] set with
+//! [`WorldSettings::job_system`].
+//!
 //! # Determinism
-//! The same calls in the same order give bit-identical results on one machine, for any
-//! [`WorldSettings::worker_threads`]. The order of body creation and removal is part of the
+//! The same binary, initial state and calls in the same order give bit-identical results on
+//! one machine, for any [`WorldSettings::worker_threads`] or caller [`JobSystem`]. The order of body creation and removal is part of the
 //! state: it decides the [`BodyId`]s. Results agree across platforms and compilers only with
 //! the `cross-platform-deterministic` feature. The repository README's Determinism section
 //! lists what is and is not covered.
@@ -228,6 +232,7 @@ mod constraint;
 mod debug;
 mod error;
 mod filter;
+mod job_system;
 mod jolt_assert;
 mod layers;
 pub mod limits;
@@ -263,6 +268,7 @@ pub use error::{
     VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
+pub use job_system::{Job, JobSystem};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{CollideShape, CollideShapeHit, RayCast, RayHit, ShapeCast, ShapeCastHit};
