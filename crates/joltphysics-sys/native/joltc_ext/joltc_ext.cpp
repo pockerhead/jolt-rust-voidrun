@@ -118,9 +118,13 @@ namespace
 	class SortedBodyIdFilter final : public JPH::StateRecorderFilter
 	{
 	public:
-		SortedBodyIdFilter(const JPH_BodyID* bodies, uint32_t bodyCount) :
-			mBodies(bodies, bodies + bodyCount)
+		SortedBodyIdFilter(const JPH_BodyID* bodies, uint32_t bodyCount)
 		{
+			// The pointer of an empty list need not point to any object (Rust passes a dangling
+			// one for an empty slice), so it takes part in no pointer arithmetic.
+			if (bodyCount == 0)
+				return;
+			mBodies.assign(bodies, bodies + bodyCount);
 			std::sort(mBodies.begin(), mBodies.end());
 			mBodies.erase(std::unique(mBodies.begin(), mBodies.end()), mBodies.end());
 		}

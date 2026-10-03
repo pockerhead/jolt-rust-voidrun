@@ -33,7 +33,8 @@ typedef enum JPH_StateRecorderState {
 
 /* PhysicsSystem state */
 /* bodies null: every body is saved; otherwise only the bodies whose id is among the bodyCount ids
-   (any order, duplicates allowed). Contacts and constraints are never filtered. */
+   (any order, duplicates allowed), none for bodyCount 0, when bodies need not point to any object.
+   Contacts and constraints are never filtered. */
 JPH_CAPI void JPH_PhysicsSystem_SaveState(const JPH_PhysicsSystem* system, JPH_StateRecorder* recorder, JPH_StateRecorderState state, const JPH_BodyID* bodies, uint32_t bodyCount);
 /* Reads from the recorder's current read position (rewind it first). Never validating. Returns
    false when Jolt could not restore; the system may then be partly restored. */

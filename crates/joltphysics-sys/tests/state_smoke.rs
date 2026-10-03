@@ -188,6 +188,20 @@ fn a_selected_body_state_restores_only_that_body() {
     assert_eq!(scene.body_bits(second), second_now);
 }
 
+// The empty slice passes a dangling, non-null pointer: an empty selection, not every body.
+#[test]
+fn an_empty_selection_saves_no_body() {
+    let scene = Scene::new();
+    scene.step(10);
+    let empty = scene.save(Some(&[]));
+    assert!(empty.len() < scene.save(Some(&[scene.spheres[0]])).len());
+
+    scene.step(10);
+    let now = scene.all_bits();
+    assert!(scene.restore(&empty));
+    assert_eq!(scene.all_bits(), now);
+}
+
 // Jolt asserts on this path ("Restoring state for non-existing body"), and the asserts build must
 // stay assert-free.
 #[cfg(not(feature = "asserts"))]
