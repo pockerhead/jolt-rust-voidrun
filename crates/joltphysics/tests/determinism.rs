@@ -104,6 +104,10 @@ const PILE_COLUMNS: usize = 10;
 /// Cubes in each column of [`run_pile`].
 const PILE_LAYERS: usize = 6;
 
+/// Extra unrecorded runs of [`run_pile`] the Rayon child may need before its pool executes a
+/// Jolt job; each misses with a probability of at most about a quarter on one core.
+const PILE_POOL_RETRIES: usize = 10;
+
 /// A floor and 600 cubes in leaning columns that topple into one pile: enough work per step
 /// that the threads of a caller's pool run Jolt jobs even on a loaded machine, where the
 /// stepping thread can finish every job of the eight-cube stacks scene before a pool thread is
@@ -920,8 +924,16 @@ fn determinism_child() {
         ),
     }
     // Only the pile is busy enough: in the smaller scenes a loaded machine's stepping thread may
-    // run every job before a pool thread is scheduled.
+    // run every job before a pool thread is scheduled. Even the pile can miss the pool in one run
+    // when the child has a single core, so fresh piles are stepped, not recorded, until the pool
+    // executed a job or the retries run out; the digest stays the first run's.
     if job_choice == JobChoice::Rayon && scenario == "pile" {
+        for _ in 0..PILE_POOL_RETRIES {
+            if jobs::queued_from_pool_jobs() > 0 {
+                break;
+            }
+            run_pile(threads);
+        }
         assert!(
             jobs::queued_from_pool_jobs() > 0,
             "the Rayon pool executed no Jolt job"
