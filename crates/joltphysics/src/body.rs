@@ -12,7 +12,7 @@ use joltphysics_sys::*;
 
 use crate::limits::{
     self, is_angular_velocity, is_friction, is_gravity_factor, is_in_frame, is_linear_velocity,
-    is_mass,
+    is_mass, is_soft_body_force,
 };
 use crate::math::{is_finite_non_negative, jolt_rotate};
 use crate::owned::{JoltObject, Owned};
@@ -1205,18 +1205,17 @@ fn sum(a: Vec3, b: Vec3, c: [f64; 3]) -> [f64; 3] {
 }
 
 /// The force to add to a soft body for the world-space `force`: `force` in the body frame Jolt
-/// accumulates it in, after checking that the accumulated force gives no vertex more than
-/// [`limits::MAX_ACCELERATION`] (Jolt adds `F · w / N` per vertex,
-/// `SoftBodyMotionProperties.cpp:334`).
+/// accumulates it in, after checking the accumulated force against the soft body force bound
+/// of [`limits`] (Jolt adds `F · w / N` per vertex, `SoftBodyMotionProperties.cpp:334`).
 fn soft_body_force(state: &SoftLoadState, force: Vec3) -> Result<Vec3, BodyError> {
     // Jolt converts only gravity into the body frame (`InitializeUpdateContext`) and adds the
     // accumulated force to the vertex velocities, which are stored in that frame.
     let local = jolt_rotate(state.rotation.conjugated(), force);
     let new_force = sum(state.force, local, [0.0; 3]);
-    let per_vertex = f64::from(state.largest_inverse_mass) / f64::from(state.vertex_count.max(1));
     require(
-        length(new_force) * per_vertex <= f64::from(limits::MAX_ACCELERATION),
-        "accumulated force would exceed limits::MAX_ACCELERATION for a vertex of this soft body",
+        is_soft_body_force(new_force, state.largest_inverse_mass, state.vertex_count),
+        "accumulated force would exceed limits::MAX_ACCELERATION for a vertex of this soft \
+         body, or limits::MAX_ACCELERATION * limits::MAX_MASS",
     )?;
     Ok(local)
 }
@@ -1377,7 +1376,9 @@ impl BodyMut<'_> {
     ///
     /// On a soft body Jolt spreads the force evenly over its vertices: a vertex of inverse mass
     /// `w` gains `F · w / N · dt` of velocity in a step, `N` being the number of vertices, and
-    /// the accumulated force may give the lightest vertex at most [`limits::MAX_ACCELERATION`].
+    /// the accumulated force may give the lightest vertex at most [`limits::MAX_ACCELERATION`]
+    /// and be at most `MAX_ACCELERATION · MAX_MASS` long (5e14 N) even when every vertex is
+    /// pinned.
     /// Jolt adds the accumulated force to the vertices in the body's own frame, so joltphysics
     /// turns `force` into that frame with the body's current rotation; a rotation set later in
     /// the same step turns the force with the vertices.

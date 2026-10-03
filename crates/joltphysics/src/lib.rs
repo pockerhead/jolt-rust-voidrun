@@ -180,8 +180,10 @@
 //! [`PhysicsWorld::soft_body`] reads its vertices in world space, and
 //! [`PhysicsWorld::soft_body_mut`] sets vertex velocities and inverse masses and moves kinematic
 //! (pinned) vertices. Soft bodies collide with rigid bodies, not with each other (Jolt does not
-//! implement that yet); constraints and vehicles refuse them, and so do the body-level velocity,
-//! torque and point-force setters, which Jolt ignores on soft bodies.
+//! implement that yet); constraints and vehicles refuse them. So do the body-level velocity and
+//! torque setters, which Jolt ignores on soft bodies, and the point-force setter: Jolt applies
+//! its force at the centre, but also adds its torque, which a soft body never clears.
+//! [`BodyMut::add_force`] works on soft bodies.
 //!
 //! # Threads
 //! Changing a world, including [`PhysicsWorld::step`], takes `&mut PhysicsWorld`; reading it

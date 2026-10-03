@@ -18,7 +18,8 @@ use crate::body::{
 };
 use crate::limits::{
     self, is_compliance, is_friction, is_gravity_factor, is_in_frame, is_linear_velocity,
-    is_local_distance, is_local_offset, is_vertex_inverse_mass,
+    is_local_distance, is_local_offset, is_soft_body_force, is_soft_body_pressure,
+    is_vertex_inverse_mass, SoftBodyPressureGeometry,
 };
 use crate::math::{is_finite_non_negative, jolt_length};
 use crate::owned::{JoltObject, Owned};
@@ -261,7 +262,10 @@ pub struct SoftBodyVolume {
 /// Owns one Jolt reference. Every soft body created from the settings holds its own, so the
 /// settings may be dropped while bodies use them. They cannot change after they are built, and
 /// one value may serve many bodies in many worlds on many threads.
-pub struct SoftBodySharedSettings(Owned<JPH_SoftBodySharedSettings>);
+pub struct SoftBodySharedSettings {
+    settings: Owned<JPH_SoftBodySharedSettings>,
+    pressure_geometry: SoftBodyPressureGeometry,
+}
 
 // SAFETY: the settings are never changed after `build` returns (no method takes `&mut self`, and
 // Jolt requires shared settings to stay constant while bodies use them, `Docs/Architecture.md:427`),
@@ -285,8 +289,10 @@ impl JoltObject for JPH_SoftBodySharedSettings {
 impl SoftBodySharedSettings {
     /// Starts settings with `vertices` and the triangle `faces` between them, given as vertex
     /// indices. Faces are what other bodies collide with and what queries hit; without a call
-    /// to [`create_constraints`](SoftBodySharedSettingsBuilder::create_constraints) the
-    /// particles are not tied together.
+    /// to [`create_constraints`](SoftBodySharedSettingsBuilder::create_constraints) or explicit
+    /// constraints ([`edge`](SoftBodySharedSettingsBuilder::edge),
+    /// [`dihedral_bend`](SoftBodySharedSettingsBuilder::dihedral_bend),
+    /// [`volume`](SoftBodySharedSettingsBuilder::volume)) the particles are not tied together.
     ///
     /// ```
     /// use joltphysics::*;
@@ -325,7 +331,7 @@ impl SoftBodySharedSettings {
     }
 
     pub(crate) fn as_ptr(&self) -> *const JPH_SoftBodySharedSettings {
-        self.0.as_ptr()
+        self.settings.as_ptr()
     }
 
     /// Number of vertices.
@@ -442,13 +448,17 @@ impl SoftBodySharedSettingsBuilder {
             return Err(SoftBodyError::InitFailed);
         }
         self.validate()?;
+        let positions: Vec<Vec3> = self.vertices.iter().map(|v| v.position).collect();
+        let pressure_geometry = SoftBodyPressureGeometry::new(&positions, &self.faces);
         // SAFETY: Jolt is initialised. The handle takes over the one reference joltc's
         // `_Create` adds.
-        let settings = SoftBodySharedSettings(
-            unsafe { Owned::from_raw(JPH_SoftBodySharedSettings_Create()) }
-                .unwrap_or_else(|| unreachable!("`new` does not return null")),
-        );
-        let ptr = settings.0.as_ptr();
+        let owned = unsafe { Owned::from_raw(JPH_SoftBodySharedSettings_Create()) }
+            .unwrap_or_else(|| unreachable!("`new` does not return null"));
+        let settings = SoftBodySharedSettings {
+            settings: owned,
+            pressure_geometry,
+        };
+        let ptr = settings.settings.as_ptr();
         let vertices: Vec<JPH_SoftVertex> = self.vertices.iter().map(|v| v.to_jph()).collect();
         let faces: Vec<JPH_SoftFace> = self
             .faces
@@ -847,6 +857,15 @@ impl SoftBodySettings {
     /// Pressure coefficient of a closed body (`n · R · T`), finite and within
     /// `0..=`[`limits::MAX_SOFT_BODY_PRESSURE`]; 0 applies no pressure. Jolt pushes the faces
     /// outwards with it divided by the enclosed volume. Default 0.
+    ///
+    /// Above 0, [`PhysicsWorld::create_soft_body`] also needs faces wound counter-clockwise
+    /// seen from outside that enclose a volume large enough for the pressure: the pressure
+    /// force Jolt computes for a vertex at the start geometry may give a vertex of
+    /// [`limits::MIN_MASS`] at most [`limits::MAX_ACCELERATION`] (see
+    /// [Derived bounds](crate::limits#derived-bounds)). Jolt computes the volume in `f32` from
+    /// the vertex positions about the body origin, so the vertices of a pressurised body
+    /// belong around that origin: far from it the rounding of that volume can exceed the
+    /// volume itself, and the body is refused.
     #[must_use]
     pub fn pressure(mut self, value: f32) -> Self {
         self.pressure = value;
@@ -1022,8 +1041,9 @@ impl PhysicsWorld {
     /// `position + rotation · vertex position`.
     ///
     /// Fails with [`BodyError::UnknownObjectLayer`] or [`BodyError::InvalidValue`] when a
-    /// setting is out of range, and with [`BodyError::TooManyBodies`] when the world is full;
-    /// then nothing changes.
+    /// setting is out of range or the pressure is too high for the volume the faces of
+    /// `shared` enclose (see [`SoftBodySettings::pressure`]), and with
+    /// [`BodyError::TooManyBodies`] when the world is full; then nothing changes.
     ///
     /// ```
     /// use joltphysics::*;
@@ -1072,6 +1092,12 @@ impl PhysicsWorld {
         settings: &SoftBodySettings,
     ) -> Result<BodyId, BodyError> {
         settings.validate(self.object_layer_count)?;
+        if !is_soft_body_pressure(settings.pressure, &shared.pressure_geometry) {
+            return Err(BodyError::InvalidValue(
+                "pressure needs faces around the body origin that enclose a volume large \
+                 enough for it, wound counter-clockwise seen from outside (see limits)",
+            ));
+        }
         let creation = creation_settings(shared, settings)?;
         if !self.has_room_for_bodies(1) {
             return Err(BodyError::TooManyBodies);
@@ -1259,7 +1285,10 @@ impl SoftBodyMut<'_> {
     /// Sets the inverse mass of vertex `index` in 1/kg: 0 pins the vertex (it becomes
     /// kinematic), otherwise the inverse of a mass within
     /// [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`]. The masses of the movable vertices must
-    /// still add up to at most [`limits::MAX_MASS`]. Jolt recomputes the body's mass from the
+    /// still add up to at most [`limits::MAX_MASS`], and the force added to the body this step
+    /// ([`BodyMut::add_force`](crate::BodyMut::add_force)) must stay within its bound for the
+    /// new inverse masses, so unpinning a vertex cannot release a force that was accepted
+    /// while every vertex was pinned. Jolt recomputes the body's mass from the
     /// vertices; while any vertex is kinematic the body's mass is infinite
     /// ([`BodyRef::mass`](crate::BodyRef::mass) is `None`).
     pub fn set_vertex_inverse_mass(
@@ -1280,12 +1309,29 @@ impl SoftBodyMut<'_> {
             .map(|&w| vertex_mass(w))
             .sum();
         require_body(total_mass <= f64::from(limits::MAX_MASS), TOTAL_MASS_RULE)?;
-        with_locked_body(self.body_lock_interface, self.id, |body| {
-            // SAFETY: `body` is locked for writing for the duration of the closure, and `index`
-            // names one of its vertices.
-            unsafe { JPH_Body_SetSoftBodyVertexInvMass(body.as_ptr(), index, inverse_mass) }
+        let largest_inverse_mass = inverse_masses.iter().copied().fold(0.0, f32::max);
+        let vertex_count = inverse_masses.len() as u32;
+        let written = with_locked_body(self.body_lock_interface, self.id, |body| {
+            let mut force = Vec3::ZERO.to_jph();
+            // SAFETY: `body` is locked for writing for the duration of the closure. A soft body
+            // is always dynamic, so it has the force accumulator the getter reads; `force` is a
+            // live local.
+            unsafe { JPH_Body_GetAccumulatedForce(body.as_ptr(), &mut force) };
+            let force = Vec3::from_jph(force);
+            let force = [force.x, force.y, force.z].map(f64::from);
+            if !is_soft_body_force(force, largest_inverse_mass, vertex_count) {
+                return false;
+            }
+            // SAFETY: as above; `index` names one of the body's vertices.
+            unsafe { JPH_Body_SetSoftBodyVertexInvMass(body.as_ptr(), index, inverse_mass) };
+            true
         })
         .ok_or(BodyError::NotFound(self.id))?;
+        require_body(
+            written,
+            "the force added this step would exceed the soft body force bound of limits with \
+             this inverse mass; step or reset forces first",
+        )?;
         self.activate();
         Ok(())
     }

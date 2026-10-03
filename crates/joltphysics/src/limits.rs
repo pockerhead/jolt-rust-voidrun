@@ -36,6 +36,40 @@
 //!   and `mInvMass * F` (`MotionProperties.inl:134`) cannot overflow. For a force at a point the
 //!   lever must be finite in `f32` and every product `lever_i · force_j` at most 1e37, so Jolt's
 //!   cross product (`Body.inl:127-131`) stays finite even when its two products cancel.
+//! - **Soft body forces.** Jolt adds a soft body's accumulated force to every vertex as
+//!   `F · w / N · dt` (`SoftBodyMotionProperties.cpp:334`), `w` the vertex's inverse mass and `N`
+//!   the vertex count. The accumulated force may give the vertex of the largest inverse mass at
+//!   most [`MAX_ACCELERATION`], and is at most `MAX_ACCELERATION · MAX_MASS` (5e14 N) whatever
+//!   the inverse masses, as on a rigid body: a body whose vertices are all pinned (`w = 0`)
+//!   cannot collect an unbounded force. Changing a vertex's inverse mass rechecks the force
+//!   accumulated in the current step against the new inverse masses, so unpinning a vertex
+//!   cannot release a force beyond the bound either.
+//! - **Soft body pressure.** Before each solver sub-step of `dt` seconds Jolt computes the
+//!   six-volume `V = Σ (x1 × x2) · x3` over the faces in `f32`, from the vertex positions about
+//!   the body origin, and when `V > 0` adds `w · pressure · dt / V · ((x2 - x1) × (x3 - x1))` to
+//!   the velocity of each vertex of every face (`SoftBodyMotionProperties.cpp:107-118,291-322`);
+//!   nothing bounds `1 / V`. [`PhysicsWorld::create_soft_body`] accepts a pressure only when
+//!   `pressure · A <= MAX_ACCELERATION · MIN_MASS · V_low`, where `V_low` is a lower bound of
+//!   the six-volume Jolt computes before the first step and `A` the largest sum, over the faces
+//!   of one vertex, of an upper bound of `|x2 - x1| · |x3 - x1|` in Jolt's arithmetic. So the
+//!   faces must enclose a positive volume, wound counter-clockwise seen from outside, and no
+//!   vertex, whatever its inverse mass (at most `1 / MIN_MASS`, also after
+//!   [`SoftBodyMut::set_vertex_inverse_mass`](crate::SoftBodyMut::set_vertex_inverse_mass)),
+//!   gains more than `MAX_ACCELERATION · dt` per sub-step from the pressure at the start
+//!   geometry; the pressure coefficient and impulses stay finite, so a kinematic vertex gets
+//!   `0 · finite`, not `0 · ∞`. `V_low` does not replay Jolt's `f32` operations, whose order
+//!   and rounding depend on the build (SSE4.1 `dpps`, fused multiply-adds, the rotation Jolt
+//!   bakes into the vertices); it is the six-volume in `f64` minus a bound of everything those
+//!   operations can change, with `u = 2^-24` and `|p|` a vertex's distance from the body
+//!   origin: a rotation within Jolt's normalization tolerance scales the six-volume by
+//!   `1 ± 4e-5` and distances by at most `1 + 2e-5`, and its rounding moves a position by at
+//!   most `15 u |p|`; one face's term `(x1 × x2) · x3` is off by at most
+//!   `64 u |p1| |p2| |p3|`; each addition of the running sum rounds by at most `u` times the
+//!   partial sum, which grows the error by at most `(1 - u)^-N` for `N` faces; underflow adds
+//!   at most `1e-36` per face. An edge in `A` is bounded by
+//!   `1.0001 · (|e| + 15 u (|pa| + |pb|))`. A tetrahedron with three 1 m edges at a right
+//!   corner takes a pressure of up to about 9e4; the ball of radius 0.5 m in
+//!   `pressure_at_the_bound_steps_finitely` takes [`MAX_SOFT_BODY_PRESSURE`].
 //! - **Vehicle gravity.** Jolt adds `gravity / inverse_mass` to the chassis
 //!   (`VehicleConstraint::OnStep`); the chassis is a dynamic body, so the force is at most
 //!   `5e8 · 1e6`, about 5e14 N.
@@ -179,8 +213,10 @@
 //!   directions, damping, motor force and torque limits, ragdoll joint friction (world
 //!   constraint friction is probed as above), wheel friction curves
 //!   and the wheel and drivetrain values that only have to give finite step coefficients.
-//! - A closed soft body with pressure crushed to a tiny positive volume: Jolt divides the
-//!   pressure by the enclosed volume (`SoftBodyMotionProperties.cpp:300-307`).
+//! - A soft body with pressure whose volume shrinks after creation (crushed, or its vertices
+//!   moved or recentred by Jolt so that an open mesh encloses less): Jolt divides the pressure
+//!   by the volume of every sub-step (`SoftBodyMotionProperties.cpp:300-307`), and the
+//!   creation check holds only for the start geometry.
 //! - Soft body constraint stability: [`MAX_COMPLIANCE`] keeps Jolt's compliance terms finite,
 //!   not the solver convergent.
 //! - `RagdollSettings::new_stabilized` reports Jolt's `Stabilize` failing to decompose an
@@ -296,11 +332,11 @@
 //! | `SoftBodySettings` position, rotation, object layer, friction, restitution, gravity factor | as for `BodySettings` | new: `soft_body_settings_are_bounded` |
 //! | `SoftBodySettings::num_iterations` | `1..=SoftBodySettings::MAX_ITERATIONS`; Jolt divides the step by it | new: `soft_body_settings_are_bounded` |
 //! | `SoftBodySettings::linear_damping`, `max_linear_velocity`, `vertex_radius` | finite, at least 0; `(0, `[`MAX_LINEAR_VELOCITY`]`]`; `0..=`[`MAX_SHAPE_EXTENT`] | new: `soft_body_settings_are_bounded` |
-//! | `SoftBodySettings::pressure` | `0..=`[`MAX_SOFT_BODY_PRESSURE`] | new: `soft_body_settings_are_bounded`, `pressure_at_the_bound_steps_finitely` |
+//! | `SoftBodySettings::pressure` | `0..=`[`MAX_SOFT_BODY_PRESSURE`]; above 0 only when the faces enclose a volume large enough for it (see [Derived bounds](#derived-bounds)) | new: `soft_body_settings_are_bounded`, `pressure_at_the_bound_steps_finitely`, `pressure_needs_a_volume_for_its_faces`, `a_sliver_at_the_pressure_bound_steps_finitely` |
 //! | `SoftBodyMut::set_vertex_velocity` | [`MAX_LINEAR_VELOCITY`] | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing` |
-//! | `SoftBodyMut::set_vertex_inverse_mass` | 0 or the inverse of a mass within [`MIN_MASS`]`..=`[`MAX_MASS`]; total movable mass at most [`MAX_MASS`] | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing` |
+//! | `SoftBodyMut::set_vertex_inverse_mass` | 0 or the inverse of a mass within [`MIN_MASS`]`..=`[`MAX_MASS`]; total movable mass at most [`MAX_MASS`]; the force accumulated this step within the soft body force bound for the new inverse masses | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing`, `unpinning_cannot_release_an_accumulated_force` |
 //! | `SoftBodyMut::move_kinematic_vertex` | target within [`MAX_POSITION`]; a time step `step` accepts; the implied velocity within [`MAX_LINEAR_VELOCITY`] | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing` |
-//! | `BodyMut::add_force` on a soft body | accumulated `|F| · w_max / N <=` [`MAX_ACCELERATION`], `N` the vertex count (Jolt's divisor) | new: `soft_body_forces_are_bounded_by_the_acceleration_of_a_vertex` |
+//! | `BodyMut::add_force` on a soft body | accumulated `|F| · w_max / N <=` [`MAX_ACCELERATION`], `N` the vertex count (Jolt's divisor), and `|F| <= MAX_ACCELERATION · MAX_MASS` | new: `soft_body_forces_are_bounded_by_the_acceleration_of_a_vertex`, `unpinning_cannot_release_an_accumulated_force` |
 //! | `DebugLineSettings` (feature `debug-renderer`) | centre within [`MAX_POSITION`], radius at most twice it | new: `center_and_radius_are_bounded_by_the_frame` |
 //!
 //! [`WorldSettings::MAX_CONTACT_CONSTRAINTS`]: crate::WorldSettings::MAX_CONTACT_CONSTRAINTS
@@ -504,9 +540,111 @@ pub const MAX_COMPLIANCE: f32 = 1.0e20;
 /// Crate policy, measured. Jolt applies `pressure · dt / (6 · volume)` times each face's area
 /// as an impulse (`SoftBodyMotionProperties.cpp:290-312`). A closed ball of 1 m with vertex
 /// masses at [`MIN_MASS`] and at the total-mass bound, at this pressure, stepped 600 times on a
-/// floor in the `asserts` build, stays finite (`pressure_at_the_bound_steps_finitely`). Not
-/// covered: a closed body crushed to a tiny positive volume, which Jolt divides by.
+/// floor in the `asserts` build, stays finite (`pressure_at_the_bound_steps_finitely`).
+///
+/// A new body with pressure must also enclose enough volume for its faces (see
+/// [Derived bounds](self#derived-bounds)); a body crushed to a tiny volume later is not covered.
 pub const MAX_SOFT_BODY_PRESSURE: f32 = 1.0e6;
+
+/// Largest force in newtons that the pressure of a new soft body may give a vertex in Jolt's
+/// formula: [`MAX_ACCELERATION`] for a vertex of [`MIN_MASS`], 5e5 N (see
+/// [Derived bounds](self#derived-bounds)).
+const MAX_PRESSURE_VERTEX_FORCE: f64 = MAX_ACCELERATION as f64 * MIN_MASS as f64;
+
+/// Unit roundoff of `f32`, `2^-24`.
+const F32_UNIT_ROUNDOFF: f64 = f32::EPSILON as f64 / 2.0;
+
+/// What [`is_soft_body_pressure`] needs to know of a soft body's vertices and faces, computed
+/// once when its shared settings are built; the rule and its error bounds are derived in
+/// [Derived bounds](self#derived-bounds).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SoftBodyPressureGeometry {
+    /// Lower bound of the six-volume Jolt computes in `f32` before the first step, in m³.
+    six_volume_low: f64,
+    /// Largest sum, over the faces of one vertex, of the bound of `|x2 - x1| · |x3 - x1|` in
+    /// Jolt's arithmetic, in m².
+    largest_vertex_face_area: f64,
+}
+
+impl SoftBodyPressureGeometry {
+    /// The geometry of `faces` (vertex indices, each valid) between vertices at `positions`
+    /// about the body origin.
+    pub(crate) fn new(positions: &[Vec3], faces: &[[u32; 3]]) -> Self {
+        // The error terms of the derivation, in units of `u`, and the rotation's slack.
+        const ROTATION_VOLUME: f64 = 4.0e-5;
+        const ROTATION_LENGTH: f64 = 1.0001;
+        const POSITION_ERROR: f64 = 15.0;
+        const TERM_ERROR: f64 = 64.0;
+        const UNDERFLOW_PER_FACE: f64 = 1.0e-36;
+        let u = F32_UNIT_ROUNDOFF;
+        let point = |index: u32| {
+            let p = positions[index as usize];
+            [p.x, p.y, p.z].map(f64::from)
+        };
+        let edge = |from: [f64; 3], to: [f64; 3]| {
+            let e = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+            ROTATION_LENGTH * (norm(e) + POSITION_ERROR * u * (norm(from) + norm(to)))
+        };
+        let mut six_volume = 0.0;
+        let mut partial_sums = 0.0;
+        let mut length_products = 0.0;
+        let mut vertex_face_area = vec![0.0_f64; positions.len()];
+        for &face in faces {
+            let [x1, x2, x3] = face.map(point);
+            let c = [
+                x1[1] * x2[2] - x1[2] * x2[1],
+                x1[2] * x2[0] - x1[0] * x2[2],
+                x1[0] * x2[1] - x1[1] * x2[0],
+            ];
+            six_volume += c[0] * x3[0] + c[1] * x3[1] + c[2] * x3[2];
+            partial_sums += six_volume.abs();
+            length_products += norm(x1) * norm(x2) * norm(x3);
+            let area = edge(x1, x2) * edge(x1, x3);
+            for index in face {
+                vertex_face_area[index as usize] += area;
+            }
+        }
+        let face_count = faces.len() as f64;
+        let growth = (1.0 - u).powf(-face_count);
+        let error = growth
+            * (u * (TERM_ERROR * length_products + (1.0 + ROTATION_VOLUME) * partial_sums)
+                + UNDERFLOW_PER_FACE * face_count);
+        Self {
+            six_volume_low: (1.0 - ROTATION_VOLUME) * six_volume - error,
+            largest_vertex_face_area: vertex_face_area.into_iter().fold(0.0, f64::max),
+        }
+    }
+}
+
+/// The length of `v`.
+fn norm(v: [f64; 3]) -> f64 {
+    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+}
+
+/// Whether a soft body of `geometry` may be created with `pressure`, already checked to be
+/// within `0..=MAX_SOFT_BODY_PRESSURE`: always without pressure, otherwise when the faces
+/// enclose a positive volume large enough for the pressure (see
+/// [Derived bounds](self#derived-bounds)).
+pub(crate) fn is_soft_body_pressure(pressure: f32, geometry: &SoftBodyPressureGeometry) -> bool {
+    pressure == 0.0
+        || (geometry.six_volume_low > 0.0
+            && f64::from(pressure) * geometry.largest_vertex_face_area
+                <= MAX_PRESSURE_VERTEX_FORCE * geometry.six_volume_low)
+}
+
+/// Whether a soft body with `vertex_count` vertices, the largest inverse mass among them
+/// `largest_inverse_mass`, may hold the accumulated force `force` in newtons, computed in
+/// `f64` (see [Derived bounds](self#derived-bounds)).
+pub(crate) fn is_soft_body_force(
+    force: [f64; 3],
+    largest_inverse_mass: f32,
+    vertex_count: u32,
+) -> bool {
+    let length = norm(force);
+    let per_vertex = f64::from(largest_inverse_mass) / f64::from(vertex_count.max(1));
+    length <= f64::from(MAX_ACCELERATION) * f64::from(MAX_MASS)
+        && length * per_vertex <= f64::from(MAX_ACCELERATION)
+}
 
 /// Whether every component of `position` is at most [`MAX_POSITION`] in absolute value.
 pub(crate) fn is_in_frame(position: RVec3) -> bool {
@@ -853,5 +991,133 @@ mod tests {
         assert!((per_step - MAX_LINEAR_VELOCITY).abs() <= MAX_LINEAR_VELOCITY * 1.0e-6);
         let per_step = MAX_ANGULAR_ACCELERATION * PhysicsWorld::MIN_DELTA_TIME;
         assert!((per_step - MAX_ANGULAR_VELOCITY).abs() <= MAX_ANGULAR_VELOCITY * 1.0e-6);
+    }
+
+    /// The tetrahedron with a right corner at `origin`, unit edges along x and z and the fourth
+    /// vertex `height` above `(1, 0, 1)`, faces wound counter-clockwise seen from outside.
+    fn tetrahedron(origin: Vec3, height: f32) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+        let positions = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, height, 1.0],
+        ]
+        .map(|[x, y, z]| Vec3::new(origin.x + x, origin.y + y, origin.z + z))
+        .to_vec();
+        (positions, vec![[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]])
+    }
+
+    /// Six-volumes as Jolt might compute them in `f32` after rotating the positions by
+    /// `rotation` with Jolt's quaternion rotation: once with separate multiplications and once
+    /// with fused multiply-adds in the cross and dot products.
+    fn f32_six_volumes(positions: &[Vec3], faces: &[[u32; 3]], rotation: crate::Quat) -> [f32; 2] {
+        let rotated: Vec<Vec3> = positions
+            .iter()
+            .map(|&p| crate::math::jolt_rotate(rotation, p))
+            .collect();
+        let mut plain = 0.0_f32;
+        let mut fused = 0.0_f32;
+        for &[a, b, c] in faces {
+            let [x1, x2, x3] = [a, b, c].map(|i| rotated[i as usize]);
+            let cross = Vec3::new(
+                x1.y * x2.z - x1.z * x2.y,
+                x1.z * x2.x - x1.x * x2.z,
+                x1.x * x2.y - x1.y * x2.x,
+            );
+            plain += (cross.x * x3.x + cross.y * x3.y) + cross.z * x3.z;
+            let cross = Vec3::new(
+                x1.y.mul_add(x2.z, -(x1.z * x2.y)),
+                x1.z.mul_add(x2.x, -(x1.x * x2.z)),
+                x1.x.mul_add(x2.y, -(x1.y * x2.x)),
+            );
+            fused += cross.z.mul_add(x3.z, cross.x.mul_add(x3.x, cross.y * x3.y));
+        }
+        [plain, fused]
+    }
+
+    #[test]
+    fn pressure_volume_bound_is_below_f32_six_volumes() {
+        // Seeded rotations, normalized within Jolt's tolerance.
+        let mut seed = 0x2545_f491_u32;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed as f32 / u32::MAX as f32 * 2.0 - 1.0
+        };
+        let mut checked = 0;
+        // Rounding grows with the distance from the origin, so heights from 1e-12 to 1 cover
+        // the region where the bound becomes positive for each origin.
+        for origin in [
+            Vec3::ZERO,
+            Vec3::new(3.0, -2.0, 4.0),
+            Vec3::new(10.0, -7.0, 15.0),
+        ] {
+            for step in 0..=48 {
+                let height = 10.0_f32.powf(-12.0 + step as f32 / 4.0);
+                let (positions, faces) = tetrahedron(origin, height);
+                let geometry = SoftBodyPressureGeometry::new(&positions, &faces);
+                if geometry.six_volume_low <= 0.0 {
+                    continue;
+                }
+                for _ in 0..64 {
+                    let rotation =
+                        crate::Quat::from_xyzw(next(), next(), next(), next()).normalized();
+                    for volume in f32_six_volumes(&positions, &faces, rotation) {
+                        assert!(
+                            f64::from(volume) >= geometry.six_volume_low,
+                            "origin {origin:?}, height {height}: {volume} < {}",
+                            geometry.six_volume_low
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= 64 * 30, "{checked}");
+    }
+
+    #[test]
+    fn pressure_needs_a_positive_volume_and_bounds_the_vertex_force() {
+        // The thin tetrahedron of a review: 1 m edges, faces with area, six-volume 1e-36.
+        let (positions, faces) = tetrahedron(Vec3::ZERO, 1.0e-36);
+        let sliver = SoftBodyPressureGeometry::new(&positions, &faces);
+        assert!(sliver.six_volume_low < 0.0, "{sliver:?}");
+        assert!(is_soft_body_pressure(0.0, &sliver));
+        assert!(!is_soft_body_pressure(f32::MIN_POSITIVE, &sliver));
+        // No faces enclose nothing.
+        let empty = SoftBodyPressureGeometry::new(&positions, &[]);
+        assert!(!is_soft_body_pressure(f32::MIN_POSITIVE, &empty));
+        // A unit tetrahedron: the vertex of the largest face sum is (1, 1, 1), whose faces have
+        // the edge products sqrt(3) * 1, 1 * sqrt(3) and sqrt(2) * sqrt(2).
+        let (positions, faces) = tetrahedron(Vec3::ZERO, 1.0);
+        let unit = SoftBodyPressureGeometry::new(&positions, &faces);
+        let area = 2.0 * 3.0_f64.sqrt() + 2.0;
+        assert!(
+            (unit.largest_vertex_face_area / area - 1.0).abs() < 1.0e-3,
+            "{unit:?}"
+        );
+        assert!((unit.six_volume_low - 1.0).abs() < 1.0e-4, "{unit:?}");
+        let bound = MAX_PRESSURE_VERTEX_FORCE * unit.six_volume_low / unit.largest_vertex_face_area;
+        let bound = bound as f32;
+        assert!(is_soft_body_pressure(bound.next_down(), &unit));
+        assert!(!is_soft_body_pressure(bound.next_up(), &unit));
+    }
+
+    #[test]
+    fn soft_body_force_is_bounded_whatever_the_inverse_masses() {
+        let bound = f64::from(MAX_ACCELERATION) * f64::from(MAX_MASS);
+        for w in [0.0, 1.0 / MAX_MASS] {
+            assert!(is_soft_body_force([bound, 0.0, 0.0], w, 4));
+            assert!(!is_soft_body_force([bound * (1.0 + 1e-12), 0.0, 0.0], w, 4));
+        }
+        let per_vertex = 4.0 * f64::from(MAX_ACCELERATION);
+        assert!(is_soft_body_force([0.0, per_vertex, 0.0], 1.0, 4));
+        assert!(!is_soft_body_force(
+            [0.0, per_vertex, 0.0],
+            1.0f32.next_up(),
+            4
+        ));
+        assert!(!is_soft_body_force([f64::NAN, 0.0, 0.0], 0.0, 4));
     }
 }
