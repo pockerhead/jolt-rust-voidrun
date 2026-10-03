@@ -313,6 +313,21 @@ impl PathConstraintSettings {
     }
 }
 
+impl PathConstraintSettings {
+    fn to_jph(&self, path: *const JPH_PathConstraintPath) -> JPH_PathConstraintSettings {
+        JPH_PathConstraintSettings {
+            base: constraint_base(),
+            path,
+            pathPosition: self.path_position.to_jph(),
+            pathRotation: self.path_rotation.to_jph(),
+            pathFraction: self.path_fraction,
+            maxFrictionForce: self.max_friction_force,
+            rotationConstraintType: self.rotation_constraint.to_jph(),
+            positionMotorSettings: self.position_motor.to_jph(),
+        }
+    }
+}
+
 impl sealed::Settings for PathConstraintSettings {
     fn validate(&self) -> Result<(), &'static str> {
         if !limits::is_local_offset(self.path_position) {
@@ -340,16 +355,7 @@ impl sealed::Settings for PathConstraintSettings {
         body2: NonNull<JPH_Body>,
     ) -> *mut JPH_Constraint {
         let path = self.path.create();
-        let settings = JPH_PathConstraintSettings {
-            base: constraint_base(),
-            path: path.as_ptr(),
-            pathPosition: self.path_position.to_jph(),
-            pathRotation: self.path_rotation.to_jph(),
-            pathFraction: self.path_fraction,
-            maxFrictionForce: self.max_friction_force,
-            rotationConstraintType: self.rotation_constraint.to_jph(),
-            positionMotorSettings: self.position_motor.to_jph(),
-        };
+        let settings = self.to_jph(path.as_ptr());
         // SAFETY: the caller locks both live bodies (trait contract); `settings` is a live,
         // validated local and `path` a live path that the constraint takes its own reference
         // to. Dropping `path` afterwards releases ours.
@@ -373,6 +379,12 @@ impl ConstraintRef<'_, PathConstraint> {
     pub fn max_fraction(&self) -> f32 {
         // SAFETY: the path is live with the constraint; the getter is a const virtual call.
         unsafe { JPH_PathConstraintPath_GetPathMaxFraction(self.path()) }
+    }
+
+    /// Whether the constraint's path joins its last point back to the first.
+    pub fn is_looping(&self) -> bool {
+        // SAFETY: the path is live with the constraint; the getter reads a member.
+        unsafe { JPH_PathConstraintPath_IsLooping(self.path()) }
     }
 
     /// Where body 2 is along the path, as of the last step or creation.
@@ -440,6 +452,36 @@ impl ConstraintRef<'_, PathConstraint> {
         // SAFETY: as in `path_fraction`.
         unsafe { JPH_PathConstraint_GetTotalLambdaMotor(self.ptr()) }
     }
+
+    /// The motor's settings.
+    pub fn position_motor_settings(&self) -> MotorSettings {
+        // SAFETY: an all-zero `JPH_MotorSettings` is valid (floats and an enum with a zero
+        // value).
+        let mut motor: JPH_MotorSettings = unsafe { std::mem::zeroed() };
+        // SAFETY: as in `path_fraction`; joltc copies the member into `motor`, a live local.
+        unsafe { JPH_PathConstraint_GetPositionMotorSettings(self.ptr(), &mut motor) };
+        MotorSettings::from_jph(motor)
+    }
+
+    /// The angular impulses in N·m·s that kept body 2 turning only about the free axis in the
+    /// last step, for [`PathRotationConstraint::ConstrainAroundTangent`], `ConstrainAroundNormal`
+    /// and `ConstrainAroundBinormal`; zero for the other rotation constraints.
+    pub fn total_lambda_rotation_hinge(&self) -> [f32; 2] {
+        let mut value = [0.0; 2];
+        // SAFETY: as in `path_fraction`; `value` has room for the two values joltc writes.
+        unsafe { JPH_PathConstraint_GetTotalLambdaRotationHinge(self.ptr(), value.as_mut_ptr()) };
+        value
+    }
+
+    /// The angular impulse in N·m·s that held body 2's rotation in the last step, for
+    /// [`PathRotationConstraint::ConstrainToPath`] and `FullyConstrained`; zero for the other
+    /// rotation constraints.
+    pub fn total_lambda_rotation(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `path_fraction`; `value` is a live local.
+        unsafe { JPH_PathConstraint_GetTotalLambdaRotation(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
 }
 
 impl ConstraintMut<'_, PathConstraint> {
@@ -489,7 +531,7 @@ impl ConstraintMut<'_, PathConstraint> {
     }
 
     /// Replaces the motor settings, checked as at creation and bounded through the bodies'
-    /// effective mass.
+    /// effective mass. Wakes the constraint's bodies.
     pub fn set_position_motor_settings(
         &mut self,
         motor: MotorSettings,
@@ -498,14 +540,66 @@ impl ConstraintMut<'_, PathConstraint> {
         let motor = motor.to_jph();
         // SAFETY: as in `set_motor_state`; `motor` is a live local that joltc copies.
         unsafe { JPH_PathConstraint_SetPositionMotorSettings(self.ptr(), &motor) };
+        self.wake_bodies();
         Ok(())
     }
 
     /// Sets the friction force in N applied while the motor is off, finite and at least 0.
+    /// Wakes the constraint's bodies.
     pub fn set_max_friction_force(&mut self, force: f32) -> Result<(), ConstraintError> {
         check_friction(force)?;
         // SAFETY: as in `set_motor_state`.
         unsafe { JPH_PathConstraint_SetMaxFrictionForce(self.ptr(), force) };
+        self.wake_bodies();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::ensure_initialized;
+
+    #[test]
+    fn path_defaults_are_jolts() {
+        assert!(ensure_initialized());
+        // SAFETY: an all-zero settings value is valid (floats, integers, `false`, enums with a
+        // zero value and a null path); joltc fills it with Jolt's defaults, a null path, and
+        // allocates nothing.
+        let mut jolt: JPH_PathConstraintSettings = unsafe { std::mem::zeroed() };
+        // SAFETY: Jolt is initialised and `jolt` is a live local.
+        unsafe { JPH_PathConstraintSettings_Init(&mut jolt) };
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let point = |position| HermitePathPoint {
+            position,
+            tangent: x,
+        };
+        let path = HermitePath::new(
+            Vec3::new(0.0, 1.0, 0.0),
+            vec![point(Vec3::ZERO), point(x)],
+            false,
+        )
+        .unwrap();
+        let ours = PathConstraintSettings::new(path).to_jph(std::ptr::null());
+        assert!(jolt.path.is_null());
+        assert_eq!(ours.base.enabled, jolt.base.enabled);
+        assert_eq!(
+            Vec3::from_jph(ours.pathPosition),
+            Vec3::from_jph(jolt.pathPosition)
+        );
+        assert_eq!(
+            Quat::from_jph(ours.pathRotation),
+            Quat::from_jph(jolt.pathRotation)
+        );
+        assert_eq!(ours.pathFraction.to_bits(), jolt.pathFraction.to_bits());
+        assert_eq!(
+            ours.maxFrictionForce.to_bits(),
+            jolt.maxFrictionForce.to_bits()
+        );
+        assert_eq!(ours.rotationConstraintType, jolt.rotationConstraintType);
+        assert_eq!(
+            MotorSettings::from_jph(ours.positionMotorSettings),
+            MotorSettings::from_jph(jolt.positionMotorSettings)
+        );
     }
 }

@@ -1681,13 +1681,15 @@ fn coupling_ratios_are_bounded() {
     let min = 1.0 / limits::MAX_RATIO;
     let gear = |ratio| GearConstraintSettings::new(z, z, ratio);
     let rack = |ratio| RackAndPinionConstraintSettings::new(z, AXIS_X, ratio);
-    // A gear's ratio is at least 1 (see `GearConstraintSettings`).
-    for ratio in [1.0, max] {
+    // A gear's ratio is between 1 and its own bound (see `GearConstraintSettings`).
+    let gear_max = limits::MAX_GEAR_RATIO;
+    for ratio in [1.0, gear_max] {
         assert!(joined_sphere(1.0, &gear(ratio)).2.is_ok());
     }
     for ratio in [
         1.0_f32.next_down(),
-        max.next_up(),
+        gear_max.next_up(),
+        max,
         0.5,
         -1.0,
         -2.0,
@@ -1709,7 +1711,7 @@ fn coupling_ratios_are_bounded() {
     }
     // Teeth give Jolt's ratios; zero teeth or a rack length out of range give none.
     assert!(joined_sphere(1.0, &gear(1.0).teeth(10, 30)).2.is_ok());
-    for (teeth1, teeth2) in [(0, 30), (30, 10)] {
+    for (teeth1, teeth2) in [(0, 30), (30, 10), (1, 11)] {
         assert!(constraint_invalid(
             joined_sphere(1.0, &gear(1.0).teeth(teeth1, teeth2)).2
         ));
@@ -1795,7 +1797,7 @@ fn ratios_at_the_bound_step_finitely() {
     for mass1 in masses {
         for mass2 in masses {
             for spun in [0, 1] {
-                for ratio in [1.0, limits::MAX_RATIO] {
+                for ratio in [1.0, limits::MAX_GEAR_RATIO] {
                     let (mut world, bodies, hinges, _) = coupling_scene([mass1, mass2, mass2]);
                     world
                         .create_constraint(

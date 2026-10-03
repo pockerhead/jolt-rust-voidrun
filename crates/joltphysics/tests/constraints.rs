@@ -508,6 +508,172 @@ fn removing_a_constraint_wakes_its_bodies() {
     assert!(world.body(cube).unwrap().position().y < 3.5);
 }
 
+/// Steps `world` until `body` sleeps, at most 900 ticks.
+fn fall_asleep(world: &mut PhysicsWorld, body: BodyId) {
+    let asleep = (0..900).any(|_| {
+        step(world, 1);
+        world.body(body).unwrap().is_sleeping()
+    });
+    assert!(asleep, "the body never fell asleep");
+}
+
+/// A world without gravity with [`anchored_box`]'s bodies joined by `settings`.
+fn sleeping_pair<S: ConstraintSettings>(
+    settings: &S,
+) -> (PhysicsWorld, BodyId, ConstraintId<S::Kind>) {
+    let mut world = world(Vec3::ZERO, 1);
+    let (anchor, body) = anchored_box(&mut world);
+    let id = world.create_constraint(anchor, body, settings).unwrap();
+    (world, body, id)
+}
+
+/// Asserts that `call` on the constraint of a scene whose body has fallen asleep wakes it.
+macro_rules! assert_wakes {
+    ($scene:expr, |$constraint:ident| $call:expr) => {{
+        let (mut world, body, id) = $scene;
+        fall_asleep(&mut world, body);
+        {
+            let mut $constraint = world.constraint_mut(id).unwrap();
+            $call.unwrap();
+        }
+        assert!(
+            !world.body(body).unwrap().is_sleeping(),
+            "{} left the body asleep",
+            stringify!($call)
+        );
+    }};
+}
+
+#[test]
+fn every_setter_wakes_the_constraint_bodies() {
+    let soft = SpringSettings::FrequencyAndDamping {
+        frequency: 2.0,
+        damping: 0.5,
+    };
+    let motor = MotorSettings::default();
+    let distance = DistanceConstraintSettings::new(RVec3::new(0.0, 10.0, 10.0), RVec3::ZERO);
+    assert_wakes!(sleeping_pair(&distance), |c| c.set_limits_spring(soft));
+    let slider = SliderConstraintSettings::new(RVec3::ZERO, Y, X);
+    assert_wakes!(sleeping_pair(&slider), |c| c.set_motor_settings(motor));
+    assert_wakes!(sleeping_pair(&slider), |c| c.set_limits(Some((-1.0, 0.0))));
+    assert_wakes!(sleeping_pair(&slider), |c| c.set_limits_spring(soft));
+    assert_wakes!(sleeping_pair(&slider), |c| c.set_max_friction_force(1.0));
+    let hinge = HingeConstraintSettings::new(RVec3::ZERO, Z, X);
+    assert_wakes!(sleeping_pair(&hinge), |c| c.set_motor_settings(motor));
+    assert_wakes!(sleeping_pair(&hinge), |c| c.set_limits(-0.5, 0.5));
+    assert_wakes!(sleeping_pair(&hinge), |c| c.set_limits_spring(soft));
+    assert_wakes!(sleeping_pair(&hinge), |c| c.set_max_friction_torque(1.0));
+    let swing_twist = SwingTwistConstraintSettings::new(RVec3::ZERO, X, Y);
+    assert_wakes!(sleeping_pair(&swing_twist), |c| c
+        .set_swing_motor_settings(motor));
+    assert_wakes!(sleeping_pair(&swing_twist), |c| c
+        .set_twist_motor_settings(motor));
+    assert_wakes!(sleeping_pair(&swing_twist), |c| c
+        .set_max_friction_torque(1.0));
+    assert_wakes!(sleeping_pair(&six_dof_settings()), |c| c
+        .set_motor_settings(SixDofConstraintAxis::RotationX, motor));
+    let path = || {
+        let mut world = world(Vec3::ZERO, 1);
+        let (body, id) = path_scene(&mut world, RVec3::ZERO, Quat::IDENTITY, &s_curve());
+        (world, body, id)
+    };
+    assert_wakes!(path(), |c| c.set_position_motor_settings(motor));
+    assert_wakes!(path(), |c| c.set_max_friction_force(1.0));
+}
+
+#[test]
+fn changed_limits_motors_and_friction_act_on_sleeping_bodies() {
+    // Each body falls asleep where the old settings let it rest; the change moves it.
+    // A slider that let the box fall to -2 m is narrowed to -1 m.
+    let mut world = world(GRAVITY, 1);
+    let (anchor, body) = anchored_box(&mut world);
+    let slider = world
+        .create_constraint(
+            anchor,
+            body,
+            &SliderConstraintSettings::new(RVec3::ZERO, Y, X).limits(-2.0, 0.0),
+        )
+        .unwrap();
+    fall_asleep(&mut world, body);
+    let before = world.constraint(slider).unwrap().current_position();
+    world
+        .constraint_mut(slider)
+        .unwrap()
+        .set_limits(Some((-1.0, 0.0)))
+        .unwrap();
+    step(&mut world, 60);
+    let after = world.constraint(slider).unwrap().current_position();
+    // Measured: -2.0000 m, then -1.0000 m.
+    assert!((before + 2.0).abs() < 1e-2, "{before}");
+    assert!((after + 1.0).abs() < 1e-2, "{after}");
+
+    // A door that fell to its -1 rad limit is narrowed to -0.5 rad.
+    let door_resting_on = |limit: f32| {
+        let mut world = common::world(GRAVITY, 1);
+        let (panel, hinge) = door(
+            &mut world,
+            HingeConstraintSettings::new(RVec3::new(0.1, 0.0, 0.0), Z, X).limits(-limit, limit),
+        );
+        fall_asleep(&mut world, panel);
+        (world, panel, hinge)
+    };
+    let angle = |world: &PhysicsWorld, hinge| world.constraint(hinge).unwrap().current_angle();
+    let (mut world, _, hinge) = door_resting_on(1.0);
+    let before = angle(&world, hinge);
+    world
+        .constraint_mut(hinge)
+        .unwrap()
+        .set_limits(-0.5, 0.5)
+        .unwrap();
+    step(&mut world, 60);
+    let after = angle(&world, hinge);
+    // Measured: -1.0021 rad, then -0.5062 rad.
+    assert!((before + 1.0).abs() < 1e-2, "{before}");
+    assert!((after + 0.5).abs() < 1e-2, "{after}");
+
+    // A position motor without a spring does nothing; giving it one lifts the door.
+    let (mut world, panel, hinge) = door_resting_on(1.0);
+    let mut motor = world.constraint_mut(hinge).unwrap();
+    motor
+        .set_motor_settings(MotorSettings::default().spring(SpringSettings::default()))
+        .unwrap();
+    motor.set_target_angle(0.0).unwrap();
+    motor.set_motor_state(MotorState::Position);
+    fall_asleep(&mut world, panel);
+    let before = angle(&world, hinge);
+    world
+        .constraint_mut(hinge)
+        .unwrap()
+        .set_motor_settings(MotorSettings::default())
+        .unwrap();
+    step(&mut world, 120);
+    let after = angle(&world, hinge);
+    // Measured: -1.0004 rad, then -0.3514 rad: the 2 Hz spring sags under the door's weight.
+    assert!((before + 1.0).abs() < 1e-2, "{before}");
+    assert!(after > -0.45, "{after}");
+
+    // Friction that held the door level is released and the door falls to its limit.
+    let mut world = common::world(GRAVITY, 1);
+    let (panel, hinge) = door(
+        &mut world,
+        HingeConstraintSettings::new(RVec3::new(0.1, 0.0, 0.0), Z, X)
+            .limits(-1.0, 1.0)
+            .max_friction_torque(1.0e4),
+    );
+    fall_asleep(&mut world, panel);
+    let before = angle(&world, hinge);
+    world
+        .constraint_mut(hinge)
+        .unwrap()
+        .set_max_friction_torque(0.0)
+        .unwrap();
+    step(&mut world, 120);
+    let after = angle(&world, hinge);
+    // Measured: -0.0003 rad, then -1.0021 rad.
+    assert!(before.abs() < 1e-2, "{before}");
+    assert!((after + 1.0).abs() < 1e-2, "{after}");
+}
+
 #[test]
 fn hinge_setters_check_their_values() {
     let mut world = world(Vec3::ZERO, 1);
@@ -676,12 +842,17 @@ fn cone_holds_a_hanging_body_within_its_angle() {
         let axis = common::ragdoll::rotate(world.body(body).unwrap().rotation(), down);
         (-axis.y).clamp(-1.0, 1.0).acos()
     };
-    step(&mut world, 180);
+    let mut peak: f32 = 0.0;
+    for _ in 0..180 {
+        step(&mut world, 1);
+        peak = peak.max(swing(&world));
+    }
     let settled = swing(&world);
     let reading = world.constraint(cone).unwrap();
     assert!((reading.half_cone_angle() - 0.3).abs() < 1e-5);
     // Measured at tick 180: 0.3037 rad; on the way the swing into the cone overshot to 0.3098.
     assert!((settled - 0.3).abs() < 1e-2, "{settled} rad");
+    assert!(peak < 0.32, "overshoot to {peak} rad");
 }
 
 #[test]
@@ -703,7 +874,20 @@ fn swing_twist_twist_limit_holds() {
         .set_target_angular_velocity_cs(Vec3::new(2.0, 0.0, 0.0))
         .unwrap();
     motor.set_twist_motor_state(MotorState::Velocity);
-    step(&mut world, 120);
+    let twist_now = |world: &PhysicsWorld| {
+        let rotation = world
+            .constraint(joint)
+            .unwrap()
+            .rotation_in_constraint_space();
+        twist_and_swing(rotation).0
+    };
+    let mut peak: f32 = 0.0;
+    for _ in 0..120 {
+        step(&mut world, 1);
+        peak = peak.max(twist_now(&world));
+    }
+    // Measured peak: 0.3000 rad, no overshoot while the motor pushes into the limit.
+    assert!(peak < 0.31, "overshoot to {peak} rad");
     let reading = world.constraint(joint).unwrap();
     let twist = twist_and_swing(reading.rotation_in_constraint_space()).0;
     assert_eq!(reading.twist_limits(), (-0.3, 0.3));
@@ -757,6 +941,29 @@ fn swing_twist_motor_reaches_target_orientation_with_a_rotated_parent() {
     assert!(error < 2e-2, "{error} rad");
     assert!(in_constraint_space < 2e-2, "{in_constraint_space} rad");
     assert_eq!(reading.swing_motor_state(), MotorState::Position);
+}
+
+#[test]
+fn swing_twist_reads_back_its_motor_settings() {
+    let swing = MotorSettings::default().torque_limits(-5.0, 6.0);
+    let twist = MotorSettings::default().spring(SpringSettings::FrequencyAndDamping {
+        frequency: 4.0,
+        damping: 0.7,
+    });
+    let (mut world, _, joint) = sleeping_pair(
+        &SwingTwistConstraintSettings::new(RVec3::ZERO, X, Y)
+            .swing_motor(swing)
+            .twist_motor(twist),
+    );
+    let reading = world.constraint(joint).unwrap();
+    assert_eq!(reading.swing_motor_settings(), swing);
+    assert_eq!(reading.twist_motor_settings(), twist);
+    let mut motors = world.constraint_mut(joint).unwrap();
+    motors.set_swing_motor_settings(twist).unwrap();
+    motors.set_twist_motor_settings(swing).unwrap();
+    let reading = world.constraint(joint).unwrap();
+    assert_eq!(reading.swing_motor_settings(), twist);
+    assert_eq!(reading.twist_motor_settings(), swing);
 }
 
 /// A six-DOF joint at the origin with every translation fixed except as `settings` say.
@@ -894,12 +1101,21 @@ fn six_dof_pyramid_holds_asymmetric_limits() {
             .set_target_angular_velocity_cs(Vec3::new(0.0, spin, 0.0))
             .unwrap();
         motor.set_motor_state(y, MotorState::Velocity);
-        step(&mut world, 120);
-        let rotation = world
-            .constraint(joint)
-            .unwrap()
-            .rotation_in_constraint_space();
-        let (_, swing_y, swing_z) = twist_and_swing(rotation);
+        let rotation = |world: &PhysicsWorld| {
+            world
+                .constraint(joint)
+                .unwrap()
+                .rotation_in_constraint_space()
+        };
+        let mut overshoot: f32 = 0.0;
+        for _ in 0..120 {
+            step(&mut world, 1);
+            let swing_y = twist_and_swing(rotation(&world)).1;
+            overshoot = overshoot.max((swing_y - bound) * spin);
+        }
+        // Measured peak past the limit: 0.0107 rad for both directions.
+        assert!(overshoot < 0.02, "spin {spin}: overshoot {overshoot} rad");
+        let (_, swing_y, swing_z) = twist_and_swing(rotation(&world));
         // Measured at tick 120: 0.6000 and -0.2000 rad, swing about z 0.
         assert!((swing_y - bound).abs() < 1e-2, "spin {spin}: {swing_y} rad");
         assert!(swing_z.abs() < 1e-2, "{swing_z} rad");
@@ -985,6 +1201,96 @@ fn gear_turns_the_second_hinge_at_the_ratio() {
             "ratio {ratio}: {spin} rad/s"
         );
         assert!(world.constraint(gear).unwrap().total_lambda().is_finite());
+    }
+}
+
+/// Two discs like [`gear_pair`]'s, of `masses` kg, coupled by a gear of `ratio` about z.
+fn weighted_gear_pair(masses: [f32; 2], ratio: f32) -> GearPair {
+    let mut world = world(Vec3::ZERO, 1);
+    let base = add_anchor(&mut world, RVec3::new(0.0, -10.0, 0.0));
+    let shape = Shape::new_box(Vec3::new(0.5, 0.5, 0.1)).unwrap();
+    let [(disc1, hinge1), (disc2, hinge2)] = [0, 1].map(|i| {
+        let position = RVec3::new(3.0 * i as Real, 0.0, 0.0);
+        let disc = world
+            .create_body(
+                &shape,
+                &BodySettings::new_dynamic()
+                    .mass(masses[i])
+                    .position(position),
+            )
+            .unwrap();
+        let hinge = world
+            .create_constraint(base, disc, &HingeConstraintSettings::new(position, Z, X))
+            .unwrap();
+        (disc, hinge)
+    });
+    world
+        .create_constraint(disc1, disc2, &GearConstraintSettings::new(Z, Z, ratio))
+        .unwrap();
+    GearPair {
+        world,
+        discs: [disc1, disc2],
+        hinges: [hinge1, hinge2],
+    }
+}
+
+/// `|ω1 + ratio · ω2|` of the discs of `pair`.
+fn gear_error(pair: &GearPair, ratio: f32) -> f32 {
+    let spin = |i: usize| pair.world.body(pair.discs[i]).unwrap().angular_velocity().z;
+    (spin(0) + ratio * spin(1)).abs()
+}
+
+#[test]
+fn gear_keeps_its_velocity_relation_at_the_largest_ratio() {
+    // Jolt's gear solver keeps up to `1 - 1/ratio` of the error per iteration (see
+    // `limits::MAX_GEAR_RATIO`), worst with a heavy body 1. At the bound, every mass
+    // distribution brings `ω1 + ratio · ω2` back within 2 % of its initial value within ten
+    // steps, whether gear 2 is knocked or gear 1 is driven.
+    let ratio = limits::MAX_GEAR_RATIO;
+    let first_step_bound = (1.0 - 1.0 / ratio).powi(10);
+    for masses in [[1.0e6, 1.0], [1.0, 1.0], [1.0, 1.0e6]] {
+        // Gear 2 knocked to 1 rad/s.
+        let mut pair = weighted_gear_pair(masses, ratio);
+        pair.world
+            .body_mut(pair.discs[1])
+            .unwrap()
+            .set_angular_velocity(Z)
+            .unwrap();
+        let initial = gear_error(&pair, ratio);
+        let mut errors = Vec::new();
+        for _ in 0..120 {
+            step(&mut pair.world, 1);
+            errors.push(gear_error(&pair, ratio) / initial);
+        }
+        let worst_after_ten = errors[9..].iter().fold(0.0_f32, |m, e| m.max(*e));
+        // Measured after one step: 0.348, 0.315 and 0.000 of the initial error (bound 0.349);
+        // worst from the tenth step on: 0.0051, 0.0030 and 0.0000.
+        assert!(
+            errors[0] <= first_step_bound + 1e-3,
+            "masses {masses:?}: {} after one step",
+            errors[0]
+        );
+        assert!(
+            worst_after_ten < 0.02,
+            "masses {masses:?}: {worst_after_ten} from the tenth step on"
+        );
+
+        // Gear 1 driven at 2 rad/s.
+        let mut pair = weighted_gear_pair(masses, ratio);
+        drive(&mut pair.world, pair.hinges[0], 2.0);
+        let mut worst_after_ten: f32 = 0.0;
+        for tick in 1..=120 {
+            step(&mut pair.world, 1);
+            let driven = pair.world.body(pair.discs[0]).unwrap().angular_velocity().z;
+            if tick >= 10 {
+                worst_after_ten = worst_after_ten.max(gear_error(&pair, ratio) / driven.abs());
+            }
+        }
+        // Measured worst from the tenth step on: 0.0051, 0.0053 and 0.0161 of gear 1's rate.
+        assert!(
+            worst_after_ten < 0.02,
+            "masses {masses:?}, driven: {worst_after_ten} from the tenth step on"
+        );
     }
 }
 
@@ -1580,6 +1886,80 @@ fn path_motor_drives_to_a_target_fraction() {
     assert!((fraction - 1.5).abs() < 1e-2, "{fraction}");
     assert_eq!(reading.target_path_fraction(), 1.5);
     assert_eq!(reading.max_fraction(), 3.0);
+}
+
+#[test]
+fn path_reads_back_its_motor_looping_and_rotation_impulses() {
+    let motor = MotorSettings::default()
+        .spring(SpringSettings::StiffnessAndDamping {
+            stiffness: 50.0,
+            damping: 5.0,
+        })
+        .force_limits(-30.0, 40.0);
+    let shape = Shape::new_box(Vec3::new(0.1, 0.1, 0.1)).unwrap();
+    // Body 2 knocked into a spin about x, then about z: a joint that only lets it turn about
+    // the normal (z) resists the first through its hinge part, a fully constrained one the
+    // second through its rotation part.
+    for (rotation, spin) in [
+        (PathRotationConstraint::ConstrainAroundNormal, X),
+        (PathRotationConstraint::FullyConstrained, Z),
+    ] {
+        let mut world = world(Vec3::ZERO, 1);
+        let anchor = world
+            .create_body(&shape, &BodySettings::new_static())
+            .unwrap();
+        let body = world
+            .create_body(
+                &shape,
+                &BodySettings::new_dynamic().position(RVec3::new(0.5, 0.0, 0.0)),
+            )
+            .unwrap();
+        let path = world
+            .create_constraint(
+                anchor,
+                body,
+                &PathConstraintSettings::new(s_curve())
+                    .path_position(Vec3::new(0.5, 0.0, 0.0))
+                    .rotation_constraint(rotation)
+                    .position_motor(motor),
+            )
+            .unwrap();
+        world
+            .body_mut(body)
+            .unwrap()
+            .set_angular_velocity(spin)
+            .unwrap();
+        step(&mut world, 1);
+        let reading = world.constraint(path).unwrap();
+        assert_eq!(reading.position_motor_settings(), motor);
+        assert!(!reading.is_looping());
+        let hinge = reading.total_lambda_rotation_hinge();
+        let hinge = hinge[0].hypot(hinge[1]);
+        let lambda = reading.total_lambda_rotation();
+        let full = length(lambda);
+        // Measured: hinge 0.0533 N·m·s, rotation 0; then hinge 0, rotation 0.0533 N·m·s about z.
+        if rotation == PathRotationConstraint::FullyConstrained {
+            assert_eq!(hinge, 0.0);
+            assert!(full > 1e-3, "{full}");
+            assert!(lambda.z.abs() > 0.99 * full, "{lambda:?}");
+        } else {
+            assert!(hinge > 1e-3, "{hinge}");
+            assert_eq!(full, 0.0);
+        }
+        let other = MotorSettings::default().force_limits(-1.0, 1.0);
+        world
+            .constraint_mut(path)
+            .unwrap()
+            .set_position_motor_settings(other)
+            .unwrap();
+        assert_eq!(
+            world.constraint(path).unwrap().position_motor_settings(),
+            other
+        );
+    }
+    let mut world = world(Vec3::ZERO, 1);
+    let (_, looping) = path_scene(&mut world, RVec3::ZERO, Quat::IDENTITY, &circle());
+    assert!(world.constraint(looping).unwrap().is_looping());
 }
 
 /// A loop through four points on a circle of radius 1, tangents of a quarter arc's length.

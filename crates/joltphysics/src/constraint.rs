@@ -60,7 +60,7 @@ pub(crate) fn constraint_base() -> JPH_ConstraintSettings {
 pub enum ConstraintSpace {
     /// Relative to each body's centre of mass.
     LocalToBodyCom,
-    /// In world space, at the bodies' creation pose. The default.
+    /// In world space, at the bodies' poses when the constraint is created. The default.
     #[default]
     WorldSpace,
 }
@@ -274,6 +274,16 @@ impl MotorSettings {
             Ok(())
         } else {
             Err("motor force and torque limits must be finite with min <= max")
+        }
+    }
+
+    fn from_jph(motor: JPH_MotorSettings) -> Self {
+        Self {
+            spring: SpringSettings::from_jph(motor.springSettings),
+            min_force_limit: motor.minForceLimit,
+            max_force_limit: motor.maxForceLimit,
+            min_torque_limit: motor.minTorqueLimit,
+            max_torque_limit: motor.maxTorqueLimit,
         }
     }
 

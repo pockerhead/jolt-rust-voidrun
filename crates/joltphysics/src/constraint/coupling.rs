@@ -20,7 +20,7 @@ const RATIO_RULE: &str =
     "ratio must be finite with a magnitude between 1 / limits::MAX_RATIO and limits::MAX_RATIO";
 
 /// What a gear ratio must satisfy.
-const GEAR_RATIO_RULE: &str = "gear ratio must be between 1 and limits::MAX_RATIO";
+const GEAR_RATIO_RULE: &str = "gear ratio must be between 1 and limits::MAX_GEAR_RATIO";
 
 /// What a referenced hinge or slider must satisfy.
 const REFERENCE_RULE: &str = "a referenced hinge or slider must join the coupled body as its body 2, with the same axis direction";
@@ -84,15 +84,25 @@ unsafe fn check_reference(
 /// of 2 turns gear 2 half as fast, the other way. The bodies need their own hinges, which hold
 /// them in place.
 ///
-/// The ratio is between 1 and [`limits::MAX_RATIO`]: body 2 is the gear that turns slower. Jolt
-/// 5.6 applies the gear's impulse to body 2 without the ratio (`GearConstraintPart::
-/// ApplyVelocityStep`) while its effective mass includes the ratio squared, so each solver
-/// iteration leaves `1 - (A + r·B) / (A + r²·B)` of the error, with `A` and `B` the inverse
-/// inertias about the two axes. That stays below 1 for every ratio of at least 1; a negative
-/// ratio, or a ratio below 1 with a light body 2, grows the error until the bodies' velocities
-/// are not finite. Swap the bodies for a gear that speeds up, and turn one axis around for gears
-/// that turn the same way. Because of the same missing factor, the torque the gear passes to
-/// body 2 is not `ratio` times the torque on body 1; the rotation rates follow the ratio.
+/// The ratio is between 1 and [`limits::MAX_GEAR_RATIO`] (10): body 2 is the gear that turns
+/// slower. Both bounds come from a defect in Jolt's gear solver (Jolt 5.6, unchanged on Jolt's
+/// master as of 2026-09-28): `GearConstraintPart::ApplyVelocityStep` and
+/// `SolvePositionConstraint` apply the impulse to body 2 as `λ · I2⁻¹ · b`, without the ratio
+/// of the Jacobian `[a, r·b]`, while the effective mass `1 / (A + r²·B)` includes it squared
+/// (`A`, `B` the inverse inertias about the two axes). Each solver iteration therefore keeps
+/// `1 − (A + r·B) / (A + r²·B)` of the velocity error `ω1 + r · ω2`:
+/// - below 1 it approaches `1 − 1/r` for a light body 2, which is negative: below 1/2, and for
+///   every negative ratio, its magnitude exceeds 1 and the error grows until the bodies'
+///   velocities are not finite;
+/// - from 1 up it is in `[0, 1)` but approaches `1 − 1/r` for a heavy body 1, so the gear
+///   needs more steps to restore the relation the larger the ratio. At ratio 10 the first step
+///   after a disturbance keeps up to 35 % of the error and ten steps bring it within 2 %; see
+///   [`limits::MAX_GEAR_RATIO`] for the measurements behind the bound.
+///
+/// Swap the bodies for a gear that speeds up, chain gears for a larger reduction, and turn one
+/// axis around for gears that turn the same way. Because of the same missing factor, the torque
+/// the gear passes to body 2 is not `ratio` times the torque on body 1; the rotation rates
+/// follow the ratio.
 ///
 /// Without [`hinges`](Self::hinges) Jolt couples the velocities only, and the gears slowly drift
 /// apart. With them it also corrects `angle1 + ratio · angle2` (modulo 2π) from the hinges'
@@ -119,7 +129,7 @@ impl Default for GearConstraintSettings {
 
 impl GearConstraintSettings {
     /// A gear about the unit `hinge_axis1` of body 1 and `hinge_axis2` of body 2, in world
-    /// space, with `ratio` within `1..=`[`limits::MAX_RATIO`].
+    /// space, with `ratio` within `1..=`[`limits::MAX_GEAR_RATIO`].
     pub fn new(hinge_axis1: Vec3, hinge_axis2: Vec3, ratio: f32) -> Self {
         Self {
             space: ConstraintSpace::WorldSpace,
@@ -138,7 +148,8 @@ impl GearConstraintSettings {
     }
 
     /// The ratio of two gears with `teeth1` and `teeth2` teeth, `teeth2 / teeth1` (Jolt
-    /// `SetRatio`); body 2 is the gear with more teeth. Zero teeth give an invalid ratio.
+    /// `SetRatio`); body 2 is the gear with more teeth, at most [`limits::MAX_GEAR_RATIO`]
+    /// times as many. Zero teeth give an invalid ratio.
     #[must_use]
     pub fn teeth(mut self, teeth1: u32, teeth2: u32) -> Self {
         self.ratio = teeth2 as f32 / teeth1 as f32;
@@ -165,7 +176,7 @@ impl sealed::Settings for GearConstraintSettings {
         if !(is_unit(self.hinge_axis1) && is_unit(self.hinge_axis2)) {
             return Err("constraint frame axes must be unit vectors");
         }
-        if !(1.0..=limits::MAX_RATIO).contains(&self.ratio) {
+        if !(1.0..=limits::MAX_GEAR_RATIO).contains(&self.ratio) {
             return Err(GEAR_RATIO_RULE);
         }
         Ok(())
@@ -314,6 +325,16 @@ impl RackAndPinionConstraintSettings {
         self.constraints = Some((hinge, slider));
         self
     }
+
+    fn to_jph(&self) -> JPH_RackAndPinionConstraintSettings {
+        JPH_RackAndPinionConstraintSettings {
+            base: constraint_base(),
+            space: self.space.to_jph(),
+            hingeAxis: self.hinge_axis.to_jph(),
+            sliderAxis: self.slider_axis.to_jph(),
+            ratio: self.ratio,
+        }
+    }
 }
 
 impl sealed::Settings for RackAndPinionConstraintSettings {
@@ -343,13 +364,7 @@ impl sealed::Settings for RackAndPinionConstraintSettings {
         body1: NonNull<JPH_Body>,
         body2: NonNull<JPH_Body>,
     ) -> *mut JPH_Constraint {
-        let settings = JPH_RackAndPinionConstraintSettings {
-            base: constraint_base(),
-            space: self.space.to_jph(),
-            hingeAxis: self.hinge_axis.to_jph(),
-            sliderAxis: self.slider_axis.to_jph(),
-            ratio: self.ratio,
-        };
+        let settings = self.to_jph();
         // SAFETY: as in `GearConstraintSettings::create`.
         unsafe { JPH_RackAndPinionConstraint_Create(&settings, body1.as_ptr(), body2.as_ptr()) }
             .cast()
@@ -388,5 +403,33 @@ impl ConstraintRef<'_, RackAndPinionConstraint> {
     pub fn total_lambda(&self) -> f32 {
         // SAFETY: the world borrowed here owns the constraint; the getter reads a member.
         unsafe { JPH_RackAndPinionConstraint_GetTotalLambda(self.ptr()) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::ensure_initialized;
+
+    #[test]
+    fn rack_and_pinion_defaults_are_jolts() {
+        assert!(ensure_initialized());
+        // SAFETY: an all-zero settings value is valid (floats, integers, `false` and enums with a
+        // zero value); joltc fills it with Jolt's defaults and allocates nothing.
+        let mut jolt: JPH_RackAndPinionConstraintSettings = unsafe { std::mem::zeroed() };
+        // SAFETY: Jolt is initialised and `jolt` is a live local.
+        unsafe { JPH_RackAndPinionConstraintSettings_Init(&mut jolt) };
+        let ours = RackAndPinionConstraintSettings::default().to_jph();
+        assert_eq!(ours.base.enabled, jolt.base.enabled);
+        assert_eq!(ours.space, jolt.space);
+        assert_eq!(
+            Vec3::from_jph(ours.hingeAxis),
+            Vec3::from_jph(jolt.hingeAxis)
+        );
+        assert_eq!(
+            Vec3::from_jph(ours.sliderAxis),
+            Vec3::from_jph(jolt.sliderAxis)
+        );
+        assert_eq!(ours.ratio.to_bits(), jolt.ratio.to_bits());
     }
 }

@@ -406,12 +406,13 @@ impl ConstraintMut<'_, DistanceConstraint> {
     }
 
     /// Replaces the spring of the range limits, bounded through the bodies' effective mass as
-    /// at creation.
+    /// at creation. Wakes the constraint's bodies.
     pub fn set_limits_spring(&mut self, spring: SpringSettings) -> Result<(), ConstraintError> {
         check_spring(spring, self.effective_mass_bound())?;
         let mut spring = spring.to_jph();
         // SAFETY: as in `set_distance`; `spring` is a live local that joltc copies.
         unsafe { JPH_DistanceConstraint_SetLimitsSpringSettings(self.ptr(), &mut spring) };
+        self.wake_bodies();
         Ok(())
     }
 }
@@ -717,17 +718,18 @@ impl ConstraintMut<'_, SliderConstraint> {
     }
 
     /// Replaces the motor settings, checked as at creation and bounded through the bodies'
-    /// effective mass.
+    /// effective mass. Wakes the constraint's bodies.
     pub fn set_motor_settings(&mut self, motor: MotorSettings) -> Result<(), ConstraintError> {
         check_motor(motor, self.effective_mass_bound())?;
         let mut motor = motor.to_jph();
         // SAFETY: as in `set_motor_state`; `motor` is a live local that joltc copies.
         unsafe { JPH_SliderConstraint_SetMotorSettings(self.ptr(), &mut motor) };
+        self.wake_bodies();
         Ok(())
     }
 
     /// Sets the position limits, with the rules of [`SliderConstraintSettings::limits`]; `None`
-    /// removes them.
+    /// removes them. Wakes the constraint's bodies.
     pub fn set_limits(&mut self, limits: Option<(f32, f32)>) -> Result<(), ConstraintError> {
         if let Some((min, max)) = limits {
             validate_slider_limits(min, max, self.limits_spring())
@@ -736,11 +738,12 @@ impl ConstraintMut<'_, SliderConstraint> {
         let (min, max) = limits.unwrap_or(NO_SLIDER_LIMITS);
         // SAFETY: as in `set_motor_state`; Jolt asserts `min <= 0 <= max`, which holds.
         unsafe { JPH_SliderConstraint_SetLimits(self.ptr(), min, max) };
+        self.wake_bodies();
         Ok(())
     }
 
     /// Replaces the spring that makes the limits soft, bounded through the bodies' effective
-    /// mass. Limits with `min == max` keep needing a soft spring.
+    /// mass. Limits with `min == max` keep needing a soft spring. Wakes the constraint's bodies.
     pub fn set_limits_spring(&mut self, spring: SpringSettings) -> Result<(), ConstraintError> {
         check_spring(spring, self.effective_mass_bound())?;
         // SAFETY: as in `set_motor_state`; the getters read members.
@@ -757,14 +760,17 @@ impl ConstraintMut<'_, SliderConstraint> {
         let mut spring = spring.to_jph();
         // SAFETY: as in `set_motor_state`; `spring` is a live local that joltc copies.
         unsafe { JPH_SliderConstraint_SetLimitsSpringSettings(self.ptr(), &mut spring) };
+        self.wake_bodies();
         Ok(())
     }
 
     /// Sets the friction force in N applied while the motor is off, finite and at least 0.
+    /// Wakes the constraint's bodies.
     pub fn set_max_friction_force(&mut self, force: f32) -> Result<(), ConstraintError> {
         check_friction(force)?;
         // SAFETY: as in `set_motor_state`.
         unsafe { JPH_SliderConstraint_SetMaxFrictionForce(self.ptr(), force) };
+        self.wake_bodies();
         Ok(())
     }
 
@@ -1068,5 +1074,35 @@ impl PhysicsWorld {
             // Dropping the old handle releases the world's reference to the old pulley.
             entry.constraint = replacement;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::ensure_initialized;
+
+    #[test]
+    fn pulley_defaults_are_jolts() {
+        assert!(ensure_initialized());
+        // SAFETY: an all-zero settings value is valid (floats, integers, `false` and enums with a
+        // zero value); joltc fills it with Jolt's defaults and allocates nothing.
+        let mut jolt: JPH_PulleyConstraintSettings = unsafe { std::mem::zeroed() };
+        // SAFETY: Jolt is initialised and `jolt` is a live local.
+        unsafe { JPH_PulleyConstraintSettings_Init(&mut jolt) };
+        let ours = PulleyConstraintSettings::default().to_jph();
+        assert_eq!(ours.base.enabled, jolt.base.enabled);
+        assert_eq!(ours.space, jolt.space);
+        for (a, b) in [
+            (ours.bodyPoint1, jolt.bodyPoint1),
+            (ours.fixedPoint1, jolt.fixedPoint1),
+            (ours.bodyPoint2, jolt.bodyPoint2),
+            (ours.fixedPoint2, jolt.fixedPoint2),
+        ] {
+            assert_eq!(RVec3::from_jph(a), RVec3::from_jph(b));
+        }
+        assert_eq!(ours.ratio.to_bits(), jolt.ratio.to_bits());
+        assert_eq!(ours.minLength.to_bits(), jolt.minLength.to_bits());
+        assert_eq!(ours.maxLength.to_bits(), jolt.maxLength.to_bits());
     }
 }

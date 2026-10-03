@@ -177,27 +177,29 @@ impl ConstraintMut<'_, HingeConstraint> {
     }
 
     /// Replaces the motor settings, checked as at creation and bounded through the bodies'
-    /// effective mass.
+    /// effective mass. Wakes the constraint's bodies.
     pub fn set_motor_settings(&mut self, motor: MotorSettings) -> Result<(), ConstraintError> {
         check_motor(motor, self.effective_mass_bound())?;
         let mut motor = motor.to_jph();
         // SAFETY: as in `set_motor_state`; `motor` is a live local that joltc copies.
         unsafe { JPH_HingeConstraint_SetMotorSettings(self.ptr(), &mut motor) };
+        self.wake_bodies();
         Ok(())
     }
 
     /// Sets the angle limits: `min` in `[-π, 0]`, `max` in `[0, π]`; `min == max` needs a soft
-    /// limits spring. `(-π, π)` turns the limits off.
+    /// limits spring. `(-π, π)` turns the limits off. Wakes the constraint's bodies.
     pub fn set_limits(&mut self, min: f32, max: f32) -> Result<(), ConstraintError> {
         validate_hinge_limits(min, max, self.limits_spring())
             .map_err(ConstraintError::InvalidValue)?;
         // SAFETY: as in `set_motor_state`; Jolt asserts the ranges checked above.
         unsafe { JPH_HingeConstraint_SetLimits(self.ptr(), min, max) };
+        self.wake_bodies();
         Ok(())
     }
 
     /// Replaces the spring that makes the limits soft, bounded through the bodies' effective
-    /// mass. Limits with `min == max` keep needing a soft spring.
+    /// mass. Limits with `min == max` keep needing a soft spring. Wakes the constraint's bodies.
     pub fn set_limits_spring(&mut self, spring: SpringSettings) -> Result<(), ConstraintError> {
         check_spring(spring, self.effective_mass_bound())?;
         // SAFETY: as in `set_motor_state`.
@@ -211,14 +213,17 @@ impl ConstraintMut<'_, HingeConstraint> {
         let mut spring = spring.to_jph();
         // SAFETY: as in `set_motor_state`; `spring` is a live local that joltc copies.
         unsafe { JPH_HingeConstraint_SetLimitsSpringSettings(self.ptr(), &mut spring) };
+        self.wake_bodies();
         Ok(())
     }
 
     /// Sets the friction torque in N·m applied while the motor is off, finite and at least 0.
+    /// Wakes the constraint's bodies.
     pub fn set_max_friction_torque(&mut self, torque: f32) -> Result<(), ConstraintError> {
         check_friction(torque)?;
         // SAFETY: as in `set_motor_state`.
         unsafe { JPH_HingeConstraint_SetMaxFrictionTorque(self.ptr(), torque) };
+        self.wake_bodies();
         Ok(())
     }
 
@@ -445,6 +450,25 @@ impl ConstraintRef<'_, SwingTwistConstraint> {
         MotorState::from_jph(unsafe { JPH_SwingTwistConstraint_GetTwistMotorState(self.ptr()) })
     }
 
+    /// The swing motor's settings.
+    pub fn swing_motor_settings(&self) -> MotorSettings {
+        // SAFETY: an all-zero `JPH_MotorSettings` is valid (floats and an enum with a zero
+        // value).
+        let mut motor: JPH_MotorSettings = unsafe { std::mem::zeroed() };
+        // SAFETY: as in `swing_motor_state`; joltc copies the member into `motor`, a live local.
+        unsafe { JPH_SwingTwistConstraint_GetSwingMotorSettings(self.ptr(), &mut motor) };
+        MotorSettings::from_jph(motor)
+    }
+
+    /// The twist motor's settings.
+    pub fn twist_motor_settings(&self) -> MotorSettings {
+        // SAFETY: as in `swing_motor_settings`.
+        let mut motor: JPH_MotorSettings = unsafe { std::mem::zeroed() };
+        // SAFETY: as in `swing_motor_settings`.
+        unsafe { JPH_SwingTwistConstraint_GetTwistMotorSettings(self.ptr(), &mut motor) };
+        MotorSettings::from_jph(motor)
+    }
+
     /// The orientation position motors drive to, in constraint space, as Jolt stores it after
     /// clamping it to the limits.
     pub fn target_orientation_cs(&self) -> Quat {
@@ -565,7 +589,7 @@ impl ConstraintMut<'_, SwingTwistConstraint> {
     }
 
     /// Replaces the swing motor settings, checked as at creation and bounded through the
-    /// bodies' effective mass.
+    /// bodies' effective mass. Wakes the constraint's bodies.
     pub fn set_swing_motor_settings(
         &mut self,
         motor: MotorSettings,
@@ -574,11 +598,12 @@ impl ConstraintMut<'_, SwingTwistConstraint> {
         let motor = motor.to_jph();
         // SAFETY: as in `set_swing_motor_state`; `motor` is a live local that joltc copies.
         unsafe { JPH_SwingTwistConstraint_SetSwingMotorSettings(self.ptr(), &motor) };
+        self.wake_bodies();
         Ok(())
     }
 
     /// Replaces the twist motor settings, checked as at creation and bounded through the
-    /// bodies' effective mass.
+    /// bodies' effective mass. Wakes the constraint's bodies.
     pub fn set_twist_motor_settings(
         &mut self,
         motor: MotorSettings,
@@ -587,15 +612,17 @@ impl ConstraintMut<'_, SwingTwistConstraint> {
         let motor = motor.to_jph();
         // SAFETY: as in `set_swing_motor_settings`.
         unsafe { JPH_SwingTwistConstraint_SetTwistMotorSettings(self.ptr(), &motor) };
+        self.wake_bodies();
         Ok(())
     }
 
     /// Sets the friction torque in N·m applied while no motor drives the joint, finite and at
-    /// least 0.
+    /// least 0. Wakes the constraint's bodies.
     pub fn set_max_friction_torque(&mut self, torque: f32) -> Result<(), ConstraintError> {
         check_friction(torque)?;
         // SAFETY: as in `set_swing_motor_state`.
         unsafe { JPH_SwingTwistConstraint_SetMaxFrictionTorque(self.ptr(), torque) };
+        self.wake_bodies();
         Ok(())
     }
 }
@@ -733,7 +760,7 @@ impl ConstraintMut<'_, SixDofConstraint> {
     }
 
     /// Replaces the motor settings of `axis`, checked as at creation and bounded through the
-    /// bodies' effective mass.
+    /// bodies' effective mass. Wakes the constraint's bodies.
     pub fn set_motor_settings(
         &mut self,
         axis: SixDofConstraintAxis,
@@ -743,6 +770,7 @@ impl ConstraintMut<'_, SixDofConstraint> {
         let motor = motor.to_jph();
         // SAFETY: as in `set_motor_state`; `motor` is a live local that joltc copies.
         unsafe { JPH_SixDOFConstraint_SetMotorSettings(self.ptr(), axis.to_jph(), &motor) };
+        self.wake_bodies();
         Ok(())
     }
 

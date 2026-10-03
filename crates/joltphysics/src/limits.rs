@@ -106,7 +106,8 @@
 //!   (`query_inputs_are_bounded_by_the_frame`) and a sphere at the extent bound cast across
 //!   the frame and collided with separations up to the extent bound
 //!   (`queries_with_shapes_at_the_extent_bound_stay_finite`);
-//! - world constraints: gears, racks and pinions and pulleys at both [`MAX_RATIO`] bounds
+//! - world constraints: gears at both ends of `1..=`[`MAX_GEAR_RATIO`], racks and pinions and
+//!   pulleys at both [`MAX_RATIO`] bounds
 //!   between bodies of both mass extremes, one of them turning or sliding at the velocity bound
 //!   (`ratios_at_the_bound_step_finitely`, `pulleys_at_the_ratio_bound_step_finitely`); motor and
 //!   limit springs accepted at the effective-mass bound and rejected one representable frequency
@@ -209,7 +210,7 @@
 //! | `ConstraintMut::<SwingTwistConstraint>::set_target_orientation_cs`, `ConstraintMut::<SixDofConstraint>::set_target_orientation_cs` | finite unit quaternion; Jolt clamps it to the limits | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
 //! | `ConstraintMut::<SixDofConstraint>::set_target_velocity_cs` | [`MAX_LINEAR_VELOCITY`] | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
 //! | `ConstraintMut::<SixDofConstraint>::set_target_position_cs` | [`MAX_SHAPE_EXTENT`] per axis | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
-//! | `GearConstraintSettings::new`, `teeth` ratio | `1..=`[`MAX_RATIO`] (see `GearConstraintSettings` for the lower bound) | new: `coupling_ratios_are_bounded`, `ratios_at_the_bound_step_finitely` |
+//! | `GearConstraintSettings::new`, `teeth` ratio | `1..=`[`MAX_GEAR_RATIO`] (see `GearConstraintSettings` and [`MAX_GEAR_RATIO`] for both bounds) | new: `coupling_ratios_are_bounded`, `ratios_at_the_bound_step_finitely`; behaviour at the bound in `tests/constraints.rs` |
 //! | `RackAndPinionConstraintSettings::new`, `teeth` ratio | magnitude within `1 / `[`MAX_RATIO`]`..=`[`MAX_RATIO`]; `teeth` length positive within [`MAX_SHAPE_EXTENT`] | new: `coupling_ratios_are_bounded`, `ratios_at_the_bound_step_finitely` |
 //! | `PulleyConstraintSettings::ratio` | positive, within `1 / `[`MAX_RATIO`]`..=`[`MAX_RATIO`] | new: `pulley_ratio_and_lengths_are_bounded`, `pulleys_at_the_ratio_bound_step_finitely` |
 //! | `PulleyLength::Range`, `ConstraintMut::<PulleyConstraint>::set_length` | `0 <= min <= max <= (1 + ratio) ·` [`MAX_SHAPE_EXTENT`] | new: `pulley_ratio_and_lengths_are_bounded` |
@@ -346,17 +347,32 @@ pub const MAX_SPRING_COEFFICIENT: f32 = 1.0e30;
 /// one-second updates, far above the characters of a game.
 pub const MAX_WEIGHT_IMPULSE: f32 = 1.0e9;
 
-/// Largest magnitude of a gear, rack-and-pinion or pulley ratio; the smallest is its inverse
-/// (for a gear 1, see [`GearConstraintSettings`](crate::GearConstraintSettings)).
+/// Largest magnitude of a rack-and-pinion or pulley ratio; the smallest is its inverse. Gears
+/// have their own, tighter range (see [`MAX_GEAR_RATIO`]).
 ///
 /// Crate policy. Jolt multiplies the inverse mass or inertia of body 2 by the ratio's square in
 /// the effective mass, and body 2's velocity (for racks and pulleys also its impulse) by the
 /// ratio (`GearConstraintPart.h:81,122`, `RackAndPinionConstraintPart.h:82,123`,
 /// `IndependentAxisConstraintPart.h:71,112` for pulleys). With a principal inverse inertia of at
 /// most `√3 · 1e6` (see [`MAX_WEIGHT_IMPULSE`]), `ratio² · I⁻¹` is at most about 1.7e14, far from
-/// `f32` overflow. A ratio of 1e4 already turns one gear ten thousand times per turn of the
-/// other; tests step both bounds on the lightest and heaviest bodies.
+/// `f32` overflow. A ratio of 1e4 already turns a pinion ten thousand radians per metre of its
+/// rack; tests step both bounds on the lightest and heaviest bodies.
 pub const MAX_RATIO: f32 = 1.0e4;
+
+/// Largest gear ratio; the smallest is 1 (see
+/// [`GearConstraintSettings`](crate::GearConstraintSettings)).
+///
+/// Crate policy, measured. Jolt 5.6 applies a gear's impulse to body 2 without the ratio
+/// (`GearConstraintPart::ApplyVelocityStep`), so each solver iteration keeps up to `1 − 1/ratio`
+/// of the velocity error `ω1 + ratio · ω2`, the worst case being a body 1 much heavier than
+/// body 2. With Jolt's 10 velocity iterations per step the gear then needs more steps to restore
+/// the relation the larger the ratio. The bound is the largest round ratio that, after a
+/// disturbance, brings the error back to within 2 % of its initial value within 10 steps for any
+/// mass distribution: measured worst 1.6 % at ratio 10, 6.5 % at 20, 60 % at 100, and at 1e4
+/// 91 % still after 60 steps. The first step after a disturbance leaves up to
+/// `(1 − 1/ratio)^10`, 35 % at ratio 10. Tested at the bound by
+/// `gear_keeps_its_velocity_relation_at_the_largest_ratio`.
+pub const MAX_GEAR_RATIO: f32 = 10.0;
 
 /// Whether every component of `position` is at most [`MAX_POSITION`] in absolute value.
 pub(crate) fn is_in_frame(position: RVec3) -> bool {
