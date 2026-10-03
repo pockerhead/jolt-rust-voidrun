@@ -2,10 +2,11 @@
 //!
 //! Jolt checks most magnitudes only with debug assertions (the `asserts` feature) and otherwise
 //! computes with whatever it is given, so a finite but huge input can overflow Jolt's `f32`
-//! arithmetic inside a step. joltphysics bounds every caller-given magnitude with the constants
-//! of this module, so that the arithmetic below stays finite. This module states which Jolt
-//! assertion paths the bounds are derived for, which are only covered by tests, and which are
-//! not covered at all. It does not claim that no accepted input can reach a Jolt assertion.
+//! arithmetic inside a step. joltphysics bounds the caller-given magnitudes the [audit](#audit)
+//! table lists with the constants of this module; the same table names the inputs that are only
+//! checked to be finite or ordered, and why. This module states which Jolt assertion paths the
+//! bounds are derived for, which are only covered by tests, and which are not covered at all. It
+//! does not claim that no accepted input can reach a Jolt assertion.
 //!
 //! # Frame and units
 //! Positions are in metres in the world frame, which must keep every component of a caller-given
@@ -45,10 +46,25 @@
 //!   linear velocity change is at most the relative normal speed whatever the strength.
 //! - **Springs.** Jolt derives a stiffness `k` and damping `c` from every spring
 //!   (`SpringPart.h:36-55,91-104`). Both stay at most [`MAX_SPRING_COEFFICIENT`]: in stiffness mode
-//!   directly, in frequency mode through an upper bound of the effective mass that ragdoll creation
-//!   computes from the parts' masses and inertias, including Jolt's `Stabilize`
-//!   (`Ragdoll.cpp:135-185`). See [`SpringSettings`](crate::SpringSettings).
+//!   directly, in frequency mode through an upper bound of the effective mass. For a ragdoll joint
+//!   that bound is computed at creation from the parts' masses and inertias, including Jolt's
+//!   `Stabilize` (`Ragdoll.cpp:135-185`); see [`SpringSettings`](crate::SpringSettings). For a
+//!   wheel's suspension it is [`MAX_MASS`], since Jolt's suspension effective mass is at most the
+//!   chassis mass (`VehicleConstraint.cpp:448-451`).
+//! - **Anti-roll bars.** Jolt's anti-roll impulse is `stiffness · length difference · dt`;
+//!   [`VehicleAntiRollBar::MAX_STIFFNESS`](crate::VehicleAntiRollBar::MAX_STIFFNESS) with wheel
+//!   lengths at most [`MAX_SHAPE_EXTENT`] keeps it at most the impulse of the largest accepted
+//!   load, `MAX_ACCELERATION · MAX_MASS · dt`.
 //! - **Restitution.** At most 1, so the restitution target speed is at most the approach speed.
+//! - **Friction.** At most [`MAX_FRICTION`], so Jolt's combined friction `sqrt(f1 · f2)`
+//!   (`ContactConstraintManager.h:554`) is finite and the friction impulse bound, combined friction
+//!   times the normal impulse (`ContactConstraintManager.cpp:1714-1715`), is never `0 · ∞` = NaN.
+//!   A cube sliding on a floor, both at `f32::MAX`, had NaN velocities within three 60 Hz steps.
+//! - **Kinematic drive.** Jolt's `MoveKinematic` sets a velocity of `move / dt` without clamping
+//!   it (`MotionProperties.inl:9-21`). [`RagdollMut::drive_to_pose_using_kinematics`](crate::RagdollMut::drive_to_pose_using_kinematics)
+//!   computes every part's velocity with Jolt's own operations first and accepts the drive only
+//!   when each stays within [`MAX_LINEAR_VELOCITY`] and [`MAX_ANGULAR_VELOCITY`], the bounds of
+//!   every other velocity input.
 //! - **Contact constraint capacity.** [`WorldSettings::MAX_CONTACT_CONSTRAINTS`] stays below the
 //!   count above which `ContactConstraintManager::Init` asserts; a native compile-time check pins
 //!   it.
@@ -56,11 +72,13 @@
 //! # Covered by tests only
 //! The asserts leg of CI runs every test with Jolt's assertions; these paths are exercised there
 //! by scenes with inputs at their bounds, not derived:
-//! - contact and constraint impulses the solver generates (heaviest against lightest bodies,
-//!   restitution 1, friction `f32::MAX`, motors at the spring bound);
-//! - angular velocity from impulses at a lever arm (character pushes and weight impulses,
-//!   contacts) on bodies with extreme inertia, such as needle-thin shapes or a far-offset centre
-//!   of mass;
+//! - contact and constraint impulses the solver generates: heaviest against lightest bodies,
+//!   restitution 1, friction at [`MAX_FRICTION`] including a speculative contact with zero
+//!   normal impulse, motors at the spring bound, suspension springs and anti-roll bars at their
+//!   bounds;
+//! - angular velocity from impulses at a lever arm on the lightest bodies: spheres of
+//!   [`MIN_MASS`] colliding head-on, and a box of [`MIN_MASS`] pushed by a character of
+//!   [`MAX_MASS`];
 //! - query arithmetic on shapes at the extent bound and from frame corners.
 //!
 //! # Not covered
@@ -68,6 +86,14 @@
 //!   carries out of the frame, the positions a rebase computes (only checked to be finite), or a
 //!   character state restored with [`CharacterMut::restore_state`](crate::CharacterMut::restore_state),
 //!   which can only come from [`CharacterRef::save_state`](crate::CharacterRef::save_state).
+//! - Bodies with an extreme inverse inertia for their mass, such as a needle-thin shape or a
+//!   centre of mass far from the shape: [`PhysicsWorld::create_body`] only requires the inverse
+//!   inertia to be finite, and no test steps such a body, so impulses at a lever arm on it are
+//!   neither derived nor tested. The same holds for the suspension effective mass Jolt forms
+//!   from a wheel's force point and the chassis's inverse inertia (`VehicleConstraint.cpp:448-451`).
+//! - Inputs that are only checked to be finite or ordered, as the audit table says: ray
+//!   directions, damping, motor force and torque limits, wheel friction curves and the wheel and
+//!   drivetrain values that only have to give finite step coefficients.
 //! - `RagdollSettings::new_stabilized` reports Jolt's `Stabilize` failing to decompose an
 //!   inertia tensor as an error, but Jolt asserts on that path first (`Ragdoll.cpp:158`).
 //! - The assertion `errors == EPhysicsUpdateError::None` at the end of every step that drops
@@ -93,7 +119,7 @@
 //! | `BodySettings::restitution` | `0..=1` | new: `body_settings_are_bounded` |
 //! | `BodySettings::gravity_factor` | [`MAX_GRAVITY_FACTOR`] | new: `body_settings_are_bounded` |
 //! | `BodySettings::mass`, `PhysicsWorld::create_body` computed mass | [`MIN_MASS`]`..=`[`MAX_MASS`] for dynamic bodies | new: `body_settings_are_bounded`, `computed_dynamic_mass_is_bounded_and_kinematic_mass_is_not` |
-//! | `BodySettings::friction` | finite, at least 0: friction only sets the range Jolt clamps the friction impulse it solves to (`ContactConstraintManager.cpp:1700-1730`) | existing: `invalid_body_settings_are_rejected`; `f32::MAX` in `bodies_at_every_bound_step_finitely` |
+//! | `BodySettings::friction` | `0..=`[`MAX_FRICTION`] | new: `body_settings_are_bounded`, `friction_at_the_bound_keeps_contacts_finite` |
 //! | `BodySettings::linear_damping`, `angular_damping` | finite, at least 0: Jolt scales by `max(0, 1 - c·dt)` (`MotionProperties.inl:144-145`) | existing: `invalid_damping_is_rejected` |
 //! | `BodySettings::rotation`, `BodyMut::set_rotation` | finite unit quaternion | existing: `invalid_body_settings_are_rejected` |
 //! | `BodyMut::set_position`, `set_position_and_rotation` | [`MAX_POSITION`] | new: `body_setters_are_bounded_and_rejection_changes_nothing` |
@@ -112,14 +138,21 @@
 //! | `ExtendedUpdateSettings` steps and forward distances | [`MAX_SHAPE_EXTENT`] | new: `character_update_gravity_and_steps_are_bounded` |
 //! | `CharacterMut::restore_state` | only states from `save_state` exist | existing: `a_restored_state_saves_the_same_bytes` |
 //! | `VehicleMut::set_gravity` | [`MAX_ACCELERATION`] | new: `gravity_is_bounded_by_max_acceleration` |
-//! | `VehicleSettings`, wheel, engine, transmission, differential, anti-roll bar and tester settings | existing derived checks | existing: `vehicle_values_are_validated`, `wheel_values_are_validated`, `engine_values_are_validated`, `transmission_values_are_validated`, `differential_values_are_validated`, `anti_roll_bars_are_validated`, `collision_testers_are_validated` |
+//! | `WheelSettings::new` position, `suspension_force_point` | [`MAX_SHAPE_EXTENT`] per axis | new: `wheel_magnitudes_are_bounded_by_the_policy` |
+//! | `WheelSettings` suspension min, max and preload lengths, radius, width | `0..=`[`MAX_SHAPE_EXTENT`] (radius positive, max length at least min length) | new: `wheel_magnitudes_are_bounded_by_the_policy` |
+//! | `WheelSettings::suspension_spring` | Jolt's stiffness and damping at most [`MAX_SPRING_COEFFICIENT`] for a chassis of [`MAX_MASS`] | new: `suspension_springs_are_bounded_by_the_coefficient`, `vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely` |
+//! | `VehicleAntiRollBar::stiffness` | `0..=VehicleAntiRollBar::MAX_STIFFNESS` | new: `anti_roll_bars_are_validated`, `vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely` |
+//! | `WheelSettings` inertia, angular damping, brake torques; engine, transmission and differential settings | finite, in their ranges, and every step coefficient they form finite at both time-step extremes; not bounded one by one | existing: `wheel_values_are_validated`, `step_coefficients_of_wheels_must_be_finite`, `step_coefficients_of_the_drivetrain_must_be_finite`, `engine_values_are_validated`, `transmission_values_are_validated`, `differential_values_are_validated` |
+//! | `WheelSettings` friction curves | finite points with increasing slip; the friction values are not bounded | existing: `wheel_values_are_validated` |
+//! | `VehicleSettings` up, forward, max pitch roll angle; collision testers | unit vectors and angle ranges; tester radius below every wheel's reach | existing: `vehicle_values_are_validated`, `collision_testers_are_validated` |
 //! | `VehicleMut::set_driver_input`, `set_max_pitch_roll_angle`, `set_collision_tester` | existing ranges | existing: `driver_input_drives_steers_and_brakes`, `invalid_vehicles_create_nothing` |
 //! | `SpringSettings::StiffnessAndDamping` | [`MAX_SPRING_COEFFICIENT`] | new: `stiffness_springs_are_bounded_by_the_coefficient` |
 //! | `SpringSettings::FrequencyAndDamping` in `RagdollSettings::new`, `new_stabilized` | `B·ω²` and `2·B·ζ·ω` at most [`MAX_SPRING_COEFFICIENT`] | new: `motor_springs_are_bounded_by_the_parts_effective_mass`, `motor_spring_of_1e20_hz_is_rejected` |
 //! | `MotorSettings::force_limits`, `torque_limits`; angle limits | finite, `min <= max`; Jolt clamps the motor impulse to `dt · limit` | existing: `motors_and_springs_are_validated`, `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
 //! | constraint frame points | [`MAX_POSITION`] | new: `constraint_frame_points_are_bounded` |
 //! | `RagdollSettings::new`, `new_stabilized` part masses | [`MIN_MASS`]`..=`[`MAX_MASS`], also for kinematic parts (`RagdollMut::set_motion_type` can make them dynamic) | new: `part_masses_and_velocities_are_bounded` |
-//! | `RagdollMut::set_pose`, `drive_to_pose_using_kinematics`, `drive_to_pose_using_motors` | root offset and positions within [`MAX_POSITION`] | new: `poses_are_validated` |
+//! | `RagdollMut::set_pose`, `drive_to_pose_using_motors` | root offset and positions within [`MAX_POSITION`] | new: `poses_are_validated` |
+//! | `RagdollMut::drive_to_pose_using_kinematics` | pose as above; every part's velocity, as Jolt computes it, within [`MAX_LINEAR_VELOCITY`] and [`MAX_ANGULAR_VELOCITY`], checked for all parts before any changes | new: `poses_are_validated`, `kinematic_drive_is_bounded_by_the_velocities_it_implies` |
 //! | `RagdollMut::set_linear_and_angular_velocity` | [`MAX_LINEAR_VELOCITY`], [`MAX_ANGULAR_VELOCITY`] | new: `part_masses_and_velocities_are_bounded` |
 //! | `Shape::new_box*`, `new_sphere`, `new_cylinder*`, `new_capsule` | dimensions within [`MAX_SHAPE_EXTENT`] | new: `primitive_extents_are_bounded` |
 //! | `Shape::new_compound`, `new_offset_center_of_mass` | positions and offset within [`MAX_SHAPE_EXTENT`]; local bounds within it | new: `decorated_and_compound_extents_are_bounded` |
@@ -189,6 +222,17 @@ pub const MAX_ANGULAR_ACCELERATION: f32 = MAX_ANGULAR_VELOCITY / PhysicsWorld::M
 ///
 /// Crate policy (like [`WorldSettings::MAX_WORKER_THREADS`](crate::WorldSettings::MAX_WORKER_THREADS)).
 pub const MAX_GRAVITY_FACTOR: f32 = 1000.0;
+
+/// Largest friction coefficient of a body.
+///
+/// Crate policy. Jolt combines the friction of two bodies in contact as
+/// `sqrt(friction1 * friction2)` (`ContactConstraintManager.h:554`) and multiplies the result by
+/// the contact's normal impulse (`ContactConstraintManager.cpp:1714-1715`). A product that
+/// overflows makes the combined friction infinite, and an infinite friction times a zero normal
+/// impulse is NaN, which reaches the bodies' velocities; two bodies with friction `f32::MAX` do
+/// that within a few steps. Any coefficient whose square is finite (below about 1.8e19) avoids
+/// it; 1000 is far above the friction of real materials.
+pub const MAX_FRICTION: f32 = 1000.0;
 
 /// Smallest mass of a dynamic body or ragdoll part, in kg: an inverse mass of at most 1000 per kg,
 /// a 1 cm cube of water.
@@ -263,6 +307,11 @@ pub(crate) fn is_acceleration(acceleration: Vec3) -> bool {
 /// Whether `factor` is finite and at most [`MAX_GRAVITY_FACTOR`] in absolute value.
 pub(crate) fn is_gravity_factor(factor: f32) -> bool {
     factor.abs() <= MAX_GRAVITY_FACTOR
+}
+
+/// Whether `friction` is finite and within `0..=MAX_FRICTION`.
+pub(crate) fn is_friction(friction: f32) -> bool {
+    (0.0..=MAX_FRICTION).contains(&friction)
 }
 
 /// Whether `mass` is finite and within `MIN_MASS..=MAX_MASS`.
@@ -370,7 +419,12 @@ mod tests {
     #[test]
     fn scalar_checks_accept_their_range_and_reject_beyond() {
         type Check = fn(f32) -> bool;
-        let checks: [(Check, &[f32], &[f32]); 3] = [
+        let checks: [(Check, &[f32], &[f32]); 4] = [
+            (
+                is_friction,
+                &[0.0, MAX_FRICTION],
+                &[-f32::MIN_POSITIVE, MAX_FRICTION.next_up()],
+            ),
             (
                 is_local_distance,
                 &[0.0, MAX_SHAPE_EXTENT],

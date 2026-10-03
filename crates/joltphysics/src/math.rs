@@ -4,7 +4,10 @@
 //! metres per second and angular velocities in radians per second. Conversions to and from
 //! Jolt copy the fields and never round, so values read back with the same bits.
 
-use joltphysics_sys::{JPH_Quat, JPH_RVec3, JPH_Vec3, JPH_Vec3_Length};
+use joltphysics_sys::{
+    JPH_Quat, JPH_Quat_GetAxisAngle, JPH_Quat_Multiply, JPH_Quat_Rotate, JPH_RVec3, JPH_Vec3,
+    JPH_Vec3_Length, JPH_Vec3_LengthSquared,
+};
 
 /// Scalar type of world positions: `f64` with the `double-precision` feature, `f32` otherwise.
 pub use joltphysics_sys::Real;
@@ -25,6 +28,59 @@ pub(crate) fn jolt_length(v: Vec3) -> f32 {
     let v = v.to_jph();
     // SAFETY: a pure function of a live local; it needs no initialization.
     unsafe { JPH_Vec3_Length(&v) }
+}
+
+/// `q * v` as Jolt computes it (`Quat::operator*(Vec3)`), so the result has Jolt's bits.
+pub(crate) fn jolt_rotate(q: Quat, v: Vec3) -> Vec3 {
+    let (q, v) = (q.to_jph(), v.to_jph());
+    let mut result = Vec3::ZERO.to_jph();
+    // SAFETY: a pure function of live locals that writes one live local; it needs no
+    // initialization.
+    unsafe { JPH_Quat_Rotate(&q, &v, &mut result) };
+    Vec3::from_jph(result)
+}
+
+/// The product `a * b` as Jolt computes it (`Quat::operator*`), so the result has Jolt's bits.
+pub(crate) fn jolt_product(a: Quat, b: Quat) -> Quat {
+    let (a, b) = (a.to_jph(), b.to_jph());
+    let mut result = Quat::IDENTITY.to_jph();
+    // SAFETY: a pure function of live locals that writes one live local; it needs no
+    // initialization.
+    unsafe { JPH_Quat_Multiply(&a, &b, &mut result) };
+    Quat::from_jph(result)
+}
+
+/// The angular velocity that turns by `rotation` in `delta_time` seconds, as Jolt's
+/// `Quat::GetAngularVelocity` computes it (`Quat.inl:186-204`): the same branches, with Jolt's own
+/// squared length and angle, so the result has Jolt's bits. `None` when `rotation` is not a
+/// finite unit quaternion within Jolt's tolerance, for which Jolt asserts.
+pub(crate) fn jolt_angular_velocity(rotation: Quat, delta_time: f32) -> Option<Vec3> {
+    if !rotation.is_valid_rotation() {
+        return None;
+    }
+    // Jolt's `EnsureWPositive` flips every sign when the sign bit of w is set.
+    let q = if rotation.w.is_sign_negative() {
+        Quat::from_xyzw(-rotation.x, -rotation.y, -rotation.z, -rotation.w)
+    } else {
+        rotation
+    };
+    let xyz = Vec3::new(q.x, q.y, q.z);
+    let jph_xyz = xyz.to_jph();
+    // SAFETY: a pure function of a live local; it needs no initialization.
+    let length_squared = unsafe { JPH_Vec3_LengthSquared(&jph_xyz) };
+    if length_squared < 4.0e-4 {
+        return Some(xyz.scale(2.0 / delta_time));
+    }
+    let (jph_q, mut axis, mut angle) = (q.to_jph(), Vec3::ZERO.to_jph(), 0.0_f32);
+    // SAFETY: reads one live local and writes two; `q` is normalized within Jolt's tolerance
+    // (checked above), so Jolt's `IsNormalized` assertion holds. It needs no initialization.
+    unsafe { JPH_Quat_GetAxisAngle(&jph_q, &mut axis, &mut angle) };
+    let divisor = length_squared.sqrt() * delta_time;
+    Some(Vec3::new(
+        xyz.x / divisor * angle,
+        xyz.y / divisor * angle,
+        xyz.z / divisor * angle,
+    ))
 }
 
 /// Tolerance of the unit-length checks: `|v·v − 1|` at most this, half of Jolt's
@@ -443,6 +499,41 @@ mod tests {
         assert!(!Quat::from_xyzw(0.0, 0.0, 0.0, 0.0)
             .normalized()
             .is_valid_rotation());
+    }
+
+    #[test]
+    fn jolt_rotate_and_product_agree_with_ours() {
+        let a = Quat::from_xyzw(0.1, 0.2, 0.3, 0.9).normalized();
+        let b = Quat::from_xyzw(-0.4, 0.1, 0.5, 0.7).normalized();
+        let v = Vec3::new(1.5, -2.0, 0.25);
+        assert_vec_near(jolt_rotate(a, v), a.rotate(v), 1e-5);
+        assert_quat_near(jolt_product(a, b), a.product(b), 1e-6);
+        assert_eq!(jolt_rotate(Quat::IDENTITY, v), v);
+    }
+
+    #[test]
+    fn jolt_angular_velocity_follows_both_branches() {
+        let dt = 0.5;
+        // Small angles: `(2 / dt) * xyz`, exactly.
+        let small = Quat::from_xyzw(0.0, 0.01, 0.0, (1.0_f32 - 1.0e-4).sqrt());
+        assert_eq!(
+            jolt_angular_velocity(small, dt),
+            Some(Vec3::new(0.0, 0.01 * (2.0 / dt), 0.0))
+        );
+        // A quarter turn about x in half a second, also with w negated (the same rotation).
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        for q in [
+            Quat::from_xyzw(half, 0.0, 0.0, half),
+            Quat::from_xyzw(-half, -0.0, -0.0, -half),
+        ] {
+            let w = jolt_angular_velocity(q, dt).unwrap();
+            assert_vec_near(w, Vec3::new(std::f32::consts::PI, 0.0, 0.0), 1e-5);
+        }
+        assert_eq!(
+            jolt_angular_velocity(Quat::from_xyzw(0.0, 0.0, 0.0, 2.0), dt),
+            None
+        );
+        assert_eq!(jolt_angular_velocity(Quat::IDENTITY, dt), Some(Vec3::ZERO));
     }
 
     #[test]

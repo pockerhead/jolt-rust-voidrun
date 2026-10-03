@@ -11,7 +11,8 @@ use std::ptr::{null, NonNull};
 use joltphysics_sys::*;
 
 use crate::limits::{
-    self, is_angular_velocity, is_gravity_factor, is_in_frame, is_linear_velocity, is_mass,
+    self, is_angular_velocity, is_friction, is_gravity_factor, is_in_frame, is_linear_velocity,
+    is_mass,
 };
 use crate::math::is_finite_non_negative;
 use crate::owned::{JoltObject, Owned};
@@ -252,7 +253,7 @@ impl BodySettings {
         self
     }
 
-    /// Friction coefficient, finite and at least 0. Default 0.2.
+    /// Friction coefficient, between 0 and [`limits::MAX_FRICTION`]. Default 0.2.
     #[must_use]
     pub fn friction(mut self, value: f32) -> Self {
         self.friction = value;
@@ -354,8 +355,8 @@ impl BodySettings {
         if !is_angular_velocity(self.angular_velocity) {
             return invalid(ANGULAR_VELOCITY_RULE);
         }
-        if !is_finite_non_negative(self.friction) {
-            return invalid("friction must be finite and not negative");
+        if !is_friction(self.friction) {
+            return invalid("friction must be finite and between 0 and limits::MAX_FRICTION");
         }
         if !(0.0..=1.0).contains(&self.restitution) {
             return invalid("restitution must be between 0 and 1");

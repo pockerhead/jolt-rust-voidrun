@@ -175,6 +175,12 @@ fn body_settings_are_bounded() {
     for restitution in [-0.1, 1.0f32.next_up(), f32::NAN] {
         rejected.push(dynamic().restitution(restitution));
     }
+    for friction in [0.0, limits::MAX_FRICTION] {
+        accepted.push(dynamic().friction(friction));
+    }
+    for friction in [-0.1, limits::MAX_FRICTION.next_up(), f32::MAX, f32::NAN] {
+        rejected.push(dynamic().friction(friction));
+    }
     let factor = limits::MAX_GRAVITY_FACTOR;
     for gravity_factor in [-factor, factor] {
         accepted.push(dynamic().gravity_factor(gravity_factor));
@@ -757,7 +763,7 @@ fn bodies_at_every_bound_step_finitely() {
                     &cube,
                     &BodySettings::new_dynamic()
                         .position(on_floor(x, y))
-                        .friction(f32::MAX)
+                        .friction(limits::MAX_FRICTION)
                         .linear_velocity(Vec3::new(v, 0.0, 0.0)),
                 )
                 .unwrap(),
@@ -893,6 +899,107 @@ fn vehicle_gravity_at_the_bound_steps_finitely() {
             .unwrap();
         let _ = world.step(DT).unwrap();
         assert_body_finite(&world, chassis, &format!("tick {tick}"));
+    }
+}
+
+#[test]
+fn vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely() {
+    let (mut world, layers) = car_world(Vec3::ZERO, 1);
+    let ground_shape = Shape::new_box(Vec3::new(50.0, 1.0, 50.0)).unwrap();
+    world
+        .create_body(
+            &ground_shape,
+            &BodySettings::new_static()
+                .object_layer(layers.ground)
+                .position(RVec3::new(0.0, -1.0, 0.0)),
+        )
+        .unwrap();
+    let coefficient = limits::MAX_SPRING_COEFFICIENT;
+    // The largest frequency whose stiffness stays within the bound for a chassis of MAX_MASS.
+    let max_frequency = (f64::from(coefficient) / f64::from(limits::MAX_MASS)).sqrt()
+        / (2.0 * std::f64::consts::PI);
+    let springs = [
+        SuspensionSpring::StiffnessAndDamping {
+            stiffness: coefficient,
+            damping: coefficient,
+        },
+        SuspensionSpring::FrequencyAndDamping {
+            frequency: (0.999 * max_frequency) as f32,
+            damping: 1.0,
+        },
+        SuspensionSpring::default(),
+        SuspensionSpring::default(),
+    ];
+    let wheels = WHEEL_POSITIONS
+        .iter()
+        .zip(springs)
+        .map(|(&position, spring)| {
+            WheelSettings::new(position)
+                .radius(WHEEL_RADIUS)
+                .width(WHEEL_WIDTH)
+                .suspension_min_length(SUSPENSION_MIN)
+                .suspension_max_length(SUSPENSION_MAX)
+                .suspension_spring(spring)
+        })
+        .collect();
+    let settings = VehicleSettings::new(
+        wheels,
+        vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
+        VehicleCollisionTester::ray(layers.probe),
+    )
+    .anti_roll_bars(vec![
+        VehicleAntiRollBar::new(0, 1).stiffness(VehicleAntiRollBar::MAX_STIFFNESS),
+        VehicleAntiRollBar::new(2, 3).stiffness(VehicleAntiRollBar::MAX_STIFFNESS),
+    ]);
+    // Tilted, so that the suspension lengths differ and the anti-roll bars push.
+    let tilt = Quat::from_xyzw(0.0, 0.0, 0.05, (1.0_f32 - 0.0025).sqrt());
+    let body = chassis_settings(&layers, RVec3::new(0.0, 0.9, 0.0), tilt);
+    let chassis = world.create_body(&chassis_shape(), &body).unwrap();
+    let car = world.create_vehicle(chassis, &settings).unwrap();
+    world
+        .vehicle_mut(car)
+        .unwrap()
+        .set_gravity(GRAVITY)
+        .unwrap();
+    for tick in 0..60 {
+        let _ = world.step(DT).unwrap();
+        assert_body_finite(&world, chassis, &format!("tick {tick}"));
+    }
+    step_at_both_extremes(&mut world, &[chassis], "vehicle springs");
+}
+
+#[test]
+fn friction_at_the_bound_keeps_contacts_finite() {
+    // A spinning, sliding cube 1 cm above a floor, both at the largest friction: Jolt makes a
+    // speculative contact whose normal impulse is zero, the case in which an infinite combined
+    // friction (two bodies at `f32::MAX`) turned the cube's velocities into NaN within three
+    // 60 Hz steps. Then the same cube resting on the floor under gravity.
+    for (gravity, height) in [(Vec3::ZERO, 1.51), (Vec3::new(0.0, -9.81, 0.0), 1.5)] {
+        let mut world = world(gravity, 1);
+        let floor = Shape::new_box(Vec3::new(10.0, 1.0, 10.0)).unwrap();
+        world
+            .create_body(
+                &floor,
+                &BodySettings::new_static().friction(limits::MAX_FRICTION),
+            )
+            .unwrap();
+        let cube = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        let id = world
+            .create_body(
+                &cube,
+                &BodySettings::new_dynamic()
+                    .position(RVec3::new(0.0, height, 0.0))
+                    .friction(limits::MAX_FRICTION)
+                    .linear_velocity(Vec3::new(1.0, 0.0, 0.0))
+                    .angular_velocity(Vec3::new(0.0, 5.0, 0.0))
+                    .allow_sleeping(false),
+            )
+            .unwrap();
+        for tick in 0..30 {
+            let _ = world.step(DT).unwrap();
+            assert_body_finite(&world, id, &format!("gravity {gravity:?}, tick {tick}"));
+        }
+        step_at_both_extremes(&mut world, &[id], &format!("gravity {gravity:?}"));
     }
 }
 

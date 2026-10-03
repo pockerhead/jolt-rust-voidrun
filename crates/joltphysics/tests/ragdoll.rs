@@ -1072,6 +1072,96 @@ fn motor_springs_at_the_coefficient_bound_drive_finitely() {
     }
 }
 
+/// Every part's linear and angular velocity as bits, in part order.
+fn part_velocity_bits(world: &PhysicsWorld, ragdoll: RagdollId) -> Vec<[u32; 6]> {
+    let ragdoll = world.ragdoll(ragdoll).unwrap();
+    ragdoll
+        .body_ids()
+        .iter()
+        .map(|&id| {
+            let body = world.body(id).unwrap();
+            let [a, b, c] = <[f32; 3]>::from(body.linear_velocity()).map(f32::to_bits);
+            let [d, e, f] = <[f32; 3]>::from(body.angular_velocity()).map(f32::to_bits);
+            [a, b, c, d, e, f]
+        })
+        .collect()
+}
+
+#[test]
+fn kinematic_drive_is_bounded_by_the_velocities_it_implies() {
+    let settings = sphere_pair(frequency_spring(2.0, 1.0), false).unwrap();
+    let (mut world, _) = ragdoll_world(1);
+    let ragdoll = world
+        .create_ragdoll(&settings, None, Activation::DontActivate)
+        .unwrap();
+    world
+        .ragdoll_mut(ragdoll)
+        .unwrap()
+        .set_motion_type(MotionType::Kinematic, Activation::DontActivate)
+        .unwrap();
+    let start = world.ragdoll(ragdoll).unwrap().pose();
+    // The spheres' centres of mass are their body origins, at whole metres, so every distance
+    // below is exact and the velocity Jolt writes is the move divided by the time step.
+    assert_eq!(start.root_offset, RVec3::new(0.0, 0.0, 0.0));
+    let initial = part_velocity_bits(&world, ragdoll);
+
+    // Translation: a power-of-two step makes `MAX_LINEAR_VELOCITY * dt` exact.
+    let dt = 1.0 / 64.0;
+    let at_bound = limits::MAX_LINEAR_VELOCITY * dt;
+    let moved = |moves: [f32; 2]| {
+        let mut pose = start.clone();
+        for (joint, x) in pose.joints.iter_mut().zip(moves) {
+            joint.translation.x += x;
+        }
+        pose
+    };
+    // Rotation of the upper part about y in the small-angle branch of Jolt's
+    // `Quat::GetAngularVelocity`, where the angular velocity is `(2 / dt) * xyz` and exact for a
+    // power-of-two step.
+    let dt_turn = 1.0 / 2048.0;
+    let turned = |sin_half_angle: f32| {
+        let mut pose = start.clone();
+        let w = (1.0 - sin_half_angle * sin_half_angle).sqrt();
+        pose.joints[1].rotation = Quat::from_xyzw(0.0, sin_half_angle, 0.0, w);
+        pose
+    };
+    let sin_at_bound = limits::MAX_ANGULAR_VELOCITY * dt_turn / 2.0;
+    let rejected = [
+        // The upper part one ulp too fast; the lower part's valid move must not happen either.
+        (moved([at_bound, at_bound.next_up()]), dt),
+        (moved([0.0, 1.0]), PhysicsWorld::MIN_DELTA_TIME),
+        (turned(sin_at_bound.next_up()), dt_turn),
+        (turned(0.1), PhysicsWorld::MIN_DELTA_TIME),
+    ];
+    for (pose, delta_time) in &rejected {
+        let result = world
+            .ragdoll_mut(ragdoll)
+            .unwrap()
+            .drive_to_pose_using_kinematics(pose, *delta_time);
+        assert!(
+            matches!(result, Err(RagdollError::InvalidValue(_))),
+            "{delta_time}: {result:?}"
+        );
+        assert_eq!(part_velocity_bits(&world, ragdoll), initial, "{delta_time}");
+    }
+
+    let mut handle = world.ragdoll_mut(ragdoll).unwrap();
+    handle
+        .drive_to_pose_using_kinematics(&moved([at_bound, at_bound]), dt)
+        .unwrap();
+    for &id in world.ragdoll(ragdoll).unwrap().body_ids() {
+        let velocity = world.body(id).unwrap().linear_velocity();
+        assert_eq!(velocity, Vec3::new(limits::MAX_LINEAR_VELOCITY, 0.0, 0.0));
+    }
+    let mut handle = world.ragdoll_mut(ragdoll).unwrap();
+    handle
+        .drive_to_pose_using_kinematics(&turned(sin_at_bound), dt_turn)
+        .unwrap();
+    let upper = world.ragdoll(ragdoll).unwrap().body_ids()[1];
+    let spin = world.body(upper).unwrap().angular_velocity();
+    assert_eq!(spin, Vec3::new(0.0, limits::MAX_ANGULAR_VELOCITY, 0.0));
+}
+
 #[test]
 fn part_masses_and_velocities_are_bounded() {
     let (_, layers) = ragdoll_layers();
