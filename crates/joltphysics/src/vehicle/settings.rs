@@ -9,7 +9,7 @@ use std::f32::consts::PI;
 
 use joltphysics_sys::*;
 
-use crate::math::{is_finite_non_negative, is_finite_positive};
+use crate::math::{is_finite_non_negative, is_finite_positive, is_unit};
 use crate::owned::{JoltObject, Owned};
 use crate::{ObjectLayer, PhysicsWorld, Vec3, VehicleError};
 
@@ -183,11 +183,12 @@ impl VehicleSettings {
 
     /// Checks that the coefficients the wheeled controller forms from the settings alone
     /// (`WheeledVehicleController::PostCollide`, `VehicleEngine::ApplyTorque`) are finite at
-    /// every step [`PhysicsWorld::step`] accepts. Each grows with the step, so the largest step
-    /// is the worst case. Values that are valid one by one can overflow together: a subnormal
-    /// inertia makes `delta_time / inertia` infinite, huge gear and differential ratios make
-    /// their product infinite. What the step computes from the vehicle's state afterwards is
-    /// not bounded here.
+    /// every step [`PhysicsWorld::step`] accepts. Most grow with the step, so the largest step
+    /// is their worst case; the brake-lock torque per rad/s of wheel speed, `inertia / step`,
+    /// grows as the step shrinks, so the smallest step is its worst case. Values that are valid
+    /// one by one can overflow together: a subnormal inertia makes `delta_time / inertia`
+    /// infinite, huge gear and differential ratios make their product infinite. What the step
+    /// computes from the vehicle's state afterwards is not bounded here.
     fn validate_step_coefficients(&self) -> Result<(), VehicleError> {
         let invalid = |what| Err(VehicleError::InvalidValue(what));
         let dt = PhysicsWorld::MAX_DELTA_TIME;
@@ -196,6 +197,7 @@ impl VehicleSettings {
             let brake_impulse = dt * (wheel.max_brake_torque + wheel.max_hand_brake_torque);
             if !all_finite(&[
                 dt / wheel.inertia,
+                wheel.inertia / PhysicsWorld::MIN_DELTA_TIME,
                 brake_impulse,
                 brake_impulse / wheel.inertia,
                 brake_impulse / wheel.radius,
@@ -345,21 +347,11 @@ impl VehicleSettings {
 /// Jolt's `VehicleEngine::cAngularVelocityToRPM`.
 const ANGULAR_VELOCITY_TO_RPM: f32 = 60.0 / (2.0 * PI);
 
-/// Tolerance of the unit-length checks: `|v·v − 1|` at most this, half of Jolt's
-/// `Vec3::IsNormalized` tolerance 1e-6, so a rounding difference between the check here and
-/// Jolt's cannot let a vector through that Jolt's assertion rejects.
-const UNIT_TOLERANCE: f32 = 5.0e-7;
-
 /// Tolerance of the perpendicularity checks on unit vectors, `|a·b|` at most this.
 const PERPENDICULAR_TOLERANCE: f32 = 1.0e-3;
 
 /// Tolerance of the engine torque ratio sum, `|sum − 1|` below this, half of Jolt's 1e-6.
 const SUM_TOLERANCE: f32 = 5.0e-7;
-
-/// Whether `v` is finite and of unit length within [`UNIT_TOLERANCE`].
-pub(crate) fn is_unit(v: Vec3) -> bool {
-    v.is_finite() && (v.dot(v) - 1.0).abs() <= UNIT_TOLERANCE
-}
 
 /// Whether `value` is a valid limited slip ratio: finite and above 1 (`f32::MAX` is open).
 fn is_limited_slip_ratio(value: f32) -> bool {
@@ -1885,6 +1877,13 @@ mod tests {
             w.max_brake_torque(f32::MAX).max_hand_brake_torque(f32::MAX)
         }));
         assert_rejected(with_wheel(|w| w.max_brake_torque(f32::MAX).inertia(0.5)));
+        // The brake-lock torque per rad/s, `inertia / MIN_DELTA_TIME`, overflows; with radius 1
+        // every other coefficient of the wheel stays finite.
+        assert_rejected(with_wheel(|w| w.radius(1.0).inertia(f32::MAX / 2.0)));
+        assert_eq!(
+            with_wheel(|w| w.radius(1.0).inertia(1.0e30)).validate(LAYERS),
+            Ok(())
+        );
         assert_eq!(with_wheel(|w| w.inertia(1.0e-30)).validate(LAYERS), Ok(()));
         assert_eq!(
             with_wheel(|w| w.max_brake_torque(1.0e30)).validate(LAYERS),
@@ -2038,11 +2037,12 @@ mod tests {
             with(VehicleCollisionTester::cast_sphere(layer, 0.84)).validate(LAYERS),
             Ok(())
         );
-        // Each length is finite, the ray or cast length `max length + radius` is not.
+        // Each length is finite, the ray or cast length `max length + radius` is not. The
+        // inertia keeps every step coefficient finite, `inertia / MIN_DELTA_TIME` included.
         let huge = |w: WheelSettings| {
             w.suspension_max_length(f32::MAX)
                 .radius(f32::MAX)
-                .inertia(f32::MAX)
+                .inertia(1.0e30)
         };
         assert_eq!(
             with_wheel(huge).validate(LAYERS),

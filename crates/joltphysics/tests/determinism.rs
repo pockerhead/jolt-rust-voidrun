@@ -11,7 +11,9 @@
 //! items dropped along its path, in the game's order of a tick: actors, items, step. The vehicle
 //! scene drives the acceptance route over terrain; the fleet scene runs 40 vehicles, enough for
 //! Jolt to spread their step listeners over a different number of jobs with 1 and 4 workers,
-//! with the couplings that would show a dependence on listener order.
+//! with the couplings that would show a dependence on listener order. The ragdoll pile drops 16
+//! humanoid ragdolls into a pit, in contact with each other from the first tick, so that their
+//! joints and contacts form an island large enough for Jolt to split it for parallel solving.
 //!
 //! Each run happens in its own child process (this test binary, running the ignored
 //! `determinism_child` test), so no state leaks between runs; see `common::determinism`.
@@ -19,6 +21,7 @@
 mod common;
 
 use common::determinism::*;
+use common::ragdoll as humanoid;
 use common::walker::{
     add_walker, record_walker, rvec3, scale, script_scene, script_start, script_tick, up_at, v3,
     vec3, Player,
@@ -707,6 +710,7 @@ fn determinism_child() {
         "walker" => run_walker(threads),
         "vehicle" => run_vehicle(threads),
         "fleet" => run_fleet(threads, &variant),
+        "ragdoll_pile" => run_ragdoll_pile(threads),
         scenario => panic!("unknown scenario {scenario}"),
     };
     finish_child(&digest);
@@ -1375,5 +1379,213 @@ fn fleet_digest_detects_a_changed_input() {
     assert!(
         matches!(divergence, Divergence::Tick { tick, .. } if tick >= FLEET_EVENT_TICK),
         "{divergence}"
+    );
+}
+
+/// Ticks of the ragdoll pile.
+const PILE_TICKS: usize = 300;
+/// Humanoids per row and per column of the pile.
+const PILE_SIDE: usize = 4;
+/// Distance in metres between row neighbours of the pile: their hand tips overlap by 2 cm.
+const PILE_ROW_SPACING: f64 = 1.34;
+/// Distance in metres between column neighbours of the pile: the head of one penetrates the
+/// feet of the next by 2 cm (head and foot spheres are 0.09 m apart sideways).
+const PILE_COLUMN_SPACING: f64 = 1.834;
+/// Inner half extents of the pit along x and z, metres.
+const PIT_HALF: [f32; 2] = [3.0, 4.0];
+/// Jolt's `LargeIslandSplitter::cLargeIslandTreshold`: an island with at least this many
+/// contacts and constraints is split for parallel solving (`LargeIslandSplitter.cpp`, inclusive).
+const LARGE_ISLAND_THRESHOLD: usize = 128;
+
+/// The four walls of the pit as one static compound.
+fn pit_walls() -> Shape {
+    let [x, z] = PIT_HALF;
+    let side = Shape::new_box(Vec3::new(0.1, 1.5, z + 0.2)).unwrap();
+    let end = Shape::new_box(Vec3::new(x + 0.2, 1.5, 0.1)).unwrap();
+    let wall = |shape, position| CompoundChild {
+        shape,
+        position,
+        rotation: Quat::IDENTITY,
+        user_data: 0,
+    };
+    Shape::new_compound(&[
+        wall(&side, Vec3::new(x + 0.1, 0.5, 0.0)),
+        wall(&side, Vec3::new(-x - 0.1, 0.5, 0.0)),
+        wall(&end, Vec3::new(0.0, 0.5, z + 0.1)),
+        wall(&end, Vec3::new(0.0, 0.5, -z - 0.1)),
+    ])
+    .unwrap()
+}
+
+/// A union-find over the ragdoll parts of the pile.
+struct Components(Vec<usize>);
+
+impl Components {
+    fn new(count: usize) -> Self {
+        Self((0..count).collect())
+    }
+
+    fn find(&mut self, mut a: usize) -> usize {
+        while self.0[a] != a {
+            self.0[a] = self.0[self.0[a]];
+            a = self.0[a];
+        }
+        a
+    }
+
+    fn union(&mut self, a: usize, b: usize) {
+        let (a, b) = (self.find(a), self.find(b));
+        self.0[a.max(b)] = a.min(b);
+    }
+}
+
+/// The most joints between parts that were awake before the last step, in one group of such
+/// parts that joints and that step's contacts between neighbouring ragdolls connect. Jolt puts
+/// each such group into one island (`IslandBuilder` links awake bodies through every contact
+/// and every constraint between them), so the island holds at least this many constraints.
+fn largest_awake_joint_group(
+    world: &PhysicsWorld,
+    ragdolls: &[RagdollId],
+    awake: &[bool],
+) -> usize {
+    let parts: Vec<BodyId> = ragdolls
+        .iter()
+        .flat_map(|&ragdoll| world.ragdoll(ragdoll).unwrap().body_ids().to_vec())
+        .collect();
+    let index = |key: usize, part: usize| key * humanoid::PART_COUNT + part;
+    let mut components = Components::new(parts.len());
+    let joints: Vec<(usize, usize)> = (0..ragdolls.len())
+        .flat_map(|key| {
+            humanoid::PARTS
+                .iter()
+                .enumerate()
+                .filter_map(move |(part, spec)| {
+                    spec.parent
+                        .map(|parent| (index(key, parent as usize), index(key, part)))
+                })
+        })
+        .filter(|&(a, b)| awake[a] && awake[b])
+        .collect();
+    for &(a, b) in &joints {
+        components.union(a, b);
+    }
+    for a_key in 0..ragdolls.len() {
+        for b_key in a_key + 1..ragdolls.len() {
+            let (ai, aj) = (a_key % PILE_SIDE, a_key / PILE_SIDE);
+            let (bi, bj) = (b_key % PILE_SIDE, b_key / PILE_SIDE);
+            if ai.abs_diff(bi) > 1 || aj.abs_diff(bj) > 1 {
+                continue;
+            }
+            for a_part in 0..humanoid::PART_COUNT {
+                for b_part in 0..humanoid::PART_COUNT {
+                    let (a, b) = (index(a_key, a_part), index(b_key, b_part));
+                    if awake[a]
+                        && awake[b]
+                        && world.were_bodies_in_contact(parts[a], parts[b]).unwrap()
+                    {
+                        components.union(a, b);
+                    }
+                }
+            }
+        }
+    }
+    let mut joints_per_group = vec![0; parts.len()];
+    for &(a, _) in &joints {
+        joints_per_group[components.find(a)] += 1;
+    }
+    joints_per_group.into_iter().max().unwrap_or(0)
+}
+
+/// Runs the ragdoll pile: 16 humanoids lying face up in a 4 x 4 grid in a walled pit on the
+/// relief, row neighbours hand to hand and column neighbours head to feet in contact, dropped
+/// 0.5 m with small death velocities under the caller's radial gravity. Records every part of
+/// every ragdoll each tick, in ragdoll and part order, and checks that some step solved an
+/// island past Jolt's large-island threshold.
+fn run_ragdoll_pile(worker_threads: u32) -> Digest {
+    let (mut world, layers) = humanoid::ragdoll_world(worker_threads);
+    let static_settings = BodySettings::new_static().object_layer(layers.fixed);
+    world
+        .create_body(&humanoid::relief_terrain(), &static_settings)
+        .unwrap();
+    world.create_body(&pit_walls(), &static_settings).unwrap();
+
+    let [half_x, half_z] = PIT_HALF;
+    let highest_sample = (-(half_x as i32)..=half_x as i32)
+        .flat_map(|x| (-(half_z as i32)..=half_z as i32).map(move |z| (x, z)))
+        .map(|(x, z)| humanoid::relief(x as f32, z as f32))
+        .fold(f32::MIN, f32::max);
+    // The thickest part, the chest, has a radius of 0.13 m.
+    let height = f64::from(highest_sample) + 0.5 + 0.13;
+    let face_up = quat_about(humanoid::X, -std::f32::consts::FRAC_PI_2);
+    let settings = humanoid::humanoid_settings(layers.ragdoll);
+    let centre = (PILE_SIDE as f64 - 1.0) / 2.0;
+    let ragdolls: Vec<RagdollId> = (0..PILE_SIDE * PILE_SIDE)
+        .map(|key| {
+            let (i, j) = ((key % PILE_SIDE) as f64, (key / PILE_SIDE) as f64);
+            let at = [
+                (i - centre) * PILE_ROW_SPACING,
+                height,
+                (j - centre) * PILE_COLUMN_SPACING,
+            ];
+            let pose = humanoid::transformed_pose(&humanoid::bind_pose(), face_up, at);
+            let ragdoll = world
+                .create_ragdoll(&settings, Some(&pose), Activation::Activate)
+                .unwrap();
+            let k = key as f32;
+            let velocity = Vec3::new(0.35 * (1.3 * k + 0.2).sin(), 0.0, 0.35 * (0.7 * k).cos());
+            world
+                .ragdoll_mut(ragdoll)
+                .unwrap()
+                .set_linear_and_angular_velocity(velocity, Vec3::ZERO)
+                .unwrap();
+            ragdoll
+        })
+        .collect();
+
+    let mut digest = Digest::new();
+    let mut split_ticks = 0;
+    for tick in 0..PILE_TICKS {
+        for &ragdoll in &ragdolls {
+            humanoid::apply_gravity(&mut world, ragdoll, humanoid::PLANET_CENTRE);
+        }
+        let awake: Vec<bool> = ragdolls
+            .iter()
+            .flat_map(|&ragdoll| world.ragdoll(ragdoll).unwrap().body_ids().to_vec())
+            .map(|part| world.body(part).unwrap().is_active())
+            .collect();
+        assert!(world.step(DT).unwrap().is_complete(), "tick {tick}");
+
+        let state = &mut digest.push().state;
+        for &ragdoll in &ragdolls {
+            for &part in world.ragdoll(ragdoll).unwrap().body_ids() {
+                record_body(&world, part, state);
+            }
+        }
+        if largest_awake_joint_group(&world, &ragdolls, &awake) >= LARGE_ISLAND_THRESHOLD {
+            split_ticks += 1;
+        }
+    }
+    // Measured: 25 of the 300 ticks.
+    eprintln!("ragdoll pile: {split_ticks} ticks with an island past the split threshold");
+    assert!(
+        split_ticks > 0,
+        "no step had an island of {LARGE_ISLAND_THRESHOLD} or more joints and contacts"
+    );
+    digest
+}
+
+fn ragdoll_pile_in_child(threads: u32) -> Digest {
+    digest_in_child("determinism_child", "ragdoll_pile", threads, "forward")
+}
+
+#[test]
+fn ragdoll_pile_digest_is_identical_across_thread_counts() {
+    let one_thread = ragdoll_pile_in_child(1);
+    let four_threads = ragdoll_pile_in_child(4);
+    assert_eq!(one_thread.ticks.len(), PILE_TICKS);
+    assert_same(
+        "ragdoll pile, 1 vs 4 worker threads",
+        &one_thread,
+        &four_threads,
     );
 }

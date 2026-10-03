@@ -165,12 +165,33 @@ fn invalid_settings_and_poses_are_rejected_without_side_effects() {
         .unwrap();
     let filter = QueryFilter::new();
     let extended = ExtendedUpdateSettings::default();
-    for delta_time in [0.0, -DT, f32::NAN, PhysicsWorld::MAX_DELTA_TIME * 2.0] {
+    for delta_time in [
+        0.0,
+        -DT,
+        f32::NAN,
+        PhysicsWorld::MAX_DELTA_TIME * 2.0,
+        PhysicsWorld::MIN_DELTA_TIME / 2.0,
+        f32::from_bits(1),
+    ] {
         assert!(matches!(
             world.update_character(id, delta_time, GRAVITY, &extended, &filter),
             Err(CharacterError::InvalidValue(_))
         ));
     }
+    world
+        .update_character(
+            id,
+            PhysicsWorld::MIN_DELTA_TIME,
+            GRAVITY,
+            &extended,
+            &filter,
+        )
+        .unwrap();
+    let position: [Real; 3] = world.character(id).unwrap().position().into();
+    assert!(
+        position.iter().all(|value| value.is_finite()),
+        "{position:?}"
+    );
     let bad_extended = [
         extended.stick_to_floor_step_down(Vec3::new(f32::NAN, 0.0, 0.0)),
         extended.walk_stairs_min_step_forward(-1.0),

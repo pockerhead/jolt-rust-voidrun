@@ -25,7 +25,7 @@ const JOLT_COMMIT: &str = "e77f175595e64cb44218cc9d9d56fc365ad0e36a";
 const JOLT_VERSION: &str = "5.6.0";
 /// Revision of the fork's joltc additions in `native/joltc_ext/`. Bump it whenever
 /// anything there changes, so prebuilt prefixes built before the change are refused.
-const JOLTC_EXT_REVISION: &str = "3";
+const JOLTC_EXT_REVISION: &str = "4";
 /// Name of the manifest file in an install prefix.
 const MANIFEST_FILE: &str = "joltphysics-sys-manifest.txt";
 
@@ -33,8 +33,7 @@ const MANIFEST_FILE: &str = "joltphysics-sys-manifest.txt";
 ///
 /// They `reinterpret_cast` a `JPH_Mat4*` (4-aligned) to a `JPH::Mat44*`
 /// (16-aligned), which is undefined behaviour for most caller-provided arrays.
-/// The ragdoll work has to fix the wrapper (copy through aligned storage)
-/// before they can come back.
+/// They stay unbound: ragdoll poses go through per-body transforms instead.
 const EXCLUDED_FUNCTIONS: &[&str] = &[
     "JPH_RagdollSettings_DisableParentChildCollisions",
     "JPH_Ragdoll_SetPose2",

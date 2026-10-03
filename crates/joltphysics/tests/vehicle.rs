@@ -297,6 +297,40 @@ fn driver_input_drives_steers_and_brakes() {
 }
 
 #[test]
+fn braking_at_the_smallest_step_stays_finite() {
+    let (mut world, chassis, car) = settled_car();
+    drive(&mut world, car, throttle(0.0), 30);
+    let brake = DriverInput {
+        brake: 1.0,
+        ..DriverInput::default()
+    };
+    world
+        .vehicle_mut(car)
+        .unwrap()
+        .set_driver_input(brake)
+        .unwrap();
+    // The brake-lock torque is `|w| * inertia / dt`, largest at the smallest step.
+    assert!(world
+        .step(PhysicsWorld::MIN_DELTA_TIME)
+        .unwrap()
+        .is_complete());
+    let body = world.body(chassis).unwrap();
+    let position: [Real; 3] = body.position().into();
+    let rotation: [f32; 4] = body.rotation().into();
+    assert!(
+        position.iter().all(|value| value.is_finite()),
+        "{position:?}"
+    );
+    assert!(
+        rotation.iter().all(|value| value.is_finite()),
+        "{rotation:?}"
+    );
+    for wheel in world.vehicle(car).unwrap().wheels() {
+        assert!(wheel.angular_velocity.is_finite(), "{wheel:?}");
+    }
+}
+
+#[test]
 fn gravity_override_replaces_world_gravity() {
     let (mut world, layers) = car_world(Vec3::new(0.0, -5.0, 0.0), 1);
     let body =

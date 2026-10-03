@@ -39,4 +39,26 @@ JPH_CAPI void JPH_CharacterVirtual_RefreshContacts2(JPH_CharacterVirtual* charac
    and JPH_Constraint_Destroy; counterpart of JPH_VehicleConstraint_AsPhysicsStepListener. */
 JPH_CAPI JPH_Constraint* JPH_VehicleConstraint_AsConstraint(JPH_VehicleConstraint* constraint);
 
+/* RagdollSettings */
+/* Copies every BodyCreationSettings field (shape reference, collision group, damping, velocities, mass
+   override, ...) into part partIndex; the part's constraint to its parent is kept. */
+JPH_CAPI void JPH_RagdollSettings_SetPart(JPH_RagdollSettings* settings, int partIndex, const JPH_BodyCreationSettings* bodySettings);
+/* Like JPH_RagdollSettings_SetPartToParent, but every field reaches Jolt, base settings, spring modes and
+   torque limits included; null removes the constraint. */
+JPH_CAPI void JPH_RagdollSettings_SetPartToParentSwingTwist(JPH_RagdollSettings* settings, int partIndex, const JPH_SwingTwistConstraintSettings* constraintSettings);
+JPH_CAPI void JPH_RagdollSettings_SetPartToParentHinge(JPH_RagdollSettings* settings, int partIndex, const JPH_HingeConstraintSettings* constraintSettings);
+JPH_CAPI void JPH_RagdollSettings_SetPartToParentSixDOF(JPH_RagdollSettings* settings, int partIndex, const JPH_SixDOFConstraintSettings* constraintSettings);
+JPH_CAPI void JPH_RagdollSettings_CalculateConstraintPriorities(JPH_RagdollSettings* settings, uint32_t basePriority);
+
+/* SwingTwistConstraint */
+JPH_CAPI void JPH_SwingTwistConstraint_SetSwingMotorState(JPH_SwingTwistConstraint* constraint, JPH_MotorState state);
+JPH_CAPI JPH_MotorState JPH_SwingTwistConstraint_GetSwingMotorState(const JPH_SwingTwistConstraint* constraint);
+JPH_CAPI void JPH_SwingTwistConstraint_SetTwistMotorState(JPH_SwingTwistConstraint* constraint, JPH_MotorState state);
+JPH_CAPI JPH_MotorState JPH_SwingTwistConstraint_GetTwistMotorState(const JPH_SwingTwistConstraint* constraint);
+JPH_CAPI void JPH_SwingTwistConstraint_SetTargetOrientationBS(JPH_SwingTwistConstraint* constraint, const JPH_Quat* orientation);
+JPH_CAPI void JPH_SwingTwistConstraint_GetRotationInConstraintSpace(const JPH_SwingTwistConstraint* constraint, JPH_Quat* result);
+
+/* HingeConstraint */
+JPH_CAPI void JPH_HingeConstraint_SetTargetOrientationBS(JPH_HingeConstraint* constraint, const JPH_Quat* orientation);
+
 #endif /* JOLT_C_EXT_H_ */

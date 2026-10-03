@@ -24,8 +24,8 @@ use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
 use crate::character::CharacterEntry;
-use crate::math::is_finite_positive;
 use crate::owned::{JoltObject, Owned};
+use crate::ragdoll::RagdollEntry;
 use crate::vehicle::VehicleEntry;
 use crate::{
     BodyError, BodyId, CollisionLayers, MotionType, Quat, RVec3, StepError, Vec3, WorldError,
@@ -215,8 +215,8 @@ impl WorldTag {
 /// [`optimize_broad_phase`](Self::optimize_broad_phase).
 pub struct PhysicsWorld {
     // Field order is drop order, after `Drop for PhysicsWorld` has taken every vehicle out of
-    // the system's step listeners and constraints and released it, so `vehicles` is empty by
-    // then. The characters go first: each destructor removes its inner
+    // the system's step listeners and constraints and every ragdoll out of the system and
+    // released them, so `vehicles` and `ragdolls` are empty by then. The characters go first: each destructor removes its inner
     // body through the still-live system. The character collision set follows; it only frees
     // its list of character pointers. The system goes next, before the job system and allocator
     // its steps used, and deletes the layer tables it owns. The interface and query pointers
@@ -225,6 +225,8 @@ pub struct PhysicsWorld {
     pub(crate) characters: BTreeMap<u32, CharacterEntry>,
     /// The vehicles by vehicle id.
     pub(crate) vehicles: BTreeMap<u32, VehicleEntry>,
+    /// The ragdolls by ragdoll id.
+    pub(crate) ragdolls: BTreeMap<u32, RagdollEntry>,
     /// Jolt's `CharacterVsCharacterCollisionSimple` of the characters that collide with each
     /// other, created with the first of them.
     pub(crate) character_collision: Option<Owned<JPH_CharacterVsCharacterCollision>>,
@@ -245,11 +247,16 @@ pub struct PhysicsWorld {
     pub(crate) vehicle_bodies: BTreeMap<u32, u32>,
     /// The id the next vehicle gets; ids start at 1 and are never reused.
     pub(crate) next_vehicle_id: u32,
+    /// Raw ids of the ragdolls' part bodies, with their ragdoll ids.
+    pub(crate) ragdoll_bodies: BTreeMap<u32, u32>,
+    /// The id the next ragdoll gets; ids start at 1 and are never reused.
+    pub(crate) next_ragdoll_id: u32,
 }
 
 impl Drop for PhysicsWorld {
     fn drop(&mut self) {
         self.remove_all_vehicles();
+        self.remove_all_ragdolls();
     }
 }
 
@@ -270,7 +277,10 @@ unsafe impl Send for PhysicsWorld {}
 // `&mut self`, and so does every use of `CharacterVsCharacterCollisionSimple`, which is not
 // thread-safe (`CharacterVirtual.h`). Vehicle reads through `&self` are joltc getters over
 // members of the vehicle constraint, its wheels and controller, which Jolt writes only during
-// `step` and the vehicle setters, both behind `&mut self`.
+// `step` and the vehicle setters, both behind `&mut self`. Ragdoll reads through `&self` use the
+// locking body interface and constraint getters that read constraint members and the bodies'
+// rotations, which Jolt writes only in `step` and the ragdoll and body setters, all behind
+// `&mut self`.
 unsafe impl Sync for PhysicsWorld {}
 
 /// One body's pose and velocities in a frame.
@@ -382,6 +392,22 @@ impl PhysicsWorld {
     /// larger ones may tunnel or sag depending on the scene.
     pub const MAX_DELTA_TIME: f32 = 1.0;
 
+    /// Smallest time step [`step`](Self::step) accepts, in seconds, inclusive.
+    ///
+    /// A joltphysics guard, not a Jolt limit. Jolt divides by the step: a kinematic body's
+    /// velocity is its move over the step (`MoveKinematic`), a character's velocities are
+    /// derived the same way, and a wheel's brake-lock torque is `|ω| · inertia / step`
+    /// (`WheeledVehicleController::PostCollide`). A subnormal step makes these infinite. The
+    /// bound keeps those reciprocals finite for finite settings; it does not bound every force
+    /// or velocity a step can produce.
+    pub const MIN_DELTA_TIME: f32 = 1.0e-6;
+
+    /// Whether `delta_time` is finite and within `MIN_DELTA_TIME..=MAX_DELTA_TIME`.
+    pub(crate) fn is_valid_delta_time(delta_time: f32) -> bool {
+        delta_time.is_finite()
+            && (Self::MIN_DELTA_TIME..=Self::MAX_DELTA_TIME).contains(&delta_time)
+    }
+
     /// Creates a world. Nothing is allocated when the settings are invalid.
     pub fn new(settings: WorldSettings) -> Result<Self, WorldError> {
         settings.validate()?;
@@ -460,6 +486,7 @@ impl PhysicsWorld {
         Ok(Self {
             characters: BTreeMap::new(),
             vehicles: BTreeMap::new(),
+            ragdolls: BTreeMap::new(),
             character_collision: None,
             system,
             job_system,
@@ -474,6 +501,8 @@ impl PhysicsWorld {
             next_character_id: 1,
             vehicle_bodies: BTreeMap::new(),
             next_vehicle_id: 1,
+            ragdoll_bodies: BTreeMap::new(),
+            next_ragdoll_id: 1,
         })
     }
 
@@ -558,6 +587,9 @@ impl PhysicsWorld {
     /// wheel contacts a vehicle reports stay in the old frame until the next step tests the
     /// wheels again, and the world up of the pitch and roll limit follows the rotated gravity on
     /// that step.
+    ///
+    /// Ragdoll parts are bodies of the world, which the list names. Joint frames and motor
+    /// targets are relative to the bodies, so they need no change.
     pub fn rebase(
         &mut self,
         bodies_in_key_order: &[BodyId],
@@ -688,13 +720,13 @@ impl PhysicsWorld {
 
     /// Advances the world by `delta_time` seconds in one collision step.
     ///
-    /// `delta_time` must be finite, positive and at most
-    /// [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), otherwise nothing happens and
+    /// `delta_time` must be finite, at least [`MIN_DELTA_TIME`](Self::MIN_DELTA_TIME) and at
+    /// most [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), otherwise nothing happens and
     /// [`StepError::InvalidDeltaTime`] is returned. Every other call advances the world and
     /// returns a [`StepReport`]; check [`StepReport::is_complete`] to learn whether Jolt
     /// dropped work because a fixed-size buffer was full.
     pub fn step(&mut self, delta_time: f32) -> Result<StepReport, StepError> {
-        if !(is_finite_positive(delta_time) && delta_time <= Self::MAX_DELTA_TIME) {
+        if !Self::is_valid_delta_time(delta_time) {
             return Err(StepError::InvalidDeltaTime);
         }
         // SAFETY: the system, temp allocator and job system are live and owned by this world;

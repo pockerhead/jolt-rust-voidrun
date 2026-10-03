@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::{BodyId, CharacterId, ObjectLayer, VehicleId};
+use crate::{BodyId, CharacterId, ObjectLayer, RagdollId, VehicleId};
 
 /// Why a [`PhysicsWorld`](crate::PhysicsWorld) could not be created or changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,7 +86,8 @@ impl std::error::Error for QueryError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StepError {
-    /// The time step is not finite, not positive, or above
+    /// The time step is not finite, below
+    /// [`PhysicsWorld::MIN_DELTA_TIME`](crate::PhysicsWorld::MIN_DELTA_TIME) or above
     /// [`PhysicsWorld::MAX_DELTA_TIME`](crate::PhysicsWorld::MAX_DELTA_TIME).
     InvalidDeltaTime,
 }
@@ -96,7 +97,8 @@ impl fmt::Display for StepError {
         match self {
             Self::InvalidDeltaTime => write!(
                 f,
-                "the time step must be finite, positive and at most {} s",
+                "the time step must be finite and between {} and {} s",
+                crate::PhysicsWorld::MIN_DELTA_TIME,
                 crate::PhysicsWorld::MAX_DELTA_TIME
             ),
         }
@@ -125,6 +127,8 @@ pub enum BodyError {
     OwnedByCharacter(BodyId),
     /// The body is the chassis of a vehicle; remove the vehicle first.
     UsedByVehicle(BodyId),
+    /// The body is a part of a ragdoll; remove the ragdoll instead.
+    OwnedByRagdoll(BodyId),
 }
 
 impl fmt::Display for BodyError {
@@ -146,6 +150,7 @@ impl fmt::Display for BodyError {
                 write!(f, "body {id:?} is the inner body of a character")
             }
             Self::UsedByVehicle(id) => write!(f, "body {id:?} is the chassis of a vehicle"),
+            Self::OwnedByRagdoll(id) => write!(f, "body {id:?} is a part of a ragdoll"),
         }
     }
 }
@@ -218,6 +223,56 @@ impl fmt::Display for VehicleError {
 }
 
 impl std::error::Error for VehicleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Body(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+/// Why a skeleton, ragdoll settings or ragdoll operation failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RagdollError {
+    /// Jolt's one-time global initialisation failed.
+    InitFailed,
+    /// The id names no ragdoll in this world: it was removed.
+    NotFound(RagdollId),
+    /// The id belongs to another world.
+    WrongWorld(RagdollId),
+    /// A setting, pose or input is out of range; the payload names it.
+    InvalidValue(&'static str),
+    /// A part's object layer does not exist in this world's collision layers.
+    UnknownObjectLayer(ObjectLayer),
+    /// A part's body settings could not be turned into Jolt's.
+    Body(BodyError),
+    /// The world has no room for every part of the ragdoll.
+    TooManyBodies,
+    /// The world has given out every ragdoll id.
+    TooManyRagdolls,
+}
+
+impl fmt::Display for RagdollError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InitFailed => f.write_str("Jolt initialisation failed"),
+            Self::NotFound(id) => write!(f, "no ragdoll {id:?} in this world"),
+            Self::WrongWorld(id) => write!(f, "ragdoll {id:?} belongs to another world"),
+            Self::InvalidValue(what) => write!(f, "invalid ragdoll value: {what}"),
+            Self::UnknownObjectLayer(layer) => write!(
+                f,
+                "object layer {} of a ragdoll part does not exist in this world",
+                layer.get()
+            ),
+            Self::Body(error) => write!(f, "unusable ragdoll part: {error}"),
+            Self::TooManyBodies => f.write_str("the world has no room for every ragdoll part"),
+            Self::TooManyRagdolls => f.write_str("the world has no ragdoll ids left"),
+        }
+    }
+}
+
+impl std::error::Error for RagdollError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Body(error) => Some(error),

@@ -22,11 +22,13 @@ use std::fmt;
 use joltphysics_sys::*;
 
 use crate::body::with_locked_body;
+use crate::constraint::constraint_base;
+use crate::math::is_unit;
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyError, BodyId, MotionType, PhysicsWorld, RVec3, SubShapeId, Vec3, VehicleError};
 
-use settings::{is_unit, WheelGeometry};
+use settings::WheelGeometry;
 pub use settings::{
     SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings,
     VehicleEngineSettings, VehicleSettings, VehicleTransmissionSettings, WheelSettings,
@@ -416,18 +418,6 @@ impl VehicleMut<'_> {
     }
 }
 
-/// Jolt's `ConstraintSettings` defaults: enabled, priority 0, the world's iteration counts.
-fn constraint_base() -> JPH_ConstraintSettings {
-    JPH_ConstraintSettings {
-        enabled: true,
-        constraintPriority: 0,
-        numVelocityStepsOverride: 0,
-        numPositionStepsOverride: 0,
-        drawConstraintSize: 1.0,
-        userData: 0,
-    }
-}
-
 /// Gives the vehicle a new Jolt tester built from the validated `tester` and records it.
 fn install_tester(entry: &mut VehicleEntry, tester: VehicleCollisionTester) {
     let jolt_tester = tester.create();
@@ -467,7 +457,7 @@ impl PhysicsWorld {
     ///
     /// Fails with [`VehicleError::InvalidValue`] when a setting is out of range (see the setters
     /// of [`VehicleSettings`] and the types it holds), with [`VehicleError::Body`] when `body`
-    /// is not in this world or is the inner body of a character, with
+    /// is not in this world, is the inner body of a character or a ragdoll part, with
     /// [`VehicleError::NotDynamic`], with [`VehicleError::AlreadyHasVehicle`] when the body
     /// carries a vehicle already, and with [`VehicleError::TooManyVehicles`] when the world has
     /// run out of ids. Nothing is created on failure.
@@ -519,6 +509,10 @@ impl PhysicsWorld {
         self.check(body).map_err(VehicleError::Body)?;
         if self.is_inner_body(body) {
             return Err(VehicleError::Body(BodyError::OwnedByCharacter(body)));
+        }
+        // A ragdoll part is destroyed with its ragdoll, which the vehicle would outlive.
+        if self.is_ragdoll_body(body) {
+            return Err(VehicleError::Body(BodyError::OwnedByRagdoll(body)));
         }
         if self.body(body).map_err(VehicleError::Body)?.motion_type() != MotionType::Dynamic {
             return Err(VehicleError::NotDynamic(body));
@@ -786,23 +780,5 @@ mod tests {
         // `listeners / batch size / batches per job` jobs, capped by the job system.
         assert_eq!(settings.stepListenersBatchSize, 8);
         assert_eq!(settings.stepListenerBatchesPerJob, 1);
-    }
-
-    #[test]
-    fn constraint_base_is_jolts_default() {
-        assert!(crate::world::ensure_initialized());
-        // SAFETY: an all-zero `JPH_VehicleConstraintSettings` is valid: floats, integers,
-        // `false` and null pointers. joltc fills it with Jolt's defaults and allocates nothing.
-        let mut settings: JPH_VehicleConstraintSettings = unsafe { std::mem::zeroed() };
-        // SAFETY: Jolt is initialised and `settings` is a live local.
-        unsafe { JPH_VehicleConstraintSettings_Init(&mut settings) };
-        let base = constraint_base();
-        let jolt = settings.base;
-        assert_eq!(base.enabled, jolt.enabled);
-        assert_eq!(base.constraintPriority, jolt.constraintPriority);
-        assert_eq!(base.numVelocityStepsOverride, jolt.numVelocityStepsOverride);
-        assert_eq!(base.numPositionStepsOverride, jolt.numPositionStepsOverride);
-        assert_eq!(base.drawConstraintSize, jolt.drawConstraintSize);
-        assert_eq!(base.userData, jolt.userData);
     }
 }
