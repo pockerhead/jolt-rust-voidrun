@@ -17,12 +17,16 @@
 //! The constraints scene runs a hinge chain, a motor-driven slider, a gear pair, a pulley and a
 //! path, and removes and re-creates a constraint halfway.
 //!
+//! Each scene is also gated with caller job systems: a Rayon pool of 4 threads and an inline job
+//! system must record what Jolt's thread pool with 1 worker records.
+//!
 //! Each run happens in its own child process (this test binary, running the ignored
 //! `determinism_child` test), so no state leaks between runs; see `common::determinism`.
 
 mod common;
 
 use common::determinism::*;
+use common::jobs::{self, JobChoice};
 use common::ragdoll as humanoid;
 use common::walker::{
     add_walker, record_walker, rvec3, scale, script_scene, script_start, script_tick, up_at, v3,
@@ -173,10 +177,10 @@ fn chunk_world(worker_threads: u32) -> (PhysicsWorld, [ObjectLayer; 3]) {
         .enable_collision(item, terrain)
         .enable_collision(item, chunk)
         .enable_collision(item, item);
-    let settings = WorldSettings::default()
-        .gravity(Vec3::ZERO)
-        .layers(layers)
-        .worker_threads(worker_threads);
+    let settings = jobs::with_threads(
+        WorldSettings::default().gravity(Vec3::ZERO).layers(layers),
+        worker_threads,
+    );
     (PhysicsWorld::new(settings).unwrap(), [terrain, chunk, item])
 }
 
@@ -860,6 +864,7 @@ fn determinism_child() {
     let Some((scenario, threads, variant)) = child_request() else {
         return;
     };
+    let job_choice = JobChoice::from_env();
     let digest = match scenario.as_str() {
         "stacks" => run_stacks(threads, &variant),
         "chunk" => run_chunk(threads, &variant),
@@ -870,7 +875,75 @@ fn determinism_child() {
         "constraints" => run_constraints(threads),
         scenario => panic!("unknown scenario {scenario}"),
     };
+    // Without this check a choice that never reached the worlds would pass as the native run.
+    match job_choice {
+        JobChoice::Native => assert_eq!(jobs::queued(), 0, "a caller job system was used"),
+        _ => assert!(
+            jobs::queued() > 0,
+            "the {job_choice:?} job system ran no job"
+        ),
+    }
     finish_child(&digest);
+}
+
+/// Runs `scenario` with Jolt's thread pool of 1 worker, a Rayon pool of 4 threads (concurrency
+/// 5) and an inline job system (concurrency 3), each in its own child, and asserts that both
+/// caller job systems record what the thread pool records.
+fn assert_caller_job_systems_agree(scenario: &str, variant: &str) {
+    let run = |threads, jobs| {
+        digest_in_child_with_jobs("determinism_child", scenario, threads, variant, jobs)
+    };
+    let native = run(1, JobChoice::Native);
+    let rayon = run(4, JobChoice::Rayon);
+    let inline = run(1, JobChoice::Inline);
+    assert!(!native.ticks.is_empty());
+    assert_same(
+        &format!("{scenario} {variant}, 1 worker vs Rayon 4 threads"),
+        &native,
+        &rayon,
+    );
+    assert_same(
+        &format!("{scenario} {variant}, 1 worker vs inline"),
+        &native,
+        &inline,
+    );
+}
+
+#[test]
+fn stacks_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("stacks", "forward");
+    assert_caller_job_systems_agree("stacks", "rebased");
+}
+
+#[test]
+fn chunk_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("chunk", "forward");
+}
+
+#[test]
+fn walker_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("walker", "forward");
+}
+
+#[test]
+fn vehicle_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("vehicle", "forward");
+}
+
+#[test]
+fn fleet_digest_is_identical_with_caller_job_systems() {
+    // The 40 vehicle listeners run in 2, 5 and 3 jobs (`PhysicsSystem.cpp:243`).
+    assert_caller_job_systems_agree("fleet", "forward");
+}
+
+#[test]
+fn ragdoll_pile_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("ragdoll_pile", "forward");
+}
+
+#[test]
+fn constraint_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("constraints", "forward");
 }
 
 fn stacks_in_child(threads: u32, variant: &str) -> Digest {

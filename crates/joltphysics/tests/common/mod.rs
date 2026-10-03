@@ -17,11 +17,10 @@ pub const DT: f32 = 1.0 / 60.0;
 
 /// A world with the default layers.
 pub fn world(gravity: Vec3, worker_threads: u32) -> PhysicsWorld {
-    PhysicsWorld::new(
-        WorldSettings::default()
-            .gravity(gravity)
-            .worker_threads(worker_threads),
-    )
+    PhysicsWorld::new(jobs::with_threads(
+        WorldSettings::default().gravity(gravity),
+        worker_threads,
+    ))
     .unwrap()
 }
 

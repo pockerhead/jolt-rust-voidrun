@@ -147,12 +147,12 @@ pub fn fixture_world(worker_threads: u32) -> (PhysicsWorld, Layers) {
     for other in [layers.terrain, layers.chunk, layers.item, layers.actor] {
         collision.enable_collision(layers.item, other);
     }
-    let world = PhysicsWorld::new(
+    let world = PhysicsWorld::new(super::jobs::with_threads(
         WorldSettings::default()
             .gravity(Vec3::ZERO)
-            .worker_threads(worker_threads)
             .layers(collision),
-    )
+        worker_threads,
+    ))
     .unwrap();
     (world, layers)
 }

@@ -624,12 +624,10 @@ pub fn ragdoll_layers() -> (CollisionLayers, RagdollLayers) {
 /// A ragdoll world without engine gravity, stepped by `worker_threads` workers.
 pub fn ragdoll_world(worker_threads: u32) -> (PhysicsWorld, RagdollLayers) {
     let (layers, ids) = ragdoll_layers();
-    let world = PhysicsWorld::new(
-        WorldSettings::default()
-            .gravity(Vec3::ZERO)
-            .worker_threads(worker_threads)
-            .layers(layers),
-    )
+    let world = PhysicsWorld::new(super::jobs::with_threads(
+        WorldSettings::default().gravity(Vec3::ZERO).layers(layers),
+        worker_threads,
+    ))
     .unwrap();
     (world, ids)
 }
