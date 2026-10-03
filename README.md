@@ -87,7 +87,7 @@ in `crates/joltphysics/src/`.
 | Queries without a step, broad-phase optimisation | `PhysicsWorld::optimize_broad_phase` | `queries.rs`: `queries_see_created_moved_and_removed_bodies_without_a_step`, `optimize_broad_phase_keeps_query_results` |
 | Queries from many threads | queries on `&PhysicsWorld` | `queries.rs`: `filtered_queries_run_in_parallel`; `world.rs`: `rays_are_cast_from_many_threads` |
 | Floating origin | `PhysicsWorld::rebase` | `rebase.rs`: `vehicle_drives_across_a_rotating_rebase`, `resting_item_stays_across_a_rebase`, `sleeping_body_stays_asleep_across_a_rebase`, `drift_rebase_equals_the_scene_built_in_the_new_frame`, `rays_answer_the_same_across_a_rebase`, `invalid_rebase_changes_nothing`; `ragdoll.rs`: `rebase_moves_a_settled_ragdoll_rigidly` |
-| Same results for any thread count | (whole API) | `determinism.rs`: `stacks_digest_is_identical_across_thread_counts`, `chunk_digest_is_identical_across_thread_counts`, `walker_digest_is_identical_across_thread_counts`, `vehicle_digest_is_identical_across_thread_counts`, `fleet_digest_is_identical_across_thread_counts`, `fleet_digest_detects_a_changed_input`, `ragdoll_pile_digest_is_identical_across_thread_counts`, `permuted_insertion_order_fails_the_gate`; `vehicle.rs`: `drive_a_route_twice_gives_identical_bits`; `crates/joltphysics-sys/tests/determinism.rs`: `digest_is_identical_across_thread_counts` |
+| Same results with 1 and 4 worker threads, for the scenes the tests run | `WorldSettings::worker_threads` | `determinism.rs`: `stacks_digest_is_identical_across_thread_counts`, `chunk_digest_is_identical_across_thread_counts`, `walker_digest_is_identical_across_thread_counts`, `vehicle_digest_is_identical_across_thread_counts`, `fleet_digest_is_identical_across_thread_counts`, `fleet_digest_detects_a_changed_input`, `ragdoll_pile_digest_is_identical_across_thread_counts`, `permuted_insertion_order_fails_the_gate`; `vehicle.rs`: `drive_a_route_twice_gives_identical_bits`; `crates/joltphysics-sys/tests/determinism.rs`: `digest_is_identical_across_thread_counts` |
 | Debug wireframe as line data (`debug-renderer`) | `PhysicsWorld::debug_lines`, `DebugLines`, `DebugLineSettings` | `debug_lines.rs`: `near_colliders_present_far_absent_terrain_present`, `line_cap_gives_exactly_the_cap_and_truncated`, `hidden_groups_vanish`, `compound_child_pose_applies_child_rotation_before_body_rotation`; `debug_lines_leaks.rs`; `crates/joltphysics-sys/tests/debug_renderer_bindings.rs` |
 | Leak gate for per-call joltc objects (Windows; bounded memory growth, catches only leaks above its threshold) | queries, rebase | `leaks.rs`: `per_call_joltc_objects_do_not_leak` |
 | Character settings with Jolt's defaults, validation | `PhysicsWorld::create_character`, `CharacterSettings`, `CharacterError` | `character.rs`: `invalid_settings_and_poses_are_rejected_without_side_effects`; `src/character.rs`: `default_settings_match_jolt` |
@@ -135,15 +135,18 @@ in neither layer yet; only a character's state can be saved.
 ## Guarantees and limits
 - **Validation.** Values Jolt only checks with debug assertions (non-finite poses, non-unit
   quaternions, zero dimensions, ids of another world, unknown layers) are rejected with a typed
-  error before they reach Jolt. The rule is that an `Err` means the call changed nothing; a step
+  error before they reach Jolt. Validation checks each input value, not what a step later
+  computes from it: an accepted but extreme value can still overflow inside a step (see the
+  vehicle and ragdoll limits below). The rule is that an `Err` means the call changed nothing; a step
   that ran but dropped contacts returns `Ok` with a flag in its `StepReport`.
 - **Ids.** A `BodyId` is Jolt's index and 8-bit sequence number. The sequence wraps after 255
   reuses of one index, so a very old id can name a new body. Character, vehicle and ragdoll ids
   count from 1 in each world and are never reused.
-- **Time step.** `step` accepts 1 µs (`MIN_DELTA_TIME`) to 1 s (`MAX_DELTA_TIME`). The lower
-  bound keeps Jolt's reciprocals of the step (kinematic and character velocities, a wheel's
-  brake-lock torque) finite for finite settings; it does not bound every force or velocity a
-  step can produce.
+- **Time step.** `step` accepts 1 µs (`MIN_DELTA_TIME`) to 1 s (`MAX_DELTA_TIME`). Jolt divides by
+  the step (kinematic and character velocities, a wheel's brake-lock torque); the lower bound
+  keeps that divisor away from subnormal values, where these quotients become infinite. A huge
+  numerator can still overflow a quotient, and the bound does not limit every force or velocity
+  a step can produce.
 - **Queries.** Ray casts see a box's sharp faces whatever its convex radius; contacts and shape
   casts use at most 0.05 m of a convex radius. Heightfields cannot be query shapes, and only
   spheres and capsules take a shape-cast target distance. `collide_shape` hits come in no
@@ -162,7 +165,7 @@ in neither layer yet; only a character's state can be saved.
   refresh each character's contacts before its next update. The game's controller
   (`tests/common/walker.rs`) is test support, not API.
 - **Vehicles.** Only the wheeled controller with the automatic transmission is bound. Settings
-  are checked against every value Jolt asserts on or divides by, and the coefficients Jolt forms
+  are checked against the values Jolt asserts on or divides by, and the coefficients Jolt forms
   from them are checked at the time step bound that is their worst case. What a step computes
   from the vehicle's state afterwards is not bounded: a huge but finite gravity or velocity can
   still overflow inside the step, where Jolt clamps it (with `joltphysics-sys/asserts` its
@@ -198,9 +201,12 @@ in neither layer yet; only a character's state can be saved.
   and for Android cross builds, but nothing checks them.
 
 ## Determinism
-What is guaranteed: on one machine, the same binary given the same calls in the same order produces
-bit-identical body ids, poses, velocities and sleep flags for any `WorldSettings::worker_threads`
-(`worker_threads(n)` means n workers plus the thread that calls `step`). The call history includes the
+The requirement: on one machine, the same binary given the same calls in the same order produces
+bit-identical body ids, poses, velocities and sleep flags whatever `WorldSettings::worker_threads`
+is (`worker_threads(n)` means n workers plus the thread that calls `step`). This rests on Jolt's own
+conditions (same binary, simulation-changing calls in the same order). The tests check it with 1 and
+4 workers on the scenes listed under "How it is checked", not for every thread count or every call
+sequence. The call history includes the
 order of body creation and removal, which decides each `BodyId`'s index and sequence number, as well as
 rebases, `optimize_broad_phase`, forces and velocity writes. Characters are covered too: each world
 numbers its characters from 1 in creation order (Jolt's default id comes from a process-wide

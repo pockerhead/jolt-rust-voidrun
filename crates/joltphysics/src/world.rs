@@ -398,8 +398,8 @@ impl PhysicsWorld {
     /// velocity is its move over the step (`MoveKinematic`), a character's velocities are
     /// derived the same way, and a wheel's brake-lock torque is `|ω| · inertia / step`
     /// (`WheeledVehicleController::PostCollide`). A subnormal step makes these infinite. The
-    /// bound keeps those reciprocals finite for finite settings; it does not bound every force
-    /// or velocity a step can produce.
+    /// bound keeps the divisor away from subnormal values; a huge numerator can still overflow a
+    /// quotient, and the bound does not limit every force or velocity a step can produce.
     pub const MIN_DELTA_TIME: f32 = 1.0e-6;
 
     /// Whether `delta_time` is finite and within `MIN_DELTA_TIME..=MAX_DELTA_TIME`.

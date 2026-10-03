@@ -93,7 +93,8 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - `PhysicsWorld::rebase` rotates each vehicle's gravity override and the up of its ray or sphere
   tester.
 - `PhysicsWorld::step`, `update_character` and the kinematic ragdoll drive reject time steps below
-  `PhysicsWorld::MIN_DELTA_TIME` (1 µs), where Jolt's reciprocals of the step become infinite.
+  `PhysicsWorld::MIN_DELTA_TIME` (1 µs). Jolt divides by the step; the bound keeps the divisor
+  away from subnormal values, where those quotients become infinite.
 - `BodySettings::linear_damping` and `angular_damping` (Jolt's default 0.05), and `BodyRef::mass`
   for dynamic bodies, for callers that apply gravity as a force.
 - `PhysicsWorld::were_bodies_in_contact` reports whether two bodies touched in the last step.
