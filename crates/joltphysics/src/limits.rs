@@ -196,6 +196,7 @@
 //! | `WorldSettings::gravity`, `PhysicsWorld::set_gravity` | [`MAX_ACCELERATION`] | new: `world_gravity_is_bounded_by_max_acceleration` |
 //! | `WorldSettings::max_contact_constraints` | `1..=`[`WorldSettings::MAX_CONTACT_CONSTRAINTS`] | new: `contact_constraint_capacity_is_bounded` |
 //! | `WorldSettings::max_bodies`, `worker_threads` | Jolt's and joltphysics' counts | existing: `invalid_settings_are_rejected`, `worker_thread_bounds_are_validated` |
+//! | `WorldSettings::job_system` (`JobSystem::max_concurrency`) | `1..=`[`WorldSettings::MAX_CONCURRENCY`](crate::WorldSettings::MAX_CONCURRENCY), read once in `PhysicsWorld::new` | new: `max_concurrency_is_bounded` |
 //! | `WorldSettings::max_body_pairs`, `temp_allocator_size` | at least 1; Jolt asserts nothing on their size, and joltc's temp allocator falls back to `malloc` | existing: `invalid_settings_are_rejected` |
 //! | `PhysicsWorld::step` delta time | `MIN_DELTA_TIME..=MAX_DELTA_TIME` | existing: `step_rejects_delta_time_above_the_bound`, `step_rejects_delta_time_below_the_bound` |
 //! | `PhysicsWorld::rebase` translation | `2 *` [`MAX_POSITION`] per axis; results finite | new: `rebase_translation_is_bounded_by_twice_the_frame` |

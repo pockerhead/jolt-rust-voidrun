@@ -71,6 +71,52 @@ fn world_lock() -> MutexGuard<'static, ()> {
     WORLD.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Creates a physics system with the table-based layers. The caller holds the world lock.
+fn create_system() -> *mut JPH_PhysicsSystem {
+    // SAFETY: Jolt is initialised and the caller holds the world lock. Every
+    // pointer passed in comes from the matching `_Create` call just above it
+    // and is not destroyed before `JPH_PhysicsSystem_Create`, which takes
+    // ownership of the three layer tables.
+    let system = unsafe {
+        let pair_filter = JPH_ObjectLayerPairFilterTable_Create(OBJECT_LAYER_COUNT);
+        JPH_ObjectLayerPairFilterTable_EnableCollision(pair_filter, OL_NON_MOVING, OL_MOVING);
+        JPH_ObjectLayerPairFilterTable_EnableCollision(pair_filter, OL_MOVING, OL_MOVING);
+
+        let broad_phase =
+            JPH_BroadPhaseLayerInterfaceTable_Create(OBJECT_LAYER_COUNT, BROAD_PHASE_LAYER_COUNT);
+        JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(
+            broad_phase,
+            OL_NON_MOVING,
+            BPL_NON_MOVING,
+        );
+        JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(
+            broad_phase,
+            OL_MOVING,
+            BPL_MOVING,
+        );
+
+        let object_vs_broad_phase = JPH_ObjectVsBroadPhaseLayerFilterTable_Create(
+            broad_phase,
+            BROAD_PHASE_LAYER_COUNT,
+            pair_filter,
+            OBJECT_LAYER_COUNT,
+        );
+
+        let settings = JPH_PhysicsSystemSettings {
+            maxBodies: 1024,
+            maxBodyPairs: 1024,
+            maxContactConstraints: 1024,
+            broadPhaseLayerInterface: broad_phase,
+            objectLayerPairFilter: pair_filter,
+            objectVsBroadPhaseLayerFilter: object_vs_broad_phase,
+            ..std::mem::zeroed()
+        };
+        JPH_PhysicsSystem_Create(&settings)
+    };
+    assert!(!system.is_null(), "JPH_PhysicsSystem_Create failed");
+    system
+}
+
 /// A physics system with its own job system and temp allocator.
 pub struct TestWorld {
     system: *mut JPH_PhysicsSystem,
@@ -86,50 +132,7 @@ impl TestWorld {
         assert!(worker_threads > 0, "joltc maps 0 or less to automatic");
         init();
         let guard = world_lock();
-
-        // SAFETY: Jolt is initialised and the world lock is held. Every
-        // pointer passed in comes from the matching `_Create` call just
-        // above it and is not destroyed before `JPH_PhysicsSystem_Create`,
-        // which takes ownership of the three layer tables.
-        let system = unsafe {
-            let pair_filter = JPH_ObjectLayerPairFilterTable_Create(OBJECT_LAYER_COUNT);
-            JPH_ObjectLayerPairFilterTable_EnableCollision(pair_filter, OL_NON_MOVING, OL_MOVING);
-            JPH_ObjectLayerPairFilterTable_EnableCollision(pair_filter, OL_MOVING, OL_MOVING);
-
-            let broad_phase = JPH_BroadPhaseLayerInterfaceTable_Create(
-                OBJECT_LAYER_COUNT,
-                BROAD_PHASE_LAYER_COUNT,
-            );
-            JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(
-                broad_phase,
-                OL_NON_MOVING,
-                BPL_NON_MOVING,
-            );
-            JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(
-                broad_phase,
-                OL_MOVING,
-                BPL_MOVING,
-            );
-
-            let object_vs_broad_phase = JPH_ObjectVsBroadPhaseLayerFilterTable_Create(
-                broad_phase,
-                BROAD_PHASE_LAYER_COUNT,
-                pair_filter,
-                OBJECT_LAYER_COUNT,
-            );
-
-            let settings = JPH_PhysicsSystemSettings {
-                maxBodies: 1024,
-                maxBodyPairs: 1024,
-                maxContactConstraints: 1024,
-                broadPhaseLayerInterface: broad_phase,
-                objectLayerPairFilter: pair_filter,
-                objectVsBroadPhaseLayerFilter: object_vs_broad_phase,
-                ..std::mem::zeroed()
-            };
-            JPH_PhysicsSystem_Create(&settings)
-        };
-        assert!(!system.is_null(), "JPH_PhysicsSystem_Create failed");
+        let system = create_system();
 
         let pool_config = JobSystemThreadPoolConfig {
             // 0 selects Jolt's default job and barrier counts.
@@ -139,6 +142,29 @@ impl TestWorld {
         };
         // SAFETY: `pool_config` is a live local for the duration of the call.
         let job_system = unsafe { JPH_JobSystemThreadPool_Create(&pool_config) };
+        Self::assemble(system, job_system, guard)
+    }
+
+    /// Creates a world stepped by `job_system`.
+    ///
+    /// # Safety
+    /// `job_system` comes from a joltc `JPH_JobSystem*_Create` call made after [`init`], is not
+    /// null and is not destroyed by anyone else: the returned world owns it and destroys it in
+    /// its `Drop`.
+    pub unsafe fn with_job_system(job_system: *mut JPH_JobSystem) -> Self {
+        assert!(!job_system.is_null(), "job system creation failed");
+        init();
+        let guard = world_lock();
+        let system = create_system();
+        Self::assemble(system, job_system, guard)
+    }
+
+    /// Adds a temp allocator to `system` and `job_system`, which the world takes over.
+    fn assemble(
+        system: *mut JPH_PhysicsSystem,
+        job_system: *mut JPH_JobSystem,
+        guard: MutexGuard<'static, ()>,
+    ) -> Self {
         // SAFETY: plain allocation with no preconditions besides `JPH_Init`.
         let temp_allocator = unsafe { JPH_TempAllocator_Create(10 * 1024 * 1024) };
 
@@ -152,7 +178,7 @@ impl TestWorld {
 
     /// Advances the simulation by `dt` seconds with one collision step.
     pub fn step(&self, dt: f32) {
-        // SAFETY: all three pointers come from `new` and live until `drop`.
+        // SAFETY: all three pointers come from `assemble` and live until `drop`.
         let result = unsafe {
             JPH_PhysicsSystem_Update2(self.system, dt, 1, self.temp_allocator, self.job_system)
         };
@@ -166,14 +192,14 @@ impl TestWorld {
 
     /// The system's locking body interface.
     pub fn body_interface(&self) -> *mut JPH_BodyInterface {
-        // SAFETY: `system` comes from `new` and lives until `drop`.
+        // SAFETY: `system` comes from `assemble` and lives until `drop`.
         unsafe { JPH_PhysicsSystem_GetBodyInterface(self.system) }
     }
 }
 
 impl Drop for TestWorld {
     fn drop(&mut self) {
-        // SAFETY: the pointers come from `new` and are destroyed exactly once
+        // SAFETY: the pointers come from `assemble` and are destroyed exactly once
         // here, the system first because it uses the other two. The world
         // lock is still held: `_guard` drops after this function.
         unsafe {

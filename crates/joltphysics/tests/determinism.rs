@@ -17,12 +17,16 @@
 //! The constraints scene runs a hinge chain, a motor-driven slider, a gear pair, a pulley and a
 //! path, and removes and re-creates a constraint halfway.
 //!
+//! Each scene is also gated with caller job systems: a Rayon pool of 4 threads and an inline job
+//! system must record what Jolt's thread pool with 1 worker records.
+//!
 //! Each run happens in its own child process (this test binary, running the ignored
 //! `determinism_child` test), so no state leaks between runs; see `common::determinism`.
 
 mod common;
 
 use common::determinism::*;
+use common::jobs::{self, JobChoice};
 use common::ragdoll as humanoid;
 use common::walker::{
     add_walker, record_walker, rvec3, scale, script_scene, script_start, script_tick, up_at, v3,
@@ -86,6 +90,44 @@ fn run_stacks(worker_threads: u32, variant: &str) -> Digest {
                 .rebase(&ids, tilted_rotation(), tilted_translation())
                 .unwrap();
         }
+        assert!(world.step(DT).unwrap().is_complete());
+        let record = digest.push();
+        for &id in &ids {
+            record_body(&world, id, &mut record.state);
+        }
+    }
+    digest
+}
+
+/// Columns of [`run_pile`] along x and z.
+const PILE_COLUMNS: usize = 10;
+/// Cubes in each column of [`run_pile`].
+const PILE_LAYERS: usize = 6;
+
+/// Extra unrecorded runs of [`run_pile`] the Rayon child may need before its pool executes a
+/// Jolt job; each misses with a probability of at most about a quarter on one core.
+const PILE_POOL_RETRIES: usize = 10;
+
+/// A floor and 600 cubes in leaning columns that topple into one pile: enough work per step
+/// that the threads of a caller's pool run Jolt jobs even on a loaded machine, where the
+/// stepping thread can finish every job of the eight-cube stacks scene before a pool thread is
+/// scheduled.
+fn run_pile(worker_threads: u32) -> Digest {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), worker_threads);
+    let mut ids = vec![add_floor(&mut world)];
+    for column in 0..PILE_COLUMNS * PILE_COLUMNS {
+        let (x, z) = (
+            (column % PILE_COLUMNS) as Real,
+            (column / PILE_COLUMNS) as Real,
+        );
+        for layer in 0..PILE_LAYERS {
+            let lean = 0.3 * layer as Real;
+            let position = RVec3::new(1.2 * x + lean, 0.5 + layer as Real, 1.2 * z);
+            ids.push(add_cube(&mut world, position));
+        }
+    }
+    let mut digest = Digest::new();
+    for _ in 0..TICKS {
         assert!(world.step(DT).unwrap().is_complete());
         let record = digest.push();
         for &id in &ids {
@@ -173,10 +215,10 @@ fn chunk_world(worker_threads: u32) -> (PhysicsWorld, [ObjectLayer; 3]) {
         .enable_collision(item, terrain)
         .enable_collision(item, chunk)
         .enable_collision(item, item);
-    let settings = WorldSettings::default()
-        .gravity(Vec3::ZERO)
-        .layers(layers)
-        .worker_threads(worker_threads);
+    let settings = jobs::with_threads(
+        WorldSettings::default().gravity(Vec3::ZERO).layers(layers),
+        worker_threads,
+    );
     (PhysicsWorld::new(settings).unwrap(), [terrain, chunk, item])
 }
 
@@ -860,8 +902,10 @@ fn determinism_child() {
     let Some((scenario, threads, variant)) = child_request() else {
         return;
     };
+    let job_choice = JobChoice::from_env();
     let digest = match scenario.as_str() {
         "stacks" => run_stacks(threads, &variant),
+        "pile" => run_pile(threads),
         "chunk" => run_chunk(threads, &variant),
         "walker" => run_walker(threads),
         "vehicle" => run_vehicle(threads),
@@ -870,7 +914,98 @@ fn determinism_child() {
         "constraints" => run_constraints(threads),
         scenario => panic!("unknown scenario {scenario}"),
     };
+    // Without these checks a choice that never reached the worlds, or a Rayon pool that never
+    // ran a job, would pass as the native run: Jolt's update barrier runs every job itself.
+    match job_choice {
+        JobChoice::Native => assert_eq!(jobs::queued(), 0, "a caller job system was used"),
+        _ => assert!(
+            jobs::queued() > 0,
+            "the {job_choice:?} job system was handed no job"
+        ),
+    }
+    // Only the pile is busy enough: in the smaller scenes a loaded machine's stepping thread may
+    // run every job before a pool thread is scheduled. Even the pile can miss the pool in one run
+    // when the child has a single core, so fresh piles are stepped, not recorded, until the pool
+    // executed a job or the retries run out; the digest stays the first run's.
+    if job_choice == JobChoice::Rayon && scenario == "pile" {
+        for _ in 0..PILE_POOL_RETRIES {
+            if jobs::queued_from_pool_jobs() > 0 {
+                break;
+            }
+            run_pile(threads);
+        }
+        assert!(
+            jobs::queued_from_pool_jobs() > 0,
+            "the Rayon pool executed no Jolt job"
+        );
+    }
     finish_child(&digest);
+}
+
+/// Runs `scenario` with Jolt's thread pool of 1 worker, a Rayon pool of 4 threads (concurrency
+/// 5) and an inline job system (concurrency 3), each in its own child, and asserts that both
+/// caller job systems record what the thread pool records.
+fn assert_caller_job_systems_agree(scenario: &str, variant: &str) {
+    let run = |threads, jobs| {
+        digest_in_child_with_jobs("determinism_child", scenario, threads, variant, jobs)
+    };
+    let native = run(1, JobChoice::Native);
+    let rayon = run(4, JobChoice::Rayon);
+    let inline = run(1, JobChoice::Inline);
+    assert!(!native.ticks.is_empty());
+    assert_same(
+        &format!("{scenario} {variant}, 1 worker vs Rayon 4 threads"),
+        &native,
+        &rayon,
+    );
+    assert_same(
+        &format!("{scenario} {variant}, 1 worker vs inline"),
+        &native,
+        &inline,
+    );
+}
+
+#[test]
+fn stacks_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("stacks", "forward");
+    assert_caller_job_systems_agree("stacks", "rebased");
+}
+
+#[test]
+fn pile_digest_is_identical_with_caller_job_systems() {
+    // The Rayon child also asserts that its pool executed Jolt jobs.
+    assert_caller_job_systems_agree("pile", "forward");
+}
+
+#[test]
+fn chunk_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("chunk", "forward");
+}
+
+#[test]
+fn walker_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("walker", "forward");
+}
+
+#[test]
+fn vehicle_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("vehicle", "forward");
+}
+
+#[test]
+fn fleet_digest_is_identical_with_caller_job_systems() {
+    // The 40 vehicle listeners run in 2, 5 and 3 jobs (`PhysicsSystem.cpp:243`).
+    assert_caller_job_systems_agree("fleet", "forward");
+}
+
+#[test]
+fn ragdoll_pile_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("ragdoll_pile", "forward");
+}
+
+#[test]
+fn constraint_digest_is_identical_with_caller_job_systems() {
+    assert_caller_job_systems_agree("constraints", "forward");
 }
 
 fn stacks_in_child(threads: u32, variant: &str) -> Digest {

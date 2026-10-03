@@ -48,12 +48,10 @@ pub fn car_world(gravity: Vec3, worker_threads: u32) -> (PhysicsWorld, CarLayers
         .enable_collision(moving, moving)
         .enable_collision(probe, ground)
         .enable_collision(probe, moving);
-    let world = PhysicsWorld::new(
-        WorldSettings::default()
-            .gravity(gravity)
-            .worker_threads(worker_threads)
-            .layers(layers),
-    )
+    let world = PhysicsWorld::new(super::jobs::with_threads(
+        WorldSettings::default().gravity(gravity).layers(layers),
+        worker_threads,
+    ))
     .unwrap();
     (
         world,

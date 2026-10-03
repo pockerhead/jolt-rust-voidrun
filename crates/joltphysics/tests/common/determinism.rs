@@ -10,11 +10,17 @@
 //! requested scenario into a [`Digest`] and hands it to [`finish_child`]. Its gate tests call
 //! [`digest_in_child`] for each run and compare the results with [`assert_same`] or
 //! [`first_divergence`].
+//!
+//! The job system is a process-wide choice of the child: [`digest_in_child_with_jobs`] sets
+//! [`JOBS_ENV`], and the world constructors of `common` read it through
+//! [`with_threads`](super::jobs::with_threads).
 
 use std::fmt;
 use std::path::PathBuf;
 use std::process::{self, Command};
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use super::jobs::{JobChoice, JOBS_ENV};
 
 /// Tells a child which run to do: exactly three comma-separated fields,
 /// `scenario,threads,variant`.
@@ -244,9 +250,21 @@ impl Drop for TempFile {
 /// How many bytes of a failed child's stdout and stderr a panic message quotes, from the end.
 const OUTPUT_TAIL: usize = 4000;
 
-/// Runs `scenario` with `threads` worker threads and `variant` in a child process that executes
-/// the ignored test `child_test` of this binary, and returns the digest it recorded.
+/// Runs `scenario` with `threads` worker threads of Jolt's thread pool and `variant` in a child
+/// process that executes the ignored test `child_test` of this binary, and returns the digest
+/// it recorded.
 pub fn digest_in_child(child_test: &str, scenario: &str, threads: u32, variant: &str) -> Digest {
+    digest_in_child_with_jobs(child_test, scenario, threads, variant, JobChoice::Native)
+}
+
+/// As [`digest_in_child`], with the child's worlds on the job system `jobs`.
+pub fn digest_in_child_with_jobs(
+    child_test: &str,
+    scenario: &str,
+    threads: u32,
+    variant: &str,
+    jobs: JobChoice,
+) -> Digest {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let file = TempFile(std::env::temp_dir().join(format!(
         "joltphysics-digest-{}-{}.bin",
@@ -254,12 +272,17 @@ pub fn digest_in_child(child_test: &str, scenario: &str, threads: u32, variant: 
         COUNTER.fetch_add(1, Ordering::Relaxed)
     )));
     let request = format!("{scenario},{threads},{variant}");
-    let output = Command::new(std::env::current_exe().unwrap())
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
         .args([child_test, "--exact", "--ignored", "--test-threads=1"])
         .env(CHILD_ENV, &request)
-        .env(OUTPUT_ENV, &file.0)
-        .output()
-        .unwrap();
+        .env(OUTPUT_ENV, &file.0);
+    match jobs.as_env() {
+        Some(value) => command.env(JOBS_ENV, value),
+        None => command.env_remove(JOBS_ENV),
+    };
+    let request = format!("{request} on {jobs:?} jobs");
+    let output = command.output().unwrap();
     if !output.status.success() {
         // libtest reports a failed test's panic on stdout, the process's own errors on stderr.
         let tail = |bytes: &[u8]| {

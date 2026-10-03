@@ -19,6 +19,9 @@ asserts = ["joltphysics-sys/asserts"]
 [dependencies]
 joltphysics-sys = { version = "0.4.0", path = "../joltphysics-sys" }
 
+[dev-dependencies]
+rayon = "1.11"
+
 [[bench]]
 name = "budgets"
 harness = false
