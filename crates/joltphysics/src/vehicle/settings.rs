@@ -11,7 +11,7 @@ use joltphysics_sys::*;
 
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
-use crate::{ObjectLayer, Vec3, VehicleError};
+use crate::{ObjectLayer, PhysicsWorld, Vec3, VehicleError};
 
 /// Jolt's default longitudinal friction curve of a wheel (`WheelSettingsWV`): friction
 /// coefficient over longitudinal slip ratio.
@@ -124,7 +124,8 @@ impl VehicleSettings {
     }
 
     /// Checks every value Jolt asserts on or divides by, so none of Jolt's assertions can fire
-    /// and no division by a setting can give a non-finite result.
+    /// and no division by a setting can give a non-finite result, and the coefficients Jolt
+    /// derives from the settings ([`validate_step_coefficients`](Self::validate_step_coefficients)).
     pub(crate) fn validate(&self, object_layer_count: u32) -> Result<(), VehicleError> {
         let invalid = |what| Err(VehicleError::InvalidValue(what));
         if self.wheels.is_empty() {
@@ -154,6 +155,7 @@ impl VehicleSettings {
         for bar in &self.anti_roll_bars {
             bar.validate(self.wheels.len())?;
         }
+        self.validate_step_coefficients()?;
         self.collision_tester.validate(
             object_layer_count,
             self.wheels.iter().map(WheelGeometry::of),
@@ -175,6 +177,93 @@ impl VehicleSettings {
         // step (`WheeledVehicleController::PostCollide`).
         if (torque_ratio_sum - 1.0).abs() >= SUM_TOLERANCE {
             return invalid("differential engine torque ratios must add up to 1");
+        }
+        Ok(())
+    }
+
+    /// Checks that the coefficients the wheeled controller forms from the settings alone
+    /// (`WheeledVehicleController::PostCollide`, `VehicleEngine::ApplyTorque`) are finite at
+    /// every step [`PhysicsWorld::step`] accepts. Each grows with the step, so the largest step
+    /// is the worst case. Values that are valid one by one can overflow together: a subnormal
+    /// inertia makes `delta_time / inertia` infinite, huge gear and differential ratios make
+    /// their product infinite. What the step computes from the vehicle's state afterwards is
+    /// not bounded here.
+    fn validate_step_coefficients(&self) -> Result<(), VehicleError> {
+        let invalid = |what| Err(VehicleError::InvalidValue(what));
+        let dt = PhysicsWorld::MAX_DELTA_TIME;
+        let all_finite = |values: &[f32]| values.iter().all(|value| value.is_finite());
+        for wheel in &self.wheels {
+            let brake_impulse = dt * (wheel.max_brake_torque + wheel.max_hand_brake_torque);
+            if !all_finite(&[
+                dt / wheel.inertia,
+                brake_impulse,
+                brake_impulse / wheel.inertia,
+                brake_impulse / wheel.radius,
+                wheel.radius / wheel.inertia,
+                wheel.inertia / wheel.radius,
+            ]) {
+                return invalid(
+                    "wheel inertia, radius and brake torques give a non-finite step coefficient",
+                );
+            }
+        }
+
+        let engine = &self.engine;
+        let dt_div_ie = dt / engine.inertia;
+        let largest_torque_fraction = engine
+            .normalized_torque
+            .iter()
+            .map(|(_, fraction)| fraction.abs())
+            .fold(0.0, f32::max);
+        let torque = engine.max_torque * largest_torque_fraction;
+        if !all_finite(&[
+            dt_div_ie,
+            torque,
+            dt_div_ie * torque,
+            ANGULAR_VELOCITY_TO_RPM * torque * dt / engine.inertia,
+        ]) {
+            return invalid("engine inertia and torque give a non-finite step coefficient");
+        }
+
+        // The clutch couples the engine to every driven wheel through the gear ratio times the
+        // differential ratio; each wheel gets at most all of the engine torque.
+        let transmission = &self.transmission;
+        let clutch = transmission.clutch_strength;
+        let largest_gear_ratio = transmission
+            .gear_ratios
+            .iter()
+            .chain(&transmission.reverse_gear_ratios)
+            .map(|ratio| ratio.abs())
+            .fold(0.0, f32::max);
+        let clutch_to_wheel_ratio = |differential: &VehicleDifferentialSettings| {
+            largest_gear_ratio * differential.differential_ratio
+        };
+        let largest_clutch_to_wheel_ratio = self
+            .differentials
+            .iter()
+            .map(clutch_to_wheel_ratio)
+            .fold(0.0, f32::max);
+        if !all_finite(&[1.0 + dt_div_ie * clutch]) {
+            return invalid(
+                "engine inertia and clutch strength give a non-finite step coefficient",
+            );
+        }
+        for differential in &self.differentials {
+            let s_r = clutch * clutch_to_wheel_ratio(differential);
+            let driven = [differential.left_wheel, differential.right_wheel];
+            for wheel in driven.into_iter().flatten() {
+                let dt_s_r_div_iw = dt * s_r / self.wheels[wheel as usize].inertia;
+                if !all_finite(&[
+                    s_r,
+                    dt_div_ie * s_r,
+                    dt_s_r_div_iw,
+                    dt_s_r_div_iw * largest_clutch_to_wheel_ratio,
+                ]) {
+                    return invalid(
+                        "clutch strength, gear and differential ratios and wheel inertia give a non-finite step coefficient",
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -252,6 +341,9 @@ impl VehicleSettings {
         self.max_pitch_roll_angle
     }
 }
+
+/// Jolt's `VehicleEngine::cAngularVelocityToRPM`.
+const ANGULAR_VELOCITY_TO_RPM: f32 = 60.0 / (2.0 * PI);
 
 /// Tolerance of the unit-length checks: `|v·v − 1|` at most this, half of Jolt's
 /// `Vec3::IsNormalized` tolerance 1e-6, so a rounding difference between the check here and
@@ -1209,6 +1301,12 @@ impl VehicleCollisionTester {
                         "ray tester needs a unit up and a max slope angle between 0 and pi",
                     );
                 }
+                // The ray length (`VehicleCollisionTesterRay::Collide`).
+                if !wheels.all(|w| (w.suspension_max_length + w.radius).is_finite()) {
+                    return invalid(
+                        "every wheel's max suspension length plus radius must be finite",
+                    );
+                }
             }
             Self::CastSphere {
                 radius,
@@ -1225,7 +1323,10 @@ impl VehicleCollisionTester {
                     return invalid("sphere tester radius must be finite and positive");
                 }
                 // The cast length (`VehicleCollisionTesterCastSphere::Collide`).
-                if !wheels.all(|w| w.suspension_max_length + w.radius - radius > 0.0) {
+                if !wheels.all(|w| {
+                    let cast_length = w.suspension_max_length + w.radius - radius;
+                    cast_length.is_finite() && cast_length > 0.0
+                }) {
                     return invalid(
                         "sphere tester radius must be below every wheel's max suspension length plus radius",
                     );
@@ -1772,6 +1873,58 @@ mod tests {
         assert_rejected(with_wheel(|w| w.inertia(0.0)));
     }
 
+    const SMALLEST_SUBNORMAL: f32 = f32::from_bits(1);
+
+    #[test]
+    fn step_coefficients_of_wheels_must_be_finite() {
+        // `delta_time / inertia` overflows for a subnormal inertia, driven wheel or not.
+        assert_rejected(with_wheel(|w| w.inertia(SMALLEST_SUBNORMAL)));
+        assert_rejected(with_wheel(|w| w.radius(SMALLEST_SUBNORMAL)));
+        assert_rejected(with_wheel(|w| w.radius(f32::MAX).inertia(1.0e-3)));
+        assert_rejected(with_wheel(|w| {
+            w.max_brake_torque(f32::MAX).max_hand_brake_torque(f32::MAX)
+        }));
+        assert_rejected(with_wheel(|w| w.max_brake_torque(f32::MAX).inertia(0.5)));
+        assert_eq!(with_wheel(|w| w.inertia(1.0e-30)).validate(LAYERS), Ok(()));
+        assert_eq!(
+            with_wheel(|w| w.max_brake_torque(1.0e30)).validate(LAYERS),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn step_coefficients_of_the_drivetrain_must_be_finite() {
+        let engine = VehicleEngineSettings::default();
+        assert_rejected(car().engine(engine.clone().inertia(SMALLEST_SUBNORMAL)));
+        assert_rejected(car().engine(engine.clone().inertia(1.0e-38)));
+        assert_rejected(car().engine(engine.clone().max_torque(f32::MAX)));
+        assert_rejected(car().engine(engine.clone().normalized_torque(vec![(0.0, f32::MAX)])));
+        let transmission = VehicleTransmissionSettings::default();
+        assert_rejected(car().transmission(transmission.clone().clutch_strength(f32::MAX)));
+        assert_rejected(car().transmission(transmission.gear_ratios(vec![f32::MAX])));
+        assert_rejected(VehicleSettings {
+            differentials: vec![
+                VehicleDifferentialSettings::new(Some(0), Some(1)).differential_ratio(f32::MAX)
+            ],
+            ..car()
+        });
+        // A driven wheel with a tiny inertia overflows `delta_time * S * R / inertia`; the same
+        // inertia on an undriven wheel does not.
+        let tiny = |w: WheelSettings| {
+            w.inertia(1.0e-37)
+                .max_brake_torque(0.0)
+                .max_hand_brake_torque(0.0)
+        };
+        let mut tiny_driven = car();
+        tiny_driven.wheels[0] = tiny(tiny_driven.wheels[0].clone());
+        assert_rejected(tiny_driven);
+        assert_eq!(with_wheel(tiny).validate(LAYERS), Ok(()));
+        assert_eq!(
+            car().engine(engine.max_torque(1.0e30)).validate(LAYERS),
+            Ok(())
+        );
+    }
+
     #[test]
     fn engine_values_are_validated() {
         let engine = |edit: fn(VehicleEngineSettings) -> VehicleEngineSettings| {
@@ -1884,6 +2037,26 @@ mod tests {
         assert_eq!(
             with(VehicleCollisionTester::cast_sphere(layer, 0.84)).validate(LAYERS),
             Ok(())
+        );
+        // Each length is finite, the ray or cast length `max length + radius` is not.
+        let huge = |w: WheelSettings| {
+            w.suspension_max_length(f32::MAX)
+                .radius(f32::MAX)
+                .inertia(f32::MAX)
+        };
+        assert_eq!(
+            with_wheel(huge).validate(LAYERS),
+            Err(VehicleError::InvalidValue(
+                "every wheel's max suspension length plus radius must be finite"
+            ))
+        );
+        let mut huge_sphere = with_wheel(huge);
+        huge_sphere.collision_tester = VehicleCollisionTester::cast_sphere(layer, 0.2);
+        assert_eq!(
+            huge_sphere.validate(LAYERS),
+            Err(VehicleError::InvalidValue(
+                "sphere tester radius must be below every wheel's max suspension length plus radius"
+            ))
         );
         assert_rejected(with(VehicleCollisionTester::CastCylinder {
             object_layer: layer,
