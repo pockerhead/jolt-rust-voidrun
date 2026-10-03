@@ -371,6 +371,8 @@ impl VehicleMut<'_> {
     /// force. The opposite of `gravity` also becomes the world up of the pitch and roll limit.
     /// The override stays until it is set again; there is no reset, because Jolt's reset writes
     /// gravity factor 1 to the chassis. For radial gravity, set it every tick.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_gravity(&mut self, gravity: Vec3) -> Result<(), VehicleError> {
         if !limits::is_acceleration(gravity) {
             return Err(VehicleError::InvalidValue(
@@ -385,6 +387,8 @@ impl VehicleMut<'_> {
 
     /// Sets the largest pitch and roll angle, radians in `[0, π]`; π turns the limit off. See
     /// [`VehicleSettings::max_pitch_roll_angle`].
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_max_pitch_roll_angle(&mut self, radians: f32) -> Result<(), VehicleError> {
         if !(radians.is_finite() && (0.0..=std::f32::consts::PI).contains(&radians)) {
             return Err(VehicleError::InvalidValue(
@@ -398,6 +402,8 @@ impl VehicleMut<'_> {
 
     /// Replaces the collision tester, checked against this vehicle's wheels as at creation. The
     /// next step tests the wheels with it.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_collision_tester(
         &mut self,
         tester: VehicleCollisionTester,
@@ -557,6 +563,7 @@ impl PhysicsWorld {
             wheels: settings.wheels.iter().map(WheelGeometry::of).collect(),
         };
         install_tester(&mut entry, settings.collision_tester);
+        self.note_structure_change();
         // SAFETY: the system and the constraint are live, the system is borrowed mutably and no
         // step runs. The system takes its own reference as a constraint and keeps a pointer as a
         // step listener; `remove_vehicle` and `remove_all_vehicles` take the vehicle out of both
@@ -590,6 +597,7 @@ impl PhysicsWorld {
     /// vehicle left it.
     pub fn remove_vehicle(&mut self, id: VehicleId) -> Result<(), VehicleError> {
         self.vehicle_entry(id)?;
+        self.note_structure_change();
         let entry = self
             .vehicles
             .remove(&id.raw)

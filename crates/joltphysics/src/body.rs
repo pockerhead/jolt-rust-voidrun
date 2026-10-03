@@ -582,6 +582,7 @@ impl PhysicsWorld {
             }
         }
         let creation = CreationSettings::new(shape, settings)?;
+        self.note_structure_change();
         // SAFETY: the body interface belongs to this live world, borrowed mutably; `creation`
         // is a fully set up settings object whose layer exists in this world.
         let raw = unsafe {
@@ -691,6 +692,7 @@ impl PhysicsWorld {
             unsafe { JPH_Body_GetWorldSpaceBounds(body.as_ptr(), &mut bounds) };
         })
         .ok_or(BodyError::NotFound(id))?;
+        self.note_structure_change();
         // SAFETY: `check` just confirmed the id names a body in this world, and `&mut self`
         // keeps anyone else from removing it in between, so the body is removed exactly once
         // (Jolt does not validate ids in `DestroyBody`). This thread holds no body lock.

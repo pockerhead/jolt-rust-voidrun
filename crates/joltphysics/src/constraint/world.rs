@@ -785,6 +785,7 @@ impl PhysicsWorld {
         // On failure, dropping `constraint` releases the only reference to it.
         attached.map_err(ConstraintError::InvalidValue)?;
 
+        self.note_structure_change();
         // SAFETY: the system and the constraint are live, the system is borrowed mutably and no
         // step runs. The system takes its own reference; `remove_constraint` and
         // `remove_all_constraints` remove it before the world releases its own.
@@ -939,6 +940,7 @@ impl PhysicsWorld {
             };
             return Err(ConstraintError::UsedByConstraint(dependent));
         }
+        self.note_structure_change();
         let entry = self
             .constraints
             .remove(&id.raw)

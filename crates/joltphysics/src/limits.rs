@@ -224,6 +224,7 @@
 //! | `PhysicsWorld::update_character` weight impulse | character mass times gravity times delta time at most [`MAX_WEIGHT_IMPULSE`] | new: `character_weight_impulse_at_a_lever_arm_is_bounded`, `weight_impulse_check_accepts_its_bound_and_rejects_beyond` |
 //! | `ExtendedUpdateSettings` steps and forward distances | [`MAX_SHAPE_EXTENT`] | new: `character_update_gravity_and_steps_are_bounded` |
 //! | `CharacterMut::restore_state` | only states from `save_state` exist | existing: `a_restored_state_saves_the_same_bytes` |
+//! | `PhysicsWorld::restore_state` | only states from `save_state`/`save_state_of` of the same world at the same epoch exist | new: `tests/state.rs` |
 //! | `VehicleMut::set_gravity` | [`MAX_ACCELERATION`] | new: `gravity_is_bounded_by_max_acceleration` |
 //! | `WheelSettings::new` position, `suspension_force_point` | [`MAX_SHAPE_EXTENT`] per axis | new: `wheel_magnitudes_are_bounded_by_the_policy` |
 //! | `WheelSettings` suspension min, max and preload lengths, radius, width | `0..=`[`MAX_SHAPE_EXTENT`] (radius positive, max length at least min length) | new: `wheel_magnitudes_are_bounded_by_the_policy` |

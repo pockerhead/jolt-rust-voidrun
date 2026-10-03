@@ -28,7 +28,7 @@ use crate::constraint::SixDofConstraintAxis;
 use crate::limits;
 use crate::math::{jolt_angular_velocity, jolt_product, jolt_rotate};
 use crate::owned::{JoltObject, Owned};
-use crate::world::WorldTag;
+use crate::world::{advance_structure_epoch, WorldTag};
 use crate::{Activation, BodyId, MotionType, PhysicsWorld, Quat, RVec3, RagdollError, Real, Vec3};
 
 use settings::JointKind;
@@ -307,6 +307,7 @@ impl RagdollRef<'_> {
 pub struct RagdollMut<'w> {
     entry: &'w mut RagdollEntry,
     body_interface: NonNull<JPH_BodyInterface>,
+    structure_epoch: &'w mut u64,
 }
 
 impl RagdollMut<'_> {
@@ -531,6 +532,8 @@ impl RagdollMut<'_> {
                 "ragdoll parts are dynamic or kinematic",
             ));
         }
+        // Jolt does not save motion types.
+        advance_structure_epoch(self.structure_epoch);
         for &id in &self.entry.bodies {
             // SAFETY: the world is borrowed mutably through this view and holds the part, which
             // has motion properties because it was created dynamic or kinematic. This thread
@@ -645,6 +648,7 @@ impl PhysicsWorld {
         if room.is_none_or(|room| parts as u64 > u64::from(room)) {
             return Err(RagdollError::TooManyBodies);
         }
+        self.note_structure_change();
         // SAFETY: the settings and the system are live, and the system is borrowed mutably, so no
         // other body is created meanwhile. Jolt's `BodyManager::AddBody` fails only when the
         // world holds `GetMaxBodies()` bodies, and the check above leaves room for every part,
@@ -729,6 +733,7 @@ impl PhysicsWorld {
         Ok(RagdollMut {
             entry,
             body_interface,
+            structure_epoch: &mut self.structure_epoch,
         })
     }
 
@@ -738,6 +743,7 @@ impl PhysicsWorld {
     /// a removed part's, part by part in part order and within a part in body-id order.
     pub fn remove_ragdoll(&mut self, id: RagdollId) -> Result<(), RagdollError> {
         self.ragdoll_entry(id)?;
+        self.note_structure_change();
         let entry = self
             .ragdolls
             .remove(&id.raw)

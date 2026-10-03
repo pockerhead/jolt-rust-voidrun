@@ -1091,6 +1091,7 @@ impl PhysicsWorld {
         let jolt_settings = settings.to_jph(raw);
         let position = position.to_jph();
         let rotation = rotation.to_jph();
+        self.note_structure_change();
         // SAFETY: the system is live and borrowed mutably; the settings, their shape pointers
         // (borrowed from `settings`) and the pose are live for the call, and validated. The
         // character takes its own references to the shapes. The handle takes over the one
@@ -1185,6 +1186,7 @@ impl PhysicsWorld {
     /// dynamic bodies, which stay awake while they touch it.
     pub fn remove_character(&mut self, id: CharacterId) -> Result<(), CharacterError> {
         self.character_entry(id)?;
+        self.note_structure_change();
         let entry = self
             .characters
             .remove(&id.raw)

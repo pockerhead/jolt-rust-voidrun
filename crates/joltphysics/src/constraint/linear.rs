@@ -412,6 +412,8 @@ impl ConstraintRef<'_, DistanceConstraint> {
 impl ConstraintMut<'_, DistanceConstraint> {
     /// Sets the allowed distance range in metres: `0 <= min <= max <=`
     /// [`limits::MAX_SHAPE_EXTENT`]. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_distance(&mut self, min: f32, max: f32) -> Result<(), ConstraintError> {
         validate_distance_range(min, max).map_err(ConstraintError::InvalidValue)?;
         // SAFETY: the world is borrowed mutably through this view and owns the constraint; no
@@ -423,6 +425,8 @@ impl ConstraintMut<'_, DistanceConstraint> {
 
     /// Replaces the spring of the range limits, bounded through the bodies' effective mass as
     /// at creation. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_limits_spring(&mut self, spring: SpringSettings) -> Result<(), ConstraintError> {
         check_spring(spring, self.effective_mass_bound())?;
         let mut spring = spring.to_jph();
@@ -743,6 +747,8 @@ impl ConstraintMut<'_, SliderConstraint> {
 
     /// Replaces the motor settings, checked as at creation and bounded through the bodies'
     /// effective mass. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_motor_settings(&mut self, motor: MotorSettings) -> Result<(), ConstraintError> {
         check_motor(motor, self.effective_mass_bound())?;
         let mut motor = motor.to_jph();
@@ -754,6 +760,8 @@ impl ConstraintMut<'_, SliderConstraint> {
 
     /// Sets the position limits, with the rules of [`SliderConstraintSettings::limits`]; `None`
     /// removes them. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_limits(&mut self, limits: Option<(f32, f32)>) -> Result<(), ConstraintError> {
         if let Some((min, max)) = limits {
             validate_slider_limits(min, max, self.limits_spring())
@@ -768,6 +776,8 @@ impl ConstraintMut<'_, SliderConstraint> {
 
     /// Replaces the spring that makes the limits soft, bounded through the bodies' effective
     /// mass. Limits with `min == max` keep needing a soft spring. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_limits_spring(&mut self, spring: SpringSettings) -> Result<(), ConstraintError> {
         check_spring(spring, self.effective_mass_bound())?;
         // SAFETY: as in `set_motor_state`; the getters read members.
@@ -790,6 +800,8 @@ impl ConstraintMut<'_, SliderConstraint> {
 
     /// Sets the friction force in N applied while the motor is off, finite and at least 0.
     /// Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_max_friction_force(&mut self, force: f32) -> Result<(), ConstraintError> {
         check_friction(force)?;
         // SAFETY: as in `set_motor_state`.
@@ -1028,6 +1040,8 @@ impl ConstraintRef<'_, PulleyConstraint> {
 impl ConstraintMut<'_, PulleyConstraint> {
     /// Sets the allowed rope length in metres: `0 <= min <= max <= (1 + ratio) ·`
     /// [`limits::MAX_SHAPE_EXTENT`]. Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_length(&mut self, min: f32, max: f32) -> Result<(), ConstraintError> {
         // SAFETY: the world is borrowed mutably through this view and owns the constraint; no
         // step runs, and `pulley_settings` only reads it.

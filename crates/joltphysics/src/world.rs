@@ -338,6 +338,12 @@ impl WorldTag {
     }
 }
 
+/// Advances a world's structure epoch ([`PhysicsWorld::note_structure_change`]), for views that
+/// borrow only part of the world. Overflow cannot happen in practice and fails closed.
+pub(crate) fn advance_structure_epoch(epoch: &mut u64) {
+    *epoch = epoch.checked_add(1).expect("structure epoch overflowed");
+}
+
 /// A Jolt physics system with its collision layers, its own job system and temp allocator.
 ///
 /// The job system is Jolt's thread pool, or a native one that hands the jobs to the caller's
@@ -397,6 +403,10 @@ pub struct PhysicsWorld {
     pub(crate) constraint_bodies: BTreeMap<u32, BTreeSet<u32>>,
     /// The id the next constraint gets; ids start at 1 and are never reused.
     pub(crate) next_constraint_id: u32,
+    /// Counts the changes Jolt's saved state cannot express (the body, character, vehicle,
+    /// ragdoll and constraint sets, the BodyID allocator, motion types, rebases); a
+    /// [`WorldState`](crate::WorldState) restores only at the epoch it was saved at.
+    pub(crate) structure_epoch: u64,
 }
 
 impl Drop for PhysicsWorld {
@@ -432,7 +442,11 @@ unsafe impl Send for PhysicsWorld {}
 // rotations, which Jolt writes only in `step` and the ragdoll and body setters, all behind
 // `&mut self`. Constraint reads through `&self` are joltc getters over constraint members and the
 // bodies' transforms, which Jolt writes only in `step` and the `&mut` constraint and body
-// setters.
+// setters. `save_state` and `save_state_of` call `PhysicsSystem::SaveState`, which is const:
+// `BodyManager::SaveState` takes every body lock (`LockAllBodies`, in mutex-array order, so
+// concurrent saves do not deadlock), `ConstraintManager::SaveState` takes its mutex, and the
+// contact cache it reads is written only by `step` and `restore_state`, both behind `&mut self`.
+// The characters' `SaveState` is const as well.
 unsafe impl Sync for PhysicsWorld {}
 
 /// One body's pose and velocities in a frame.
@@ -656,7 +670,16 @@ impl PhysicsWorld {
             next_ragdoll_id: 1,
             constraint_bodies: BTreeMap::new(),
             next_constraint_id: 1,
+            structure_epoch: 0,
         })
+    }
+
+    /// Records a change that a [`WorldState`](crate::WorldState) cannot undo, so states saved
+    /// before it are refused. Every API that adds or removes a Jolt object (body, character,
+    /// vehicle, ragdoll, constraint) or changes a motion type must call it, after its checks and
+    /// before its first Jolt call that makes the change.
+    pub(crate) fn note_structure_change(&mut self) {
+        advance_structure_epoch(&mut self.structure_epoch);
     }
 
     /// Gravity in m/s².
@@ -831,6 +854,9 @@ impl PhysicsWorld {
             Vec::new()
         };
 
+        // A rebase recreates pulleys, which a state saved before cannot match, and rotates the
+        // vehicles' gravity overrides, which Jolt does not save.
+        self.note_structure_change();
         for (id, motion_type, old, new) in changes {
             let position = new.position.to_jph();
             let rotation = new.rotation.to_jph();

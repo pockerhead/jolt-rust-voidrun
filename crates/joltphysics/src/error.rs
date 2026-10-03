@@ -337,3 +337,38 @@ impl std::error::Error for ConstraintError {
         }
     }
 }
+
+/// Why [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) refused or failed.
+/// On [`WrongWorld`](Self::WrongWorld) and [`WorldChanged`](Self::WorldChanged) the world is
+/// unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StateError {
+    /// The state was saved by another world. This is the crate's policy: Jolt itself can share
+    /// state between worlds built with identical calls, but this API cannot yet check that a
+    /// world is such a peer.
+    WrongWorld,
+    /// The world's structure has changed since the state was saved: a body, character, vehicle,
+    /// ragdoll or constraint was created or removed, a ragdoll's motion type was set, or the
+    /// world was rebased (a rebase that changes nothing does not count). Jolt saves neither
+    /// which objects exist nor its body id allocator, so even a create followed by a remove
+    /// leaves earlier states unrestorable.
+    WorldChanged,
+    /// Jolt or a character could not read the state. A state the world accepted should never
+    /// cause it; if it does, the world may be partly restored and should be discarded.
+    RestoreFailed,
+}
+
+impl fmt::Display for StateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WrongWorld => f.write_str("the state was saved by another world"),
+            Self::WorldChanged => {
+                f.write_str("the world's objects have changed since the state was saved")
+            }
+            Self::RestoreFailed => f.write_str("the state could not be restored"),
+        }
+    }
+}
+
+impl std::error::Error for StateError {}
