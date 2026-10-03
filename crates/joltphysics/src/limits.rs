@@ -410,6 +410,8 @@
 //! | `Shape::new_compound`, `new_offset_center_of_mass` | positions and offset within [`MAX_SHAPE_EXTENT`]; local bounds within it | new: `decorated_and_compound_extents_are_bounded` |
 //! | `Shape::new_height_field` | local bounds within [`MAX_SHAPE_EXTENT`] | new: `height_field_extent_is_bounded` |
 //! | `HeightFieldSettings`, `CompoundChild::rotation` | existing ranges | existing: `invalid_height_fields_are_rejected`, `empty_or_invalid_compounds_are_rejected` |
+//! | `Shape::new_box_with_material`, `new_sphere_with_material`, `new_capsule_with_material`, `new_cylinder_with_material` | the plain sibling's rules | new: `convex_constructors_apply_the_plain_rules` |
+//! | `Shape::new_height_field_with_materials` | the rules of `new_height_field`; material count `1..=256`, `(n - 1)^2` indices, each below the count | new: `height_field_material_lists_are_validated` |
 //! | `PhysicsWorld::cast_ray` origin | [`MAX_POSITION`] | new: `query_inputs_are_bounded_by_the_frame` |
 //! | `RayCast` direction | finite, not zero | existing: `invalid_rays_are_rejected`; new: `a_ray_with_a_huge_finite_direction_is_cast` |
 //! | `ShapeCast`, `CollideShape` position | [`MAX_POSITION`] | new: `query_inputs_are_bounded_by_the_frame` |

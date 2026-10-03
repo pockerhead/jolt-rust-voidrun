@@ -90,7 +90,7 @@ pub struct CompoundSubShape {
 /// cached `ShapeResult` reference. A shape returned by a `*_CreateShape` or `*_Create` call
 /// carries its own reference (joltc calls `AddRef` before returning it), so the caller keeps
 /// exactly one reference to the shape.
-struct ShapeSettings(Owned<JPH_ShapeSettings>);
+pub(crate) struct ShapeSettings(Owned<JPH_ShapeSettings>);
 
 /// Shape settings, of which the owner holds one Jolt reference.
 impl JoltObject for JPH_ShapeSettings {
@@ -108,7 +108,7 @@ impl ShapeSettings {
     /// # Safety
     /// `ptr` is null or points to live shape settings holding one reference that the caller
     /// hands over.
-    unsafe fn from_raw(ptr: *mut JPH_ShapeSettings) -> Result<Self, ShapeError> {
+    pub(crate) unsafe fn from_raw(ptr: *mut JPH_ShapeSettings) -> Result<Self, ShapeError> {
         // SAFETY: the caller hands over one reference to live settings, or null.
         unsafe { Owned::from_raw(ptr) }
             .map(Self)
@@ -118,35 +118,53 @@ impl ShapeSettings {
     /// The settings as one of joltc's typed settings pointers. joltc's settings types are
     /// `reinterpret_cast`s of Jolt classes with single inheritance from `ShapeSettings`, the
     /// convention joltc itself uses, so the caller picks the type the settings were created as.
-    fn as_ptr<T>(&self) -> *mut T {
+    pub(crate) fn as_ptr<T>(&self) -> *mut T {
         self.0.as_ptr().cast()
     }
 }
 
-/// Jolt heightfield settings holding `samples` and `settings`.
+/// Material indices, one per cell, and the live materials they index, for a heightfield.
+pub(crate) type HeightFieldMaterials<'a> = (&'a [u8], &'a [*const JPH_PhysicsMaterial]);
+
+/// Jolt heightfield settings holding `samples`, `settings` and, when given, `materials`.
 ///
 /// # Safety
 /// Jolt is initialised, `samples` holds `sample_count^2` finite values and `settings` passed
-/// `validate_layout(sample_count)` and `validate_extents`.
+/// `validate_layout(sample_count)` and `validate_extents`. Material indices, when given, hold
+/// `(sample_count - 1)^2` entries, and the material list is not empty and holds live materials.
 unsafe fn height_field_settings(
     sample_count: u32,
     samples: &[f32],
     settings: &HeightFieldSettings,
+    materials: Option<HeightFieldMaterials<'_>>,
 ) -> Result<ShapeSettings, ShapeError> {
     let offset = settings.offset.to_jph();
     let scale = settings.scale.to_jph();
-    // SAFETY: the caller guarantees initialisation and that `samples` holds `sample_count^2`
-    // floats, which Jolt copies; `offset` and `scale` are live locals. Null material indices
-    // are allowed. The returned settings hold one reference, which the guard takes over.
+    // SAFETY: the caller guarantees initialisation, that `samples` holds `sample_count^2`
+    // floats and the index and material counts, all of which Jolt copies (the list takes its
+    // own material references); `offset` and `scale` are live locals. Null material indices
+    // are allowed without a list. The returned settings hold one reference, which the guard
+    // takes over.
     let jolt_settings = unsafe {
         ShapeSettings::from_raw(
-            JPH_HeightFieldShapeSettings_Create(
-                samples.as_ptr(),
-                &offset,
-                &scale,
-                sample_count,
-                null(),
-            )
+            match materials {
+                None => JPH_HeightFieldShapeSettings_Create(
+                    samples.as_ptr(),
+                    &offset,
+                    &scale,
+                    sample_count,
+                    null(),
+                ),
+                Some((indices, list)) => JPH_HeightFieldShapeSettings_Create2(
+                    samples.as_ptr(),
+                    &offset,
+                    &scale,
+                    sample_count,
+                    indices.as_ptr(),
+                    list.as_ptr(),
+                    list.len() as u32,
+                ),
+            }
             .cast(),
         )
     }?;
@@ -165,7 +183,7 @@ unsafe fn height_field_settings(
 }
 
 /// Runs `JPH_Init` once, mapping failure to [`ShapeError::InitFailed`].
-fn initialize() -> Result<(), ShapeError> {
+pub(crate) fn initialize() -> Result<(), ShapeError> {
     if ensure_initialized() {
         Ok(())
     } else {
@@ -322,6 +340,120 @@ fn height_range(samples: &[f32]) -> Option<(f32, f32)> {
         })
 }
 
+/// The checks of [`Shape::new_box_with_convex_radius`].
+pub(crate) fn validate_box(half_extent: Vec3, convex_radius: f32) -> Result<(), ShapeError> {
+    let components = [half_extent.x, half_extent.y, half_extent.z];
+    if !components.into_iter().all(is_finite_positive) {
+        return Err(ShapeError::InvalidDimensions(
+            "box half extents must be finite and positive",
+        ));
+    }
+    if !components.into_iter().all(within_extent) {
+        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+    }
+    validate_convex_radius(convex_radius)
+}
+
+fn validate_convex_radius(convex_radius: f32) -> Result<(), ShapeError> {
+    if is_finite_non_negative(convex_radius) {
+        Ok(())
+    } else {
+        Err(ShapeError::InvalidDimensions(
+            "convex radius must be finite and not negative",
+        ))
+    }
+}
+
+/// The checks of [`Shape::new_sphere`].
+pub(crate) fn validate_sphere(radius: f32) -> Result<(), ShapeError> {
+    if radius > limits::MAX_SHAPE_EXTENT {
+        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+    }
+    validate_positive_sphere(radius)
+}
+
+fn validate_positive_sphere(radius: f32) -> Result<(), ShapeError> {
+    if is_finite_positive(radius) {
+        Ok(())
+    } else {
+        Err(ShapeError::InvalidDimensions(
+            "sphere radius must be finite and positive",
+        ))
+    }
+}
+
+/// The checks of [`Shape::new_capsule`].
+pub(crate) fn validate_capsule(
+    half_height_of_cylinder: f32,
+    radius: f32,
+) -> Result<(), ShapeError> {
+    if half_height_of_cylinder + radius > limits::MAX_SHAPE_EXTENT {
+        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+    }
+    validate_positive_capsule(half_height_of_cylinder, radius)
+}
+
+fn validate_positive_capsule(half_height_of_cylinder: f32, radius: f32) -> Result<(), ShapeError> {
+    if is_finite_positive(half_height_of_cylinder) && is_finite_positive(radius) {
+        Ok(())
+    } else {
+        Err(ShapeError::InvalidDimensions(
+            "capsule half height and radius must be finite and positive",
+        ))
+    }
+}
+
+/// The checks of [`Shape::new_cylinder_with_convex_radius`].
+pub(crate) fn validate_cylinder(
+    half_height: f32,
+    radius: f32,
+    convex_radius: f32,
+) -> Result<(), ShapeError> {
+    if !(is_finite_positive(half_height) && is_finite_positive(radius)) {
+        return Err(ShapeError::InvalidDimensions(
+            "cylinder half height and radius must be finite and positive",
+        ));
+    }
+    if !(within_extent(half_height) && within_extent(radius)) {
+        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+    }
+    validate_convex_radius(convex_radius)
+}
+
+/// The checks of [`Shape::new_height_field`] before Jolt sees anything.
+pub(crate) fn validate_height_field(
+    sample_count: u32,
+    samples: &[f32],
+    settings: &HeightFieldSettings,
+) -> Result<(), ShapeError> {
+    if sample_count < 2 {
+        return Err(ShapeError::InvalidDimensions(
+            "sample_count must be at least 2",
+        ));
+    }
+    // Jolt divides by the block size before it checks it, so the settings are checked first.
+    let padded = settings.validate_layout(sample_count)?;
+    let count = sample_count as usize;
+    if count.checked_mul(count) != Some(samples.len()) {
+        return Err(ShapeError::InvalidDimensions(
+            "samples must hold sample_count^2 values",
+        ));
+    }
+    if !samples.iter().all(|sample| sample.is_finite()) {
+        return Err(ShapeError::InvalidDimensions(
+            "height samples must be finite",
+        ));
+    }
+    let heights = height_range(samples);
+    // Jolt quantises with `65534 / (max - min)`, so the range must be finite too.
+    if heights.is_some_and(|(min, max)| !(max - min).is_finite()) {
+        return Err(ShapeError::InvalidDimensions(
+            "height sample range must be finite",
+        ));
+    }
+    settings.validate_extents(padded, heights)
+}
+
 impl Shape {
     /// A box with the given half extents in metres (each finite, positive and at most
     /// [`limits::MAX_SHAPE_EXTENT`]) and Jolt's default convex radius of 0.05 m; see
@@ -346,20 +478,7 @@ impl Shape {
         half_extent: Vec3,
         convex_radius: f32,
     ) -> Result<Self, ShapeError> {
-        let components = [half_extent.x, half_extent.y, half_extent.z];
-        if !components.into_iter().all(is_finite_positive) {
-            return Err(ShapeError::InvalidDimensions(
-                "box half extents must be finite and positive",
-            ));
-        }
-        if !components.into_iter().all(within_extent) {
-            return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
-        }
-        if !is_finite_non_negative(convex_radius) {
-            return Err(ShapeError::InvalidDimensions(
-                "convex radius must be finite and not negative",
-            ));
-        }
+        validate_box(half_extent, convex_radius)?;
         initialize()?;
         let half_extent = half_extent.to_jph();
         // SAFETY: Jolt is initialised, `half_extent` is a live local and both inputs were
@@ -371,20 +490,14 @@ impl Shape {
     /// A sphere with the given radius in metres (finite, positive and at most
     /// [`limits::MAX_SHAPE_EXTENT`]).
     pub fn new_sphere(radius: f32) -> Result<Self, ShapeError> {
-        if radius > limits::MAX_SHAPE_EXTENT {
-            return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
-        }
+        validate_sphere(radius)?;
         Self::sphere(radius)
     }
 
     /// A sphere of any finite positive radius, also beyond the extent bound: what
     /// [`inflated`](Self::inflated) needs for a query shape.
     fn sphere(radius: f32) -> Result<Self, ShapeError> {
-        if !is_finite_positive(radius) {
-            return Err(ShapeError::InvalidDimensions(
-                "sphere radius must be finite and positive",
-            ));
-        }
+        validate_positive_sphere(radius)?;
         initialize()?;
         // SAFETY: Jolt is initialised. The returned sphere holds one reference, which `Self`
         // takes over.
@@ -411,19 +524,7 @@ impl Shape {
         radius: f32,
         convex_radius: f32,
     ) -> Result<Self, ShapeError> {
-        if !(is_finite_positive(half_height) && is_finite_positive(radius)) {
-            return Err(ShapeError::InvalidDimensions(
-                "cylinder half height and radius must be finite and positive",
-            ));
-        }
-        if !(within_extent(half_height) && within_extent(radius)) {
-            return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
-        }
-        if !is_finite_non_negative(convex_radius) {
-            return Err(ShapeError::InvalidDimensions(
-                "convex radius must be finite and not negative",
-            ));
-        }
+        validate_cylinder(half_height, radius, convex_radius)?;
         initialize()?;
         // `JPH_CylinderShape_Create` would ignore the convex radius (joltc passes 0), so the
         // cylinder is built through its settings.
@@ -447,20 +548,14 @@ impl Shape {
     /// and positive, and `half_height_of_cylinder + radius` at most
     /// [`limits::MAX_SHAPE_EXTENT`].
     pub fn new_capsule(half_height_of_cylinder: f32, radius: f32) -> Result<Self, ShapeError> {
-        if half_height_of_cylinder + radius > limits::MAX_SHAPE_EXTENT {
-            return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
-        }
+        validate_capsule(half_height_of_cylinder, radius)?;
         Self::capsule(half_height_of_cylinder, radius)
     }
 
     /// A capsule of any finite positive size, also beyond the extent bound: what
     /// [`inflated`](Self::inflated) needs for a query shape.
     fn capsule(half_height_of_cylinder: f32, radius: f32) -> Result<Self, ShapeError> {
-        if !(is_finite_positive(half_height_of_cylinder) && is_finite_positive(radius)) {
-            return Err(ShapeError::InvalidDimensions(
-                "capsule half height and radius must be finite and positive",
-            ));
-        }
+        validate_positive_capsule(half_height_of_cylinder, radius)?;
         initialize()?;
         // SAFETY: Jolt is initialised and both values are positive, as Jolt asserts
         // (`CapsuleShape.h`). The returned capsule holds one reference, which `Self` takes
@@ -510,36 +605,28 @@ impl Shape {
         samples: &[f32],
         settings: &HeightFieldSettings,
     ) -> Result<Self, ShapeError> {
-        if sample_count < 2 {
-            return Err(ShapeError::InvalidDimensions(
-                "sample_count must be at least 2",
-            ));
-        }
-        // Jolt divides by the block size before it checks it, so the settings are checked
-        // first.
-        let padded = settings.validate_layout(sample_count)?;
-        let count = sample_count as usize;
-        if count.checked_mul(count) != Some(samples.len()) {
-            return Err(ShapeError::InvalidDimensions(
-                "samples must hold sample_count^2 values",
-            ));
-        }
-        if !samples.iter().all(|sample| sample.is_finite()) {
-            return Err(ShapeError::InvalidDimensions(
-                "height samples must be finite",
-            ));
-        }
-        let heights = height_range(samples);
-        // Jolt quantises with `65534 / (max - min)`, so the range must be finite too.
-        if heights.is_some_and(|(min, max)| !(max - min).is_finite()) {
-            return Err(ShapeError::InvalidDimensions(
-                "height sample range must be finite",
-            ));
-        }
-        settings.validate_extents(padded, heights)?;
+        validate_height_field(sample_count, samples, settings)?;
+        // SAFETY: `samples` and `settings` were validated above; there are no materials.
+        unsafe { Self::height_field(sample_count, samples, settings, None) }
+    }
+
+    /// The heightfield of [`new_height_field`](Self::new_height_field), with `materials` when
+    /// given.
+    ///
+    /// # Safety
+    /// `samples` and `settings` passed [`validate_height_field`]; `materials`, when given,
+    /// meets the contract of `height_field_settings`.
+    pub(crate) unsafe fn height_field(
+        sample_count: u32,
+        samples: &[f32],
+        settings: &HeightFieldSettings,
+        materials: Option<HeightFieldMaterials<'_>>,
+    ) -> Result<Self, ShapeError> {
         initialize()?;
-        // SAFETY: Jolt is initialised and `samples` and `settings` were validated above.
-        let jolt_settings = unsafe { height_field_settings(sample_count, samples, settings) }?;
+        // SAFETY: Jolt is initialised, the caller validated `samples` and `settings` and
+        // guarantees the material contract.
+        let jolt_settings =
+            unsafe { height_field_settings(sample_count, samples, settings, materials) }?;
         // SAFETY: the settings are live, owned by the guard and were created as heightfield
         // settings. The returned shape holds one reference, which `Self` takes over.
         unsafe {
@@ -680,7 +767,7 @@ impl Shape {
 
     /// `self` when its local bounds lie within [`limits::MAX_SHAPE_EXTENT`] on every axis or are
     /// empty (a field of holes); otherwise an error, and the shape is released.
-    fn within_extent_bounds(self) -> Result<Self, ShapeError> {
+    pub(crate) fn within_extent_bounds(self) -> Result<Self, ShapeError> {
         let mut bounds = JPH_AABox {
             min: Vec3::ZERO.to_jph(),
             max: Vec3::ZERO.to_jph(),
@@ -725,7 +812,7 @@ impl Shape {
     ///
     /// # Safety
     /// `ptr` is null or a live shape holding one reference that the caller hands over.
-    unsafe fn from_created(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
+    pub(crate) unsafe fn from_created(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
         // SAFETY: the caller hands over one reference to a live shape, or null.
         unsafe { Owned::from_raw(ptr) }
             .map(Self)
@@ -1073,7 +1160,7 @@ mod tests {
         assert_eq!(settings.validate_layout(9), Ok(12));
         assert!(ensure_initialized());
         // SAFETY: Jolt is initialised and the inputs are valid (checked above).
-        let jolt_settings = unsafe { height_field_settings(9, &samples, &settings) }.unwrap();
+        let jolt_settings = unsafe { height_field_settings(9, &samples, &settings, None) }.unwrap();
         let ptr = jolt_settings.as_ptr();
         // SAFETY: the settings are live and were created as heightfield settings; getters only
         // read them.

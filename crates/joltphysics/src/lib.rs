@@ -7,7 +7,8 @@
 //! [`Shape`] and [`BodySettings`] and named by a [`BodyId`]. Shapes are boxes (with a
 //! configurable convex radius), spheres, Y-cylinders, Y-capsules, heightfields, compounds
 //! whose children carry their own pose and user data, and shapes with a moved centre of mass;
-//! one shape may serve many bodies in many worlds.
+//! one shape may serve many bodies in many worlds. Primitives and heightfields can be made of
+//! [`PhysicsMaterial`]s, which carry the caller's user data.
 //!
 //! Scene queries run on `&PhysicsWorld`: [`PhysicsWorld::cast_ray`] finds the closest body
 //! along a ray, [`PhysicsWorld::cast_shape`] the first obstacle a moving shape hits, and
@@ -287,6 +288,7 @@ mod job_system;
 mod jolt_assert;
 mod layers;
 pub mod limits;
+mod material;
 mod math;
 mod owned;
 mod query;
@@ -323,6 +325,7 @@ pub use error::{
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
+pub use material::PhysicsMaterial;
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{CollideShape, CollideShapeHit, RayCast, RayHit, ShapeCast, ShapeCastHit};
 pub use ragdoll::{

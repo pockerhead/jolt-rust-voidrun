@@ -919,3 +919,76 @@ fn low_center_of_mass_rights_a_tilted_box() {
     let fallen = roll_after_release(None, 85.0);
     assert!(fallen > 60.0, "plain box ends at roll {fallen}");
 }
+
+#[test]
+fn height_field_material_lists_are_validated() {
+    let materials: Vec<PhysicsMaterial> =
+        (0..257).map(|i| PhysicsMaterial::new(i).unwrap()).collect();
+    let refs: Vec<&PhysicsMaterial> = materials.iter().collect();
+    let samples = vec![0.0; 9];
+    let field = |list: &[&PhysicsMaterial], indices: &[u8]| {
+        Shape::new_height_field_with_materials(
+            3,
+            &samples,
+            &HeightFieldSettings::default(),
+            list,
+            indices,
+        )
+        .err()
+    };
+    let invalid = |error: Option<ShapeError>| matches!(error, Some(ShapeError::InvalidSettings(_)));
+    assert!(invalid(field(&[], &[0; 4])), "no material");
+    assert!(invalid(field(&refs, &[0; 4])), "257 materials");
+    assert_eq!(field(&refs[..256], &[255, 0, 0, 0]), None, "256 materials");
+    assert!(invalid(field(&refs[..2], &[0; 3])), "short indices");
+    assert!(invalid(field(&refs[..2], &[0; 5])), "long indices");
+    assert!(invalid(field(&refs[..2], &[0, 1, 2, 0])), "index == len");
+    assert_eq!(field(&refs[..2], &[0, 1, 1, 0]), None);
+    // The rules of `new_height_field` come first.
+    let error = Shape::new_height_field_with_materials(
+        1,
+        &[0.0],
+        &HeightFieldSettings::default(),
+        &refs[..1],
+        &[],
+    )
+    .err();
+    assert!(matches!(error, Some(ShapeError::InvalidDimensions(_))));
+}
+
+#[test]
+fn shapes_with_materials_collide_like_their_plain_siblings() {
+    let material = PhysicsMaterial::new(3).unwrap();
+    let half = Vec3::new(1.0, 0.5, 1.0);
+    let pairs = [
+        (
+            Shape::new_box(half).unwrap(),
+            Shape::new_box_with_material(half, 0.05, &material).unwrap(),
+        ),
+        (
+            Shape::new_sphere(0.8).unwrap(),
+            Shape::new_sphere_with_material(0.8, &material).unwrap(),
+        ),
+        (
+            Shape::new_capsule(0.4, 0.6).unwrap(),
+            Shape::new_capsule_with_material(0.4, 0.6, &material).unwrap(),
+        ),
+        (
+            Shape::new_cylinder(0.7, 0.6).unwrap(),
+            Shape::new_cylinder_with_material(0.7, 0.6, 0.05, &material).unwrap(),
+        ),
+    ];
+    for (plain, with_material) in &pairs {
+        let mut distances = Vec::new();
+        for shape in [plain, with_material] {
+            let mut world = PhysicsWorld::new(WorldSettings::default()).unwrap();
+            add_static(&mut world, shape, RVec3::ZERO);
+            let hit = world
+                .cast_ray(down_from(0.1, 5.0, 0.2, 10.0), &QueryFilter::new())
+                .unwrap()
+                .expect("the ray hits the shape");
+            distances.push(hit.distance);
+        }
+        assert_eq!(distances[0], distances[1]);
+    }
+}
