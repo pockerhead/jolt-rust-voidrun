@@ -2722,3 +2722,44 @@ fn soft_body_forces_are_bounded_by_the_acceleration_of_a_vertex() {
         assert!(length(vertex.velocity) <= limits::MAX_LINEAR_VELOCITY * 1.0001);
     }
 }
+
+#[test]
+fn soft_body_explicit_constraints_are_bounded() {
+    // Two vertices `length` apart joined by an edge, and a bend over that edge.
+    let pair = |length: f32| {
+        let vertices = vec![
+            SoftBodyVertex::new(Vec3::ZERO),
+            SoftBodyVertex::new(Vec3::new(length, 0.0, 0.0)),
+            SoftBodyVertex::new(Vec3::new(0.0, 0.0, 1.0)),
+            SoftBodyVertex::new(Vec3::new(0.0, 0.0, -1.0)),
+        ];
+        SoftBodySharedSettings::builder(vertices, Vec::new())
+    };
+    let edge = |length, compliance| {
+        pair(length)
+            .edge(SoftBodyEdge {
+                vertices: [0, 1],
+                compliance,
+            })
+            .build()
+    };
+    let bend = |length| {
+        pair(length)
+            .dihedral_bend(SoftBodyDihedralBend {
+                vertices: [0, 1, 2, 3],
+                compliance: 0.0,
+            })
+            .build()
+    };
+    let min = limits::MIN_SOFT_BODY_EDGE_LENGTH;
+    assert!(edge(min, limits::MAX_COMPLIANCE).is_ok());
+    assert!(bend(min).is_ok());
+    assert!(soft_invalid(edge(min.next_down(), 0.0)));
+    assert!(soft_invalid(bend(min.next_down())));
+    for compliance in [-f32::MIN_POSITIVE, limits::MAX_COMPLIANCE.next_up()]
+        .into_iter()
+        .chain(NON_FINITE)
+    {
+        assert!(soft_invalid(edge(1.0, compliance)));
+    }
+}

@@ -3,7 +3,10 @@
 
 mod common;
 
-use common::soft_body::{cloth_attributes, distance, max_vertex_speed, sphere, Cloth};
+use common::soft_body::{
+    cloth_attributes, distance, enclosed_volume, max_vertex_speed, sphere, tetrahedral_cube, Cloth,
+    CUBE_FACES,
+};
 use common::{add_floor, step, world, DT};
 use joltphysics::*;
 
@@ -621,4 +624,143 @@ fn pressure_at_the_bound_steps_finitely() {
             .all(|v| finite_position(v.position) && finite(v.velocity)));
         world.remove_body(id).unwrap();
     }
+}
+
+#[test]
+fn a_tetrahedral_cube_keeps_its_volume_on_the_floor() {
+    let mut world = world(GRAVITY, 2);
+    add_floor(&mut world);
+    let shared = tetrahedral_cube(1.0).build().unwrap();
+    assert_eq!(shared.vertex_count(), 8);
+    assert_eq!(shared.face_count(), 12);
+    assert_eq!(shared.volume_constraint_count(), 6);
+    // 12 cube edges, 6 face diagonals and the body diagonal.
+    assert_eq!(shared.edge_constraint_count(), 19);
+    let id = world
+        .create_soft_body(
+            &shared,
+            &SoftBodySettings::default().position(RVec3::new(0.0, 1.5, 0.0)),
+        )
+        .unwrap();
+    let start = enclosed_volume(&world, id, &CUBE_FACES);
+    assert!((start - 1.0).abs() < 1.0e-5, "{start}");
+    step(&mut world, 180);
+    let volume = enclosed_volume(&world, id, &CUBE_FACES);
+    assert!((volume - 1.0).abs() <= 0.1, "volume {volume}");
+    let lowest = world
+        .soft_body(id)
+        .unwrap()
+        .vertices()
+        .iter()
+        .map(|v| v.position.y)
+        .fold(Real::INFINITY, Real::min);
+    assert!(lowest.abs() < 0.05, "the cube rests on the floor: {lowest}");
+}
+
+#[test]
+fn explicit_constraints_add_to_the_generated_ones() {
+    let cloth = Cloth::new(3, 0.5);
+    let generated = cloth
+        .builder()
+        .create_constraints(SoftBodyBendType::None, SoftBodyVertexAttributes::default())
+        .build()
+        .unwrap();
+    let edge = SoftBodyEdge {
+        vertices: [0, 8],
+        compliance: 0.0,
+    };
+    let bend = SoftBodyDihedralBend {
+        vertices: [0, 4, 3, 1],
+        compliance: 1.0e-3,
+    };
+    let both = cloth
+        .builder()
+        .create_constraints(SoftBodyBendType::None, SoftBodyVertexAttributes::default())
+        .edge(edge)
+        .dihedral_bend(bend)
+        .build()
+        .unwrap();
+    assert_eq!(
+        both.edge_constraint_count(),
+        generated.edge_constraint_count() + 1
+    );
+    assert_eq!(both.dihedral_bend_constraint_count(), 1);
+    assert_eq!(both.volume_constraint_count(), 0);
+}
+
+#[test]
+fn explicit_edges_without_faces_hold_a_pendulum() {
+    let mut world = world(GRAVITY, 1);
+    let vertices = vec![
+        SoftBodyVertex::kinematic(Vec3::ZERO),
+        SoftBodyVertex::new(Vec3::new(1.0, 0.0, 0.0)),
+    ];
+    let shared = SoftBodySharedSettings::builder(vertices, Vec::new())
+        .edge(SoftBodyEdge {
+            vertices: [0, 1],
+            compliance: 0.0,
+        })
+        .build()
+        .unwrap();
+    assert_eq!(shared.face_count(), 0);
+    let id = world
+        .create_soft_body(
+            &shared,
+            &SoftBodySettings::default().position(RVec3::new(0.0, 5.0, 0.0)),
+        )
+        .unwrap();
+    step(&mut world, 30);
+    let vertices = world.soft_body(id).unwrap().vertices();
+    let length = distance(vertices[0].position, vertices[1].position);
+    assert!((length - 1.0).abs() < 0.01, "{length}");
+    assert!(vertices[1].position.y < 5.0, "the bob swings down");
+}
+
+#[test]
+fn invalid_explicit_constraints_are_rejected() {
+    let cloth = Cloth::new(3, 0.5);
+    let invalid = |builder: SoftBodySharedSettingsBuilder| {
+        matches!(builder.build(), Err(SoftBodyError::InvalidValue(_)))
+    };
+    let edge = |vertices, compliance| {
+        cloth.builder().edge(SoftBodyEdge {
+            vertices,
+            compliance,
+        })
+    };
+    assert!(invalid(edge([0, 9], 0.0)));
+    assert!(invalid(edge([4, 4], 0.0)));
+    assert!(invalid(edge([0, 1], -1.0)));
+    assert!(invalid(edge([0, 1], f32::NAN)));
+    assert!(invalid(edge([0, 1], limits::MAX_COMPLIANCE.next_up())));
+    assert!(!invalid(edge([0, 1], limits::MAX_COMPLIANCE)));
+    let bend = |vertices| {
+        cloth.builder().dihedral_bend(SoftBodyDihedralBend {
+            vertices,
+            compliance: 0.0,
+        })
+    };
+    assert!(invalid(bend([0, 4, 3, 3])));
+    assert!(invalid(bend([0, 4, 3, 9])));
+    assert!(!invalid(bend([0, 4, 3, 1])));
+    // A shared edge between two vertices at the same place.
+    let mut doubled = cloth.vertices.clone();
+    doubled.push(doubled[4]);
+    let coincident =
+        SoftBodySharedSettings::builder(doubled, Vec::new()).dihedral_bend(SoftBodyDihedralBend {
+            vertices: [4, 9, 3, 1],
+            compliance: 0.0,
+        });
+    assert!(invalid(coincident));
+    let volume = |vertices| {
+        tetrahedral_cube(1.0).volume(SoftBodyVolume {
+            vertices,
+            compliance: 0.0,
+        })
+    };
+    // Four corners of one face are coplanar.
+    assert!(invalid(volume([0, 1, 2, 3])));
+    assert!(invalid(volume([0, 1, 3, 3])));
+    assert!(invalid(volume([0, 1, 3, 8])));
+    assert!(!invalid(volume([0, 1, 3, 7])));
 }

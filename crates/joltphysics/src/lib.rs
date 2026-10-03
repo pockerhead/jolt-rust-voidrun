@@ -175,7 +175,8 @@
 //! [`PhysicsWorld::create_soft_body`] creates a soft body (cloth, a pressurised ball) from
 //! [`SoftBodySharedSettings`]: vertices, the faces between them and constraints that
 //! [`SoftBodySharedSettingsBuilder::create_constraints`] generates (edges, shear edges, bend
-//! constraints and long range attachments). It is an ordinary body with a [`BodyId`];
+//! constraints and long range attachments) or the caller adds (edges, dihedral bends, volume
+//! constraints for solid bodies). It is an ordinary body with a [`BodyId`];
 //! [`PhysicsWorld::soft_body`] reads its vertices in world space, and
 //! [`PhysicsWorld::soft_body_mut`] sets vertex velocities and inverse masses and moves kinematic
 //! (pinned) vertices. Soft bodies collide with rigid bodies, not with each other (Jolt does not
@@ -328,9 +329,9 @@ pub use ragdoll::{
 };
 pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
 pub use soft_body::{
-    LongRangeAttachment, SoftBodyBendType, SoftBodyMut, SoftBodyRef, SoftBodySettings,
-    SoftBodySharedSettings, SoftBodySharedSettingsBuilder, SoftBodyVertex,
-    SoftBodyVertexAttributes, SoftBodyVertexState,
+    LongRangeAttachment, SoftBodyBendType, SoftBodyDihedralBend, SoftBodyEdge, SoftBodyMut,
+    SoftBodyRef, SoftBodySettings, SoftBodySharedSettings, SoftBodySharedSettingsBuilder,
+    SoftBodyVertex, SoftBodyVertexAttributes, SoftBodyVertexState, SoftBodyVolume,
 };
 pub use state::WorldState;
 pub use vehicle::{

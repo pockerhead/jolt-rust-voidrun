@@ -142,3 +142,83 @@ pub fn distance(a: RVec3, b: RVec3) -> f64 {
     let d = [a.x - b.x, a.y - b.y, a.z - b.z].map(f64::from);
     (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
 }
+
+/// The six tetrahedra of a cube around its diagonal from corner 0 to corner 7, corner
+/// `x + 2y + 4z` at `(x, y, z)`.
+pub const CUBE_TETRAHEDRA: [[u32; 4]; 6] = [
+    [0, 1, 3, 7],
+    [0, 3, 2, 7],
+    [0, 2, 6, 7],
+    [0, 6, 4, 7],
+    [0, 4, 5, 7],
+    [0, 5, 1, 7],
+];
+
+/// The twelve surface triangles of the same cube, wound counter-clockwise seen from outside.
+pub const CUBE_FACES: [[u32; 3]; 12] = [
+    [0, 4, 6],
+    [0, 6, 2],
+    [1, 3, 7],
+    [1, 7, 5],
+    [0, 1, 5],
+    [0, 5, 4],
+    [2, 6, 7],
+    [2, 7, 3],
+    [0, 2, 3],
+    [0, 3, 1],
+    [4, 5, 7],
+    [4, 7, 6],
+];
+
+/// A solid cube of `side` metres centred on the origin: the surface faces for collisions, an
+/// explicit edge along every tetrahedron edge and a volume constraint per tetrahedron.
+pub fn tetrahedral_cube(side: f32) -> SoftBodySharedSettingsBuilder {
+    let vertices = (0..8)
+        .map(|corner: u32| {
+            let at = |bit: u32| side * ((corner >> bit) & 1) as f32 - 0.5 * side;
+            SoftBodyVertex::new(Vec3::new(at(0), at(1), at(2)))
+        })
+        .collect();
+    let mut builder = SoftBodySharedSettings::builder(vertices, CUBE_FACES.to_vec());
+    let mut edges = std::collections::BTreeSet::new();
+    for tetrahedron in CUBE_TETRAHEDRA {
+        for i in 0..4 {
+            for j in i + 1..4 {
+                let (a, b) = (tetrahedron[i], tetrahedron[j]);
+                edges.insert((a.min(b), a.max(b)));
+            }
+        }
+        builder = builder.volume(SoftBodyVolume {
+            vertices: tetrahedron,
+            compliance: 0.0,
+        });
+    }
+    for (a, b) in edges {
+        builder = builder.edge(SoftBodyEdge {
+            vertices: [a, b],
+            compliance: 1.0e-4,
+        });
+    }
+    builder
+}
+
+/// The volume a closed soft body's faces enclose, from its vertices' world positions.
+pub fn enclosed_volume(world: &PhysicsWorld, id: BodyId, faces: &[[u32; 3]]) -> f64 {
+    let vertices = world.soft_body(id).unwrap().vertices();
+    let p = |index: u32| {
+        let v = vertices[index as usize].position;
+        [v.x, v.y, v.z].map(f64::from)
+    };
+    faces
+        .iter()
+        .map(|&[a, b, c]| {
+            let (a, b, c) = (p(a), p(b), p(c));
+            let cross = [
+                b[1] * c[2] - b[2] * c[1],
+                b[2] * c[0] - b[0] * c[2],
+                b[0] * c[1] - b[1] * c[0],
+            ];
+            (a[0] * cross[0] + a[1] * cross[1] + a[2] * cross[2]) / 6.0
+        })
+        .sum()
+}

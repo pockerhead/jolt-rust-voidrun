@@ -221,6 +221,40 @@ enum GeneratedConstraints {
     PerVertex(SoftBodyBendType, Vec<SoftBodyVertexAttributes>),
 }
 
+/// An edge constraint the caller adds explicitly (Jolt `SoftBodySharedSettings::Edge`): keeps
+/// two vertices at their rest distance, measured when the settings are built.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SoftBodyEdge {
+    /// The two vertices, different, at least [`limits::MIN_SOFT_BODY_EDGE_LENGTH`] apart.
+    pub vertices: [u32; 2],
+    /// Compliance in m/N, `0..=`[`limits::MAX_COMPLIANCE`]; 0 is rigid.
+    pub compliance: f32,
+}
+
+/// A dihedral bend constraint the caller adds explicitly (Jolt
+/// `SoftBodySharedSettings::DihedralBend`): keeps the angle between two triangles that share an
+/// edge at its rest angle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SoftBodyDihedralBend {
+    /// Four different vertices; the first two are the shared edge, at least
+    /// [`limits::MIN_SOFT_BODY_EDGE_LENGTH`] long, the last two the vertices opposite it.
+    pub vertices: [u32; 4],
+    /// Compliance (inverse stiffness of the angle constraint), `0..=`[`limits::MAX_COMPLIANCE`];
+    /// 0 is rigid.
+    pub compliance: f32,
+}
+
+/// A volume constraint the caller adds explicitly (Jolt `SoftBodySharedSettings::Volume`):
+/// keeps the volume of a tetrahedron at its rest volume.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SoftBodyVolume {
+    /// Four different vertices that span a tetrahedron with a volume.
+    pub vertices: [u32; 4],
+    /// Compliance (inverse stiffness of the volume constraint), `0..=`[`limits::MAX_COMPLIANCE`];
+    /// 0 is rigid.
+    pub compliance: f32,
+}
+
 /// The particles of a soft body and the constraints between them (Jolt
 /// `SoftBodySharedSettings`), built and checked by [`SoftBodySharedSettings::builder`].
 ///
@@ -284,6 +318,9 @@ impl SoftBodySharedSettings {
             vertices,
             faces,
             generated: None,
+            edges: Vec::new(),
+            dihedral_bends: Vec::new(),
+            volumes: Vec::new(),
         }
     }
 
@@ -337,6 +374,9 @@ pub struct SoftBodySharedSettingsBuilder {
     vertices: Vec<SoftBodyVertex>,
     faces: Vec<[u32; 3]>,
     generated: Option<GeneratedConstraints>,
+    edges: Vec<SoftBodyEdge>,
+    dihedral_bends: Vec<SoftBodyDihedralBend>,
+    volumes: Vec<SoftBodyVolume>,
 }
 
 impl SoftBodySharedSettingsBuilder {
@@ -363,6 +403,25 @@ impl SoftBodySharedSettingsBuilder {
         self
     }
 
+    /// Adds an edge constraint, kept in addition to the generated ones. Long range attachments
+    /// follow the generated edges only.
+    pub fn edge(mut self, edge: SoftBodyEdge) -> Self {
+        self.edges.push(edge);
+        self
+    }
+
+    /// Adds a dihedral bend constraint, kept in addition to the generated ones.
+    pub fn dihedral_bend(mut self, bend: SoftBodyDihedralBend) -> Self {
+        self.dihedral_bends.push(bend);
+        self
+    }
+
+    /// Adds a volume constraint, for example one per tetrahedron of a solid soft body.
+    pub fn volume(mut self, volume: SoftBodyVolume) -> Self {
+        self.volumes.push(volume);
+        self
+    }
+
     /// Checks everything and builds the settings; nothing is allocated when a check fails.
     ///
     /// Fails with [`SoftBodyError::InvalidValue`] when there is no vertex; when a vertex
@@ -373,8 +432,11 @@ impl SoftBodySharedSettingsBuilder {
     /// mass); when a face names a vertex that does not exist, names one vertex twice, has an
     /// edge shorter than [`limits::MIN_SOFT_BODY_EDGE_LENGTH`] or no area; with
     /// [`SoftBodyBendType::Distance`], when the vertices opposite a shared edge are closer than
-    /// that length (the bend edge between them would have no length); and when the
-    /// attributes are out of range or, per vertex, not one per vertex.
+    /// that length (the bend edge between them would have no length); when the
+    /// attributes are out of range or, per vertex, not one per vertex; and when an explicit
+    /// constraint names a vertex that does not exist or one vertex twice, has a compliance out
+    /// of range, an edge (or a bend's shared edge) shorter than
+    /// [`limits::MIN_SOFT_BODY_EDGE_LENGTH`], or a tetrahedron without volume.
     pub fn build(self) -> Result<SoftBodySharedSettings, SoftBodyError> {
         if !ensure_initialized() {
             return Err(SoftBodyError::InitFailed);
@@ -426,10 +488,48 @@ impl SoftBodySharedSettingsBuilder {
                 );
             }
         }
+        // Generating constraints replaces the edges, so explicit ones come after it.
+        self.add_explicit_constraints(ptr);
         // SAFETY: `ptr` is live; Jolt reorders the constraints for its solver, the last change
         // the settings get.
         unsafe { JPH_SoftBodySharedSettings_Optimize(ptr) };
         Ok(settings)
+    }
+
+    /// Adds the explicit constraints to `ptr` and computes their rest values.
+    fn add_explicit_constraints(&self, ptr: *mut JPH_SoftBodySharedSettings) {
+        // SAFETY: `ptr` is the live settings object `build` owns, which holds the checked
+        // vertices; `validate` checked every index and the geometry the rest values need.
+        unsafe {
+            for edge in &self.edges {
+                let [a, b] = edge.vertices;
+                JPH_SoftBodySharedSettings_AddEdgeConstraint(ptr, a, b, edge.compliance);
+            }
+            for bend in &self.dihedral_bends {
+                let [a, b, c, d] = bend.vertices;
+                JPH_SoftBodySharedSettings_AddDihedralBendConstraint(
+                    ptr,
+                    a,
+                    b,
+                    c,
+                    d,
+                    bend.compliance,
+                );
+            }
+            for volume in &self.volumes {
+                let [a, b, c, d] = volume.vertices;
+                JPH_SoftBodySharedSettings_AddVolumeConstraint(ptr, a, b, c, d, volume.compliance);
+            }
+            if !self.edges.is_empty() {
+                JPH_SoftBodySharedSettings_CalculateEdgeLengths(ptr);
+            }
+            if !self.dihedral_bends.is_empty() {
+                JPH_SoftBodySharedSettings_CalculateBendConstraintConstants(ptr);
+            }
+            if !self.volumes.is_empty() {
+                JPH_SoftBodySharedSettings_CalculateVolumeConstraintVolumes(ptr);
+            }
+        }
     }
 
     fn validate(&self) -> Result<(), SoftBodyError> {
@@ -480,6 +580,53 @@ impl SoftBodySharedSettingsBuilder {
             if bend == SoftBodyBendType::Distance {
                 self.validate_distance_bends()?;
             }
+        }
+        self.validate_explicit_constraints()
+    }
+
+    /// Whether `indices` name different vertices.
+    fn names_different_vertices(&self, indices: &[u32]) -> Result<(), SoftBodyError> {
+        let count = self.vertices.len();
+        require(
+            indices.iter().all(|&index| (index as usize) < count),
+            "a constraint index must name a vertex",
+        )?;
+        let distinct = indices
+            .iter()
+            .enumerate()
+            .all(|(i, a)| indices[i + 1..].iter().all(|b| a != b));
+        require(distinct, "a constraint must name different vertices")
+    }
+
+    fn validate_explicit_constraints(&self) -> Result<(), SoftBodyError> {
+        for edge in &self.edges {
+            self.names_different_vertices(&edge.vertices)?;
+            require(is_compliance(edge.compliance), COMPLIANCE_RULE)?;
+            let [a, b] = edge.vertices.map(|index| self.position(index));
+            require(is_edge_length(a, b), EDGE_LENGTH_RULE)?;
+        }
+        for bend in &self.dihedral_bends {
+            self.names_different_vertices(&bend.vertices)?;
+            require(is_compliance(bend.compliance), COMPLIANCE_RULE)?;
+            let [a, b, _, _] = bend.vertices.map(|index| self.position(index));
+            require(
+                is_edge_length(a, b),
+                "the shared edge of a bend must be at least limits::MIN_SOFT_BODY_EDGE_LENGTH long",
+            )?;
+        }
+        for volume in &self.volumes {
+            self.names_different_vertices(&volume.vertices)?;
+            require(is_compliance(volume.compliance), COMPLIANCE_RULE)?;
+            let [x1, x2, x3, x4] = volume.vertices.map(|index| self.position(index));
+            // Jolt's six times the rest volume, in f32 (`CalculateVolumeConstraintVolumes`).
+            let six_volume = dot(
+                cross(difference(x1, x2), difference(x1, x3)),
+                difference(x1, x4),
+            );
+            require(
+                six_volume.is_finite() && six_volume != 0.0,
+                "a volume constraint must span a tetrahedron with a volume",
+            )?;
         }
         Ok(())
     }
@@ -563,6 +710,10 @@ fn require(valid: bool, what: &'static str) -> Result<(), SoftBodyError> {
 /// `to - from` in `f32`, as Jolt subtracts vertex positions.
 fn difference(from: Vec3, to: Vec3) -> Vec3 {
     Vec3::new(to.x - from.x, to.y - from.y, to.z - from.z)
+}
+
+fn dot(a: Vec3, b: Vec3) -> f32 {
+    a.x * b.x + a.y * b.y + a.z * b.z
 }
 
 fn cross(a: Vec3, b: Vec3) -> Vec3 {
