@@ -27,8 +27,18 @@ const UPDATE_ERROR_LINE: u32 = 679;
 fn continues_after(expression: &str, message: Option<&str>, file: &str, line: u32) -> bool {
     expression == UPDATE_ERROR_EXPRESSION
         && message == Some(UPDATE_ERROR_MESSAGE)
-        && file.replace('\\', "/").ends_with(UPDATE_ERROR_FILE)
+        && is_update_error_file(file)
         && line == UPDATE_ERROR_LINE
+}
+
+/// Whether `file` is Jolt's `PhysicsSystem.cpp`: the pinned relative path itself, or a path
+/// that ends with it right after a separator (`\` or `/`).
+fn is_update_error_file(file: &str) -> bool {
+    let file = file.replace('\\', "/");
+    file == UPDATE_ERROR_FILE
+        || file
+            .strip_suffix(UPDATE_ERROR_FILE)
+            .is_some_and(|prefix| prefix.ends_with('/'))
 }
 
 /// A string Jolt passes to the handler, or `None` for null.
@@ -102,7 +112,7 @@ mod tests {
             r"D:\a\jolt\crates\joltphysics-sys\vendor\JoltPhysics\Jolt\Physics\PhysicsSystem.cpp";
         let unix = "/home/runner/vendor/JoltPhysics/Jolt/Physics/PhysicsSystem.cpp";
         let message = Some(UPDATE_ERROR_MESSAGE);
-        for file in [windows, unix] {
+        for file in [windows, unix, UPDATE_ERROR_FILE] {
             assert!(continues_after(
                 UPDATE_ERROR_EXPRESSION,
                 message,
@@ -110,7 +120,7 @@ mod tests {
                 UPDATE_ERROR_LINE
             ));
         }
-        let cases: [(&str, Option<&str>, &str, u32); 7] = [
+        let cases: [(&str, Option<&str>, &str, u32); 9] = [
             ("isfinite(len_sq)", message, unix, UPDATE_ERROR_LINE),
             (UPDATE_ERROR_EXPRESSION, None, unix, UPDATE_ERROR_LINE),
             (
@@ -129,6 +139,18 @@ mod tests {
                 UPDATE_ERROR_EXPRESSION,
                 message,
                 "/x/Jolt/Physics/XPhysicsSystem.cpp",
+                UPDATE_ERROR_LINE,
+            ),
+            (
+                UPDATE_ERROR_EXPRESSION,
+                message,
+                "/tmp/NotJolt/Physics/PhysicsSystem.cpp",
+                UPDATE_ERROR_LINE,
+            ),
+            (
+                UPDATE_ERROR_EXPRESSION,
+                message,
+                r"D:\a\NotJolt\Physics\PhysicsSystem.cpp",
                 UPDATE_ERROR_LINE,
             ),
             (UPDATE_ERROR_EXPRESSION, message, unix, 678),
