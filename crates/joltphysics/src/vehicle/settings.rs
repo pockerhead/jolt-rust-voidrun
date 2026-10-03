@@ -2047,11 +2047,12 @@ mod tests {
             with(VehicleCollisionTester::cast_sphere(layer, 0.84)).validate(LAYERS),
             Ok(())
         );
-        // Each length is finite, the ray or cast length `max length + radius` is not.
+        // Each length is finite, the ray or cast length `max length + radius` is not. The
+        // inertia keeps every step coefficient finite, `inertia / MIN_DELTA_TIME` included.
         let huge = |w: WheelSettings| {
             w.suspension_max_length(f32::MAX)
                 .radius(f32::MAX)
-                .inertia(f32::MAX)
+                .inertia(1.0e30)
         };
         assert_eq!(
             with_wheel(huge).validate(LAYERS),
