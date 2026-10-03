@@ -137,17 +137,35 @@
 //!   including a character's weight impulse, are neither derived nor tested. The same holds
 //!   for the suspension effective mass Jolt forms from a wheel's force point and the chassis's
 //!   inverse inertia (`VehicleConstraint.cpp:448-451`).
-//! - Constraints whose solver diverges for reasons the lever-arm ratio does not measure. A hinge
-//!   on a thin body whose pivot lies off the body's long axis fails Jolt's finite-velocity
-//!   assertion while the body moves fast: a 1 kg rod of 1.5 m by 4 cm, hinged to a static body
-//!   5 cm off its axis (a lever-arm ratio of 15), failed in 8 of 12 seeded directions at the
-//!   velocity bounds and in 2 of 12 at 3 % of them (15 m/s); the same rod hinged on its axis,
-//!   or 20 cm thick, did not fail. A random search over every constraint kind at the
-//!   lever-arm bound, with box sides of 6 cm to 8 m and masses of [`MIN_MASS`] to [`MAX_MASS`]
-//!   at the velocity bounds, found 5 failures in 2400 scenes, all hinges on rods or plates
-//!   whose principal inertias differ by a factor of 100 or more. In the release build the same
-//!   scenes keep a finite state (Jolt's velocity clamp turns an overflowed velocity into zero),
-//!   but the motion is wrong. No input bound in this module excludes them.
+//! - Constraints whose solver diverges for reasons the lever-arm ratio does not measure. In the
+//!   `asserts` build Jolt then asserts that a squared velocity is finite
+//!   (`MotionProperties.inl:28` or `:38`); in the release build the joint tears apart by metres
+//!   and the state can become NaN, because Jolt's velocity clamp turns an infinite velocity into
+//!   zero but lets NaN through. No impact is needed. Measured with one constraint to a static
+//!   body under gravity unless stated otherwise:
+//!   - a hinge whose pin lies off the least-inertia axis of a slender body, outside its cross
+//!     section (an offset `d` of about twice the half thickness `t` or more). A 2 kg rod of 1 m
+//!     by 2 cm hinged 5 cm off its axis (a lever-arm ratio of 43.5) asserted while swinging
+//!     about the hinge at 10 rad/s, and in the release build it was NaN after 323 steps of that
+//!     swing; a 10 kg barrier arm of 3 m by 5 cm on a 5 cm bracket (ratio 12) asserted at
+//!     30 rad/s and was NaN after 145 steps; a 1 m rod 1 cm thick with the pin 5 cm beside it
+//!     along the hinge line asserted while falling from horizontal under gravity alone. On 1 m
+//!     rods swung at up to 47 rad/s, `t` = 5 mm failed from `d` = 1 cm, `t` = 1 cm from 2 cm,
+//!     `t` = 2 cm only at 10 cm, and `t` = 5 cm not up to 10 cm;
+//!   - chains of hinges with non-parallel axes, also between cubes: of 100 seeded chains of 3 to
+//!     10 cubes, 3 asserted at kicks of 15 m/s and 1.4 rad/s per body at lever-arm ratios of 10
+//!     to 100, and 18 at ratios of 100 to 500; in the release build 2 of 100 chains became NaN
+//!     at 15 m/s and 31 of 100 at 50 m/s;
+//!   - a light body held by two to four constraints to static anchors, also without a hinge
+//!     (point and fixed, cone, distance and six-DOF, ...): 8 of 300 seeded scenes at 0.3 to 1 of
+//!     the lever-arm bound asserted at the velocity bounds, 3 at a tenth of them and none at
+//!     3 %.
+//!
+//!   The same probes found no failure for a 2 m by 1 m by 5 cm door hinged at its edge, capsule
+//!   limbs on hinges, a rod hinged on its axis, or the 12-capsule test ragdoll, at kicks up to
+//!   499 m/s and 47 rad/s. A six-DOF joint with the hinge's free axis did not assert on the
+//!   slender bodies but let the joint drift apart by 0.3 to 3.3 m, so it is no workaround. No
+//!   input bound in this module excludes these cases.
 //! - A slider adds the distance travelled along its axis to the lever of body 1
 //!   (`SliderConstraint.cpp`), which [`MAX_LEVER_ARM_RATIO`] checks only at creation; with a
 //!   dynamic body 1 and a long travel the lever grows beyond the bound.
