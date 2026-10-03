@@ -603,6 +603,56 @@ fn constraint_frame_points_are_bounded() {
     }
 }
 
+#[test]
+fn six_dof_translation_limits_at_the_bound_step_finitely() {
+    // Two parts at the mass extremes, joined by a six-DOF joint whose translation limit along x
+    // excludes where they start, so Jolt corrects them by about the extent bound each step.
+    let skeleton = Skeleton::new(&[
+        SkeletonJoint {
+            name: "a",
+            parent: None,
+        },
+        SkeletonJoint {
+            name: "b",
+            parent: Some(0),
+        },
+    ])
+    .unwrap();
+    let shape = sphere();
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let tx = SixDofConstraintAxis::TranslationX;
+    for (min, max) in [(extent.next_down(), extent), (-extent, (-extent).next_up())] {
+        let (mut world, layers) = common::ragdoll::ragdoll_world(1);
+        let joint = SixDofConstraintSettings::new(
+            RVec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        )
+        .axis(tx, SixDofAxis::Limited { min, max });
+        let body = BodySettings::new_dynamic().object_layer(layers.ragdoll);
+        let parts = [
+            RagdollPart {
+                shape: &shape,
+                body: body.clone().mass(limits::MAX_MASS),
+                joint: None,
+            },
+            RagdollPart {
+                shape: &shape,
+                body: body
+                    .position(RVec3::new(0.0, 2.0, 0.0))
+                    .mass(limits::MIN_MASS),
+                joint: Some(RagdollJoint::SixDof(joint)),
+            },
+        ];
+        let settings = RagdollSettings::new(&skeleton, &parts).unwrap();
+        let id = world
+            .create_ragdoll(&settings, None, Activation::Activate)
+            .unwrap();
+        let bodies = world.ragdoll(id).unwrap().body_ids().to_vec();
+        step_at_both_extremes(&mut world, &bodies, &format!("limits {min}..{max}"));
+    }
+}
+
 /// A flat heightfield of 4 x 4 samples, three cells of `scale` metres per side from `offset`
 /// on x and z.
 fn flat_field(offset: f32, scale: f32) -> Result<Shape, ShapeError> {
@@ -674,6 +724,65 @@ fn query_inputs_are_bounded_by_the_frame() {
     collide(corner, extent).unwrap();
     assert!(query_invalid(collide(beyond, 0.0)));
     assert!(query_invalid(collide(corner, extent.next_up())));
+}
+
+#[test]
+fn queries_with_shapes_at_the_extent_bound_stay_finite() {
+    let mut world = empty_world();
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let slab = Shape::new_box(Vec3::new(extent, 1.0, extent)).unwrap();
+    world
+        .create_body(&slab, &BodySettings::new_static())
+        .unwrap();
+    let all = QueryFilter::new();
+    let largest = Shape::new_sphere(extent).unwrap();
+    let bound = limits::MAX_POSITION;
+    // `Real` is `f32` without the `double-precision` feature, so the cast is a no-op there.
+    #[allow(clippy::unnecessary_cast)]
+    let span = (2.0 * bound) as f32;
+    for sign in [1.0_f32, -1.0] {
+        // From a frame corner across the frame, through the slab.
+        let at = Real::from(sign) * bound;
+        let corner = RVec3::new(at, at, at);
+        let across = Vec3::new(-sign * span, -sign * span, -sign * span);
+        let hit = world
+            .cast_shape(
+                &ShapeCast::new(&largest, corner, Quat::IDENTITY, across),
+                &all,
+            )
+            .unwrap()
+            .expect("the cast passes through the slab");
+        let values = [
+            v3(hit.point),
+            f3(hit.normal),
+            [hit.fraction, hit.distance, hit.penetration_depth].map(f64::from),
+        ];
+        assert!(
+            values.iter().flatten().all(|value| value.is_finite()),
+            "{hit:?}"
+        );
+    }
+    // Deep overlap at the centre, reporting separations up to the extent bound.
+    let hits = world
+        .collide_shape(
+            &CollideShape::new(&largest, RVec3::ZERO, Quat::IDENTITY)
+                .max_separation_distance(extent),
+            &all,
+        )
+        .unwrap();
+    assert!(!hits.is_empty());
+    for hit in &hits {
+        let values = [
+            v3(hit.point_on_shape),
+            v3(hit.point_on_body),
+            f3(hit.normal),
+            [f64::from(hit.penetration_depth); 3],
+        ];
+        assert!(
+            values.iter().flatten().all(|value| value.is_finite()),
+            "{hit:?}"
+        );
+    }
 }
 
 #[test]
@@ -811,6 +920,84 @@ fn bodies_at_every_bound_step_finitely() {
     }
 }
 
+/// A character of [`limits::MAX_MASS`] whose capsule rests on the +x edge of a cube of
+/// [`limits::MIN_MASS`] with half extent 0.03 m, in a world without gravity. That cube is about
+/// the smallest one for which Jolt keeps its own inertia, so the weight impulse at the edge
+/// turns it fastest.
+fn character_on_the_edge_of_a_light_cube() -> (PhysicsWorld, BodyId, CharacterId) {
+    let mut world = empty_world();
+    let half = 0.03;
+    let cube_shape = Shape::new_box_with_convex_radius(Vec3::new(half, half, half), 0.0).unwrap();
+    let cube = world
+        .create_body(
+            &cube_shape,
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(0.0, -Real::from(half), 0.0))
+                .mass(limits::MIN_MASS)
+                .allow_sleeping(false),
+        )
+        .unwrap();
+    let capsule = Shape::new_capsule(0.5, 0.3).unwrap();
+    let settings = CharacterSettings::new(&capsule)
+        .mass(limits::MAX_MASS)
+        .shape_offset(Vec3::new(0.0, 0.8, 0.0));
+    // The lower sphere (radius 0.3) is centred 0.1 m beyond the edge and touches it.
+    let sphere_height = (0.3f32 * 0.3 - 0.1 * 0.1).sqrt();
+    let position = RVec3::new(Real::from(half + 0.1), Real::from(sphere_height - 0.3), 0.0);
+    let id = world
+        .create_character(&settings, position, Quat::IDENTITY)
+        .unwrap();
+    world
+        .refresh_character_contacts(id, &QueryFilter::new())
+        .unwrap();
+    (world, cube, id)
+}
+
+#[test]
+fn character_weight_impulse_at_a_lever_arm_is_bounded() {
+    let delta_time = PhysicsWorld::MAX_DELTA_TIME;
+    let update = |world: &mut PhysicsWorld, id, gravity: f32| {
+        world.update_character(
+            id,
+            delta_time,
+            Vec3::new(0.0, -gravity, 0.0),
+            &ExtendedUpdateSettings::default(),
+            &QueryFilter::new(),
+        )
+    };
+    // Mass times gravity times delta time is exactly the bound.
+    let at_bound = limits::MAX_WEIGHT_IMPULSE / (limits::MAX_MASS * delta_time);
+    let (mut world, cube, id) = character_on_the_edge_of_a_light_cube();
+    update(&mut world, id, at_bound).unwrap();
+    assert_eq!(world.character(id).unwrap().ground_body(), Some(cube));
+    assert_body_finite(&world, cube, "weight impulse at the bound");
+    // The impulse turns the cube up to Jolt's clamp; an overflow would have zeroed it.
+    let spin = f3(world.body(cube).unwrap().angular_velocity())
+        .iter()
+        .map(|c| c * c)
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        spin >= 0.99 * f64::from(limits::MAX_ANGULAR_VELOCITY),
+        "angular speed {spin}"
+    );
+    for gravity in [at_bound.next_up(), limits::MAX_ACCELERATION] {
+        let (mut world, cube, id) = character_on_the_edge_of_a_light_cube();
+        let position = world.character(id).unwrap().position();
+        assert!(matches!(
+            update(&mut world, id, gravity),
+            Err(CharacterError::InvalidValue(_))
+        ));
+        assert_eq!(
+            real_bits(world.character(id).unwrap().position()),
+            real_bits(position)
+        );
+        let body = world.body(cube).unwrap();
+        assert_eq!(bits(body.linear_velocity()), bits(Vec3::ZERO));
+        assert_eq!(bits(body.angular_velocity()), bits(Vec3::ZERO));
+    }
+}
+
 #[test]
 fn character_at_its_bounds_pushes_the_lightest_body() {
     let mut world = empty_world();
@@ -836,9 +1023,10 @@ fn character_at_its_bounds_pushes_the_lightest_body() {
         .unwrap();
     let all = QueryFilter::new();
     world.refresh_character_contacts(id, &all).unwrap();
-    let gravity = Vec3::new(0.0, -limits::MAX_ACCELERATION, 0.0);
     let velocity = Vec3::new(limits::MAX_LINEAR_VELOCITY, 0.0, 0.0);
     for delta_time in [PhysicsWorld::MAX_DELTA_TIME, PhysicsWorld::MIN_DELTA_TIME] {
+        let weight_bound = limits::MAX_WEIGHT_IMPULSE / (limits::MAX_MASS * delta_time);
+        let gravity = Vec3::new(0.0, -limits::MAX_ACCELERATION.min(weight_bound), 0.0);
         for tick in 0..30 {
             world
                 .character_mut(id)

@@ -40,10 +40,15 @@
 //!   (`VehicleConstraint::OnStep`); the chassis is a dynamic body, so the force is at most
 //!   `5e8 · 1e6`, about 5e14 N.
 //! - **Character weight and push.** A character presses on what it stands on with the impulse
-//!   `mass · |g| · dt` (`CharacterVirtual.cpp:1474-1481`), which gives a body of the smallest
-//!   mass at most `1e6 · 5e8 · 1 · 1e3`, about 5e17 m/s, whose square is finite. Its push impulse
-//!   is capped at `delta_velocity / inv_effective_mass` (`CharacterVirtual.cpp:795-811`), so the
-//!   linear velocity change is at most the relative normal speed whatever the strength.
+//!   `mass · |g| · dt` at the ground contact point (`CharacterVirtual.cpp:1474-1481`), so the
+//!   impulse also turns the ground body. [`PhysicsWorld::update_character`] accepts at most
+//!   [`MAX_WEIGHT_IMPULSE`], 1e9 N·s, which changes the linear velocity of a body of the
+//!   smallest mass by at most 1e12 m/s and the angular velocity of a body whose principal
+//!   inverse inertia is at most `√3 · 1e6` by at most about 6e18 rad/s; both squares are
+//!   finite (see [`MAX_WEIGHT_IMPULSE`] for the derivation). Its push impulse is capped at
+//!   `delta_velocity / inv_effective_mass` (`CharacterVirtual.cpp:795-811`), whose effective
+//!   mass includes the body's rotation, so the velocity change at the contact is at most the
+//!   relative normal speed whatever the strength.
 //! - **Springs.** Jolt derives a stiffness `k` and damping `c` from every spring
 //!   (`SpringPart.h:36-55,91-104`). Both stay at most [`MAX_SPRING_COEFFICIENT`]: in stiffness mode
 //!   directly, in frequency mode through an upper bound of the effective mass. For a ragdoll joint
@@ -51,10 +56,14 @@
 //!   `Stabilize` (`Ragdoll.cpp:135-185`); see [`SpringSettings`](crate::SpringSettings). For a
 //!   wheel's suspension it is [`MAX_MASS`], since Jolt's suspension effective mass is at most the
 //!   chassis mass (`VehicleConstraint.cpp:448-451`).
-//! - **Anti-roll bars.** Jolt's anti-roll impulse is `stiffness · length difference · dt`;
-//!   [`VehicleAntiRollBar::MAX_STIFFNESS`](crate::VehicleAntiRollBar::MAX_STIFFNESS) with wheel
-//!   lengths at most [`MAX_SHAPE_EXTENT`] keeps it at most the impulse of the largest accepted
-//!   load, `MAX_ACCELERATION · MAX_MASS · dt`.
+//! - **Anti-roll bars.** Jolt computes `stiffness · length difference · dt` for each bar
+//!   (`VehicleConstraint.cpp:289-293`) and passes it as the bias `b` of the wheel's suspension
+//!   constraint (`VehicleConstraint.cpp:508`), whose impulse is `-K⁻¹ (J v + b)`
+//!   (`AxisConstraintPart.h:300-301`): a velocity term, scaled by an effective mass that is at
+//!   most each body's own along the axis. With
+//!   [`VehicleAntiRollBar::MAX_STIFFNESS`](crate::VehicleAntiRollBar::MAX_STIFFNESS) and wheel
+//!   lengths at most [`MAX_SHAPE_EXTENT`], `b` is at most 5e14 m/s, so the velocity change along
+//!   the suspension axis stays finite and squares finitely.
 //! - **Restitution.** At most 1, so the restitution target speed is at most the approach speed.
 //! - **Friction.** At most [`MAX_FRICTION`], so Jolt's combined friction `sqrt(f1 · f2)`
 //!   (`ContactConstraintManager.h:554`) is finite and the friction impulse bound, combined friction
@@ -65,6 +74,10 @@
 //!   computes every part's velocity with Jolt's own operations first and accepts the drive only
 //!   when each stays within [`MAX_LINEAR_VELOCITY`] and [`MAX_ANGULAR_VELOCITY`], the bounds of
 //!   every other velocity input.
+//! - **Six-DOF translation limits.** Jolt corrects a violated limit by the distance beyond it
+//!   times the effective mass (`SixDOFConstraint.cpp:380-410,780-790`); limits within
+//!   [`MAX_SHAPE_EXTENT`] keep that finite. A limit of 1e30 m moved two parts to NaN positions in
+//!   a few steps.
 //! - **Contact constraint capacity.** [`WorldSettings::MAX_CONTACT_CONSTRAINTS`] stays below the
 //!   count above which `ContactConstraintManager::Init` asserts; a native compile-time check pins
 //!   it.
@@ -72,28 +85,39 @@
 //! # Covered by tests only
 //! The asserts leg of CI runs every test with Jolt's assertions; these paths are exercised there
 //! by scenes with inputs at their bounds, not derived:
-//! - contact and constraint impulses the solver generates: heaviest against lightest bodies,
-//!   restitution 1, friction at [`MAX_FRICTION`] including a speculative contact with zero
-//!   normal impulse, motors at the spring bound, suspension springs and anti-roll bars at their
-//!   bounds;
-//! - angular velocity from impulses at a lever arm on the lightest bodies: spheres of
-//!   [`MIN_MASS`] colliding head-on, and a box of [`MIN_MASS`] pushed by a character of
-//!   [`MAX_MASS`];
-//! - query arithmetic on shapes at the extent bound and from frame corners.
+//! - contact and constraint impulses the solver generates: spheres of [`MIN_MASS`] and
+//!   [`MAX_MASS`] colliding head-on at the velocity bounds, restitution 1, friction at
+//!   [`MAX_FRICTION`] including a speculative contact with zero normal impulse, motors at the
+//!   spring bound, six-DOF translation limits at the extent bound between parts of both mass
+//!   extremes, suspension springs and anti-roll bars at their bounds
+//!   (`bodies_at_every_bound_step_finitely`, `friction_at_the_bound_keeps_contacts_finite`,
+//!   `six_dof_translation_limits_at_the_bound_step_finitely`,
+//!   `vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely`,
+//!   `motor_springs_at_the_coefficient_bound_drive_finitely`);
+//! - impulses at a lever arm on the lightest bodies: the weight impulse of a character of
+//!   [`MAX_MASS`] at [`MAX_WEIGHT_IMPULSE`] on the edge of a 6 cm cube of [`MIN_MASS`], the
+//!   cube that turns fastest (`character_weight_impulse_at_a_lever_arm_is_bounded`), and a box
+//!   of [`MIN_MASS`] pressed on its floor and pushed at the velocity bound by such a character
+//!   (`character_at_its_bounds_pushes_the_lightest_body`);
+//! - query arithmetic: rays, shape casts and collisions from frame corners
+//!   (`query_inputs_are_bounded_by_the_frame`) and a sphere at the extent bound cast across
+//!   the frame and collided with separations up to the extent bound
+//!   (`queries_with_shapes_at_the_extent_bound_stay_finite`).
 //!
 //! # Not covered
 //! - State the simulation produces itself is not an input and is not checked again: a body Jolt
 //!   carries out of the frame, the positions a rebase computes (only checked to be finite), or a
 //!   character state restored with [`CharacterMut::restore_state`](crate::CharacterMut::restore_state),
 //!   which can only come from [`CharacterRef::save_state`](crate::CharacterRef::save_state).
-//! - Bodies with an extreme inverse inertia for their mass, such as a needle-thin shape or a
+//! - Bodies with a principal inverse inertia above `√3 · 1e6`, such as a needle-thin shape or a
 //!   centre of mass far from the shape: [`PhysicsWorld::create_body`] only requires the inverse
-//!   inertia to be finite, and no test steps such a body, so impulses at a lever arm on it are
-//!   neither derived nor tested. The same holds for the suspension effective mass Jolt forms
-//!   from a wheel's force point and the chassis's inverse inertia (`VehicleConstraint.cpp:448-451`).
+//!   inertia to be finite, and no test steps such a body, so impulses at a lever arm on it,
+//!   including a character's weight impulse, are neither derived nor tested. The same holds
+//!   for the suspension effective mass Jolt forms from a wheel's force point and the chassis's
+//!   inverse inertia (`VehicleConstraint.cpp:448-451`).
 //! - Inputs that are only checked to be finite or ordered, as the audit table says: ray
-//!   directions, damping, motor force and torque limits, wheel friction curves and the wheel and
-//!   drivetrain values that only have to give finite step coefficients.
+//!   directions, damping, motor force and torque limits, joint friction, wheel friction curves
+//!   and the wheel and drivetrain values that only have to give finite step coefficients.
 //! - `RagdollSettings::new_stabilized` reports Jolt's `Stabilize` failing to decompose an
 //!   inertia tensor as an error, but Jolt asserts on that path first (`Ragdoll.cpp:158`).
 //! - The assertion `errors == EPhysicsUpdateError::None` at the end of every step that drops
@@ -135,6 +159,7 @@
 //! | `CharacterMut::set_linear_velocity` | [`MAX_LINEAR_VELOCITY`]; Jolt does not clamp a character | new: `character_settings_and_setters_are_bounded` |
 //! | `CharacterMut::set_up`, `set_rotation` | unit vector, unit quaternion | existing: `invalid_settings_and_poses_are_rejected_without_side_effects` |
 //! | `PhysicsWorld::update_character` gravity | [`MAX_ACCELERATION`] | new: `character_update_gravity_and_steps_are_bounded` |
+//! | `PhysicsWorld::update_character` weight impulse | character mass times gravity times delta time at most [`MAX_WEIGHT_IMPULSE`] | new: `character_weight_impulse_at_a_lever_arm_is_bounded`, `weight_impulse_check_accepts_its_bound_and_rejects_beyond` |
 //! | `ExtendedUpdateSettings` steps and forward distances | [`MAX_SHAPE_EXTENT`] | new: `character_update_gravity_and_steps_are_bounded` |
 //! | `CharacterMut::restore_state` | only states from `save_state` exist | existing: `a_restored_state_saves_the_same_bytes` |
 //! | `VehicleMut::set_gravity` | [`MAX_ACCELERATION`] | new: `gravity_is_bounded_by_max_acceleration` |
@@ -150,6 +175,8 @@
 //! | `SpringSettings::FrequencyAndDamping` in `RagdollSettings::new`, `new_stabilized` | `B·ω²` and `2·B·ζ·ω` at most [`MAX_SPRING_COEFFICIENT`] | new: `motor_springs_are_bounded_by_the_parts_effective_mass`, `motor_spring_of_1e20_hz_is_rejected` |
 //! | `MotorSettings::force_limits`, `torque_limits`; angle limits | finite, `min <= max`; Jolt clamps the motor impulse to `dt · limit` | existing: `motors_and_springs_are_validated`, `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
 //! | constraint frame points | [`MAX_POSITION`] | new: `constraint_frame_points_are_bounded` |
+//! | `SwingTwistConstraintSettings::max_friction_torque`, `HingeConstraintSettings::max_friction_torque`, `SixDofConstraintSettings::max_friction` | finite, at least 0; Jolt clamps the friction impulse to `dt · limit` and applies no more than stops the relative motion | existing: `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
+//! | `SixDofAxis::Limited` on a translation axis | finite, `min < max`, within [`MAX_SHAPE_EXTENT`] | new: `six_dof_limits_are_validated`, `six_dof_translation_limits_at_the_bound_step_finitely` |
 //! | `RagdollSettings::new`, `new_stabilized` part masses | [`MIN_MASS`]`..=`[`MAX_MASS`], also for kinematic parts (`RagdollMut::set_motion_type` can make them dynamic) | new: `part_masses_and_velocities_are_bounded` |
 //! | `RagdollMut::set_pose`, `drive_to_pose_using_motors` | root offset and positions within [`MAX_POSITION`] | new: `poses_are_validated` |
 //! | `RagdollMut::drive_to_pose_using_kinematics` | pose as above; every part's velocity, as Jolt computes it, within [`MAX_LINEAR_VELOCITY`] and [`MAX_ANGULAR_VELOCITY`], checked for all parts before any changes | new: `poses_are_validated`, `kinematic_drive_is_bounded_by_the_velocities_it_implies` |
@@ -254,6 +281,25 @@ pub const MAX_MASS: f32 = 1.0e6;
 /// and effective mass Jolt computes from them stay finite.
 pub const MAX_SPRING_COEFFICIENT: f32 = 1.0e30;
 
+/// Largest weight impulse a character may press on what it stands on during one update, its
+/// mass times the length of the update's gravity times the update's delta time, in N·s.
+///
+/// Crate policy. Jolt applies the weight impulse at the ground contact point
+/// (`CharacterVirtual.cpp:1474-1481`), so it also turns the ground body. Jolt keeps a body's
+/// principal moments of inertia only while their vector is longer than 1e-6 (`Vec3::IsNearZero`
+/// in `MotionProperties.cpp:46-56`) and otherwise uses the inertia of a sphere of radius 1, an
+/// inverse of `2.5 / mass`, at most 2500 for [`MIN_MASS`]. So a body whose principal moments are
+/// equal has an inverse inertia of at most `√3 · 1e6`, and the ground contact lies within
+/// `√3 ·` [`MAX_SHAPE_EXTENT`] of its centre of mass. For such a body and every body with a
+/// smaller principal inverse inertia, the angular velocity change is at most
+/// `√3e6 · 3464 · 1e9`, about 6e18 rad/s, whose square is finite; the linear velocity change is
+/// at most `1e9 · 1e3` m/s. Without the bound, a character of [`MAX_MASS`] at
+/// [`MAX_ACCELERATION`] with a one-second update (5e14 N·s) on the edge of a 6 cm cube of
+/// [`MIN_MASS`] overflows the cube's squared angular speed, which Jolt asserts on
+/// (`MotionProperties.inl:38`). The bound allows a character of [`MAX_MASS`] at 1000 m/s² with
+/// one-second updates, far above the characters of a game.
+pub const MAX_WEIGHT_IMPULSE: f32 = 1.0e9;
+
 /// Whether every component of `position` is at most [`MAX_POSITION`] in absolute value.
 pub(crate) fn is_in_frame(position: RVec3) -> bool {
     [position.x, position.y, position.z]
@@ -312,6 +358,13 @@ pub(crate) fn is_gravity_factor(factor: f32) -> bool {
 /// Whether `friction` is finite and within `0..=MAX_FRICTION`.
 pub(crate) fn is_friction(friction: f32) -> bool {
     (0.0..=MAX_FRICTION).contains(&friction)
+}
+
+/// Whether a character of `mass` updated with `gravity` for `delta_time` seconds presses with
+/// a weight impulse of at most [`MAX_WEIGHT_IMPULSE`], computed in `f64` so that it cannot
+/// overflow. The inputs are already checked to be finite and within their own bounds.
+pub(crate) fn is_weight_impulse(mass: f32, gravity: Vec3, delta_time: f32) -> bool {
+    f64::from(mass) * f64_length(gravity) * f64::from(delta_time) <= f64::from(MAX_WEIGHT_IMPULSE)
 }
 
 /// Whether `mass` is finite and within `MIN_MASS..=MAX_MASS`.
@@ -477,6 +530,35 @@ mod tests {
             assert!(check(v), "{v:?}");
             assert!(!check(Vec3::new(v.x.next_up(), v.y, v.z)), "{v:?}");
         }
+    }
+
+    #[test]
+    fn weight_impulse_keeps_the_angular_speed_of_the_ground_body_finite() {
+        let largest_kept_inverse_inertia = 3.0_f64.sqrt() * 1.0e6;
+        let largest_lever = 3.0_f64.sqrt() * f64::from(MAX_SHAPE_EXTENT);
+        let angular_speed =
+            largest_kept_inverse_inertia * largest_lever * f64::from(MAX_WEIGHT_IMPULSE)
+                + f64::from(MAX_ANGULAR_VELOCITY);
+        assert!(angular_speed * angular_speed < f64::from(f32::MAX) / 4.0);
+        let sphere_inverse_inertia = 2.5 / f64::from(MIN_MASS);
+        assert!(sphere_inverse_inertia < largest_kept_inverse_inertia);
+    }
+
+    #[test]
+    fn weight_impulse_check_accepts_its_bound_and_rejects_beyond() {
+        let gravity = MAX_WEIGHT_IMPULSE / MAX_MASS;
+        for down in on_axes(gravity) {
+            assert!(is_weight_impulse(MAX_MASS, down, 1.0), "{down:?}");
+            assert!(is_weight_impulse(0.0, down, 1.0), "{down:?}");
+        }
+        for down in on_axes(gravity.next_up()) {
+            assert!(!is_weight_impulse(MAX_MASS, down, 1.0), "{down:?}");
+        }
+        assert!(!is_weight_impulse(
+            MAX_MASS,
+            Vec3::new(0.0, -gravity, 0.0),
+            1.0f32.next_up()
+        ));
     }
 
     #[test]

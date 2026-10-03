@@ -658,8 +658,8 @@ pub enum SixDofAxis {
     Free,
     /// Does not move (Jolt `MakeFixedAxis`).
     Fixed,
-    /// Moves within `[min, max]`, `min < max`: metres for translations, radians in `[-π, π]`
-    /// for rotations.
+    /// Moves within `[min, max]`, `min < max`: metres within
+    /// [`limits::MAX_SHAPE_EXTENT`] for translations, radians in `[-π, π]` for rotations.
     Limited {
         /// Lower limit.
         min: f32,
@@ -805,8 +805,12 @@ impl SixDofConstraintSettings {
                         "limited axes need finite limits with min < max; use Fixed for min == max",
                     );
                 }
-                let in_angle_range = within(min, -PI, PI) && within(max, -PI, PI);
-                if !(which.is_translation() || in_angle_range) {
+                if which.is_translation() {
+                    let extent = limits::MAX_SHAPE_EXTENT;
+                    if !(within(min, -extent, extent) && within(max, -extent, extent)) {
+                        return Err("translation limits must be within limits::MAX_SHAPE_EXTENT");
+                    }
+                } else if !(within(min, -PI, PI) && within(max, -PI, PI)) {
                     return Err("rotation limits must be between -pi and pi");
                 }
             }
@@ -1105,6 +1109,11 @@ mod tests {
         assert!(hinge().limits(-0.5, -0.1).validate().is_err());
         assert!(hinge().limits(-PI - 0.01, 0.0).validate().is_err());
         assert!(hinge().limits(0.0, 0.0).validate().is_err());
+        assert!(hinge().max_friction_torque(-1.0).validate().is_err());
+        assert!(hinge()
+            .max_friction_torque(f32::INFINITY)
+            .validate()
+            .is_err());
         let soft = SpringSettings::FrequencyAndDamping {
             frequency: 5.0,
             damping: 0.5,
@@ -1129,6 +1138,14 @@ mod tests {
             .is_err());
         assert!(six_dof().axis(rx, limited(0.2, 0.2)).validate().is_err());
         assert!(six_dof().axis(tx, limited(-5.0, 5.0)).validate().is_ok());
+        let extent = limits::MAX_SHAPE_EXTENT;
+        assert!(six_dof()
+            .axis(tx, limited(-extent, extent))
+            .validate()
+            .is_ok());
+        for (min, max) in [(-extent.next_up(), 0.0), (0.0, extent.next_up())] {
+            assert!(six_dof().axis(tx, limited(min, max)).validate().is_err());
+        }
         assert!(six_dof()
             .axis(tx, limited(f32::NEG_INFINITY, 0.0))
             .validate()

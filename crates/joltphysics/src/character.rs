@@ -237,7 +237,8 @@ impl<'a> CharacterSettings<'a> {
     }
 
     /// Mass in kg, between 0 and [`limits::MAX_MASS`], with which the character presses on what
-    /// it stands on. Default 70.
+    /// it stands on. Default 70. Each update also bounds the weight impulse it gives, see
+    /// [`PhysicsWorld::update_character`].
     #[must_use]
     pub fn mass(mut self, value: f32) -> Self {
         self.mass = value;
@@ -738,6 +739,8 @@ pub(crate) struct CharacterEntry {
     character: Owned<JPH_CharacterVirtual>,
     inner_body: Option<BodyId>,
     collides_with_characters: bool,
+    /// The mass with which the character presses on what it stands on.
+    mass: f32,
 }
 
 /// Read access to one character, borrowed from its world.
@@ -1139,6 +1142,7 @@ impl PhysicsWorld {
                 character,
                 inner_body,
                 collides_with_characters: settings.collide_with_characters,
+                mass: settings.mass,
             },
         );
         self.next_character_id += 1;
@@ -1251,8 +1255,9 @@ impl PhysicsWorld {
     ///
     /// `delta_time` must be finite, at least [`MIN_DELTA_TIME`](Self::MIN_DELTA_TIME) and at
     /// most [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), `gravity` finite and at most
-    /// [`limits::MAX_ACCELERATION`] long, the settings valid and the filter's layers in this
-    /// world; otherwise nothing happens and
+    /// [`limits::MAX_ACCELERATION`] long, the character's mass times the length of `gravity`
+    /// times `delta_time` at most [`limits::MAX_WEIGHT_IMPULSE`], the settings valid and the
+    /// filter's layers in this world; otherwise nothing happens and
     /// [`CharacterError::InvalidValue`] is returned.
     ///
     /// # Panics
@@ -1299,7 +1304,13 @@ impl PhysicsWorld {
             ));
         }
         settings.validate()?;
-        let character = self.character_entry(id)?.character.as_ptr();
+        let entry = self.character_entry(id)?;
+        if !limits::is_weight_impulse(entry.mass, gravity, delta_time) {
+            return Err(CharacterError::InvalidValue(
+                "mass times gravity times delta time must be at most limits::MAX_WEIGHT_IMPULSE",
+            ));
+        }
+        let character = entry.character.as_ptr();
         filter.validate(self).map_err(query_error)?;
         let gravity = gravity.to_jph();
         let settings = settings.to_jph();

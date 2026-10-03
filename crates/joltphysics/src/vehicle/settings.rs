@@ -1167,11 +1167,12 @@ pub struct VehicleAntiRollBar {
 impl VehicleAntiRollBar {
     /// Largest anti-roll bar stiffness, N/m: about 2.5e11.
     ///
-    /// Each step Jolt pushes on the two wheels' contacts with the impulse
-    /// `stiffness · suspension length difference · dt` (`VehicleConstraint::OnStep`). With a
-    /// length difference of at most [`limits::MAX_SHAPE_EXTENT`] this bound keeps that impulse at
-    /// most `MAX_ACCELERATION · MAX_MASS · dt`, the impulse of the largest load
-    /// [`BodyMut::add_force`](crate::BodyMut::add_force) accepts.
+    /// Each step Jolt computes `stiffness · suspension length difference · dt`
+    /// (`VehicleConstraint::OnStep`) and uses it as the velocity bias of both wheels'
+    /// suspension constraints, which the constraint's effective mass turns into an impulse.
+    /// With a length difference of at most [`limits::MAX_SHAPE_EXTENT`] this bound keeps the
+    /// bias at most about 5e14 for `dt <= 1`, so the velocity change it gives stays finite;
+    /// see [`limits`](crate::limits#derived-bounds).
     pub const MAX_STIFFNESS: f32 =
         limits::MAX_ACCELERATION * limits::MAX_MASS / limits::MAX_SHAPE_EXTENT;
 
