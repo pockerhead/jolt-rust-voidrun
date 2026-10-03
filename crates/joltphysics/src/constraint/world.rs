@@ -84,6 +84,28 @@ pub(crate) mod sealed {
             body1: NonNull<JPH_Body>,
             body2: NonNull<JPH_Body>,
         ) -> *mut JPH_Constraint;
+
+        /// Hands the constraints [`references`](Self::references) names to the newly created
+        /// `constraint`, after checking that they fit it; the error says how they do not.
+        ///
+        /// # Safety
+        /// `constraint` was just returned by [`create`](Self::create) for `bodies` and is not
+        /// added to the system yet. `references` holds, in the order of `references`, the live
+        /// constraints of the same world those ids name, of the kinds the ids are typed with.
+        unsafe fn attach_references(
+            &self,
+            _constraint: NonNull<JPH_Constraint>,
+            _bodies: [BodyId; 2],
+            _references: [Option<ReferencedConstraint>; 2],
+        ) -> Result<(), &'static str> {
+            Ok(())
+        }
+    }
+
+    /// A constraint another one references, with its bodies.
+    pub struct ReferencedConstraint {
+        pub(crate) constraint: NonNull<JPH_Constraint>,
+        pub(crate) bodies: [BodyId; 2],
     }
 }
 
@@ -545,6 +567,29 @@ impl PhysicsWorld {
             unsafe { JPH_Constraint_GetSubType(constraint.as_ptr()) },
             <S::Kind as sealed::Kind>::SUB_TYPE
         );
+
+        let referenced = references.map(|reference| {
+            reference.map(|id| {
+                let entry = &self.constraints[&id.raw];
+                sealed::ReferencedConstraint {
+                    constraint: entry.constraint.as_non_null(),
+                    bodies: entry.bodies,
+                }
+            })
+        });
+        // SAFETY: `constraint` was just created for these bodies and is not added; `referenced`
+        // holds the live constraints `references` names, which `constraint_entry` found in this
+        // world, of the kinds the typed settings require.
+        let attached = unsafe {
+            sealed::Settings::attach_references(
+                settings,
+                constraint.as_non_null(),
+                [body1, body2],
+                referenced,
+            )
+        };
+        // On failure, dropping `constraint` releases the only reference to it.
+        attached.map_err(ConstraintError::InvalidValue)?;
 
         // SAFETY: the system and the constraint are live, the system is borrowed mutably and no
         // step runs. The system takes its own reference; `remove_constraint` and

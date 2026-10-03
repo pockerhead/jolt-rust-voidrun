@@ -194,6 +194,8 @@
 //! | `ConstraintMut::<SwingTwistConstraint>::set_target_orientation_cs`, `ConstraintMut::<SixDofConstraint>::set_target_orientation_cs` | finite unit quaternion; Jolt clamps it to the limits | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
 //! | `ConstraintMut::<SixDofConstraint>::set_target_velocity_cs` | [`MAX_LINEAR_VELOCITY`] | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
 //! | `ConstraintMut::<SixDofConstraint>::set_target_position_cs` | [`MAX_SHAPE_EXTENT`] per axis | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
+//! | `GearConstraintSettings::new`, `teeth` ratio | `1..=`[`MAX_RATIO`] (see `GearConstraintSettings` for the lower bound) | new: `coupling_ratios_are_bounded`, `ratios_at_the_bound_step_finitely` |
+//! | `RackAndPinionConstraintSettings::new`, `teeth` ratio | magnitude within `1 / `[`MAX_RATIO`]`..=`[`MAX_RATIO`]; `teeth` length positive within [`MAX_SHAPE_EXTENT`] | new: `coupling_ratios_are_bounded`, `ratios_at_the_bound_step_finitely` |
 //! | `SwingTwistConstraintSettings::max_friction_torque`, `HingeConstraintSettings::max_friction_torque`, `SixDofConstraintSettings::max_friction` | finite, at least 0; Jolt clamps the friction impulse to `dt · limit` and applies no more than stops the relative motion | existing: `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
 //! | `SixDofAxis::Limited` on a translation axis | finite, `min < max`, within [`MAX_SHAPE_EXTENT`] | new: `six_dof_limits_are_validated`, `six_dof_translation_limits_at_the_bound_step_finitely` |
 //! | `RagdollSettings::new`, `new_stabilized` part masses | [`MIN_MASS`]`..=`[`MAX_MASS`], also for kinematic parts (`RagdollMut::set_motion_type` can make them dynamic) | new: `part_masses_and_velocities_are_bounded` |
@@ -319,6 +321,17 @@ pub const MAX_SPRING_COEFFICIENT: f32 = 1.0e30;
 /// one-second updates, far above the characters of a game.
 pub const MAX_WEIGHT_IMPULSE: f32 = 1.0e9;
 
+/// Largest magnitude of a gear, rack-and-pinion or pulley ratio; the smallest is its inverse
+/// (for a gear 1, see [`GearConstraintSettings`](crate::GearConstraintSettings)).
+///
+/// Crate policy. Jolt multiplies the inverse mass or inertia of body 2 by the ratio's square in
+/// the effective mass and the impulse on body 2 by the ratio (`GearConstraintPart.h:81,122`,
+/// `RackAndPinionConstraintPart.h:82,123`, `PulleyConstraint.cpp`). With a principal inverse
+/// inertia of at most `√3 · 1e6` (see [`MAX_WEIGHT_IMPULSE`]), `ratio² · I⁻¹` is at most about
+/// 1.7e14, far from `f32` overflow. A ratio of 1e4 already turns one gear ten thousand times per
+/// turn of the other; a test steps both bounds on the lightest and heaviest bodies.
+pub const MAX_RATIO: f32 = 1.0e4;
+
 /// Whether every component of `position` is at most [`MAX_POSITION`] in absolute value.
 pub(crate) fn is_in_frame(position: RVec3) -> bool {
     [position.x, position.y, position.z]
@@ -389,6 +402,11 @@ pub(crate) fn is_weight_impulse(mass: f32, gravity: Vec3, delta_time: f32) -> bo
 /// Whether `mass` is finite and within `MIN_MASS..=MAX_MASS`.
 pub(crate) fn is_mass(mass: f32) -> bool {
     (MIN_MASS..=MAX_MASS).contains(&mass)
+}
+
+/// Whether `ratio` is finite and its magnitude within `1 / MAX_RATIO..=MAX_RATIO`.
+pub(crate) fn is_ratio(ratio: f32) -> bool {
+    (1.0 / MAX_RATIO..=MAX_RATIO).contains(&ratio.abs())
 }
 
 /// The length of `v`, computed in `f64` so that it cannot overflow.

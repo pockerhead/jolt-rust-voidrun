@@ -1673,3 +1673,168 @@ fn slider_and_swing_twist_friction_at_f32_max_steps_finitely() {
         step_at_both_extremes(&mut world, &[body], &format!("swing-twist, mass {mass}"));
     }
 }
+
+#[test]
+fn coupling_ratios_are_bounded() {
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let max = limits::MAX_RATIO;
+    let min = 1.0 / limits::MAX_RATIO;
+    let gear = |ratio| GearConstraintSettings::new(z, z, ratio);
+    let rack = |ratio| RackAndPinionConstraintSettings::new(z, AXIS_X, ratio);
+    // A gear's ratio is at least 1 (see `GearConstraintSettings`).
+    for ratio in [1.0, max] {
+        assert!(joined_sphere(1.0, &gear(ratio)).2.is_ok());
+    }
+    for ratio in [
+        1.0_f32.next_down(),
+        max.next_up(),
+        0.5,
+        -1.0,
+        -2.0,
+        f32::NAN,
+    ] {
+        assert!(constraint_invalid(joined_sphere(1.0, &gear(ratio)).2));
+    }
+    for ratio in [max, -max, min, -min] {
+        assert!(joined_sphere(1.0, &rack(ratio)).2.is_ok());
+    }
+    for ratio in [
+        max.next_up(),
+        -max.next_up(),
+        min.next_down(),
+        0.0,
+        f32::NAN,
+    ] {
+        assert!(constraint_invalid(joined_sphere(1.0, &rack(ratio)).2));
+    }
+    // Teeth give Jolt's ratios; zero teeth or a rack length out of range give none.
+    assert!(joined_sphere(1.0, &gear(1.0).teeth(10, 30)).2.is_ok());
+    for (teeth1, teeth2) in [(0, 30), (30, 10)] {
+        assert!(constraint_invalid(
+            joined_sphere(1.0, &gear(1.0).teeth(teeth1, teeth2)).2
+        ));
+    }
+    assert!(joined_sphere(1.0, &rack(1.0).teeth(20, 1.0, 10)).2.is_ok());
+    for (teeth, length) in [
+        (0, 1.0),
+        (20, 0.0),
+        (20, limits::MAX_SHAPE_EXTENT.next_up()),
+    ] {
+        assert!(constraint_invalid(
+            joined_sphere(1.0, &rack(1.0).teeth(teeth, length, 10)).2
+        ));
+    }
+}
+
+/// A static base far away and three spheres hinged to it about z at x = 0 and 3 and held on a
+/// slider along x at x = -3, of masses `masses`.
+fn coupling_scene(
+    masses: [f32; 3],
+) -> (
+    PhysicsWorld,
+    [BodyId; 3],
+    [ConstraintId<HingeConstraint>; 2],
+    ConstraintId<SliderConstraint>,
+) {
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let mut world = empty_world();
+    let base = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(0.0, -10.0, 0.0)),
+        )
+        .unwrap();
+    let xs = [0.0, 3.0, -3.0];
+    let bodies = [0, 1, 2].map(|i| {
+        world
+            .create_body(
+                &sphere(),
+                &BodySettings::new_dynamic()
+                    .mass(masses[i])
+                    .position(RVec3::new(xs[i], 0.0, 0.0)),
+            )
+            .unwrap()
+    });
+    let hinges = [0, 1].map(|i| {
+        world
+            .create_constraint(
+                base,
+                bodies[i],
+                &HingeConstraintSettings::new(RVec3::new(xs[i], 0.0, 0.0), z, AXIS_X),
+            )
+            .unwrap()
+    });
+    let slider = world
+        .create_constraint(
+            base,
+            bodies[2],
+            &SliderConstraintSettings::new(RVec3::new(-3.0, 0.0, 0.0), AXIS_X, AXIS_Y),
+        )
+        .unwrap();
+    (world, bodies, hinges, slider)
+}
+
+/// Steps 120 ticks and then both time step extremes, checking `bodies` finite.
+fn step_coupling(world: &mut PhysicsWorld, bodies: &[BodyId], what: &str) {
+    for tick in 0..120 {
+        let _ = world.step(DT).unwrap();
+        for &id in bodies {
+            assert_body_finite(world, id, &format!("{what}, tick {tick}"));
+        }
+    }
+    step_at_both_extremes(world, bodies, what);
+}
+
+#[test]
+fn ratios_at_the_bound_step_finitely() {
+    // Gears and racks and pinions at their ratio bounds between bodies of both mass extremes,
+    // one of the coupled bodies spinning at the angular velocity bound.
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let spin = Vec3::new(0.0, 0.0, limits::MAX_ANGULAR_VELOCITY);
+    let masses = [limits::MIN_MASS, limits::MAX_MASS];
+    for mass1 in masses {
+        for mass2 in masses {
+            for spun in [0, 1] {
+                for ratio in [1.0, limits::MAX_RATIO] {
+                    let (mut world, bodies, hinges, _) = coupling_scene([mass1, mass2, mass2]);
+                    world
+                        .create_constraint(
+                            bodies[0],
+                            bodies[1],
+                            &GearConstraintSettings::new(z, z, ratio).hinges(hinges[0], hinges[1]),
+                        )
+                        .unwrap();
+                    world
+                        .body_mut(bodies[spun])
+                        .unwrap()
+                        .set_angular_velocity(spin)
+                        .unwrap();
+                    let what = format!("gear {ratio}, masses {mass1} {mass2}, body {spun} spun");
+                    step_coupling(&mut world, &bodies[..2], &what);
+                }
+                let max = limits::MAX_RATIO;
+                for ratio in [max, -max, 1.0 / max, -1.0 / max] {
+                    let (mut world, bodies, hinges, slider) = coupling_scene([mass1, mass2, mass2]);
+                    world
+                        .create_constraint(
+                            bodies[0],
+                            bodies[2],
+                            &RackAndPinionConstraintSettings::new(z, AXIS_X, ratio)
+                                .constraints(hinges[0], slider),
+                        )
+                        .unwrap();
+                    let driven = if spun == 0 { bodies[0] } else { bodies[2] };
+                    let mut body = world.body_mut(driven).unwrap();
+                    if spun == 0 {
+                        body.set_angular_velocity(spin).unwrap();
+                    } else {
+                        body.set_linear_velocity(Vec3::new(limits::MAX_LINEAR_VELOCITY, 0.0, 0.0))
+                            .unwrap();
+                    }
+                    let what = format!("rack {ratio}, masses {mass1} {mass2}, body {spun} driven");
+                    step_coupling(&mut world, &[bodies[0], bodies[2]], &what);
+                }
+            }
+        }
+    }
+}

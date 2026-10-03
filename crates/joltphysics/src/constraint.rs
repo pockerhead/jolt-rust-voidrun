@@ -11,6 +11,7 @@
 //! [`ConstraintSpace::LocalToBodyCom`] relative to each body's centre of mass. In the constraint frame, X is the twist (or hinge) axis and Y and Z are the
 //! swing axes.
 
+mod coupling;
 mod linear;
 mod rotational;
 mod world;
@@ -19,6 +20,7 @@ use std::f32::consts::PI;
 
 use joltphysics_sys::*;
 
+pub use coupling::{GearConstraintSettings, RackAndPinionConstraintSettings};
 pub use linear::{
     DistanceConstraintSettings, DistanceRange, FixedConstraintSettings, PointConstraintSettings,
     SliderConstraintSettings,

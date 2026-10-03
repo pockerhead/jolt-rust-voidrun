@@ -905,3 +905,333 @@ fn six_dof_pyramid_holds_asymmetric_limits() {
         assert!(swing_z.abs() < 1e-2, "{swing_z} rad");
     }
 }
+
+/// `angle` wrapped into `(-π, π]`, as Jolt's `CenterAngleAroundZero` after `fmod`.
+fn wrapped(angle: f32) -> f32 {
+    let a = angle % (2.0 * PI);
+    if a > PI {
+        a - 2.0 * PI
+    } else if a <= -PI {
+        a + 2.0 * PI
+    } else {
+        a
+    }
+}
+
+/// A disc of 1 m by 1 m at `x`, hinged about z to a static base far away.
+fn hinged_disc(
+    world: &mut PhysicsWorld,
+    base: BodyId,
+    x: Real,
+) -> (BodyId, ConstraintId<HingeConstraint>) {
+    let disc = add_box(world, Vec3::new(0.5, 0.5, 0.1), RVec3::new(x, 0.0, 0.0));
+    let hinge = world
+        .create_constraint(
+            base,
+            disc,
+            &HingeConstraintSettings::new(RVec3::new(x, 0.0, 0.0), Z, X),
+        )
+        .unwrap();
+    (disc, hinge)
+}
+
+/// Turns hinge `hinge` at `speed` rad/s with a velocity motor.
+fn drive(world: &mut PhysicsWorld, hinge: ConstraintId<HingeConstraint>, speed: f32) {
+    let mut motor = world.constraint_mut(hinge).unwrap();
+    motor.set_target_angular_velocity(speed).unwrap();
+    motor.set_motor_state(MotorState::Velocity);
+}
+
+struct GearPair {
+    world: PhysicsWorld,
+    discs: [BodyId; 2],
+    hinges: [ConstraintId<HingeConstraint>; 2],
+}
+
+fn gear_pair() -> GearPair {
+    let mut world = world(Vec3::ZERO, 1);
+    let base = add_anchor(&mut world, RVec3::new(0.0, -10.0, 0.0));
+    let (disc1, hinge1) = hinged_disc(&mut world, base, 0.0);
+    let (disc2, hinge2) = hinged_disc(&mut world, base, 3.0);
+    GearPair {
+        world,
+        discs: [disc1, disc2],
+        hinges: [hinge1, hinge2],
+    }
+}
+
+#[test]
+fn gear_turns_the_second_hinge_at_the_ratio() {
+    for ratio in [1.0, 2.0, 10.0] {
+        let GearPair {
+            mut world,
+            discs,
+            hinges,
+        } = gear_pair();
+        let gear = world
+            .create_constraint(
+                discs[0],
+                discs[1],
+                &GearConstraintSettings::new(Z, Z, ratio),
+            )
+            .unwrap();
+        drive(&mut world, hinges[0], 2.0);
+        step(&mut world, 60);
+        let spin = world.body(discs[1]).unwrap().angular_velocity().z;
+        let wanted = -2.0 / ratio;
+        // Measured: -2.0000, -1.0000 and -0.2000 rad/s.
+        assert!(
+            ((spin - wanted) / wanted).abs() < 0.02,
+            "ratio {ratio}: {spin} rad/s"
+        );
+        assert!(world.constraint(gear).unwrap().total_lambda().is_finite());
+    }
+}
+
+#[test]
+fn gear_references_correct_drift() {
+    let GearPair {
+        mut world,
+        discs,
+        hinges,
+    } = gear_pair();
+    // Gear 2 starts turned by 0.3 rad, so the gear starts 0.6 rad out of mesh; only the hinge
+    // references let Jolt correct that.
+    world
+        .body_mut(discs[1])
+        .unwrap()
+        .set_rotation(quat_about(Z, 0.3), Activation::Activate)
+        .unwrap();
+    world
+        .create_constraint(
+            discs[0],
+            discs[1],
+            &GearConstraintSettings::new(Z, Z, 2.0).hinges(hinges[0], hinges[1]),
+        )
+        .unwrap();
+    drive(&mut world, hinges[0], 3.0);
+    let angle =
+        |world: &PhysicsWorld, i: usize| world.constraint(hinges[i]).unwrap().current_angle();
+    let mesh_error = |world: &PhysicsWorld| wrapped(angle(world, 0) + 2.0 * angle(world, 1));
+    let initial = mesh_error(&world);
+    step(&mut world, 60);
+    let mut worst: f32 = 0.0;
+    let mut wraps = [0, 0];
+    let mut last = [angle(&world, 0), angle(&world, 1)];
+    for _ in 0..300 {
+        step(&mut world, 1);
+        let now = [angle(&world, 0), angle(&world, 1)];
+        for i in 0..2 {
+            if (now[i] - last[i]).abs() > PI {
+                wraps[i] += 1;
+            }
+        }
+        last = now;
+        worst = worst.max(mesh_error(&world).abs());
+    }
+    // Both hinges wrapped at ±π after the first second; measured worst after it: 0.00002 rad,
+    // and 0.6 rad without the references.
+    assert!((initial - 0.6).abs() < 1e-3, "{initial}");
+    assert!(wraps[0] >= 2 && wraps[1] >= 1, "{wraps:?}");
+    assert!(worst < 1e-2, "{worst} rad");
+}
+
+struct RackScene {
+    world: PhysicsWorld,
+    pinion: BodyId,
+    rack: BodyId,
+    hinge: ConstraintId<HingeConstraint>,
+    slider: ConstraintId<SliderConstraint>,
+}
+
+fn rack_scene() -> RackScene {
+    let mut world = world(Vec3::ZERO, 1);
+    let base = add_anchor(&mut world, RVec3::new(0.0, -10.0, 0.0));
+    let (pinion, hinge) = hinged_disc(&mut world, base, 0.0);
+    let rack = add_box(
+        &mut world,
+        Vec3::new(1.0, 0.2, 0.2),
+        RVec3::new(0.0, -2.0, 0.0),
+    );
+    let slider = world
+        .create_constraint(
+            base,
+            rack,
+            &SliderConstraintSettings::new(RVec3::new(0.0, -2.0, 0.0), X, Y),
+        )
+        .unwrap();
+    RackScene {
+        world,
+        pinion,
+        rack,
+        hinge,
+        slider,
+    }
+}
+
+#[test]
+fn rack_moves_at_the_pinion_rate() {
+    let RackScene {
+        mut world,
+        pinion,
+        rack,
+        hinge,
+        ..
+    } = rack_scene();
+    let coupling = world
+        .create_constraint(
+            pinion,
+            rack,
+            &RackAndPinionConstraintSettings::new(Z, X, 4.0),
+        )
+        .unwrap();
+    drive(&mut world, hinge, 2.0);
+    step(&mut world, 60);
+    // Jolt's rack and pinion keeps rotation = ratio · translation: 2 rad/s / 4 rad/m.
+    let speed = world.body(rack).unwrap().linear_velocity().x;
+    // Measured: 0.5000 m/s.
+    assert!(((speed - 0.5) / 0.5).abs() < 0.02, "{speed} m/s");
+    assert!(world
+        .constraint(coupling)
+        .unwrap()
+        .total_lambda()
+        .is_finite());
+}
+
+#[test]
+fn rack_references_correct_drift() {
+    let RackScene {
+        mut world,
+        pinion,
+        rack,
+        hinge,
+        slider,
+    } = rack_scene();
+    // The pinion starts turned by 0.5 rad, out of mesh; only the references let Jolt correct
+    // that.
+    world
+        .body_mut(pinion)
+        .unwrap()
+        .set_rotation(quat_about(Z, 0.5), Activation::Activate)
+        .unwrap();
+    world
+        .create_constraint(
+            pinion,
+            rack,
+            &RackAndPinionConstraintSettings::new(Z, X, 4.0).constraints(hinge, slider),
+        )
+        .unwrap();
+    drive(&mut world, hinge, 3.0);
+    let mesh_error = |world: &PhysicsWorld| {
+        let rotation = world.constraint(hinge).unwrap().current_angle();
+        let translation = world.constraint(slider).unwrap().current_position();
+        wrapped(rotation - 4.0 * translation)
+    };
+    let initial = mesh_error(&world);
+    step(&mut world, 60);
+    let mut worst: f32 = 0.0;
+    for _ in 0..300 {
+        step(&mut world, 1);
+        worst = worst.max(mesh_error(&world).abs());
+    }
+    // The pinion turned about 2.9 times; measured worst after the first second: 0.000006 rad,
+    // and 0.5 rad without the references.
+    assert!((initial - 0.5).abs() < 1e-3, "{initial}");
+    assert!(world.constraint(slider).unwrap().current_position() > 4.0);
+    assert!(worst < 1e-2, "{worst} rad");
+}
+
+#[test]
+fn a_referenced_hinge_cannot_be_removed() {
+    let GearPair {
+        mut world,
+        discs,
+        hinges,
+    } = gear_pair();
+    let gear = world
+        .create_constraint(
+            discs[0],
+            discs[1],
+            &GearConstraintSettings::new(Z, Z, 2.0).hinges(hinges[0], hinges[1]),
+        )
+        .unwrap();
+    for hinge in hinges {
+        assert_eq!(
+            world.remove_constraint(hinge),
+            Err(ConstraintError::UsedByConstraint(gear.into()))
+        );
+    }
+    step(&mut world, 10);
+    world.remove_constraint(gear).unwrap();
+    for hinge in hinges {
+        world.remove_constraint(hinge).unwrap();
+    }
+    step(&mut world, 10);
+}
+
+#[test]
+fn unrelated_or_reversed_references_are_rejected() {
+    let GearPair {
+        mut world,
+        discs,
+        hinges,
+    } = gear_pair();
+    let base = world.constraint(hinges[0]).unwrap().bodies()[0];
+    // A hinge of another disc.
+    let (_, unrelated) = hinged_disc(&mut world, base, 6.0);
+    // A hinge with disc 1 as its body 1.
+    let reversed = world
+        .create_constraint(
+            discs[0],
+            base,
+            &HingeConstraintSettings::new(RVec3::ZERO, Z, X),
+        )
+        .unwrap();
+    // A hinge of disc 1 about the opposite axis.
+    let opposite = world
+        .create_constraint(
+            base,
+            discs[0],
+            &HingeConstraintSettings::new(RVec3::ZERO, Vec3::new(0.0, 0.0, -1.0), X),
+        )
+        .unwrap();
+    let count = world.constraint_count();
+    for first in [unrelated, reversed, opposite] {
+        let result = world.create_constraint(
+            discs[0],
+            discs[1],
+            &GearConstraintSettings::new(Z, Z, 2.0).hinges(first, hinges[1]),
+        );
+        assert!(
+            matches!(result, Err(ConstraintError::InvalidValue(_))),
+            "{result:?}"
+        );
+        assert_eq!(world.constraint_count(), count);
+    }
+    // The second hinge must hold body 2.
+    let result = world.create_constraint(
+        discs[0],
+        discs[1],
+        &GearConstraintSettings::new(Z, Z, 2.0).hinges(hinges[0], hinges[0]),
+    );
+    assert!(matches!(result, Err(ConstraintError::InvalidValue(_))));
+    world
+        .create_constraint(
+            discs[0],
+            discs[1],
+            &GearConstraintSettings::new(Z, Z, 2.0).hinges(hinges[0], hinges[1]),
+        )
+        .unwrap();
+    // A removed reference is not found.
+    world.remove_constraint(unrelated).unwrap();
+    assert_eq!(
+        world
+            .create_constraint(
+                discs[0],
+                discs[1],
+                &GearConstraintSettings::new(Z, Z, 2.0).hinges(unrelated, hinges[1]),
+            )
+            .err(),
+        Some(ConstraintError::NotFound(unrelated.into()))
+    );
+}

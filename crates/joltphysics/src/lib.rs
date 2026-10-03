@@ -238,9 +238,10 @@ pub use constraint::{
     AnyConstraintId, ConeConstraint, ConeConstraintSettings, ConstraintId, ConstraintKind,
     ConstraintMut, ConstraintRef, ConstraintSettings, ConstraintSpace, ConstraintType,
     DistanceConstraint, DistanceConstraintSettings, DistanceRange, FixedConstraint,
-    FixedConstraintSettings, GearConstraint, HingeConstraint, HingeConstraintSettings,
-    MotorSettings, MotorState, PathConstraint, PointConstraint, PointConstraintSettings,
-    PulleyConstraint, RackAndPinionConstraint, SixDofAxis, SixDofConstraint, SixDofConstraintAxis,
+    FixedConstraintSettings, GearConstraint, GearConstraintSettings, HingeConstraint,
+    HingeConstraintSettings, MotorSettings, MotorState, PathConstraint, PointConstraint,
+    PointConstraintSettings, PulleyConstraint, RackAndPinionConstraint,
+    RackAndPinionConstraintSettings, SixDofAxis, SixDofConstraint, SixDofConstraintAxis,
     SixDofConstraintSettings, SliderConstraint, SliderConstraintSettings, SpringSettings,
     SwingTwistConstraint, SwingTwistConstraintSettings, SwingType,
 };
