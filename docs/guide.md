@@ -2,8 +2,9 @@
 
 This guide builds the scene `joltphysics` was written for: terrain, a building made of several
 parts with their own collision groups, a dropped item, the queries a game runs every frame and a
-floating origin, then a character walking on a small planet. Everything runs headless; nothing is
-drawn. The two complete programs are at the end and run as tests (`cargo test -p joltphysics --doc`).
+floating origin, then a character walking on a small planet, then a car on terrain and a ragdoll
+in a second world. Everything runs headless; nothing is drawn. The three complete programs run as
+tests (`cargo test -p joltphysics --doc`).
 
 Units are metres, seconds, kilograms and radians. Jolt is right-handed with Y up.
 
@@ -42,8 +43,8 @@ creating bodies and shared between bodies and worlds.
 
 ## Stepping
 
-`PhysicsWorld::step(dt)` runs one collision step. `Err` means the step was rejected (a bad `dt`)
-and nothing happened. `Ok(report)` means the world advanced; `report.is_complete()` is false when
+`PhysicsWorld::step(dt)` runs one collision step. `Err` means the step was rejected (a `dt` that is
+not finite or outside `MIN_DELTA_TIME` (1 µs) to `MAX_DELTA_TIME` (1 s)) and nothing happened. `Ok(report)` means the world advanced; `report.is_complete()` is false when
 Jolt dropped contacts because a fixed-size buffer was full, and the flag names the `WorldSettings`
 limit to raise.
 
@@ -502,6 +503,399 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let moved = dot(moved, moved).sqrt();
         assert!((0.9..1.1).contains(&moved), "walked from {start:?}: {moved}");
     }
+    Ok(())
+}
+```
+
+## Vehicles
+
+A vehicle is Jolt's `VehicleConstraint` with the wheeled controller, attached to a dynamic body the
+caller created, its chassis. `PhysicsWorld::create_vehicle(chassis, &settings)` adds it; from then
+on it runs inside every `step`: at the start of the step each wheel casts against the scene and
+gravity is applied, then engine, brakes and tire friction act through the constraint.
+
+- **Chassis.** The chassis shape gives the vehicle its mass and centre of mass.
+  `Shape::new_offset_center_of_mass` moves only the centre of mass, not the collision surface, so a
+  box hull can carry a low centre of mass that keeps the car from rolling over. `remove_body`
+  refuses a chassis while its vehicle exists; call `remove_vehicle` first.
+- **Settings.** `VehicleSettings::new(wheels, differentials, collision_tester)`, with builders for
+  the rest; the defaults are Jolt's. Positions and directions are in the chassis body's space,
+  with up +Y and forward +Z by default. Wheels are numbered in the order given, and differentials
+  and anti-roll bars name them by index; Jolt's samples put the left wheels at +X. A vehicle needs
+  at least one differential, and the engine torque ratios of all differentials add up to 1.
+  Values Jolt asserts on or divides by are checked first: `create_vehicle` returns
+  `VehicleError::InvalidValue` for them and creates nothing.
+- **Wheels and the ground.** `VehicleCollisionTester::ray`, `cast_sphere` or `cast_cylinder`.
+  The wheels see the bodies whose object layer collides with the tester's object layer, never
+  their own chassis. A tester cannot skip compound children by group, so give the wheels their
+  own object layer that collides with exactly what they drive on.
+- **Gravity.** For gravity the game applies itself (radial on a planet), create the chassis with
+  `gravity_factor(0.0)` and `allow_sleeping(false)`, and call `VehicleMut::set_gravity` with the
+  gravity at the car before every step. Jolt then adds that gravity times the chassis mass as a
+  force on every step while the chassis is awake; a sleeping chassis gets nothing. The opposite of
+  that gravity is also the up of the pitch and roll limit (`VehicleSettings::max_pitch_roll_angle`).
+- **Driving.** `set_driver_input(DriverInput { forward, right, brake, hand_brake })`: forward and
+  right in `[-1, 1]`, the brakes in `[0, 1]`. Right 1 steers fully right, which Jolt reports as a
+  negative steer angle. The input stays until it is set again.
+- **Readout.** `VehicleRef::wheels` gives each wheel's `WheelState`: the ground contact (body,
+  sub-shape, point, normal), the suspension length, the wheel's rotation speed and the impulses
+  of the last step; `engine_rpm` and `current_gear` read the drivetrain. Contacts are found at the
+  start of the step, at the chassis pose before the step moved it. Normals are the ground's
+  outward normal, as in queries. A wheel whose cast starts inside a solid body reports suspension
+  length 0 and `hit_hard_point`, not how deep it is; `collide_shape` gives the depth.
+- **Rebase.** `PhysicsWorld::rebase` moves the chassis like any body and rotates each vehicle's
+  gravity override and the up of a ray or sphere tester; the reported contacts stay in the old
+  frame until the next step.
+
+## Ragdolls
+
+A ragdoll is Jolt's `Ragdoll`: one body per joint of a `Skeleton`, each joined to its parent part
+by a constraint. `RagdollSettings::new(&skeleton, &parts)` builds the settings once. Each
+`RagdollPart` is a shape, `BodySettings` (motion type, layer, mass, friction, damping, gravity
+factor, initial velocity) at the part's bind pose in world space, and the joint to its parent.
+
+- **Joints.** `RagdollJoint::SwingTwist` (spine, neck, shoulders), `Hinge` with limits (elbows,
+  knees) and `SixDof` (hips). By default their frames are given in world space at the bind pose.
+  In a joint's frame X is the twist or hinge axis and Y and Z are the swing axes. A cone swing has
+  symmetric limits; `SwingType::Pyramid` allows a different range on each side, which a hip needs.
+- **Collisions.** Parts of one ragdoll never collide with each other: every pair of parts is
+  disabled in a group filter, and each ragdoll gets its own group, so two ragdolls still collide.
+  To keep ragdolls out of the main simulation, put them in a second `PhysicsWorld` whose static
+  bodies are made from the same `Shape` handles as the main world's: Jolt shares a shape, it does
+  not copy it.
+- **Gravity.** For the game's own gravity, give every part `gravity_factor(0.0)` and add
+  gravity times mass to each part before every step (`BodyRef::mass`, `BodyMut::add_force`).
+- **Pose and drive.** `RagdollRef::pose` and `RagdollMut::set_pose` read and write every part at
+  once. `drive_to_pose_using_motors` aims each joint's motors at its part's rotation relative to
+  the parent part in the pose. Motors keep the parts awake only while something wakes them, so
+  drive every tick. `drive_to_pose_using_kinematics` moves kinematic parts to the pose in one step.
+- **Rest.** `SettleDetector::default()` reports a ragdoll as settled once every part has moved
+  slower than 0.05 m/s and 0.1 rad/s for 30 updates in a row; the timeout is the caller's. In the
+  repository's tests a humanoid came to rest reliably only with joint friction (about 1 N·m on
+  every joint, `max_friction_torque` and `max_friction`); without it the near-spherical head kept
+  rocking on the ground and several drops did not settle.
+- **Joint limits on impact.** In each solver iteration Jolt solves contacts after constraints, so
+  when a falling ragdoll hits the ground the contacts win and joints pass their limits for a few
+  dozen ticks before the constraints pull them mostly back. These are measurements, not bounds:
+  in the repository's drop test (a 12-part humanoid dropped with its pelvis 1.5 m above the
+  terrain) the worst overshoot is 0.29 rad and 0.0037 rad remain at rest. Over a sweep of 126
+  drops of that humanoid (from 1 to 2.5 m, with raw and stabilized masses) the overshoot reached
+  0.48 rad, the joints were up to 0.15 rad outside their limits when the ragdoll came to rest,
+  and hinges bent about their fixed axes by up to 0.57 rad on impact. Check joint limits at rest,
+  with a tolerance, not on every tick. In that sweep the centre of a thin limb dropped from 2.5 m
+  ended up to 0.15 m below the terrain surface with the default `MotionQuality::Discrete`;
+  `MotionQuality::LinearCast` on the limbs is the setting to try for high falls.
+- **Lifecycle.** `remove_ragdoll` removes the parts and wakes what rested on them; `remove_body`
+  refuses a part.
+
+## A car and a ragdoll
+
+A car drives over rolling terrain in the main world while a ragdoll falls in a second world that
+shares the terrain shape. Neither world has gravity of its own: the caller applies it, as on a
+planet, where it would point at the centre. The ragdoll faces +Z in its bind pose: a pelvis, chest
+and head joined by swing-twist joints, thighs on six-DOF hips with asymmetric limits and shins on
+hinged knees.
+
+```rust
+use joltphysics::*;
+
+type Error = Box<dyn std::error::Error>;
+
+const DT: f32 = 1.0 / 60.0;
+/// The gravity the caller applies. On a planet it would point at the centre and change with the
+/// position; here it is constant to keep the example short.
+const GRAVITY: Vec3 = Vec3::new(0.0, -9.81, 0.0);
+
+/// The object layers of both worlds.
+struct Layers {
+    ground: ObjectLayer,
+    moving: ObjectLayer,
+    wheels: ObjectLayer,
+}
+
+/// A world without gravity of its own, in which wheels see the ground only.
+fn world() -> Result<(PhysicsWorld, Layers), Error> {
+    let mut table = CollisionLayers::new(2);
+    let fixed = BroadPhaseLayer::new(0);
+    let moving = BroadPhaseLayer::new(1);
+    let layers = Layers {
+        ground: table.add_object_layer(fixed),
+        moving: table.add_object_layer(moving),
+        wheels: table.add_object_layer(moving),
+    };
+    table
+        .enable_collision(layers.moving, layers.ground)
+        .enable_collision(layers.moving, layers.moving)
+        .enable_collision(layers.wheels, layers.ground);
+    let world = PhysicsWorld::new(WorldSettings::default().gravity(Vec3::ZERO).layers(table))?;
+    Ok((world, layers))
+}
+
+/// A gentle swell, metres.
+fn swell(x: f32, z: f32) -> f32 {
+    0.3 * (0.35 * x).sin() * (0.25 * z).cos()
+}
+
+/// The terrain: 33 x 33 samples of the swell, one per metre, x and z in [-16, 16].
+fn terrain() -> Result<Shape, Error> {
+    let mut samples = Vec::with_capacity(33 * 33);
+    for z in 0..33 {
+        for x in 0..33 {
+            samples.push(swell(x as f32 - 16.0, z as f32 - 16.0));
+        }
+    }
+    let settings = HeightFieldSettings::default().offset(Vec3::new(-16.0, 0.0, -16.0));
+    Ok(Shape::new_height_field(33, &samples, &settings)?)
+}
+
+/// The height of the ground below `(x, z)`.
+fn ground_at(world: &PhysicsWorld, layers: &Layers, x: Real, z: Real) -> Result<Real, Error> {
+    let ray = RayCast::new(RVec3::new(x, 10.0, z), Vec3::new(0.0, -20.0, 0.0));
+    let ground = [layers.ground];
+    let hit = world.cast_ray(ray, &QueryFilter::new().object_layers(&ground))?;
+    Ok(ray.point_at(hit.ok_or("no ground")?.fraction).y)
+}
+
+/// Adds the force of `GRAVITY` to a dynamic body.
+fn apply_gravity(world: &mut PhysicsWorld, body: BodyId) -> Result<(), Error> {
+    let mass = world.body(body)?.mass().ok_or("a dynamic body")?;
+    let force = Vec3::new(GRAVITY.x * mass, GRAVITY.y * mass, GRAVITY.z * mass);
+    world.body_mut(body)?.add_force(force)?;
+    Ok(())
+}
+
+/// A front-wheel-drive car with a low centre of mass, 8 m south of the centre, facing +Z.
+fn add_car(world: &mut PhysicsWorld, layers: &Layers) -> Result<(BodyId, VehicleId), Error> {
+    let hull = Shape::new_box(Vec3::new(0.9, 0.3, 2.0))?;
+    let chassis_shape = Shape::new_offset_center_of_mass(&hull, Vec3::new(0.0, -0.3, 0.0))?;
+    let ground = ground_at(world, layers, 0.0, -8.0)?;
+    let chassis = world.create_body(
+        &chassis_shape,
+        &BodySettings::new_dynamic()
+            .position(RVec3::new(0.0, ground + 1.0, -8.0))
+            .object_layer(layers.moving)
+            .mass(1500.0)
+            .allow_sleeping(false)
+            .gravity_factor(0.0),
+    )?;
+    // Left wheels at +X. The front wheels steer, the hand brake holds the rear ones.
+    let wheel = |x: f32, z: f32| WheelSettings::new(Vec3::new(x, -0.1, z)).radius(0.35).width(0.2);
+    let front = |x| wheel(x, 1.4).max_steer_angle(0.5).max_hand_brake_torque(0.0);
+    let rear = |x| wheel(x, -1.4).max_steer_angle(0.0);
+    let settings = VehicleSettings::new(
+        vec![front(0.9), front(-0.9), rear(0.9), rear(-0.9)],
+        vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
+        VehicleCollisionTester::cast_sphere(layers.wheels, 0.2),
+    )
+    .anti_roll_bars(vec![VehicleAntiRollBar::new(0, 1), VehicleAntiRollBar::new(2, 3)]);
+    let car = world.create_vehicle(chassis, &settings)?;
+    Ok((chassis, car))
+}
+
+/// The ragdoll's skeleton: the name and parent of each joint, parents first.
+const JOINTS: [(&str, Option<u32>); 7] = [
+    ("pelvis", None),
+    ("chest", Some(0)),
+    ("head", Some(1)),
+    ("thigh_l", Some(0)),
+    ("shin_l", Some(3)),
+    ("thigh_r", Some(0)),
+    ("shin_r", Some(5)),
+];
+
+/// The bind pose with the pelvis at the origin: each part's centre, capsule half height and
+/// radius, and mass in kg. Every capsule stands along Y.
+const PARTS: [([f32; 3], f32, f32, f32); 7] = [
+    ([0.0, 0.0, 0.0], 0.1, 0.15, 12.0),
+    ([0.0, 0.42, 0.0], 0.12, 0.15, 18.0),
+    ([0.0, 0.8, 0.0], 0.04, 0.11, 5.0),
+    ([0.12, -0.42, 0.0], 0.14, 0.08, 8.0),
+    ([0.12, -0.86, 0.0], 0.14, 0.07, 4.0),
+    ([-0.12, -0.42, 0.0], 0.14, 0.08, 8.0),
+    ([-0.12, -0.86, 0.0], 0.14, 0.07, 4.0),
+];
+
+/// Joint friction, N·m: it lets the ragdoll come to rest instead of rocking.
+const FRICTION: f32 = 1.0;
+/// How far a knee bends, radians.
+const KNEE_BEND: f32 = 2.2;
+
+/// The joint of `part` to its parent, in world space at the bind pose.
+fn joint(part: usize) -> Option<RagdollJoint> {
+    let up = Vec3::new(0.0, 1.0, 0.0);
+    let down = Vec3::new(0.0, -1.0, 0.0);
+    let side = Vec3::new(1.0, 0.0, 0.0);
+    let x = PARTS[part].0[0];
+    let at = |y: Real| RVec3::new(x as Real, y, 0.0);
+    Some(match part {
+        0 => return None,
+        // Waist and neck: the twist axis runs up the spine.
+        1 | 2 => {
+            let (anchor, cone) = if part == 1 { (at(0.2), 0.3) } else { (at(0.62), 0.5) };
+            RagdollJoint::SwingTwist(
+                SwingTwistConstraintSettings::new(anchor, up, side)
+                    .half_cone_angles(cone, cone)
+                    .twist_limits(-0.3, 0.3)
+                    .max_friction_torque(FRICTION),
+            )
+        }
+        // Hips: the twist axis runs down the thigh, Y is the side axis and Z points forward. A
+        // negative turn about Y swings the leg forward, a positive turn about Z swings it toward
+        // +X: the leg swings 1.4 rad forward but 0.3 back, 0.5 out but 0.2 in.
+        3 | 5 => {
+            let (out, inward) = (0.5, 0.2);
+            let about_z = if x > 0.0 { (-inward, out) } else { (-out, inward) };
+            let mut hip = SixDofConstraintSettings::new(at(-0.24), down, side)
+                .swing_type(SwingType::Pyramid);
+            for axis in [
+                SixDofConstraintAxis::TranslationX,
+                SixDofConstraintAxis::TranslationY,
+                SixDofConstraintAxis::TranslationZ,
+            ] {
+                hip = hip.axis(axis, SixDofAxis::Fixed);
+            }
+            for (axis, (min, max)) in [
+                (SixDofConstraintAxis::RotationX, (-0.3, 0.3)),
+                (SixDofConstraintAxis::RotationY, (-1.4, 0.3)),
+                (SixDofConstraintAxis::RotationZ, about_z),
+            ] {
+                hip = hip
+                    .axis(axis, SixDofAxis::Limited { min, max })
+                    .max_friction(axis, FRICTION);
+            }
+            RagdollJoint::SixDof(hip)
+        }
+        // Knees: a hinge about the side axis; a positive angle swings the shin back, to -Z.
+        _ => RagdollJoint::Hinge(
+            HingeConstraintSettings::new(at(-0.64), side, down)
+                .limits(0.0, KNEE_BEND)
+                .max_friction_torque(FRICTION),
+        ),
+    })
+}
+
+/// The ragdoll's settings, its parts in `layer` under the caller's gravity.
+fn ragdoll_settings(layer: ObjectLayer) -> Result<RagdollSettings, Error> {
+    let joints: Vec<SkeletonJoint<'_>> = JOINTS
+        .iter()
+        .map(|&(name, parent)| SkeletonJoint { name, parent })
+        .collect();
+    let skeleton = Skeleton::new(&joints)?;
+    let shapes = PARTS
+        .iter()
+        .map(|&(_, half_height, radius, _)| Shape::new_capsule(half_height, radius))
+        .collect::<Result<Vec<_>, _>>()?;
+    let parts: Vec<RagdollPart<'_>> = PARTS
+        .iter()
+        .zip(&shapes)
+        .enumerate()
+        .map(|(part, (&([x, y, z], _, _, mass), shape))| RagdollPart {
+            shape,
+            body: BodySettings::new_dynamic()
+                .position(RVec3::new(x as Real, y as Real, z as Real))
+                .object_layer(layer)
+                .mass(mass)
+                .friction(0.6)
+                .gravity_factor(0.0),
+            joint: joint(part),
+        })
+        .collect();
+    Ok(RagdollSettings::new(&skeleton, &parts)?)
+}
+
+/// The bind pose turned a quarter turn about Z, lying on its side, with the pelvis at `pelvis`.
+fn lying_pose(pelvis: RVec3) -> SkeletonPose {
+    let half_angle = std::f32::consts::FRAC_PI_4;
+    let rotation = Quat::from_xyzw(0.0, 0.0, half_angle.sin(), half_angle.cos());
+    let joints = PARTS
+        .iter()
+        // The quarter turn about Z takes (x, y) to (-y, x).
+        .map(|&([x, y, z], ..)| JointTransform { translation: Vec3::new(-y, x, z), rotation })
+        .collect();
+    SkeletonPose { root_offset: pelvis, joints }
+}
+
+fn main() -> Result<(), Error> {
+    // One terrain shape in two worlds.
+    let terrain = terrain()?;
+    let (mut main, main_layers) = world()?;
+    let ground = BodySettings::new_static().object_layer(main_layers.ground);
+    let main_terrain = main.create_body(&terrain, &ground)?;
+    let (mut ragdolls, layers) = world()?;
+    let ground = BodySettings::new_static().object_layer(layers.ground);
+    let ragdoll_terrain = ragdolls.create_body(&terrain, &ground)?;
+    drop(terrain); // each body holds its own reference
+    assert_eq!(
+        ground_at(&main, &main_layers, 3.3, -2.7)?.to_bits(),
+        ground_at(&ragdolls, &layers, 3.3, -2.7)?.to_bits(),
+    );
+
+    // Three seconds at full throttle; the caller's gravity is set before every step.
+    let (chassis, car) = add_car(&mut main, &main_layers)?;
+    for _ in 0..180 {
+        let mut vehicle = main.vehicle_mut(car)?;
+        vehicle.set_gravity(GRAVITY)?;
+        vehicle.set_driver_input(DriverInput { forward: 1.0, ..DriverInput::default() })?;
+        assert!(main.step(DT)?.is_complete());
+    }
+    let body = main.body(chassis)?;
+    assert!(body.position().z > -4.0, "the car drove: {:?}", body.position());
+    // The y component of the chassis' up, the rotated +Y, is 1 - 2 (x² + z²).
+    let r = body.rotation();
+    assert!(1.0 - 2.0 * (r.x * r.x + r.z * r.z) > 0.9, "the car is upright");
+    let vehicle = main.vehicle(car)?;
+    assert!(vehicle.current_gear() >= 1);
+    for wheel in vehicle.wheels() {
+        let contact = wheel.contact.ok_or("every wheel is on the terrain")?;
+        assert_eq!(contact.body, main_terrain);
+        assert!(contact.normal.y > 0.9, "the terrain's normal points up");
+    }
+
+    // The ragdoll falls from 1.2 m, lying on its side, with a push; gravity is the caller's.
+    let settings = ragdoll_settings(layers.moving)?;
+    let pelvis = RVec3::new(5.0, ground_at(&ragdolls, &layers, 5.0, 5.0)? + 1.2, 5.0);
+    let ragdoll =
+        ragdolls.create_ragdoll(&settings, Some(&lying_pose(pelvis)), Activation::Activate)?;
+    ragdolls
+        .ragdoll_mut(ragdoll)?
+        .set_linear_and_angular_velocity(Vec3::new(1.0, 0.0, 0.5), Vec3::new(0.0, 1.0, 0.0))?;
+    let parts = ragdolls.ragdoll(ragdoll)?.body_ids().to_vec();
+    let mut detector = SettleDetector::default();
+    let mut landed = false;
+    let mut settled = false;
+    for _ in 0..600 {
+        for &part in &parts {
+            apply_gravity(&mut ragdolls, part)?;
+        }
+        assert!(ragdolls.step(DT)?.is_complete());
+        for (i, &a) in parts.iter().enumerate() {
+            landed |= ragdolls.were_bodies_in_contact(a, ragdoll_terrain)?;
+            for &b in &parts[i + 1..] {
+                assert!(!ragdolls.were_bodies_in_contact(a, b)?, "parts of one ragdoll touched");
+            }
+        }
+        if detector.update(&ragdolls.ragdoll(ragdoll)?) {
+            settled = true;
+            break;
+        }
+    }
+    assert!(landed && settled, "the ragdoll fell onto the terrain and came to rest");
+
+    // At rest the knees are within their limits; on impact they may have passed them.
+    let rest = ragdolls.ragdoll(ragdoll)?;
+    for knee in [4, 6] {
+        let Some(JointReading::Hinge { current_angle }) = rest.joint(knee) else {
+            return Err("a knee is a hinge".into());
+        };
+        assert!((-0.05..=KNEE_BEND + 0.05).contains(&current_angle), "{current_angle}");
+    }
+    let pelvis = rest.pose().root_offset;
+    let ground = ground_at(&ragdolls, &layers, pelvis.x, pelvis.z)?;
+    assert!(pelvis.y - ground < 0.4, "the pelvis lies on the terrain");
+
+    // Removing the ragdoll removes its parts; the terrain stays.
+    ragdolls.remove_ragdoll(ragdoll)?;
+    assert_eq!(ragdolls.body_count(), 1);
     Ok(())
 }
 ```

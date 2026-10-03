@@ -78,3 +78,45 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   doctest, and explains how a game builds its own autostep for steps with sharp edges.
 - Benchmarks against the game's budgets (`cargo bench -p joltphysics --bench budgets`, results in
   `docs/benchmarks.md`); the `character_cost` example moved into this bench.
+- `Shape::new_offset_center_of_mass` (Jolt `OffsetCenterOfMassShape`) moves a shape's centre of
+  mass without moving its surface, for a vehicle chassis with a low centre of mass.
+- Wheeled vehicles (Jolt `VehicleConstraint` with the wheeled controller) on a dynamic chassis
+  body: `PhysicsWorld::create_vehicle`, `remove_vehicle`, `vehicle`, `vehicle_mut`, configured by
+  `VehicleSettings` with wheels, suspension, engine, automatic transmission, differentials and
+  anti-roll bars at Jolt's defaults, and validated with `VehicleError`.
+- Vehicle wheels find the ground with a ray, sphere or cylinder cast (`VehicleCollisionTester`)
+  on their own object layer, and report contact, suspension length and impulses (`WheelState`).
+- Vehicles take driver input, a gravity override for gravity the caller applies, and a pitch and
+  roll limit; they report engine rpm and gear. An override whose force would overflow is refused.
+- `remove_body` refuses a vehicle's chassis (`BodyError::UsedByVehicle`), and dropping a world
+  removes its vehicles and ragdolls first.
+- `PhysicsWorld::rebase` rotates each vehicle's gravity override and the up of its ray or sphere
+  tester.
+- `PhysicsWorld::step`, `update_character` and the kinematic ragdoll drive reject time steps below
+  `PhysicsWorld::MIN_DELTA_TIME` (1 µs). Jolt divides by the step; the bound keeps the divisor
+  away from subnormal values, where those quotients become infinite.
+- `BodySettings::linear_damping` and `angular_damping` (Jolt's default 0.05), and `BodyRef::mass`
+  for dynamic bodies, for callers that apply gravity as a force.
+- `PhysicsWorld::were_bodies_in_contact` reports whether two bodies touched in the last step.
+- Constraint settings for ragdoll joints with Jolt's defaults and validation:
+  `SwingTwistConstraintSettings`, `HingeConstraintSettings` with limits and
+  `SixDofConstraintSettings` with asymmetric pyramid limits, with `MotorSettings` and
+  `SpringSettings`.
+- Ragdolls (Jolt `Ragdoll`): `Skeleton`, `RagdollSettings` (and `new_stabilized` for Jolt's
+  `Stabilize`), `PhysicsWorld::create_ragdoll` and `remove_ragdoll`. Parts of one ragdoll never
+  collide with each other; different ragdolls do. `remove_body` refuses a part
+  (`BodyError::OwnedByRagdoll`).
+- Ragdolls report their pose, root transform and joint readings, take a pose, are driven to a
+  pose with motors (six-DOF joints included) or kinematically, switch motion type and take
+  velocities; `SettleDetector` tells when a ragdoll has come to rest.
+- Determinism gates for a car driving a route, a fleet of 40 vehicles and a pile of 16 ragdolls
+  (1 against 4 worker threads), and leak gates for vehicles and ragdolls.
+- `joltphysics-sys` extension: `JPH_VehicleConstraint_AsConstraint`, ragdoll part and joint
+  setters that keep every setting (`JPH_RagdollSettings_SetPart`,
+  `_SetPartToParentSwingTwist`, `_SetPartToParentHinge`, `_SetPartToParentSixDOF`),
+  `JPH_RagdollSettings_CalculateConstraintPriorities`, and swing-twist and hinge motor access.
+  Layout assertions now cover the vehicle and constraint settings and every `JPH_PhysicsSettings`
+  field.
+- The guide has sections on vehicles and ragdolls, with a car on terrain and a ragdoll in a
+  second world run as a doctest; the README and the ragdoll docs state how far joints pass their
+  limits on impact.

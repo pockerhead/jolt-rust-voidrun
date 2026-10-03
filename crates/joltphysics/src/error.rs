@@ -198,7 +198,8 @@ pub enum VehicleError {
     WrongWorld(VehicleId),
     /// A setting or input is out of range; the payload names it.
     InvalidValue(&'static str),
-    /// The chassis body is not usable: not in this world, or the inner body of a character.
+    /// The chassis body is not usable: not in this world, the inner body of a character or a
+    /// part of a ragdoll.
     Body(BodyError),
     /// The chassis body is not dynamic.
     NotDynamic(BodyId),
