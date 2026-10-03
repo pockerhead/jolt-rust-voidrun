@@ -626,6 +626,13 @@ impl PhysicsWorld {
     ///
     /// Ragdoll parts are bodies of the world, which the list names. Joint frames and motor
     /// targets are relative to the bodies, so they need no change.
+    ///
+    /// Constraint frames are relative to the bodies and need no change, except pulleys, whose
+    /// fixed points are world points: a rebase recreates each pulley in the new frame, in id
+    /// order after the vehicles. That keeps its id, enabled state, ratio and lengths, drops its
+    /// warm start and its cached rope directions, and changes Jolt's constraint order (the new
+    /// pulley goes to the end, the last constraint takes the old one's place). The same calls
+    /// give the same order. A translation alone recreates pulleys too.
     pub fn rebase(
         &mut self,
         bodies_in_key_order: &[BodyId],
@@ -673,6 +680,9 @@ impl PhysicsWorld {
         if frame.is_noop() {
             return Ok(());
         }
+        let pulleys = self
+            .rebased_pulleys(|p| frame.point(p))
+            .map_err(BodyError::InvalidValue)?;
         let mut characters = Vec::with_capacity(self.characters.len());
         for id in self.character_ids().collect::<Vec<_>>() {
             let character = self
@@ -749,6 +759,9 @@ impl PhysicsWorld {
             character.write_linear_velocity(new.linear_velocity);
         }
         self.apply_vehicle_rebase(vehicles);
+        // After the bodies: Jolt computes each new pulley's world attachment points from the
+        // bodies' new poses.
+        self.apply_pulley_rebase(pulleys);
         if frame.rotates() {
             let gravity = gravity.to_jph();
             // SAFETY: the system is live and borrowed mutably; `gravity` is a live local.

@@ -1838,3 +1838,96 @@ fn ratios_at_the_bound_step_finitely() {
         }
     }
 }
+
+/// A pulley between two dynamic spheres of `masses` hanging 3 m below their fixed points.
+fn pulley_pair(
+    gravity: Vec3,
+    masses: [f32; 2],
+    settings: impl Fn(PulleyConstraintSettings) -> PulleyConstraintSettings,
+) -> (
+    PhysicsWorld,
+    [BodyId; 2],
+    Result<ConstraintId<PulleyConstraint>, ConstraintError>,
+) {
+    let mut world = world(gravity, 1);
+    let xs = [-2.0, 2.0];
+    let bodies = [0, 1].map(|i| {
+        world
+            .create_body(
+                &sphere(),
+                &BodySettings::new_dynamic()
+                    .mass(masses[i])
+                    .position(RVec3::new(xs[i], 0.0, 0.0)),
+            )
+            .unwrap()
+    });
+    let pulley = settings(PulleyConstraintSettings::new(
+        RVec3::new(-2.0, 0.0, 0.0),
+        RVec3::new(-2.0, 3.0, 0.0),
+        RVec3::new(2.0, 0.0, 0.0),
+        RVec3::new(2.0, 3.0, 0.0),
+    ));
+    let id = world.create_constraint(bodies[0], bodies[1], &pulley);
+    (world, bodies, id)
+}
+
+#[test]
+fn pulley_ratio_and_lengths_are_bounded() {
+    let max = limits::MAX_RATIO;
+    let min = 1.0 / limits::MAX_RATIO;
+    let create = |settings: &dyn Fn(PulleyConstraintSettings) -> PulleyConstraintSettings| {
+        pulley_pair(Vec3::ZERO, [1.0, 1.0], settings).2
+    };
+    for ratio in [min, max] {
+        assert!(create(&|s| s.ratio(ratio)).is_ok());
+    }
+    for ratio in [min.next_down(), max.next_up(), -1.0, 0.0, f32::NAN] {
+        assert!(constraint_invalid(create(&|s| s.ratio(ratio))));
+    }
+    let longest = 3.0 * limits::MAX_SHAPE_EXTENT;
+    let range = |min, max| PulleyLength::Range { min, max };
+    for (lo, hi) in [(0.0, longest), (longest, longest), (0.0, 0.0)] {
+        assert!(create(&|s| s.ratio(2.0).length(range(lo, hi))).is_ok());
+    }
+    for (lo, hi) in [(0.0, longest.next_up()), (-1.0e-6, 1.0), (2.0, 1.0)] {
+        assert!(constraint_invalid(create(&|s| s
+            .ratio(2.0)
+            .length(range(lo, hi)))));
+    }
+    // Fixed points are world points under the frame rule, like body points.
+    for point in real_on_axes(limits::MAX_POSITION.next_up()) {
+        assert!(constraint_invalid(create(&|_| {
+            PulleyConstraintSettings::new(
+                RVec3::new(-2.0, 0.0, 0.0),
+                point,
+                RVec3::new(2.0, 0.0, 0.0),
+                RVec3::new(2.0, 3.0, 0.0),
+            )
+        })));
+    }
+
+    let (mut world, _, id) = pulley_pair(Vec3::ZERO, [1.0, 1.0], |s| s.ratio(2.0));
+    let mut pulley = world.constraint_mut(id.unwrap()).unwrap();
+    assert!(pulley.set_length(0.0, longest).is_ok());
+    assert!(pulley.set_length(longest, longest).is_ok());
+    for (lo, hi) in [(0.0, longest.next_up()), (-1.0e-6, 1.0), (2.0, 1.0)] {
+        assert!(constraint_invalid(pulley.set_length(lo, hi)));
+    }
+}
+
+#[test]
+fn pulleys_at_the_ratio_bound_step_finitely() {
+    let gravity = Vec3::new(0.0, -9.81, 0.0);
+    let masses = [limits::MIN_MASS, limits::MAX_MASS];
+    for ratio in [limits::MAX_RATIO, 1.0 / limits::MAX_RATIO] {
+        for mass1 in masses {
+            for mass2 in masses {
+                let (mut world, bodies, id) =
+                    pulley_pair(gravity, [mass1, mass2], |s| s.ratio(ratio));
+                id.unwrap();
+                let what = format!("pulley {ratio}, masses {mass1} {mass2}");
+                step_coupling(&mut world, &bodies, &what);
+            }
+        }
+    }
+}

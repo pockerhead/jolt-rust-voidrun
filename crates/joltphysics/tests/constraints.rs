@@ -1235,3 +1235,207 @@ fn unrelated_or_reversed_references_are_rejected() {
         Some(ConstraintError::NotFound(unrelated.into()))
     );
 }
+
+/// Two boxes of `masses` hanging from fixed points 3 m above them, at x = -1 and x = 1, joined
+/// by a pulley of `ratio`.
+fn hanging_pair(
+    world: &mut PhysicsWorld,
+    masses: [f32; 2],
+    ratio: f32,
+) -> ([BodyId; 2], ConstraintId<PulleyConstraint>) {
+    let shape = Shape::new_box(Vec3::new(0.2, 0.2, 0.2)).unwrap();
+    let xs = [-1.0, 1.0];
+    let bodies = [0, 1].map(|i| {
+        world
+            .create_body(
+                &shape,
+                &BodySettings::new_dynamic()
+                    .mass(masses[i])
+                    .position(RVec3::new(xs[i], 0.0, 0.0)),
+            )
+            .unwrap()
+    });
+    let pulley = world
+        .create_constraint(
+            bodies[0],
+            bodies[1],
+            &PulleyConstraintSettings::new(
+                RVec3::new(-1.0, 0.0, 0.0),
+                RVec3::new(-1.0, 3.0, 0.0),
+                RVec3::new(1.0, 0.0, 0.0),
+                RVec3::new(1.0, 3.0, 0.0),
+            )
+            .ratio(ratio),
+        )
+        .unwrap();
+    (bodies, pulley)
+}
+
+#[test]
+fn pulley_lifts_one_body_as_the_other_falls() {
+    let mut world = world(GRAVITY, 1);
+    let (bodies, pulley) = hanging_pair(&mut world, [2.0, 1.0], 1.0);
+    let reading = world.constraint(pulley).unwrap();
+    assert_eq!((reading.min_length(), reading.max_length()), (0.0, 6.0));
+    let length = |world: &PhysicsWorld, i: usize, x: Real| {
+        distance(
+            world.body(bodies[i]).unwrap().position(),
+            RVec3::new(x, 3.0, 0.0),
+        )
+    };
+    let mut worst: f64 = 0.0;
+    for _ in 0..60 {
+        step(&mut world, 1);
+        worst = worst.max(length(&world, 0, -1.0) + length(&world, 1, 1.0) - 6.0);
+    }
+    let y = |i: usize| world.body(bodies[i]).unwrap().position().y;
+    // The heavier box went down 1.63 m and pulled the lighter one up as far; measured: the
+    // rope stretched by at most 0.0000002 m.
+    assert!(y(0) < -0.5 && y(1) > 0.5, "{} {}", y(0), y(1));
+    assert!(worst < 1e-3, "{worst} m");
+    assert!(world
+        .constraint(pulley)
+        .unwrap()
+        .total_lambda_position()
+        .is_finite());
+}
+
+#[test]
+fn pulley_with_ratio_two_moves_half_as_far() {
+    let mut world = world(GRAVITY, 1);
+    let (bodies, pulley) = hanging_pair(&mut world, [3.0, 1.0], 2.0);
+    assert_eq!(world.constraint(pulley).unwrap().ratio(), 2.0);
+    step(&mut world, 60);
+    let y = |i: usize| wide(world.body(bodies[i]).unwrap().position().y);
+    // length1 + 2 · length2 stays 9 m: body 2 rises half as far as body 1 falls. Measured:
+    // the ratio of the moves is 0.5000.
+    assert!(y(0) < -0.5, "{}", y(0));
+    let ratio = y(1) / -y(0);
+    assert!((ratio - 0.5).abs() < 1e-2, "{ratio}");
+}
+
+/// A hinged door swinging down and, 5 m behind it, a hanging pulley pair, for the rebase
+/// tests.
+fn swinging_scene() -> (PhysicsWorld, Vec<BodyId>, ConstraintId<PulleyConstraint>) {
+    let mut world = world(GRAVITY, 1);
+    let post = add_anchor(&mut world, RVec3::new(-2.0, 2.0, 5.0));
+    let panel = add_box(
+        &mut world,
+        Vec3::new(0.5, 0.05, 0.5),
+        RVec3::new(0.6, 2.0, 5.0),
+    );
+    world
+        .create_constraint(
+            post,
+            panel,
+            &HingeConstraintSettings::new(RVec3::new(0.1, 2.0, 5.0), Z, X),
+        )
+        .unwrap();
+    let (pair, pulley) = hanging_pair(&mut world, [2.0, 1.0], 1.0);
+    (world, vec![post, panel, pair[0], pair[1]], pulley)
+}
+
+/// `p` mapped back from the frame `rotation * p + translation`.
+fn mapped_back(p: RVec3, rotation: Quat, translation: RVec3) -> RVec3 {
+    let shifted = Vec3::new(
+        wide(p.x - translation.x) as f32,
+        wide(p.y - translation.y) as f32,
+        wide(p.z - translation.z) as f32,
+    );
+    let back = common::ragdoll::rotate(common::ragdoll::conj(rotation), shifted);
+    RVec3::new(back.x as Real, back.y as Real, back.z as Real)
+}
+
+/// The largest distance over 60 ticks between the bodies of a swinging scene rebased at tick
+/// 30 by `rotation` and `translation`, mapped back, and those of an un-rebased twin.
+fn rebase_drift(rotation: Quat, translation: RVec3) -> f64 {
+    let (mut rebased, bodies, pulley) = swinging_scene();
+    let (mut twin, twin_bodies, _) = swinging_scene();
+    step(&mut rebased, 30);
+    step(&mut twin, 30);
+    let length = rebased.constraint(pulley).unwrap().current_length();
+    rebased.rebase(&bodies, rotation, translation).unwrap();
+    let reading = rebased.constraint(pulley).unwrap();
+    assert!((reading.current_length() - length).abs() < 1e-4);
+    assert_eq!((reading.min_length(), reading.max_length()), (0.0, 6.0));
+    let mut worst: f64 = 0.0;
+    for _ in 0..60 {
+        step(&mut rebased, 1);
+        step(&mut twin, 1);
+        for (&id, &twin_id) in bodies.iter().zip(&twin_bodies) {
+            let back = mapped_back(rebased.body(id).unwrap().position(), rotation, translation);
+            worst = worst.max(distance(back, twin.body(twin_id).unwrap().position()));
+        }
+    }
+    worst
+}
+
+#[test]
+fn rebase_moves_constraints_rigidly() {
+    let translation = RVec3::new(30.0, -12.0, 7.0);
+    let shifted = rebase_drift(Quat::IDENTITY, translation);
+    let turned = rebase_drift(quat_about(Vec3::new(0.0, 0.6, 0.8), 0.4), translation);
+    // Measured: 0.000007 m after a translation and 0.0023 m after a rotation. The pulley pair
+    // built in the turned frame from the start and stepped next to the unturned one differs by
+    // the same 0.0023 m: Jolt's pulley is not exactly rotation-equivariant in f32, and the
+    // rebase adds nothing to that (the door alone stays within 0.00001 m).
+    assert!(shifted < 1e-4, "{shifted} m");
+    assert!(turned < 5e-3, "{turned} m");
+}
+
+#[test]
+fn rebase_with_a_pulley_is_atomic() {
+    // The fixed points cannot leave a finite frame through a valid rebase, so a refused rebase
+    // is made with an incomplete body list: nothing, the pulley included, changes.
+    let (mut world, bodies, pulley) = swinging_scene();
+    step(&mut world, 20);
+    let snapshot = |world: &PhysicsWorld| {
+        let reading = world.constraint(pulley).unwrap();
+        let mut bits: Vec<u64> = [
+            reading.current_length(),
+            reading.min_length(),
+            reading.max_length(),
+            reading.total_lambda_position(),
+        ]
+        .iter()
+        .map(|v| u64::from(v.to_bits()))
+        .collect();
+        for &id in &bodies {
+            let p = world.body(id).unwrap().position();
+            bits.extend([p.x, p.y, p.z].map(|c| wide(c).to_bits()));
+        }
+        bits
+    };
+    let before = snapshot(&world);
+    let rotation = quat_about(Z, 0.3);
+    assert!(matches!(
+        world.rebase(&bodies[..3], rotation, RVec3::new(1.0, 2.0, 3.0)),
+        Err(BodyError::InvalidValue(_))
+    ));
+    assert_eq!(snapshot(&world), before);
+    world
+        .rebase(&bodies, rotation, RVec3::new(1.0, 2.0, 3.0))
+        .unwrap();
+    assert_ne!(snapshot(&world), before);
+}
+
+#[test]
+fn rebase_with_pulleys_is_repeatable() {
+    let run = || {
+        let (mut world, bodies, _) = swinging_scene();
+        let mut digest = Vec::new();
+        for tick in 0..90 {
+            if tick % 30 == 29 {
+                world
+                    .rebase(&bodies, quat_about(Y, 0.2), RVec3::new(5.0, 0.0, -3.0))
+                    .unwrap();
+            }
+            step(&mut world, 1);
+            for &id in &bodies {
+                record_body(&world, id, &mut digest);
+            }
+        }
+        digest
+    };
+    assert_eq!(run(), run());
+}

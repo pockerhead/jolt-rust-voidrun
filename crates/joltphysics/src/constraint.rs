@@ -23,7 +23,7 @@ use joltphysics_sys::*;
 pub use coupling::{GearConstraintSettings, RackAndPinionConstraintSettings};
 pub use linear::{
     DistanceConstraintSettings, DistanceRange, FixedConstraintSettings, PointConstraintSettings,
-    SliderConstraintSettings,
+    PulleyConstraintSettings, PulleyLength, SliderConstraintSettings,
 };
 pub use rotational::ConeConstraintSettings;
 pub(crate) use world::ConstraintEntry;

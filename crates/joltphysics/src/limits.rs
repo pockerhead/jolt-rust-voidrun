@@ -196,6 +196,9 @@
 //! | `ConstraintMut::<SixDofConstraint>::set_target_position_cs` | [`MAX_SHAPE_EXTENT`] per axis | new: `slider_cone_swing_twist_and_six_dof_targets_are_bounded` |
 //! | `GearConstraintSettings::new`, `teeth` ratio | `1..=`[`MAX_RATIO`] (see `GearConstraintSettings` for the lower bound) | new: `coupling_ratios_are_bounded`, `ratios_at_the_bound_step_finitely` |
 //! | `RackAndPinionConstraintSettings::new`, `teeth` ratio | magnitude within `1 / `[`MAX_RATIO`]`..=`[`MAX_RATIO`]; `teeth` length positive within [`MAX_SHAPE_EXTENT`] | new: `coupling_ratios_are_bounded`, `ratios_at_the_bound_step_finitely` |
+//! | `PulleyConstraintSettings::ratio` | positive, within `1 / `[`MAX_RATIO`]`..=`[`MAX_RATIO`] | new: `pulley_ratio_and_lengths_are_bounded`, `pulleys_at_the_ratio_bound_step_finitely` |
+//! | `PulleyLength::Range`, `ConstraintMut::<PulleyConstraint>::set_length` | `0 <= min <= max <= (1 + ratio) ·` [`MAX_SHAPE_EXTENT`] | new: `pulley_ratio_and_lengths_are_bounded` |
+//! | `PulleyConstraintSettings::new` body and fixed points | [`MAX_POSITION`]; a rebase moves fixed points as re-expressed state, checked finite only | new: `pulley_ratio_and_lengths_are_bounded` |
 //! | `SwingTwistConstraintSettings::max_friction_torque`, `HingeConstraintSettings::max_friction_torque`, `SixDofConstraintSettings::max_friction` | finite, at least 0; Jolt clamps the friction impulse to `dt · limit` and applies no more than stops the relative motion | existing: `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated` |
 //! | `SixDofAxis::Limited` on a translation axis | finite, `min < max`, within [`MAX_SHAPE_EXTENT`] | new: `six_dof_limits_are_validated`, `six_dof_translation_limits_at_the_bound_step_finitely` |
 //! | `RagdollSettings::new`, `new_stabilized` part masses | [`MIN_MASS`]`..=`[`MAX_MASS`], also for kinematic parts (`RagdollMut::set_motion_type` can make them dynamic) | new: `part_masses_and_velocities_are_bounded` |
@@ -325,11 +328,12 @@ pub const MAX_WEIGHT_IMPULSE: f32 = 1.0e9;
 /// (for a gear 1, see [`GearConstraintSettings`](crate::GearConstraintSettings)).
 ///
 /// Crate policy. Jolt multiplies the inverse mass or inertia of body 2 by the ratio's square in
-/// the effective mass and the impulse on body 2 by the ratio (`GearConstraintPart.h:81,122`,
-/// `RackAndPinionConstraintPart.h:82,123`, `PulleyConstraint.cpp`). With a principal inverse
-/// inertia of at most `√3 · 1e6` (see [`MAX_WEIGHT_IMPULSE`]), `ratio² · I⁻¹` is at most about
-/// 1.7e14, far from `f32` overflow. A ratio of 1e4 already turns one gear ten thousand times per
-/// turn of the other; a test steps both bounds on the lightest and heaviest bodies.
+/// the effective mass, and body 2's velocity (for racks and pulleys also its impulse) by the
+/// ratio (`GearConstraintPart.h:81,122`, `RackAndPinionConstraintPart.h:82,123`,
+/// `IndependentAxisConstraintPart.h:71,112` for pulleys). With a principal inverse inertia of at
+/// most `√3 · 1e6` (see [`MAX_WEIGHT_IMPULSE`]), `ratio² · I⁻¹` is at most about 1.7e14, far from
+/// `f32` overflow. A ratio of 1e4 already turns one gear ten thousand times per turn of the
+/// other; tests step both bounds on the lightest and heaviest bodies.
 pub const MAX_RATIO: f32 = 1.0e4;
 
 /// Whether every component of `position` is at most [`MAX_POSITION`] in absolute value.
