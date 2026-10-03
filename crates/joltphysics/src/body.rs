@@ -582,6 +582,9 @@ impl PhysicsWorld {
             }
         }
         let creation = CreationSettings::new(shape, settings)?;
+        if !self.has_room_for_bodies(1) {
+            return Err(BodyError::TooManyBodies);
+        }
         self.note_structure_change();
         // SAFETY: the body interface belongs to this live world, borrowed mutably; `creation`
         // is a fully set up settings object whose layer exists in this world.

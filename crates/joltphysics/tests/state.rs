@@ -637,6 +637,34 @@ fn a_rejected_structural_call_keeps_a_state_restorable() {
 }
 
 #[test]
+fn a_failed_create_on_a_full_world_keeps_a_state_restorable() {
+    // Full after the floor and one cube.
+    let mut world =
+        PhysicsWorld::new(WorldSettings::default().gravity(GRAVITY).max_bodies(2)).unwrap();
+    add_floor(&mut world);
+    add_cube(&mut world, RVec3::new(0.0, 1.0, 0.0));
+    step(&mut world, 5);
+    let saved = world.save_state();
+    step(&mut world, 1);
+
+    assert_eq!(
+        world.create_body(&cube_shape(), &BodySettings::new_dynamic()),
+        Err(BodyError::TooManyBodies)
+    );
+    let capsule = Shape::new_capsule(0.7, 0.4).unwrap();
+    let character = CharacterSettings::new(&capsule).inner_body(Some(InnerBody {
+        shape: &capsule,
+        object_layer: ObjectLayer::MOVING,
+    }));
+    assert!(matches!(
+        world.create_character(&character, RVec3::new(3.0, 0.0, 0.0), Quat::IDENTITY),
+        Err(CharacterError::TooManyBodies)
+    ));
+    assert_eq!(world.character_ids().count(), 0);
+    assert_eq!(world.restore_state(&saved), Ok(()));
+}
+
+#[test]
 fn a_state_of_another_world_is_refused() {
     let mut a = Scene::new(1);
     let mut b = Scene::new(1);

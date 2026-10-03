@@ -1086,6 +1086,14 @@ impl PhysicsWorld {
         if raw == INVALID_ID {
             return Err(CharacterError::TooManyCharacters);
         }
+        if settings.inner_body.is_some() && !self.has_room_for_bodies(1) {
+            return Err(CharacterError::TooManyBodies);
+        }
+        let collision = if settings.collide_with_characters {
+            Some(self.character_collision()?)
+        } else {
+            None
+        };
         // The world passes an explicit id: Jolt's default comes from a process-wide counter,
         // and Jolt orders contacts between characters by id.
         let jolt_settings = settings.to_jph(raw);
@@ -1110,16 +1118,15 @@ impl PhysicsWorld {
             // SAFETY: the character is live; the getter reads a member.
             let raw_body = unsafe { JPH_CharacterVirtual_GetInnerBodyID(character.as_ptr()) };
             if raw_body == INVALID_ID {
-                // Jolt created no body because the world is full; dropping the character
-                // releases it and creates nothing else.
+                // Jolt created no body because the world is full, which the room check above
+                // rules out; dropping the character releases it and creates nothing else.
                 return Err(CharacterError::TooManyBodies);
             }
             Some(BodyId::new(raw_body, self.tag))
         } else {
             None
         };
-        if settings.collide_with_characters {
-            let collision = self.character_collision()?;
+        if let Some(collision) = collision {
             // SAFETY: both objects are live and owned by this world, borrowed mutably. The set
             // keeps a pointer to the character until `remove_character` takes it out; the
             // character keeps a pointer to the set, which the world drops after its characters.

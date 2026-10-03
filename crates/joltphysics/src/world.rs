@@ -709,6 +709,17 @@ impl PhysicsWorld {
         unsafe { JPH_PhysicsSystem_GetNumBodies(self.system.as_ptr()) }
     }
 
+    /// Whether the world has room for `count` more bodies. Jolt's `BodyManager::AddBody` fails
+    /// only when the world holds `GetMaxBodies()` bodies, so creators check this before they
+    /// change anything and a full world rejects them cleanly.
+    pub(crate) fn has_room_for_bodies(&self, count: usize) -> bool {
+        // SAFETY: the system is live; the getter reads a constant.
+        let max_bodies = unsafe { JPH_PhysicsSystem_GetMaxBodies(self.system.as_ptr()) };
+        max_bodies
+            .checked_sub(self.body_count())
+            .is_some_and(|room| count as u64 <= u64::from(room))
+    }
+
     /// Rebuilds the broad phase's trees for fast queries.
     ///
     /// Queries see bodies created, moved and removed through this API immediately, without a

@@ -642,10 +642,7 @@ impl PhysicsWorld {
         if raw == u32::MAX {
             return Err(RagdollError::TooManyRagdolls);
         }
-        // SAFETY: the system is live; the getter reads a constant.
-        let max_bodies = unsafe { JPH_PhysicsSystem_GetMaxBodies(self.system.as_ptr()) };
-        let room = max_bodies.checked_sub(self.body_count());
-        if room.is_none_or(|room| parts as u64 > u64::from(room)) {
+        if !self.has_room_for_bodies(parts) {
             return Err(RagdollError::TooManyBodies);
         }
         self.note_structure_change();
