@@ -390,7 +390,9 @@ impl JoltObject for JPH_DebugRenderer {
     }
 }
 
-/// Wireframe drawing only produces lines; Jolt never calls `DrawTriangle` in that mode.
+/// Wireframe drawing of rigid shapes only produces lines. Soft body shapes draw their faces with
+/// `DrawTriangle`, which joltc turns into three `DrawLine` calls when no triangle callback is set
+/// (`DebugRendererSimple::DrawTriangle`, `joltc.cpp:9392-9406`).
 static DEBUG_RENDERER_PROCS: JPH_DebugRenderer_Procs = JPH_DebugRenderer_Procs {
     DrawLine: Some(draw_line),
     DrawTriangle: None,

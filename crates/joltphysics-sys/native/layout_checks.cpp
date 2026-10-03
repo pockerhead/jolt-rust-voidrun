@@ -31,6 +31,7 @@
 #include <Jolt/Physics/Constraints/SpringSettings.h>
 #include <Jolt/Physics/EActivation.h>
 #include <Jolt/Physics/EPhysicsUpdateError.h>
+#include <Jolt/Physics/SoftBody/SoftBodySharedSettings.h>
 #include <Jolt/Physics/Vehicle/VehicleTransmission.h>
 
 #include <cstddef>
@@ -81,6 +82,31 @@ JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_RayCastResult, 12, 4);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RayCastResult, bodyID, 0);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RayCastResult, fraction, 4);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_RayCastResult, subShapeID2, 8);
+
+// Soft body values. joltc copies JPH_SoftVertex and JPH_SoftFace field by field
+// (JPH_SoftBodySharedSettings_AddVertices/_AddFaces), and the extension copies
+// JPH_SoftBodyVertexAttributes field by field, so only the C ABI is pinned here.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_SoftVertex, 28, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftVertex, position, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftVertex, velocity, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftVertex, invMass, 24);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_SoftFace, 16, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftFace, vertex1, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftFace, vertex2, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftFace, vertex3, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftFace, materialIndex, 12);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_SoftBodyVertexAttributes, 20, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyVertexAttributes, compliance, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyVertexAttributes, shearCompliance, 4);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyVertexAttributes, bendCompliance, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyVertexAttributes, lraType, 12);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyVertexAttributes, lraMaxDistanceMultiplier, 16);
+static_assert(int(JPH_SoftBodyBendType_None) == int(JPH::SoftBodySharedSettings::EBendType::None), "JPH_SoftBodyBendType_None");
+static_assert(int(JPH_SoftBodyBendType_Distance) == int(JPH::SoftBodySharedSettings::EBendType::Distance), "JPH_SoftBodyBendType_Distance");
+static_assert(int(JPH_SoftBodyBendType_Dihedral) == int(JPH::SoftBodySharedSettings::EBendType::Dihedral), "JPH_SoftBodyBendType_Dihedral");
+static_assert(int(JPH_SoftBodyLRAType_None) == int(JPH::SoftBodySharedSettings::ELRAType::None), "JPH_SoftBodyLRAType_None");
+static_assert(int(JPH_SoftBodyLRAType_EuclideanDistance) == int(JPH::SoftBodySharedSettings::ELRAType::EuclideanDistance), "JPH_SoftBodyLRAType_EuclideanDistance");
+static_assert(int(JPH_SoftBodyLRAType_GeodesicDistance) == int(JPH::SoftBodySharedSettings::ELRAType::GeodesicDistance), "JPH_SoftBodyLRAType_GeodesicDistance");
 
 // Scene query settings and results. joltc converts these field by field
 // (ToJolt/FromJolt), so only the C ABI is pinned here, not agreement with the

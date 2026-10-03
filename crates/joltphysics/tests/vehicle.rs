@@ -88,6 +88,7 @@ fn wheel_contacts_match_the_ground_geometry() {
                 // For a vertical suspension over a plane each is the distance minus the wheel
                 // radius.
                 let expected = distance - f64::from(WHEEL_RADIUS);
+                // A tester that stopped skipping the vehicle's own chassis reports it here.
                 assert_eq!(contact.body, ground, "{case}");
                 let normal = f3(contact.normal);
                 assert!(
@@ -703,4 +704,96 @@ fn drive_a_route_twice_gives_identical_bits() {
     drive_route(1, |world, car| record_vehicle(world, car, &mut second));
     assert!(!first.is_empty());
     assert!(first == second, "the two drives differ");
+}
+
+/// A pressurised ball of radius 1 whose 162 vertices of 1 kg are all free.
+fn free_soft_ball() -> SoftBodySharedSettings {
+    let (vertices, faces) = common::soft_body::sphere(1.0, 9, 20);
+    SoftBodySharedSettings::builder(vertices, faces)
+        .create_constraints(
+            SoftBodyBendType::None,
+            SoftBodyVertexAttributes::default()
+                .compliance(1.0e-4)
+                .shear_compliance(1.0e-4)
+                .bend_compliance(Some(1.0e-3)),
+        )
+        .build()
+        .unwrap()
+}
+
+/// Jolt's vehicle constraint solves the body under a wheel as a rigid body (in an asserts build
+/// a wheel on a free soft body aborts in `Body::AddPositionStep`), so the wheels look through
+/// soft bodies: a car driving onto a pressurised ball and one standing on a cloth only ever
+/// report the ground.
+#[test]
+fn wheels_pass_through_soft_bodies_to_the_ground() {
+    for tester_index in 0..3 {
+        let (mut world, layers) = car_world(GRAVITY, 2);
+        let ground = add_ground(&mut world, &layers, false);
+        let ball = world
+            .create_soft_body(
+                &free_soft_ball(),
+                &SoftBodySettings::default()
+                    .object_layer(layers.moving)
+                    .position(RVec3::new(0.0, 1.0, 1.5))
+                    .pressure(2000.0)
+                    .allow_sleeping(false),
+            )
+            .unwrap();
+        let (chassis, car) = add_car_with(
+            &mut world,
+            &chassis_settings(&layers, RVec3::new(0.0, 2.5, 0.0), Quat::IDENTITY)
+                .gravity_factor(1.0),
+            testers(&layers)[tester_index],
+        );
+        let mut ground_contacts = 0;
+        for _ in 0..240 {
+            drive(&mut world, car, throttle(0.3), 1);
+            for wheel in world.vehicle(car).unwrap().wheels() {
+                if let Some(contact) = wheel.contact {
+                    assert_eq!(contact.body, ground, "tester {tester_index}");
+                    ground_contacts += 1;
+                }
+            }
+            let [x, y, z] = v3(world.body(chassis).unwrap().position());
+            assert!(x.is_finite() && y.is_finite() && z.is_finite());
+        }
+        assert!(ground_contacts > 0, "tester {tester_index}");
+        assert!(world.body(ball).is_ok());
+
+        // A car resting on a cloth that lies on the ground stands on the ground through it.
+        let (mut world, layers) = car_world(GRAVITY, 2);
+        let ground = add_ground(&mut world, &layers, false);
+        let cloth = common::soft_body::Cloth::new(12, 0.5)
+            .builder()
+            .create_constraints(
+                SoftBodyBendType::Dihedral,
+                SoftBodyVertexAttributes::default(),
+            )
+            .build()
+            .unwrap();
+        world
+            .create_soft_body(
+                &cloth,
+                &SoftBodySettings::default()
+                    .object_layer(layers.moving)
+                    .position(RVec3::new(0.0, 0.05, 0.0))
+                    .faces_double_sided(true),
+            )
+            .unwrap();
+        let (_, car) = add_car_with(
+            &mut world,
+            &chassis_settings(&layers, RVec3::new(0.0, 1.0, 0.0), Quat::IDENTITY)
+                .gravity_factor(1.0),
+            testers(&layers)[tester_index],
+        );
+        step(&mut world, 60);
+        let wheels = world.vehicle(car).unwrap().wheels();
+        assert!(
+            wheels
+                .iter()
+                .all(|wheel| wheel.contact.is_some_and(|contact| contact.body == ground)),
+            "tester {tester_index}: {wheels:?}"
+        );
+    }
 }

@@ -6,15 +6,15 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
-use std::ptr::{null, NonNull};
+use std::ptr::{null, null_mut, NonNull};
 
 use joltphysics_sys::*;
 
 use crate::limits::{
     self, is_angular_velocity, is_friction, is_gravity_factor, is_in_frame, is_linear_velocity,
-    is_mass,
+    is_mass, is_soft_body_force,
 };
-use crate::math::is_finite_non_negative;
+use crate::math::{is_finite_non_negative, jolt_rotate};
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyError, ObjectLayer, PhysicsWorld, Quat, RVec3, Shape, Vec3};
@@ -540,7 +540,7 @@ impl CreationSettings {
 }
 
 /// Jolt's `BodyID::cInvalidBodyID`, returned by `CreateAndAddBody` when the world is full.
-const INVALID_BODY_ID: JPH_BodyID = 0xffff_ffff;
+pub(crate) const INVALID_BODY_ID: JPH_BodyID = 0xffff_ffff;
 
 impl PhysicsWorld {
     /// Creates a body from `shape` and adds it to the world. The body keeps its own reference
@@ -645,7 +645,7 @@ impl PhysicsWorld {
         })
     }
 
-    /// Removes a body from the world and destroys it.
+    /// Removes a body from the world and destroys it; soft bodies are removed the same way.
     ///
     /// Jolt does not wake the bodies around a removed one by itself, so joltphysics wakes every
     /// non-static body whose current bounds overlap (or touch) the removed body's bounds, in
@@ -708,7 +708,9 @@ impl PhysicsWorld {
     /// `PhysicsSystem::WereBodiesInContact`).
     ///
     /// Jolt answers from the contact cache of the last step, and only for pairs of which at
-    /// least one body was awake in it; bodies removed since are allowed. Fails with
+    /// least one body was awake in it; bodies removed since are allowed. A soft body's
+    /// vertices collide inside the soft body solver and never enter that cache, so this is
+    /// `false` for every pair with a soft body, even one lying on the other body. Fails with
     /// [`BodyError::WrongWorld`] for an id of another world.
     pub fn were_bodies_in_contact(&self, a: BodyId, b: BodyId) -> Result<bool, BodyError> {
         for id in [a, b] {
@@ -1018,7 +1020,8 @@ impl BodyRef<'_> {
         Quat::from_jph(value)
     }
 
-    /// Linear velocity of the centre of mass in m/s.
+    /// Linear velocity of the centre of mass in m/s. For a soft body, Jolt reports the average
+    /// of its vertex velocities.
     pub fn linear_velocity(&self) -> Vec3 {
         let mut value = Vec3::ZERO.to_jph();
         // SAFETY: as in `position`.
@@ -1026,7 +1029,8 @@ impl BodyRef<'_> {
         Vec3::from_jph(value)
     }
 
-    /// Angular velocity in rad/s.
+    /// Angular velocity in rad/s. For a soft body, Jolt reports the average of `p × v` over its
+    /// vertices (in m²/s, relative to the body origin), not a rigid rotation.
     pub fn angular_velocity(&self) -> Vec3 {
         let mut value = Vec3::ZERO.to_jph();
         // SAFETY: as in `position`.
@@ -1057,20 +1061,34 @@ impl BodyRef<'_> {
     /// infinite. For the caller's own gravity `g` (m/s²) on a body created with
     /// [`gravity_factor(0.0)`](BodySettings::gravity_factor), add the force `g * mass` every
     /// step with [`BodyMut::add_force`].
+    ///
+    /// For a soft body, the sum of the masses of its movable vertices; `None` while any vertex
+    /// is kinematic, because Jolt then gives the whole body infinite mass.
     pub fn mass(&self) -> Option<f32> {
-        with_read_locked_body(self.body_lock_interface, self.id, |body| {
+        let inverse_mass = with_read_locked_body(self.body_lock_interface, self.id, |body| {
             // SAFETY: `body` is locked for reading for the duration of the closure. A dynamic body
             // has motion properties, so the unchecked getter reads a live member; the getters
             // only read.
             unsafe {
                 JPH_Body_IsDynamic(body.as_ptr()).then(|| {
-                    1.0 / JPH_MotionProperties_GetInverseMassUnchecked(
-                        JPH_Body_GetMotionProperties(body.as_ptr()),
-                    )
+                    JPH_MotionProperties_GetInverseMassUnchecked(JPH_Body_GetMotionProperties(
+                        body.as_ptr(),
+                    ))
                 })
             }
         })
-        .flatten()
+        .flatten()?;
+        (inverse_mass != 0.0).then(|| 1.0 / inverse_mass)
+    }
+
+    /// Whether the body is a soft body ([`PhysicsWorld::create_soft_body`]).
+    pub fn is_soft_body(&self) -> bool {
+        with_read_locked_body(self.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for reading for the duration of the closure; the getter
+            // only reads it.
+            unsafe { JPH_Body_IsSoftBody(body.as_ptr()) }
+        })
+        .unwrap_or(false)
     }
 }
 
@@ -1100,13 +1118,108 @@ const POSITION_RULE: &str = "position must be finite and within limits::MAX_POSI
 /// two products cancel.
 const F32_PRODUCT_HEADROOM: f64 = 1.0e37;
 
-/// What [`BodyMut::check_load`] reads from a dynamic body.
+/// What [`BodyMut::check_load`] reads from a dynamic rigid body.
 struct LoadState {
     force: Vec3,
     torque: Vec3,
     inverse_mass: f32,
     inverse_inertia: Vec3,
     center_of_mass: RVec3,
+}
+
+/// What [`BodyMut::check_load`] reads from a soft body.
+struct SoftLoadState {
+    force: Vec3,
+    rotation: Quat,
+    largest_inverse_mass: f32,
+    vertex_count: u32,
+}
+
+/// The body state that bounds a load, by kind of body.
+enum Load {
+    /// A static or kinematic body, which ignores loads.
+    Ignored,
+    Rigid(LoadState),
+    Soft(SoftLoadState),
+}
+
+/// Reads what bounds a load on `body`.
+///
+/// # Safety
+/// `body` is locked (for reading or writing) for the duration of the call.
+unsafe fn read_load(body: NonNull<JPH_Body>) -> Load {
+    let body = body.as_ptr();
+    let mut accumulated_force = Vec3::ZERO.to_jph();
+    // SAFETY: `body` is locked (function contract). A dynamic body, soft bodies included, has
+    // motion properties, so the unchecked getter reads a live member; the getters only read, and
+    // every output is a live local that holds the count joltc writes.
+    unsafe {
+        if !JPH_Body_IsDynamic(body) {
+            return Load::Ignored;
+        }
+        JPH_Body_GetAccumulatedForce(body, &mut accumulated_force);
+        if JPH_Body_IsSoftBody(body) {
+            let vertex_count = JPH_Body_GetSoftBodyVertexCount(body);
+            let mut inverse_masses = vec![0.0_f32; vertex_count as usize];
+            JPH_Body_GetSoftBodyVertices(
+                body,
+                null_mut(),
+                null_mut(),
+                inverse_masses.as_mut_ptr(),
+                vertex_count,
+            );
+            let mut rotation = Quat::IDENTITY.to_jph();
+            JPH_Body_GetRotation(body, &mut rotation);
+            return Load::Soft(SoftLoadState {
+                force: Vec3::from_jph(accumulated_force),
+                rotation: Quat::from_jph(rotation),
+                largest_inverse_mass: inverse_masses.into_iter().fold(0.0, f32::max),
+                vertex_count,
+            });
+        }
+        let motion = JPH_Body_GetMotionProperties(body);
+        let mut accumulated_torque = Vec3::ZERO.to_jph();
+        let mut inverse_inertia = Vec3::ZERO.to_jph();
+        let mut center_of_mass = RVec3::ZERO.to_jph();
+        JPH_Body_GetAccumulatedTorque(body, &mut accumulated_torque);
+        JPH_MotionProperties_GetInverseInertiaDiagonal(motion, &mut inverse_inertia);
+        JPH_Body_GetCenterOfMassPosition(body, &mut center_of_mass);
+        Load::Rigid(LoadState {
+            force: Vec3::from_jph(accumulated_force),
+            torque: Vec3::from_jph(accumulated_torque),
+            inverse_mass: JPH_MotionProperties_GetInverseMassUnchecked(motion),
+            inverse_inertia: Vec3::from_jph(inverse_inertia),
+            center_of_mass: RVec3::from_jph(center_of_mass),
+        })
+    }
+}
+
+/// The length of `v`, in `f64`.
+fn length(v: [f64; 3]) -> f64 {
+    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+}
+
+/// `a + b + c` per component, in `f64`.
+fn sum(a: Vec3, b: Vec3, c: [f64; 3]) -> [f64; 3] {
+    let [ax, ay, az] = [a.x, a.y, a.z].map(f64::from);
+    let [bx, by, bz] = [b.x, b.y, b.z].map(f64::from);
+    [ax + bx + c[0], ay + by + c[1], az + bz + c[2]]
+}
+
+/// The force to add to a soft body for the world-space `force`: `force` in the body frame Jolt
+/// accumulates it in, after checking the accumulated force against the soft body force bound
+/// of [`limits`] (Jolt adds `F · w / N` per vertex, `SoftBodyMotionProperties.cpp:334`).
+fn soft_body_force(state: &SoftLoadState, force: Vec3) -> Result<Vec3, BodyError> {
+    // Jolt converts only gravity into the body frame (`InitializeUpdateContext`) and adds the
+    // accumulated force to the vertex velocities, which are stored in that frame.
+    let local = jolt_rotate(state.rotation.conjugated(), force);
+    let new_force = sum(state.force, local, [0.0; 3]);
+    require(
+        is_soft_body_force(new_force, state.largest_inverse_mass, state.vertex_count),
+        "accumulated force would exceed limits::MAX_ACCELERATION for a vertex of this soft \
+         body, or limits::MAX_ACCELERATION * limits::MAX_MASS",
+    )?;
+    Ok(local)
 }
 
 /// The torque, in `f64`, of `force` at `point` on a body whose centre of mass is
@@ -1224,7 +1337,12 @@ impl BodyMut<'_> {
     /// Sets the linear velocity in m/s, finite and at most [`limits::MAX_LINEAR_VELOCITY`] long
     /// (Jolt would clamp a faster one; it is rejected, as at creation). Wakes the body when the
     /// velocity is not near zero.
+    ///
+    /// Fails with [`BodyError::SoftBody`] for a soft body, whose velocity is stored per vertex
+    /// and which Jolt ignores this for (`Docs/Architecture.md:460`); use
+    /// [`SoftBodyMut::set_vertex_velocity`](crate::SoftBodyMut::set_vertex_velocity).
     pub fn set_linear_velocity(&mut self, velocity: Vec3) -> Result<(), BodyError> {
+        self.reject_soft_body()?;
         require(is_linear_velocity(velocity), LINEAR_VELOCITY_RULE)?;
         let velocity = velocity.to_jph();
         // SAFETY: as in `set_position`.
@@ -1235,7 +1353,10 @@ impl BodyMut<'_> {
     /// Sets the angular velocity in rad/s, finite and at most [`limits::MAX_ANGULAR_VELOCITY`]
     /// long (Jolt would clamp a faster one; it is rejected, as at creation). Wakes the body when
     /// the velocity is not near zero.
+    ///
+    /// Fails with [`BodyError::SoftBody`] for a soft body, which Jolt ignores this for.
     pub fn set_angular_velocity(&mut self, velocity: Vec3) -> Result<(), BodyError> {
+        self.reject_soft_body()?;
         require(is_angular_velocity(velocity), ANGULAR_VELOCITY_RULE)?;
         let mut velocity = velocity.to_jph();
         // SAFETY: as in `set_position`.
@@ -1254,9 +1375,18 @@ impl BodyMut<'_> {
     /// this one may give the body at most [`limits::MAX_ACCELERATION`] (`|F| / mass`); otherwise
     /// [`BodyError::InvalidValue`] is returned and nothing changes. Static and kinematic bodies
     /// ignore forces.
+    ///
+    /// On a soft body Jolt spreads the force evenly over its vertices: a vertex of inverse mass
+    /// `w` gains `F · w / N · dt` of velocity in a step, `N` being the number of vertices, and
+    /// the accumulated force may give the lightest vertex at most [`limits::MAX_ACCELERATION`]
+    /// and be at most `MAX_ACCELERATION · MAX_MASS` long (5e14 N) even when every vertex is
+    /// pinned.
+    /// Jolt adds the accumulated force to the vertices in the body's own frame, so joltphysics
+    /// turns `force` into that frame with the body's current rotation; a rotation set later in
+    /// the same step turns the force with the vertices.
     pub fn add_force(&mut self, force: Vec3) -> Result<(), BodyError> {
         require(force.is_finite(), "force must be finite")?;
-        self.check_load(force, None, Vec3::ZERO)?;
+        let force = self.check_load(force, None, Vec3::ZERO)?;
         let mut force = force.to_jph();
         // SAFETY: as in `set_position`.
         unsafe { JPH_BodyInterface_AddForce(self.interface(), self.id.raw, &mut force) };
@@ -1272,7 +1402,13 @@ impl BodyMut<'_> {
     /// (`|τ|` times the largest principal inverse inertia), and Jolt's `f32` torque
     /// `(point - centre_of_mass) × force` must not overflow; otherwise
     /// [`BodyError::InvalidValue`] is returned and nothing changes.
+    ///
+    /// Fails with [`BodyError::SoftBody`] for a soft body: Jolt would add the torque as well,
+    /// and a soft body never clears its torque (it resets only the force after a step), so the
+    /// torque would stay in the body and in its saved state. Use [`add_force`](Self::add_force)
+    /// or set vertex velocities instead.
     pub fn add_force_at_point(&mut self, force: Vec3, point: RVec3) -> Result<(), BodyError> {
+        self.reject_soft_body()?;
         require(force.is_finite(), "force must be finite")?;
         require(
             is_in_frame(point),
@@ -1294,7 +1430,11 @@ impl BodyMut<'_> {
     /// including this one may give the body at most [`limits::MAX_ANGULAR_ACCELERATION`] (`|τ|`
     /// times the largest principal inverse inertia); otherwise [`BodyError::InvalidValue`] is
     /// returned and nothing changes.
+    ///
+    /// Fails with [`BodyError::SoftBody`] for a soft body, which Jolt ignores torque for and
+    /// never clears it on.
     pub fn add_torque(&mut self, torque: Vec3) -> Result<(), BodyError> {
+        self.reject_soft_body()?;
         require(torque.is_finite(), "torque must be finite")?;
         self.check_load(Vec3::ZERO, None, torque)?;
         let mut torque = torque.to_jph();
@@ -1303,52 +1443,41 @@ impl BodyMut<'_> {
         Ok(())
     }
 
+    /// Fails with [`BodyError::SoftBody`] when the body is a soft body.
+    fn reject_soft_body(&self) -> Result<(), BodyError> {
+        if self.is_soft_body() {
+            Err(BodyError::SoftBody(self.id))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Checks that adding `force` (at `point`, or at the centre of mass) and `torque` keeps this
-    /// step's accumulated load within the acceleration bounds of [`limits`]. Reads the body
-    /// under a read lock that is released before the caller adds the load: Jolt's body mutexes
-    /// are not recursive.
-    fn check_load(&self, force: Vec3, point: Option<RVec3>, torque: Vec3) -> Result<(), BodyError> {
-        let state = with_read_locked_body(self.inner.body_lock_interface, self.id, |body| {
-            // SAFETY: `body` is locked for reading for the duration of the closure. A dynamic
-            // body has motion properties, so the unchecked getter reads a live member; the
-            // getters only read, and every output is a live local.
-            unsafe {
-                if !JPH_Body_IsDynamic(body.as_ptr()) {
-                    return None;
-                }
-                let motion = JPH_Body_GetMotionProperties(body.as_ptr());
-                let mut accumulated_force = Vec3::ZERO.to_jph();
-                let mut accumulated_torque = Vec3::ZERO.to_jph();
-                let mut inverse_inertia = Vec3::ZERO.to_jph();
-                let mut center_of_mass = RVec3::ZERO.to_jph();
-                JPH_Body_GetAccumulatedForce(body.as_ptr(), &mut accumulated_force);
-                JPH_Body_GetAccumulatedTorque(body.as_ptr(), &mut accumulated_torque);
-                JPH_MotionProperties_GetInverseInertiaDiagonal(motion, &mut inverse_inertia);
-                JPH_Body_GetCenterOfMassPosition(body.as_ptr(), &mut center_of_mass);
-                Some(LoadState {
-                    force: Vec3::from_jph(accumulated_force),
-                    torque: Vec3::from_jph(accumulated_torque),
-                    inverse_mass: JPH_MotionProperties_GetInverseMassUnchecked(motion),
-                    inverse_inertia: Vec3::from_jph(inverse_inertia),
-                    center_of_mass: RVec3::from_jph(center_of_mass),
-                })
-            }
+    /// step's accumulated load within the acceleration bounds of [`limits`], and returns the
+    /// force to give Jolt: `force` itself, or for a soft body `force` in the body frame. Reads
+    /// the body under a read lock that is released before the caller adds the load: Jolt's body
+    /// mutexes are not recursive.
+    fn check_load(
+        &self,
+        force: Vec3,
+        point: Option<RVec3>,
+        torque: Vec3,
+    ) -> Result<Vec3, BodyError> {
+        let load = with_read_locked_body(self.inner.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for reading for the duration of the closure.
+            unsafe { read_load(body) }
         })
         .ok_or(BodyError::NotFound(self.id))?;
-        // Jolt ignores loads on static and kinematic bodies.
-        let Some(state) = state else {
-            return Ok(());
+        let state = match load {
+            // Jolt ignores loads on static and kinematic bodies.
+            Load::Ignored => return Ok(force),
+            Load::Soft(state) => return soft_body_force(&state, force),
+            Load::Rigid(state) => state,
         };
         let point_torque = match point {
             Some(point) => point_torque(force, point, state.center_of_mass)?,
             None => [0.0; 3],
         };
-        let sum = |a: Vec3, b: Vec3, c: [f64; 3]| {
-            let [ax, ay, az] = [a.x, a.y, a.z].map(f64::from);
-            let [bx, by, bz] = [b.x, b.y, b.z].map(f64::from);
-            [ax + bx + c[0], ay + by + c[1], az + bz + c[2]]
-        };
-        let length = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
         let new_force = sum(state.force, force, [0.0; 3]);
         let new_torque = sum(state.torque, torque, point_torque);
         let largest_inverse_inertia = state
@@ -1365,11 +1494,12 @@ impl BodyMut<'_> {
             length(new_torque) * f64::from(largest_inverse_inertia)
                 <= f64::from(limits::MAX_ANGULAR_ACCELERATION),
             "accumulated torque would exceed limits::MAX_ANGULAR_ACCELERATION for this body",
-        )
+        )?;
+        Ok(force)
     }
 
     /// Discards the force and torque added since the last step. Jolt clears them after every
-    /// step anyway. Does nothing for static and kinematic bodies.
+    /// step anyway. Does nothing for static and kinematic bodies; works on soft bodies.
     pub fn reset_forces(&mut self) {
         with_locked_body(self.inner.body_lock_interface, self.id, |body| {
             // SAFETY: `body` is locked for writing for the duration of the closure. Jolt's

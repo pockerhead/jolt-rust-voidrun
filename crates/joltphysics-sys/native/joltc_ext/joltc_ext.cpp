@@ -13,7 +13,9 @@
 // constraints follow the same convention: each handle is a reinterpret_cast of the most derived
 // object, and Constraint is the first base of their single-inheritance chain, so the same address
 // is the JPH_Constraint joltc's AsConstraint expects. A path handle is a JPH::PathConstraintPath*
-// (the base that carries the reference count), never a pointer to a derived path.
+// (the base that carries the reference count), never a pointer to a derived path. Soft body
+// shared settings and bodies are reinterpret_casts of JPH::SoftBodySharedSettings and JPH::Body,
+// as joltc's DEF_MAP_DECL defines them.
 //
 // Unlike the other handles, a JPH_PhysicsSystem is joltc's own wrapper struct around the Jolt
 // system, which is reached through its physicsSystem member. The struct's definition comes from a
@@ -37,12 +39,15 @@
 #include <Jolt/Physics/Constraints/SixDOFConstraint.h>
 #include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
+#include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
+#include <Jolt/Physics/SoftBody/SoftBodySharedSettings.h>
 #include <Jolt/Physics/StateRecorderImpl.h>
 #include <Jolt/Physics/Vehicle/VehicleConstraint.h>
 
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "joltc_ext.h"
@@ -454,6 +459,79 @@ JPH_Constraint* JPH_VehicleConstraint_AsConstraint(JPH_VehicleConstraint* constr
 
 	JPH::Constraint* joltConstraint = static_cast<JPH::Constraint*>(reinterpret_cast<JPH::VehicleConstraint*>(constraint));
 	return reinterpret_cast<JPH_Constraint*>(joltConstraint);
+}
+
+/* VehicleCollisionTester */
+namespace
+{
+	// What a wheel may stand on: neither the chassis (what Jolt's default IgnoreSingleBodyFilter
+	// skips) nor a soft body, which VehicleConstraint would solve as a rigid body (Body::AddPositionStep
+	// asserts IsRigidBody, and BuildIslands reads its index in the soft body active list).
+	class RigidGroundBodyFilter final : public JPH::BodyFilter
+	{
+	public:
+		explicit RigidGroundBodyFilter(JPH::BodyID vehicleBody) : mVehicleBody(vehicleBody) {}
+
+		bool ShouldCollide(const JPH::BodyID& bodyID) const override
+		{
+			return bodyID != mVehicleBody;
+		}
+
+		bool ShouldCollideLocked(const JPH::Body& body) const override
+		{
+			return !body.IsSoftBody();
+		}
+
+	private:
+		JPH::BodyID mVehicleBody;
+	};
+
+	// A Jolt tester that owns its body filter, so the filter lives exactly as long as the tester.
+	template <class Tester>
+	class RigidGroundTester final : public Tester
+	{
+	public:
+		template <class... Args>
+		explicit RigidGroundTester(JPH::BodyID vehicleBody, Args&&... args) :
+			Tester(std::forward<Args>(args)...),
+			mFilter(vehicleBody)
+		{
+			Tester::SetBodyFilter(&mFilter);
+		}
+
+	private:
+		RigidGroundBodyFilter mFilter;
+	};
+
+	template <class Tester, class Result, class... Args>
+	Result* CreateRigidGroundTester(JPH_BodyID vehicleBody, Args&&... args)
+	{
+		auto tester = new RigidGroundTester<Tester>(JPH::BodyID(vehicleBody), std::forward<Args>(args)...);
+		tester->AddRef();
+		return reinterpret_cast<Result*>(static_cast<JPH::VehicleCollisionTester*>(tester));
+	}
+}
+
+JPH_VehicleCollisionTesterRay* JPH_VehicleCollisionTesterRay_Create2(JPH_ObjectLayer layer, const JPH_Vec3* up, float maxSlopeAngle, JPH_BodyID vehicleBody)
+{
+	JPH_ASSERT(up);
+
+	return CreateRigidGroundTester<JPH::VehicleCollisionTesterRay, JPH_VehicleCollisionTesterRay>(vehicleBody,
+		static_cast<JPH::ObjectLayer>(layer), ToVec3(*up), maxSlopeAngle);
+}
+
+JPH_VehicleCollisionTesterCastSphere* JPH_VehicleCollisionTesterCastSphere_Create2(JPH_ObjectLayer layer, float radius, const JPH_Vec3* up, float maxSlopeAngle, JPH_BodyID vehicleBody)
+{
+	JPH_ASSERT(up);
+
+	return CreateRigidGroundTester<JPH::VehicleCollisionTesterCastSphere, JPH_VehicleCollisionTesterCastSphere>(vehicleBody,
+		static_cast<JPH::ObjectLayer>(layer), radius, ToVec3(*up), maxSlopeAngle);
+}
+
+JPH_VehicleCollisionTesterCastCylinder* JPH_VehicleCollisionTesterCastCylinder_Create2(JPH_ObjectLayer layer, float convexRadiusFraction, JPH_BodyID vehicleBody)
+{
+	return CreateRigidGroundTester<JPH::VehicleCollisionTesterCastCylinder, JPH_VehicleCollisionTesterCastCylinder>(vehicleBody,
+		static_cast<JPH::ObjectLayer>(layer), convexRadiusFraction);
 }
 
 /* RagdollSettings */
@@ -913,4 +991,177 @@ void JPH_RackAndPinionConstraint_SetConstraints(JPH_RackAndPinionConstraint* con
 float JPH_RackAndPinionConstraint_GetTotalLambda(const JPH_RackAndPinionConstraint* constraint)
 {
 	return AsRackAndPinionConstraint(constraint)->GetTotalLambda();
+}
+
+/* SoftBodySharedSettings */
+namespace
+{
+	JPH::SoftBodySharedSettings* AsSoftBodySharedSettings(JPH_SoftBodySharedSettings* settings)
+	{
+		return reinterpret_cast<JPH::SoftBodySharedSettings*>(settings);
+	}
+
+	const JPH::SoftBodySharedSettings* AsSoftBodySharedSettings(const JPH_SoftBodySharedSettings* settings)
+	{
+		return reinterpret_cast<const JPH::SoftBodySharedSettings*>(settings);
+	}
+
+	// The soft body motion properties of body, or null when it is not a soft body.
+	JPH::SoftBodyMotionProperties* AsSoftBodyMotionProperties(JPH::Body* body)
+	{
+		if (body == nullptr || !body->IsSoftBody())
+			return nullptr;
+		return static_cast<JPH::SoftBodyMotionProperties*>(body->GetMotionProperties());
+	}
+
+	const JPH::SoftBodyMotionProperties* AsSoftBodyMotionProperties(const JPH::Body* body)
+	{
+		if (body == nullptr || !body->IsSoftBody())
+			return nullptr;
+		return static_cast<const JPH::SoftBodyMotionProperties*>(body->GetMotionProperties());
+	}
+}
+
+void JPH_SoftBodyVertexAttributes_Init(JPH_SoftBodyVertexAttributes* attributes)
+{
+	JPH_ASSERT(attributes);
+
+	const JPH::SoftBodySharedSettings::VertexAttributes joltAttributes{};
+	attributes->compliance = joltAttributes.mCompliance;
+	attributes->shearCompliance = joltAttributes.mShearCompliance;
+	attributes->bendCompliance = joltAttributes.mBendCompliance;
+	attributes->lraType = static_cast<JPH_SoftBodyLRAType>(joltAttributes.mLRAType);
+	attributes->lraMaxDistanceMultiplier = joltAttributes.mLRAMaxDistanceMultiplier;
+}
+
+void JPH_SoftBodySharedSettings_CreateConstraints2(JPH_SoftBodySharedSettings* settings,
+	const JPH_SoftBodyVertexAttributes* attributes, uint32_t attributeCount, JPH_SoftBodyBendType bendType)
+{
+	JPH_ASSERT(settings && attributes && attributeCount > 0);
+
+	JPH::Array<JPH::SoftBodySharedSettings::VertexAttributes> joltAttributes;
+	joltAttributes.reserve(attributeCount);
+	for (uint32_t i = 0; i < attributeCount; ++i)
+	{
+		const JPH_SoftBodyVertexAttributes& in = attributes[i];
+		joltAttributes.emplace_back(in.compliance, in.shearCompliance, in.bendCompliance,
+			static_cast<JPH::SoftBodySharedSettings::ELRAType>(in.lraType), in.lraMaxDistanceMultiplier);
+	}
+	AsSoftBodySharedSettings(settings)->CreateConstraints(joltAttributes.data(), (JPH::uint)joltAttributes.size(),
+		static_cast<JPH::SoftBodySharedSettings::EBendType>(bendType));
+}
+
+void JPH_SoftBodySharedSettings_AddEdgeConstraint(JPH_SoftBodySharedSettings* settings, uint32_t vertex1, uint32_t vertex2, float compliance)
+{
+	AsSoftBodySharedSettings(settings)->mEdgeConstraints.emplace_back(vertex1, vertex2, compliance);
+}
+
+void JPH_SoftBodySharedSettings_AddDihedralBendConstraint(JPH_SoftBodySharedSettings* settings, uint32_t vertex1, uint32_t vertex2, uint32_t vertex3, uint32_t vertex4, float compliance)
+{
+	AsSoftBodySharedSettings(settings)->mDihedralBendConstraints.emplace_back(vertex1, vertex2, vertex3, vertex4, compliance);
+}
+
+void JPH_SoftBodySharedSettings_AddVolumeConstraint(JPH_SoftBodySharedSettings* settings, uint32_t vertex1, uint32_t vertex2, uint32_t vertex3, uint32_t vertex4, float compliance)
+{
+	AsSoftBodySharedSettings(settings)->mVolumeConstraints.emplace_back(vertex1, vertex2, vertex3, vertex4, compliance);
+}
+
+void JPH_SoftBodySharedSettings_CalculateEdgeLengths(JPH_SoftBodySharedSettings* settings)
+{
+	AsSoftBodySharedSettings(settings)->CalculateEdgeLengths();
+}
+
+void JPH_SoftBodySharedSettings_CalculateBendConstraintConstants(JPH_SoftBodySharedSettings* settings)
+{
+	AsSoftBodySharedSettings(settings)->CalculateBendConstraintConstants();
+}
+
+void JPH_SoftBodySharedSettings_CalculateVolumeConstraintVolumes(JPH_SoftBodySharedSettings* settings)
+{
+	AsSoftBodySharedSettings(settings)->CalculateVolumeConstraintVolumes();
+}
+
+uint32_t JPH_SoftBodySharedSettings_GetEdgeConstraintCount(const JPH_SoftBodySharedSettings* settings)
+{
+	return (uint32_t)AsSoftBodySharedSettings(settings)->mEdgeConstraints.size();
+}
+
+uint32_t JPH_SoftBodySharedSettings_GetDihedralBendConstraintCount(const JPH_SoftBodySharedSettings* settings)
+{
+	return (uint32_t)AsSoftBodySharedSettings(settings)->mDihedralBendConstraints.size();
+}
+
+uint32_t JPH_SoftBodySharedSettings_GetVolumeConstraintCount(const JPH_SoftBodySharedSettings* settings)
+{
+	return (uint32_t)AsSoftBodySharedSettings(settings)->mVolumeConstraints.size();
+}
+
+uint32_t JPH_SoftBodySharedSettings_GetLRAConstraintCount(const JPH_SoftBodySharedSettings* settings)
+{
+	return (uint32_t)AsSoftBodySharedSettings(settings)->mLRAConstraints.size();
+}
+
+/* Soft body Body */
+// Vertex positions and velocities are stored relative to the centre of mass transform; the
+// centre of mass of a soft body shape is its origin (SoftBodyShape::GetCenterOfMass).
+void JPH_Body_GetSoftBodyVertices(const JPH_Body* body, JPH_RVec3* outPositions,
+	JPH_Vec3* outVelocities, float* outInvMasses, uint32_t count)
+{
+	const JPH::Body* joltBody = reinterpret_cast<const JPH::Body*>(body);
+	const JPH::SoftBodyMotionProperties* mp = AsSoftBodyMotionProperties(joltBody);
+	if (mp == nullptr)
+		return;
+
+	const JPH::Array<JPH::SoftBodyVertex>& vertices = mp->GetVertices();
+	const uint32_t n = std::min(count, (uint32_t)vertices.size());
+	const JPH::RMat44 com = joltBody->GetCenterOfMassTransform();
+	for (uint32_t i = 0; i < n; ++i)
+	{
+		const JPH::SoftBodyVertex& v = vertices[i];
+		if (outPositions != nullptr)
+			FromRVec3(com * v.mPosition, &outPositions[i]);
+		if (outVelocities != nullptr)
+			FromVec3(com.Multiply3x3(v.mVelocity), &outVelocities[i]);
+		if (outInvMasses != nullptr)
+			outInvMasses[i] = v.mInvMass;
+	}
+}
+
+void JPH_Body_GetSoftBodyVertexLocalPositions(const JPH_Body* body, JPH_Vec3* outPositions, uint32_t count)
+{
+	JPH_ASSERT(outPositions || count == 0);
+
+	const JPH::SoftBodyMotionProperties* mp = AsSoftBodyMotionProperties(reinterpret_cast<const JPH::Body*>(body));
+	if (mp == nullptr)
+		return;
+
+	const JPH::Array<JPH::SoftBodyVertex>& vertices = mp->GetVertices();
+	const uint32_t n = std::min(count, (uint32_t)vertices.size());
+	for (uint32_t i = 0; i < n; ++i)
+		FromVec3(vertices[i].mPosition, &outPositions[i]);
+}
+
+void JPH_Body_SetSoftBodyVertexVelocity(JPH_Body* body, uint32_t index, const JPH_Vec3* velocity)
+{
+	JPH_ASSERT(velocity);
+
+	JPH::Body* joltBody = reinterpret_cast<JPH::Body*>(body);
+	JPH::SoftBodyMotionProperties* mp = AsSoftBodyMotionProperties(joltBody);
+	if (mp == nullptr || index >= mp->GetVertices().size())
+		return;
+
+	// The inverse of the world transform Jolt applies to gravity in InitializeUpdateContext.
+	const JPH::RMat44 com = joltBody->GetCenterOfMassTransform();
+	mp->GetVertex(index).mVelocity = com.Multiply3x3Transposed(ToVec3(*velocity));
+}
+
+void JPH_Body_SetSoftBodyVertexInvMass(JPH_Body* body, uint32_t index, float invMass)
+{
+	JPH::Body* joltBody = reinterpret_cast<JPH::Body*>(body);
+	JPH::SoftBodyMotionProperties* mp = AsSoftBodyMotionProperties(joltBody);
+	if (mp == nullptr || index >= mp->GetVertices().size())
+		return;
+
+	mp->GetVertex(index).mInvMass = invMass;
+	mp->CalculateMassAndInertia();
 }

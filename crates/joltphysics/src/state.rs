@@ -18,7 +18,9 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 /// gravity; per body its pose, velocities, accumulated force and torque, sleep test data,
 /// whether it may sleep and whether it is awake; the contact cache; and every constraint's own
 /// state (its enabled flag, the solver parts' warm start, motor states and targets, and for
-/// path constraints also the motor settings and maximum friction). For vehicles that covers the
+/// path constraints also the motor settings and maximum friction). For a soft body that covers
+/// its vertex positions and velocities and its bounds
+/// (`SoftBodyMotionProperties::SaveState`). For vehicles that covers the
 /// driver input, the engine, transmission and wheel state. On top of Jolt's state it holds every
 /// character's [`CharacterState`].
 ///
@@ -47,6 +49,10 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 /// - vehicle: [`set_gravity`](crate::VehicleMut::set_gravity),
 ///   [`set_max_pitch_roll_angle`](crate::VehicleMut::set_max_pitch_roll_angle),
 ///   [`set_collision_tester`](crate::VehicleMut::set_collision_tester).
+///
+/// Soft body vertex inverse masses
+/// ([`set_vertex_inverse_mass`](crate::SoftBodyMut::set_vertex_inverse_mass)) are configuration
+/// too: a restore keeps the ones set last, not those at the save.
 ///
 /// Body properties set at creation (shape, mass, friction, layers, ...) are not saved either;
 /// the body setters change only poses and velocities. A setting the caller applies again before every

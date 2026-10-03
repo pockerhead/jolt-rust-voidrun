@@ -2426,3 +2426,790 @@ fn path_motor_springs_and_friction_are_bounded() {
         step_coupling(&mut world, &[body], &format!("path friction, mass {mass}"));
     }
 }
+
+fn soft_invalid(result: Result<SoftBodySharedSettings, SoftBodyError>) -> bool {
+    matches!(result, Err(SoftBodyError::InvalidValue(_)))
+}
+
+/// A triangle of three vertices, the first at `first`, with one face.
+fn soft_triangle(first: SoftBodyVertex) -> SoftBodySharedSettingsBuilder {
+    let vertices = vec![
+        first,
+        SoftBodyVertex::new(Vec3::new(1.0, 0.0, 0.0)),
+        SoftBodyVertex::new(Vec3::new(0.0, 0.0, 1.0)),
+    ];
+    SoftBodySharedSettings::builder(vertices, vec![[0, 2, 1]])
+}
+
+/// Four vertices of 1 kg on a unit square with two faces, every inverse mass `inverse_mass`.
+fn soft_square(inverse_mass: f32) -> SoftBodySharedSettingsBuilder {
+    let vertices = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
+        .map(|[x, z]| SoftBodyVertex {
+            inverse_mass,
+            ..SoftBodyVertex::new(Vec3::new(x, 0.0, z))
+        })
+        .to_vec();
+    SoftBodySharedSettings::builder(vertices, vec![[0, 2, 3], [0, 3, 1]])
+}
+
+#[test]
+fn soft_body_shared_settings_are_bounded() {
+    let vertex = SoftBodyVertex::new;
+    let mut accepted = Vec::new();
+    let mut rejected = Vec::new();
+    // The first vertex on the extent bound; the triangle keeps an area.
+    for p in on_axes(limits::MAX_SHAPE_EXTENT) {
+        accepted.push(soft_triangle(vertex(p)));
+    }
+    for p in on_axes(limits::MAX_SHAPE_EXTENT.next_up()) {
+        rejected.push(soft_triangle(vertex(p)));
+    }
+    let away = Vec3::new(0.0, 0.0, -1.0);
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY) {
+        accepted.push(soft_triangle(SoftBodyVertex {
+            velocity: v,
+            ..vertex(away)
+        }));
+    }
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY.next_up()) {
+        rejected.push(soft_triangle(SoftBodyVertex {
+            velocity: v,
+            ..vertex(away)
+        }));
+    }
+    let with_inverse_mass = |inverse_mass| {
+        soft_triangle(SoftBodyVertex {
+            inverse_mass,
+            ..vertex(away)
+        })
+    };
+    for inverse_mass in [0.0, limits::MAX_VERTEX_INVERSE_MASS, 2.0 / limits::MAX_MASS] {
+        accepted.push(with_inverse_mass(inverse_mass));
+    }
+    for inverse_mass in [-0.5, limits::MAX_VERTEX_INVERSE_MASS.next_up(), 1.0e-7]
+        .into_iter()
+        .chain(NON_FINITE)
+    {
+        rejected.push(with_inverse_mass(inverse_mass));
+    }
+    // A face edge on the length bound and just below it.
+    let edge = |length: f32| {
+        let vertices = vec![
+            vertex(Vec3::ZERO),
+            vertex(Vec3::new(length, 0.0, 0.0)),
+            vertex(Vec3::new(0.0, 0.0, 1.0)),
+        ];
+        SoftBodySharedSettings::builder(vertices, vec![[0, 2, 1]])
+    };
+    accepted.push(edge(limits::MIN_SOFT_BODY_EDGE_LENGTH));
+    rejected.push(edge(limits::MIN_SOFT_BODY_EDGE_LENGTH.next_down()));
+    let attributes = SoftBodyVertexAttributes::default;
+    let generated = |attributes: SoftBodyVertexAttributes| {
+        soft_square(1.0).create_constraints(SoftBodyBendType::Dihedral, attributes)
+    };
+    let lra = LongRangeAttachment::GeodesicDistance;
+    for compliance in [0.0, limits::MAX_COMPLIANCE] {
+        accepted.push(generated(attributes().compliance(compliance)));
+        accepted.push(generated(attributes().shear_compliance(compliance)));
+        accepted.push(generated(attributes().bend_compliance(Some(compliance))));
+    }
+    for compliance in [-f32::MIN_POSITIVE, limits::MAX_COMPLIANCE.next_up()]
+        .into_iter()
+        .chain(NON_FINITE)
+    {
+        rejected.push(generated(attributes().compliance(compliance)));
+        rejected.push(generated(attributes().shear_compliance(compliance)));
+        rejected.push(generated(attributes().bend_compliance(Some(compliance))));
+    }
+    for multiplier in [1.0, limits::MAX_RATIO] {
+        accepted.push(generated(
+            attributes().long_range_attachment(lra, multiplier),
+        ));
+    }
+    for multiplier in [1.0f32.next_down(), limits::MAX_RATIO.next_up()]
+        .into_iter()
+        .chain(NON_FINITE)
+    {
+        rejected.push(generated(
+            attributes().long_range_attachment(lra, multiplier),
+        ));
+    }
+    for builder in accepted {
+        let description = format!("{builder:?}");
+        assert!(builder.build().is_ok(), "{description}");
+    }
+    for builder in rejected {
+        let description = format!("{builder:?}");
+        assert!(soft_invalid(builder.build()), "{description}");
+    }
+}
+
+#[test]
+fn soft_body_total_mass_is_bounded() {
+    // Four vertices whose masses add up to the bound exactly (powers of two keep it exact in
+    // f32 and f64).
+    assert!(soft_square(4.0 / limits::MAX_MASS).build().is_ok());
+    assert!(soft_invalid(
+        soft_square((4.0 / limits::MAX_MASS).next_down()).build()
+    ));
+}
+
+#[test]
+fn soft_body_settings_are_bounded() {
+    let mut world = empty_world();
+    let shared = soft_square(1.0).build().unwrap();
+    let base = SoftBodySettings::default;
+    let mut accepted = Vec::new();
+    let mut rejected = Vec::new();
+    for p in real_on_axes(limits::MAX_POSITION) {
+        accepted.push(base().position(p));
+    }
+    for p in real_on_axes(limits::MAX_POSITION.next_up()) {
+        rejected.push(base().position(p));
+    }
+    for iterations in [1, SoftBodySettings::MAX_ITERATIONS] {
+        accepted.push(base().num_iterations(iterations));
+    }
+    for iterations in [0, SoftBodySettings::MAX_ITERATIONS + 1] {
+        rejected.push(base().num_iterations(iterations));
+    }
+    accepted.push(base().linear_damping(0.0));
+    for damping in [-f32::MIN_POSITIVE].into_iter().chain(NON_FINITE) {
+        rejected.push(base().linear_damping(damping));
+    }
+    for velocity in [f32::MIN_POSITIVE, limits::MAX_LINEAR_VELOCITY] {
+        accepted.push(base().max_linear_velocity(velocity));
+    }
+    for velocity in [0.0, limits::MAX_LINEAR_VELOCITY.next_up(), f32::NAN] {
+        rejected.push(base().max_linear_velocity(velocity));
+    }
+    for restitution in [0.0, 1.0] {
+        accepted.push(base().restitution(restitution));
+    }
+    for restitution in [-0.1, 1.0f32.next_up(), f32::NAN] {
+        rejected.push(base().restitution(restitution));
+    }
+    for friction in [0.0, limits::MAX_FRICTION] {
+        accepted.push(base().friction(friction));
+    }
+    for friction in [-0.1, limits::MAX_FRICTION.next_up(), f32::NAN] {
+        rejected.push(base().friction(friction));
+    }
+    // The open square encloses no volume, so it takes no pressure; see
+    // `pressure_needs_a_volume_for_its_faces` for the bound on a closed body.
+    accepted.push(base().pressure(0.0));
+    rejected.push(base().pressure(f32::MIN_POSITIVE));
+    for pressure in [-f32::MIN_POSITIVE, limits::MAX_SOFT_BODY_PRESSURE.next_up()]
+        .into_iter()
+        .chain(NON_FINITE)
+    {
+        rejected.push(base().pressure(pressure));
+    }
+    let factor = limits::MAX_GRAVITY_FACTOR;
+    for gravity_factor in [-factor, factor] {
+        accepted.push(base().gravity_factor(gravity_factor));
+    }
+    for gravity_factor in [(-factor).next_down(), factor.next_up(), f32::NAN] {
+        rejected.push(base().gravity_factor(gravity_factor));
+    }
+    for radius in [0.0, limits::MAX_SHAPE_EXTENT] {
+        accepted.push(base().vertex_radius(radius));
+    }
+    for radius in [
+        -f32::MIN_POSITIVE,
+        limits::MAX_SHAPE_EXTENT.next_up(),
+        f32::NAN,
+    ] {
+        rejected.push(base().vertex_radius(radius));
+    }
+    rejected.push(base().rotation(Quat::from_xyzw(0.0, 0.0, 0.0, 2.0)));
+    for settings in &accepted {
+        world.create_soft_body(&shared, settings).unwrap();
+    }
+    let count = world.body_count();
+    for settings in &rejected {
+        assert!(
+            body_invalid(world.create_soft_body(&shared, settings)),
+            "{settings:?}"
+        );
+    }
+    let unknown = ObjectLayer::new(99);
+    assert_eq!(
+        world.create_soft_body(&shared, &base().object_layer(unknown)),
+        Err(BodyError::UnknownObjectLayer(unknown))
+    );
+    assert_eq!(world.body_count(), count);
+}
+
+/// The tetrahedron of the right corner at the origin with the edges `side` along x and z and
+/// the fourth vertex at `(side, height, side)`, faces wound counter-clockwise seen from outside,
+/// vertices of inverse mass `inverse_mass` joined by rigid edges.
+fn soft_tetrahedron(side: f32, height: f32, inverse_mass: f32) -> SoftBodySharedSettingsBuilder {
+    let vertices = [
+        [0.0, 0.0, 0.0],
+        [side, 0.0, 0.0],
+        [0.0, 0.0, side],
+        [side, height, side],
+    ]
+    .map(|p| SoftBodyVertex {
+        inverse_mass,
+        ..SoftBodyVertex::new(Vec3::from(p))
+    })
+    .to_vec();
+    SoftBodySharedSettings::builder(vertices, vec![[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]])
+        .create_constraints(SoftBodyBendType::None, SoftBodyVertexAttributes::default())
+}
+
+#[test]
+fn pressure_needs_a_volume_for_its_faces() {
+    let mut world = empty_world();
+    let pressure = |value| SoftBodySettings::default().pressure(value);
+    let max = limits::MAX_SOFT_BODY_PRESSURE;
+    // Every face has an area and 1 m edges, but the six-volume is 1e-36: Jolt's pressure
+    // coefficient `pressure * dt / volume` would overflow `f32` in the first step.
+    let sliver = soft_tetrahedron(1.0, 1.0e-36, 1.0).build().unwrap();
+    // The same tetrahedron wound inside out, and an open square: no positive volume.
+    let inside_out = SoftBodySharedSettings::builder(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+        ]
+        .map(|p| SoftBodyVertex::new(Vec3::from(p)))
+        .to_vec(),
+        vec![[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]],
+    )
+    .build()
+    .unwrap();
+    let square = soft_square(1.0).build().unwrap();
+    // A tetrahedron large enough for the largest pressure, and a unit one that takes less.
+    let large = soft_tetrahedron(12.0, 12.0, 1.0).build().unwrap();
+    let small = soft_tetrahedron(1.0, 1.0, 1.0).build().unwrap();
+    for shared in [&sliver, &inside_out, &square, &large, &small] {
+        world.create_soft_body(shared, &pressure(0.0)).unwrap();
+    }
+    world.create_soft_body(&large, &pressure(max)).unwrap();
+    world.create_soft_body(&small, &pressure(5.0e4)).unwrap();
+    let count = world.body_count();
+    for shared in [&sliver, &inside_out, &square, &small] {
+        assert!(body_invalid(world.create_soft_body(shared, &pressure(max))));
+    }
+    for shared in [&sliver, &inside_out, &square] {
+        assert!(body_invalid(
+            world.create_soft_body(shared, &pressure(f32::MIN_POSITIVE))
+        ));
+    }
+    assert!(body_invalid(
+        world.create_soft_body(&small, &pressure(2.0e5))
+    ));
+    assert_eq!(world.body_count(), count);
+    step(&mut world, 60);
+}
+
+/// The smallest height up to `side` of a [`soft_tetrahedron`] that takes `pressure`, found by
+/// bisection on `f32` heights.
+fn smallest_pressurised_height(side: f32, pressure: f32, inverse_mass: f32) -> f32 {
+    let mut world = empty_world();
+    let mut accepts = |height: f32| {
+        let shared = soft_tetrahedron(side, height, inverse_mass)
+            .build()
+            .unwrap();
+        match world.create_soft_body(&shared, &SoftBodySettings::default().pressure(pressure)) {
+            Ok(id) => {
+                world.remove_body(id).unwrap();
+                true
+            }
+            Err(_) => false,
+        }
+    };
+    let (mut low, mut high) = (1.0e-36_f32, side);
+    assert!(!accepts(low) && accepts(high));
+    // Positive floats are ordered like their bit patterns.
+    while high.to_bits() - low.to_bits() > 1 {
+        let middle = f32::from_bits(low.to_bits() + (high.to_bits() - low.to_bits()) / 2);
+        if accepts(middle) {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    high
+}
+
+#[test]
+fn a_sliver_at_the_pressure_bound_steps_finitely() {
+    // The lightest vertices; the largest pressure, where the force term decides the volume
+    // bound, and a pressure so small that the bound of Jolt's rounding decides.
+    let inverse_mass = limits::MAX_VERTEX_INVERSE_MASS;
+    for (side, pressure) in [(20.0, limits::MAX_SOFT_BODY_PRESSURE), (1.0, 1.0e-3)] {
+        let height = smallest_pressurised_height(side, pressure, inverse_mass);
+        for gravity in [Vec3::ZERO, GRAVITY] {
+            let mut world = world(gravity, 1);
+            let create = |world: &mut PhysicsWorld, height| {
+                let shared = soft_tetrahedron(side, height, inverse_mass)
+                    .build()
+                    .unwrap();
+                world.create_soft_body(&shared, &SoftBodySettings::default().pressure(pressure))
+            };
+            assert!(body_invalid(create(&mut world, height.next_down())));
+            let id = create(&mut world, height).unwrap();
+            for tick in 0..120 {
+                let _ = world.step(DT).unwrap();
+                for vertex in world.soft_body(id).unwrap().vertices() {
+                    let p = vertex.position;
+                    let [x, y, z] = <[f32; 3]>::from(vertex.velocity);
+                    assert!(
+                        p.x.is_finite() && p.y.is_finite() && p.z.is_finite(),
+                        "pressure {pressure}, height {height}, tick {tick}"
+                    );
+                    assert!(
+                        x.is_finite() && y.is_finite() && z.is_finite(),
+                        "pressure {pressure}, height {height}, tick {tick}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn unpinning_cannot_release_an_accumulated_force() {
+    let bound = limits::MAX_ACCELERATION * limits::MAX_MASS;
+    // Every vertex pinned: Jolt moves no vertex by the force, but keeps accumulating it.
+    let mut world = empty_world();
+    let shared = soft_square(0.0).build().unwrap();
+    let id = world
+        .create_soft_body(&shared, &SoftBodySettings::default())
+        .unwrap();
+    let mut body = world.body_mut(id).unwrap();
+    assert!(body_invalid(body.add_force(Vec3::new(f32::MAX, 0.0, 0.0))));
+    assert!(body_invalid(body.add_force(Vec3::new(
+        bound.next_up(),
+        0.0,
+        0.0
+    ))));
+    body.add_force(Vec3::new(bound, 0.0, 0.0)).unwrap();
+    assert!(body_invalid(body.add_force(Vec3::new(bound, 0.0, 0.0))));
+    let before = world.soft_body(id).unwrap().vertices();
+    let mut soft = world.soft_body_mut(id).unwrap();
+    assert!(body_invalid(soft.set_vertex_inverse_mass(0, 1.0)));
+    assert_eq!(world.soft_body(id).unwrap().vertices(), before);
+    // Without the force the vertex may move.
+    world.body_mut(id).unwrap().reset_forces();
+    world
+        .soft_body_mut(id)
+        .unwrap()
+        .set_vertex_inverse_mass(0, 1.0)
+        .unwrap();
+    step(&mut world, 2);
+
+    // Vertices of 1 kg with the largest force for them: a lighter vertex is refused, a heavier
+    // one and a pinned one are not.
+    let mut world = empty_world();
+    let shared = soft_square(1.0).build().unwrap();
+    let id = world
+        .create_soft_body(&shared, &SoftBodySettings::default())
+        .unwrap();
+    world
+        .body_mut(id)
+        .unwrap()
+        .add_force(Vec3::new(4.0 * limits::MAX_ACCELERATION, 0.0, 0.0))
+        .unwrap();
+    let before = world.soft_body(id).unwrap().vertices();
+    let mut soft = world.soft_body_mut(id).unwrap();
+    assert!(body_invalid(soft.set_vertex_inverse_mass(0, 2.0)));
+    assert_eq!(world.soft_body(id).unwrap().vertices(), before);
+    let mut soft = world.soft_body_mut(id).unwrap();
+    soft.set_vertex_inverse_mass(0, 0.5).unwrap();
+    soft.set_vertex_inverse_mass(1, 0.0).unwrap();
+    step(&mut world, 2);
+    for vertex in world.soft_body(id).unwrap().vertices() {
+        let [x, y, z] = <[f32; 3]>::from(vertex.velocity);
+        assert!(x.is_finite() && y.is_finite() && z.is_finite());
+    }
+}
+
+#[test]
+fn soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing() {
+    let mut world = empty_world();
+    let shared = soft_triangle(SoftBodyVertex::kinematic(Vec3::ZERO))
+        .build()
+        .unwrap();
+    let id = world
+        .create_soft_body(&shared, &SoftBodySettings::default())
+        .unwrap();
+    let before = world.soft_body(id).unwrap().vertices();
+    let mut body = world.soft_body_mut(id).unwrap();
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY.next_up()) {
+        assert!(body_invalid(body.set_vertex_velocity(1, v)));
+    }
+    for value in NON_FINITE {
+        assert!(body_invalid(
+            body.set_vertex_velocity(1, Vec3::new(value, 0.0, 0.0))
+        ));
+    }
+    for inverse_mass in [-0.5, limits::MAX_VERTEX_INVERSE_MASS.next_up(), 1.0e-7]
+        .into_iter()
+        .chain(NON_FINITE)
+    {
+        assert!(body_invalid(body.set_vertex_inverse_mass(1, inverse_mass)));
+    }
+    // A kinematic move whose velocity passes the bound, and targets beyond the frame.
+    let origin = before[0].position;
+    let dt = 0.5;
+    let reach = Real::from(1.01 * limits::MAX_LINEAR_VELOCITY * dt);
+    let too_far = RVec3::new(origin.x + reach, origin.y, origin.z);
+    assert!(body_invalid(body.move_kinematic_vertex(0, too_far, dt)));
+    for p in real_on_axes(limits::MAX_POSITION.next_up()) {
+        assert!(body_invalid(body.move_kinematic_vertex(0, p, dt)));
+    }
+    assert_eq!(world.soft_body(id).unwrap().vertices(), before);
+
+    let mut body = world.soft_body_mut(id).unwrap();
+    for v in on_axes(limits::MAX_LINEAR_VELOCITY) {
+        body.set_vertex_velocity(1, v).unwrap();
+    }
+    // Vertex 2 pinned, so vertex 1 alone may take the largest mass.
+    body.set_vertex_inverse_mass(2, 0.0).unwrap();
+    for inverse_mass in [0.0, limits::MAX_VERTEX_INVERSE_MASS, 1.0 / limits::MAX_MASS] {
+        body.set_vertex_inverse_mass(1, inverse_mass).unwrap();
+    }
+    // Two vertices of the largest mass pass the total bound.
+    assert!(body_invalid(
+        body.set_vertex_inverse_mass(2, 1.0 / limits::MAX_MASS)
+    ));
+    let reach = Real::from(0.99 * limits::MAX_LINEAR_VELOCITY * dt);
+    let near = RVec3::new(origin.x + reach, origin.y, origin.z);
+    body.move_kinematic_vertex(0, near, dt).unwrap();
+}
+
+#[test]
+fn soft_body_forces_are_bounded_by_the_acceleration_of_a_vertex() {
+    let mut world = empty_world();
+    // Four vertices of 1 kg: Jolt gives each vertex `F / 4` per kg.
+    let shared = soft_square(1.0).build().unwrap();
+    let id = world
+        .create_soft_body(&shared, &SoftBodySettings::default())
+        .unwrap();
+    let bound = 4.0 * limits::MAX_ACCELERATION;
+    let mut body = world.body_mut(id).unwrap();
+    for value in NON_FINITE {
+        assert!(body_invalid(body.add_force(Vec3::new(value, 0.0, 0.0))));
+    }
+    assert!(body_invalid(body.add_force(Vec3::new(
+        bound.next_up(),
+        0.0,
+        0.0
+    ))));
+    body.add_force(Vec3::new(bound, 0.0, 0.0)).unwrap();
+    // The accumulated force counts.
+    assert!(body_invalid(body.add_force(Vec3::new(1.0e3, 0.0, 0.0))));
+    step(&mut world, 2);
+    for vertex in world.soft_body(id).unwrap().vertices() {
+        let [x, y, z] = <[f32; 3]>::from(vertex.velocity);
+        assert!(x.is_finite() && y.is_finite() && z.is_finite());
+        assert!(length(vertex.velocity) <= limits::MAX_LINEAR_VELOCITY * 1.0001);
+    }
+}
+
+#[test]
+fn soft_body_explicit_constraints_are_bounded() {
+    // Two vertices `length` apart joined by an edge, and a bend over that edge.
+    let pair = |length: f32| {
+        let vertices = vec![
+            SoftBodyVertex::new(Vec3::ZERO),
+            SoftBodyVertex::new(Vec3::new(length, 0.0, 0.0)),
+            SoftBodyVertex::new(Vec3::new(0.0, 0.0, 1.0)),
+            SoftBodyVertex::new(Vec3::new(0.0, 0.0, -1.0)),
+        ];
+        SoftBodySharedSettings::builder(vertices, Vec::new())
+    };
+    let edge = |length, compliance| {
+        pair(length)
+            .edge(SoftBodyEdge {
+                vertices: [0, 1],
+                compliance,
+            })
+            .build()
+    };
+    let bend = |length| {
+        pair(length)
+            .dihedral_bend(SoftBodyDihedralBend {
+                vertices: [0, 1, 2, 3],
+                compliance: 0.0,
+            })
+            .build()
+    };
+    let min = limits::MIN_SOFT_BODY_EDGE_LENGTH;
+    assert!(edge(min, limits::MAX_COMPLIANCE).is_ok());
+    assert!(bend(min).is_ok());
+    assert!(soft_invalid(edge(min.next_down(), 0.0)));
+    assert!(soft_invalid(bend(min.next_down())));
+    for compliance in [-f32::MIN_POSITIVE, limits::MAX_COMPLIANCE.next_up()]
+        .into_iter()
+        .chain(NON_FINITE)
+    {
+        assert!(soft_invalid(edge(1.0, compliance)));
+    }
+}
+
+/// The vertices of an 11 × 11 cloth of 1 kg vertices, 0.1 m apart, centred `distance` from the
+/// body origin along (1, 0, 1), its first vertex kinematic when `pinned`.
+fn offset_cloth_vertices(distance: f32, pinned: bool) -> Vec<SoftBodyVertex> {
+    let offset = distance / 2.0_f32.sqrt();
+    let mut vertices = common::soft_body::Cloth::new(11, 0.1).vertices;
+    for vertex in &mut vertices {
+        vertex.position = Vec3::new(
+            vertex.position.x + offset,
+            vertex.position.y,
+            vertex.position.z + offset,
+        );
+    }
+    if pinned {
+        vertices[0].inverse_mass = 0.0;
+    }
+    vertices
+}
+
+/// Shared settings of free particles (no faces, no constraints).
+fn particles(vertices: Vec<SoftBodyVertex>) -> SoftBodySharedSettings {
+    SoftBodySharedSettings::builder(vertices, Vec::new())
+        .build()
+        .unwrap()
+}
+
+#[test]
+fn soft_body_inertia_is_checked_at_creation() {
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let turned = quat_about(Vec3::new(0.6, 0.0, 0.8), 1.0);
+    // Jolt sums the inertia about the body origin: a cloth near its origin is accepted, also
+    // with a rotation Jolt bakes into the vertices, and decomposed without an assertion.
+    for distance in [0.0, 1.0, 5.0, 10.0] {
+        for rotation in [Quat::IDENTITY, turned] {
+            let shared = particles(offset_cloth_vertices(distance, false));
+            let id = world
+                .create_soft_body(&shared, &SoftBodySettings::default().rotation(rotation))
+                .unwrap();
+            step(&mut world, 2);
+            world.remove_body(id).unwrap();
+        }
+    }
+    // Far from it (Jolt's decomposition asserted at 50 m) it is refused, changing nothing.
+    for distance in [15.0, 50.0, 100.0, 1000.0] {
+        let shared = particles(offset_cloth_vertices(distance, false));
+        for rotation in [Quat::IDENTITY, turned] {
+            let settings = SoftBodySettings::default().rotation(rotation);
+            assert!(body_invalid(world.create_soft_body(&shared, &settings)));
+        }
+        assert_eq!(world.body_count(), 0);
+    }
+    // A kinematic vertex gives the body infinite inertia without a decomposition.
+    let pinned = particles(offset_cloth_vertices(1000.0, true));
+    world
+        .create_soft_body(&pinned, &SoftBodySettings::default())
+        .unwrap();
+    step(&mut world, 2);
+    // Free vertices on one line have no inertia about it: refused on an axis and off it.
+    let line = |direction: [f32; 3]| {
+        particles(
+            (1..=4)
+                .map(|i| {
+                    let [x, y, z] = direction.map(|c| c * i as f32);
+                    SoftBodyVertex::new(Vec3::new(x, y, z))
+                })
+                .collect(),
+        )
+    };
+    for direction in [[1.0, 0.0, 0.0], [0.6, 0.8, 0.0], [0.48, 0.6, 0.64]] {
+        let settings = SoftBodySettings::default();
+        assert!(body_invalid(
+            world.create_soft_body(&line(direction), &settings)
+        ));
+    }
+    // One vertex at the origin: Jolt gives the zero tensor the inertia of a unit sphere.
+    let single = particles(vec![SoftBodyVertex::new(Vec3::ZERO)]);
+    world
+        .create_soft_body(&single, &SoftBodySettings::default())
+        .unwrap();
+    // Eight vertices within 1 cm of (10, 0, 0) with masses from 2 g to 50 t, on which Jolt's
+    // decomposition asserted, are refused.
+    let cluster = [
+        ([10.001002, 0.0021947764, -0.00030142843], 0.024279153),
+        ([9.998484, -0.0011584508, 0.004818453], 2.1364938e-5),
+        ([10.0024, -0.0009066194, 0.0030977945], 144.5319),
+        ([9.998568, 0.00448157, -0.0006148457], 0.017587047),
+        ([9.999195, -0.0018897026, 0.003035497], 0.02039532),
+        ([10.001087, 0.002987452, 0.000934242], 0.23255065),
+        ([9.996244, -0.0009508091, 0.004369754], 0.17152376),
+        ([9.995533, 0.0035093676, 0.0048835487], 0.0006062472),
+    ]
+    .map(|([x, y, z], inverse_mass)| SoftBodyVertex {
+        inverse_mass,
+        ..SoftBodyVertex::new(Vec3::new(x, y, z))
+    })
+    .to_vec();
+    assert!(body_invalid(world.create_soft_body(
+        &particles(cluster),
+        &SoftBodySettings::default()
+    )));
+    step(&mut world, 2);
+}
+
+#[test]
+fn unpinning_checks_the_inertia_at_the_current_positions() {
+    // A cloth authored 50 m from its origin is accepted while a vertex is pinned; unpinning it
+    // is refused and changes nothing. Near its origin the same unpinning is accepted.
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    for (distance, accepted) in [(50.0, false), (1.0, true)] {
+        let shared = particles(offset_cloth_vertices(distance, true));
+        let id = world
+            .create_soft_body(&shared, &SoftBodySettings::default())
+            .unwrap();
+        let before = world.soft_body(id).unwrap().vertices();
+        let result = world
+            .soft_body_mut(id)
+            .unwrap()
+            .set_vertex_inverse_mass(0, 1.0);
+        if accepted {
+            result.unwrap();
+            let mass = world.body(id).unwrap().mass().unwrap();
+            assert!((mass - 121.0).abs() < 1.0e-3, "{mass}");
+            step(&mut world, 2);
+        } else {
+            assert!(body_invalid(result));
+            assert_eq!(world.soft_body(id).unwrap().vertices(), before);
+            assert_eq!(world.body(id).unwrap().mass(), None);
+        }
+        world.remove_body(id).unwrap();
+    }
+
+    // Kinematic vertices carried about 50 m from an origin that stays put
+    // (`update_position(false)`): the last unpinning is checked at the positions then.
+    for update_position in [false, true] {
+        let mut world = empty_world();
+        let shared = particles(
+            common::soft_body::Cloth::new(4, 0.1)
+                .vertices
+                .into_iter()
+                .map(|vertex| SoftBodyVertex::kinematic(vertex.position))
+                .collect(),
+        );
+        let id = world
+            .create_soft_body(
+                &shared,
+                &SoftBodySettings::default().update_position(update_position),
+            )
+            .unwrap();
+        for velocity in [Vec3::new(60.0, 0.0, 80.0), Vec3::ZERO] {
+            for index in 0..16 {
+                let mut soft = world.soft_body_mut(id).unwrap();
+                soft.set_vertex_velocity(index, velocity).unwrap();
+            }
+            step(&mut world, 30);
+        }
+        for index in 0..15 {
+            let mut soft = world.soft_body_mut(id).unwrap();
+            soft.set_vertex_inverse_mass(index, 1.0).unwrap();
+        }
+        let last = world
+            .soft_body_mut(id)
+            .unwrap()
+            .set_vertex_inverse_mass(15, 1.0);
+        if update_position {
+            last.unwrap();
+            step(&mut world, 2);
+        } else {
+            assert!(body_invalid(last));
+            let vertices = world.soft_body(id).unwrap().vertices();
+            assert_eq!(vertices[15].inverse_mass, 0.0);
+        }
+    }
+}
+
+/// A seeded generator of `f32` in [0, 1).
+fn uniform(seed: &mut u32) -> f32 {
+    *seed ^= *seed << 13;
+    *seed ^= *seed >> 17;
+    *seed ^= *seed << 5;
+    (*seed >> 8) as f32 / (1u32 << 24) as f32
+}
+
+#[test]
+fn soft_body_inertia_at_its_bound_decomposes() {
+    // Seeded clouds of free particles, flat or stretched, with masses from 1 g to 1 t, moved
+    // away from the body origin until the inertia rule refuses them. The last accepted offset
+    // is created, also with baked rotations; in the asserts build Jolt decomposes each inertia
+    // there without an assertion.
+    let mut world = empty_world();
+    let mut seed = 0x9e37_79b9_u32;
+    let mut created = 0;
+    for _ in 0..24 {
+        let count = 3 + (uniform(&mut seed) * 30.0) as usize;
+        let extents = [0; 3].map(|_| 10.0_f32.powf(uniform(&mut seed) * 4.0 - 3.0));
+        let positions: Vec<[f32; 3]> = (0..count)
+            .map(|_| extents.map(|e| e * (uniform(&mut seed) - 0.5)))
+            .collect();
+        let inverse_masses: Vec<f32> = (0..count)
+            .map(|_| 10.0_f32.powf(uniform(&mut seed) * 6.0 - 3.0))
+            .collect();
+        let direction = [0; 3].map(|_| uniform(&mut seed) - 0.5);
+        let length = direction
+            .iter()
+            .map(|c| c * c)
+            .sum::<f32>()
+            .sqrt()
+            .max(1.0e-3);
+        let at = |distance: f32| {
+            particles(
+                positions
+                    .iter()
+                    .zip(&inverse_masses)
+                    .map(|(p, &inverse_mass)| {
+                        let [x, y, z] = [0, 1, 2].map(|k| p[k] + direction[k] / length * distance);
+                        SoftBodyVertex {
+                            inverse_mass,
+                            ..SoftBodyVertex::new(Vec3::new(x, y, z))
+                        }
+                    })
+                    .collect(),
+            )
+        };
+        let accepts = |world: &mut PhysicsWorld, distance: f32| match world
+            .create_soft_body(&at(distance), &SoftBodySettings::default())
+        {
+            Ok(id) => {
+                world.remove_body(id).unwrap();
+                true
+            }
+            Err(BodyError::InvalidValue(_)) => false,
+            Err(other) => panic!("{other:?}"),
+        };
+        let (mut low, mut high) = (0.0_f32, 0.5 * limits::MAX_SHAPE_EXTENT);
+        if !accepts(&mut world, low) || accepts(&mut world, high) {
+            continue;
+        }
+        while high - low > 1.0e-6 * high {
+            let middle = 0.5 * (low + high);
+            if accepts(&mut world, middle) {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        for _ in 0..4 {
+            let [x, y, z, w] = [0; 4].map(|_| uniform(&mut seed) - 0.5);
+            let length = (x * x + y * y + z * z + w * w).sqrt();
+            let rotation = Quat::from_xyzw(x / length, y / length, z / length, w / length);
+            for rotation in [Quat::IDENTITY, rotation] {
+                let settings = SoftBodySettings::default().rotation(rotation);
+                if let Ok(id) = world.create_soft_body(&at(low), &settings) {
+                    step(&mut world, 1);
+                    world.remove_body(id).unwrap();
+                    created += 1;
+                }
+            }
+        }
+    }
+    assert!(created >= 40, "{created}");
+}

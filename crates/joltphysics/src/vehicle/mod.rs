@@ -420,7 +420,7 @@ impl VehicleMut<'_> {
 
 /// Gives the vehicle a new Jolt tester built from the validated `tester` and records it.
 fn install_tester(entry: &mut VehicleEntry, tester: VehicleCollisionTester) {
-    let jolt_tester = tester.create();
+    let jolt_tester = tester.create(entry.body.to_raw());
     // SAFETY: the world is borrowed mutably (the caller holds the entry mutably) and owns the
     // constraint; no step runs. The constraint takes its own reference to the tester and
     // releases the one to the tester it replaces; the guard releases ours afterwards.
@@ -457,7 +457,7 @@ impl PhysicsWorld {
     ///
     /// Fails with [`VehicleError::InvalidValue`] when a setting is out of range (see the setters
     /// of [`VehicleSettings`] and the types it holds), with [`VehicleError::Body`] when `body`
-    /// is not in this world, is the inner body of a character or a ragdoll part, with
+    /// is not in this world, is the inner body of a character, a ragdoll part or a soft body, with
     /// [`VehicleError::NotDynamic`], with [`VehicleError::AlreadyHasVehicle`] when the body
     /// carries a vehicle already, and with [`VehicleError::TooManyVehicles`] when the world has
     /// run out of ids. Nothing is created on failure.
@@ -513,6 +513,11 @@ impl PhysicsWorld {
         // A ragdoll part is destroyed with its ragdoll, which the vehicle would outlive.
         if self.is_ragdoll_body(body) {
             return Err(VehicleError::Body(BodyError::OwnedByRagdoll(body)));
+        }
+        // A vehicle is a constraint, and Jolt's constraints cannot operate on soft bodies
+        // (`Docs/Architecture.md:462`).
+        if self.body(body).map_err(VehicleError::Body)?.is_soft_body() {
+            return Err(VehicleError::Body(BodyError::SoftBody(body)));
         }
         if self.body(body).map_err(VehicleError::Body)?.motion_type() != MotionType::Dynamic {
             return Err(VehicleError::NotDynamic(body));
