@@ -893,3 +893,132 @@ fn empty_world_rebases() {
     let frame = Frame::tilted();
     assert_eq!(world.rebase(&[], frame.rotation, frame.translation), Ok(()));
 }
+
+/// How a vehicle run treats its collision tester after the rebase.
+#[derive(Clone, Copy, PartialEq)]
+enum TesterAfterRebase {
+    /// Keep the tester the rebase rotated.
+    Rotated,
+    /// Set back a tester with the up of the old frame.
+    OldUp,
+}
+
+/// A car driving straight on a box floor under the override gravity, with a ray tester whose
+/// slope limit is only 10 degrees: a tester up that did not follow a tilting rebase rejects the
+/// floor. Drives 60 ticks, then rebases with `frame` when given, then drives 60 more ticks.
+/// Returns the world, the chassis, the vehicle and how many wheels had contact on each tick
+/// after the rebase.
+fn drive_across(
+    frame: Option<&Frame>,
+    tester_after: TesterAfterRebase,
+) -> (PhysicsWorld, BodyId, VehicleId, Vec<usize>) {
+    let (mut world, layers) = common::vehicle::car_world(Vec3::ZERO, 1);
+    let floor = Shape::new_box(Vec3::new(100.0, 1.0, 100.0)).unwrap();
+    let floor = world
+        .create_body(
+            &floor,
+            &BodySettings::new_static()
+                .position(RVec3::new(0.0, -1.0, 0.0))
+                .object_layer(layers.ground),
+        )
+        .unwrap();
+    let tester = VehicleCollisionTester::Ray {
+        object_layer: layers.probe,
+        up: Vec3::new(0.0, 1.0, 0.0),
+        max_slope_angle: 10.0_f32.to_radians(),
+    };
+    let body =
+        common::vehicle::chassis_settings(&layers, RVec3::new(0.0, 0.9, 0.0), Quat::IDENTITY);
+    let (chassis, car) = common::vehicle::add_car_with(&mut world, &body, tester);
+    let input = DriverInput {
+        forward: 0.5,
+        ..DriverInput::default()
+    };
+    let mut gravity = common::vehicle::GRAVITY;
+    for _ in 0..60 {
+        let mut vehicle = world.vehicle_mut(car).unwrap();
+        vehicle.set_gravity(gravity).unwrap();
+        vehicle.set_driver_input(input).unwrap();
+        step(&mut world, 1);
+    }
+    if let Some(frame) = frame {
+        world
+            .rebase(&[floor, chassis], frame.rotation, frame.translation)
+            .unwrap();
+        gravity = frame.map_vector(gravity);
+        let vehicle = world.vehicle(car).unwrap();
+        assert_vector_near(
+            "gravity override",
+            vehicle.gravity().unwrap(),
+            gravity,
+            1e-5,
+        );
+        let up = vehicle.collision_tester().up().unwrap();
+        assert_vector_near(
+            "tester up",
+            up,
+            frame.map_vector(Vec3::new(0.0, 1.0, 0.0)),
+            1e-6,
+        );
+        if tester_after == TesterAfterRebase::OldUp {
+            world
+                .vehicle_mut(car)
+                .unwrap()
+                .set_collision_tester(tester)
+                .unwrap();
+        }
+    }
+    let mut wheels_down = Vec::new();
+    for _ in 0..60 {
+        let mut vehicle = world.vehicle_mut(car).unwrap();
+        vehicle.set_gravity(gravity).unwrap();
+        vehicle.set_driver_input(input).unwrap();
+        step(&mut world, 1);
+        let vehicle = world.vehicle(car).unwrap();
+        wheels_down.push(
+            vehicle
+                .wheels()
+                .iter()
+                .filter(|wheel| wheel.contact.is_some())
+                .count(),
+        );
+    }
+    (world, chassis, car, wheels_down)
+}
+
+#[test]
+fn vehicle_drives_across_a_rotating_rebase() {
+    let frame = Frame::tilted();
+    let (unrebased, chassis_a, car_a, wheels_down_a) =
+        drive_across(None, TesterAfterRebase::Rotated);
+    assert!(wheels_down_a.iter().all(|&count| count == 4));
+    let (rebased, chassis_b, car_b, wheels_down_b) =
+        drive_across(Some(&frame), TesterAfterRebase::Rotated);
+    assert!(
+        wheels_down_b.iter().all(|&count| count == 4),
+        "a wheel lost the floor after the rebase: {wheels_down_b:?}"
+    );
+
+    let a = unrebased.body(chassis_a).unwrap();
+    let b = rebased.body(chassis_b).unwrap();
+    // The car moved: the comparison is not between two resting cars.
+    assert!(real3(a.position())[2] > 1.0);
+    let position = norm(sub(
+        real3(b.position()),
+        frame.map_point_f64(real3(a.position())),
+    ));
+    assert!(position <= 1e-2, "position off by {position}");
+    let velocity = norm(sub(
+        vec3(b.linear_velocity()),
+        vec3(frame.map_vector(a.linear_velocity())),
+    ));
+    assert!(velocity <= 1e-2, "velocity off by {velocity}");
+    assert_eq!(
+        unrebased.vehicle(car_a).unwrap().current_gear(),
+        rebased.vehicle(car_b).unwrap().current_gear()
+    );
+
+    // The control: the same rebase with the tester's old up loses the floor at once.
+    let (_, _, _, wheels_down_c) = drive_across(Some(&frame), TesterAfterRebase::OldUp);
+    assert_eq!(wheels_down_c[0], 0, "{wheels_down_c:?}");
+}

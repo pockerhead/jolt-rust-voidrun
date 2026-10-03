@@ -600,6 +600,31 @@ impl Shape {
         }
     }
 
+    /// `shape` with its centre of mass moved by `offset` (shape space, metres, finite), a Jolt
+    /// `OffsetCenterOfMassShape`.
+    ///
+    /// Only the centre of mass moves: the body origin and the collision surface stay where
+    /// `shape` puts them, and mass and inertia are computed about the new centre. A vehicle
+    /// chassis gets a low centre of mass this way. The new shape holds its own reference to
+    /// `shape`, which may be dropped afterwards. A decorated shape that only static bodies may
+    /// use (a heightfield) stays static-only. [`compound_sub_shape`](Self::compound_sub_shape)
+    /// does not look through the decorator: it returns `None` for an offset compound.
+    pub fn new_offset_center_of_mass(shape: &Shape, offset: Vec3) -> Result<Self, ShapeError> {
+        if !offset.is_finite() {
+            return Err(ShapeError::InvalidDimensions(
+                "centre of mass offset must be finite",
+            ));
+        }
+        initialize()?;
+        let offset = offset.to_jph();
+        // SAFETY: Jolt is initialised, `offset` is a live local and `shape` is live for the
+        // call; the decorator takes its own reference to it. The returned shape holds one
+        // reference, which `Self` takes over.
+        unsafe {
+            Self::from_raw(JPH_OffsetCenterOfMassShape_Create(&offset, shape.as_ptr()).cast())
+        }
+    }
+
     /// The child of this compound that `id` leads to.
     ///
     /// `None` for shapes that are not compounds. Only the root level is decoded, so `id` may be
@@ -765,8 +790,28 @@ mod tests {
             drop(Shape::new_box(Vec3::new(size, size, size)).unwrap());
             drop(Shape::new_sphere(size).unwrap());
             drop(Shape::new_cylinder(size, size).unwrap());
-            drop(Shape::new_capsule(size, size).unwrap());
+            let capsule = Shape::new_capsule(size, size).unwrap();
+            drop(Shape::new_offset_center_of_mass(&capsule, Vec3::new(0.0, -size, 0.0)).unwrap());
         }
+    }
+
+    #[test]
+    fn offset_center_of_mass_moves_only_the_center() {
+        let offset = Vec3::new(0.1, -0.3, 0.25);
+        let shape = Shape::new_offset_center_of_mass(&unit_box(), offset).unwrap();
+        assert_eq!(shape.sub_type(), JPH_ShapeSubType_OffsetCenterOfMass);
+        let bits = |v: Vec3| <[f32; 3]>::from(v).map(f32::to_bits);
+        assert_eq!(bits(shape.center_of_mass()), bits(offset));
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(matches!(
+                Shape::new_offset_center_of_mass(&unit_box(), Vec3::new(0.0, bad, 0.0)),
+                Err(ShapeError::InvalidDimensions(_))
+            ));
+        }
+        let terrain =
+            Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
+        let offset_terrain = Shape::new_offset_center_of_mass(&terrain, offset).unwrap();
+        assert!(offset_terrain.must_be_static());
     }
 
     #[test]

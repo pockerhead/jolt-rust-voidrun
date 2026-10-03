@@ -94,6 +94,70 @@ const _: () = {
     assert!(offset_of!(JPH_ExtendedUpdateSettings, walkStairsCosAngleForwardContact) == 32);
     assert!(offset_of!(JPH_ExtendedUpdateSettings, walkStairsStepDownExtra) == 36);
 
+    assert!(size_of::<JPH_Point>() == 8);
+    assert!(align_of::<JPH_Point>() == 4);
+    assert!(offset_of!(JPH_Point, x) == 0);
+    assert!(offset_of!(JPH_Point, y) == 4);
+
+    assert!(size_of::<JPH_SpringSettings>() == 12);
+    assert!(align_of::<JPH_SpringSettings>() == 4);
+    assert!(offset_of!(JPH_SpringSettings, mode) == 0);
+    assert!(offset_of!(JPH_SpringSettings, frequencyOrStiffness) == 4);
+    assert!(offset_of!(JPH_SpringSettings, damping) == 8);
+
+    assert!(size_of::<JPH_VehicleAntiRollBar>() == 12);
+    assert!(align_of::<JPH_VehicleAntiRollBar>() == 4);
+    assert!(offset_of!(JPH_VehicleAntiRollBar, leftWheel) == 0);
+    assert!(offset_of!(JPH_VehicleAntiRollBar, rightWheel) == 4);
+    assert!(offset_of!(JPH_VehicleAntiRollBar, stiffness) == 8);
+
+    assert!(size_of::<JPH_VehicleDifferentialSettings>() == 24);
+    assert!(align_of::<JPH_VehicleDifferentialSettings>() == 4);
+    assert!(offset_of!(JPH_VehicleDifferentialSettings, leftWheel) == 0);
+    assert!(offset_of!(JPH_VehicleDifferentialSettings, rightWheel) == 4);
+    assert!(offset_of!(JPH_VehicleDifferentialSettings, differentialRatio) == 8);
+    assert!(offset_of!(JPH_VehicleDifferentialSettings, leftRightSplit) == 12);
+    assert!(offset_of!(JPH_VehicleDifferentialSettings, limitedSlipRatio) == 16);
+    assert!(offset_of!(JPH_VehicleDifferentialSettings, engineTorqueRatio) == 20);
+
+    assert!(size_of::<JPH_ConstraintSettings>() == 32);
+    assert!(align_of::<JPH_ConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_ConstraintSettings, enabled) == 0);
+    assert!(offset_of!(JPH_ConstraintSettings, constraintPriority) == 4);
+    assert!(offset_of!(JPH_ConstraintSettings, numVelocityStepsOverride) == 8);
+    assert!(offset_of!(JPH_ConstraintSettings, numPositionStepsOverride) == 12);
+    assert!(offset_of!(JPH_ConstraintSettings, drawConstraintSize) == 16);
+    assert!(offset_of!(JPH_ConstraintSettings, userData) == 24);
+
+    assert!(size_of::<JPH_PhysicsSettings>() == 84);
+    assert!(align_of::<JPH_PhysicsSettings>() == 4);
+    assert!(offset_of!(JPH_PhysicsSettings, maxInFlightBodyPairs) == 0);
+    assert!(offset_of!(JPH_PhysicsSettings, stepListenersBatchSize) == 4);
+    assert!(offset_of!(JPH_PhysicsSettings, stepListenerBatchesPerJob) == 8);
+    assert!(offset_of!(JPH_PhysicsSettings, baumgarte) == 12);
+    assert!(offset_of!(JPH_PhysicsSettings, speculativeContactDistance) == 16);
+    assert!(offset_of!(JPH_PhysicsSettings, penetrationSlop) == 20);
+    assert!(offset_of!(JPH_PhysicsSettings, linearCastThreshold) == 24);
+    assert!(offset_of!(JPH_PhysicsSettings, linearCastMaxPenetration) == 28);
+    assert!(offset_of!(JPH_PhysicsSettings, manifoldTolerance) == 32);
+    assert!(offset_of!(JPH_PhysicsSettings, maxPenetrationDistance) == 36);
+    assert!(offset_of!(JPH_PhysicsSettings, bodyPairCacheMaxDeltaPositionSq) == 40);
+    assert!(offset_of!(JPH_PhysicsSettings, bodyPairCacheCosMaxDeltaRotationDiv2) == 44);
+    assert!(offset_of!(JPH_PhysicsSettings, contactNormalCosMaxDeltaRotation) == 48);
+    assert!(offset_of!(JPH_PhysicsSettings, contactPointPreserveLambdaMaxDistSq) == 52);
+    assert!(offset_of!(JPH_PhysicsSettings, numVelocitySteps) == 56);
+    assert!(offset_of!(JPH_PhysicsSettings, numPositionSteps) == 60);
+    assert!(offset_of!(JPH_PhysicsSettings, minVelocityForRestitution) == 64);
+    assert!(offset_of!(JPH_PhysicsSettings, timeBeforeSleep) == 68);
+    assert!(offset_of!(JPH_PhysicsSettings, pointVelocitySleepThreshold) == 72);
+    assert!(offset_of!(JPH_PhysicsSettings, deterministicSimulation) == 76);
+    assert!(offset_of!(JPH_PhysicsSettings, constraintWarmStart) == 77);
+    assert!(offset_of!(JPH_PhysicsSettings, useBodyPairContactCache) == 78);
+    assert!(offset_of!(JPH_PhysicsSettings, useManifoldReduction) == 79);
+    assert!(offset_of!(JPH_PhysicsSettings, useLargeIslandSplitter) == 80);
+    assert!(offset_of!(JPH_PhysicsSettings, allowSleeping) == 81);
+    assert!(offset_of!(JPH_PhysicsSettings, checkActiveEdges) == 82);
+
     assert!(size_of::<JobSystemThreadPoolConfig>() == 12);
     assert!(align_of::<JobSystemThreadPoolConfig>() == 4);
     assert!(offset_of!(JobSystemThreadPoolConfig, numThreads) == 8);
@@ -114,6 +178,9 @@ const _: () = {
     assert!(size_of::<JPH_CollectFacesMode>() == 4);
     assert!(size_of::<JPH_CollisionCollectorType>() == 4);
     assert!(size_of::<JPH_GroundState>() == 4);
+    assert!(size_of::<JPH_SpringMode>() == 4);
+    assert!(size_of::<JPH_TransmissionMode>() == 4);
+    assert!(size_of::<JPH_ConstraintSubType>() == 4);
 };
 
 #[cfg(feature = "double-precision")]
@@ -198,6 +265,27 @@ const _: () = {
     assert!(offset_of!(JPH_CharacterVirtualSettings, innerBodyShape) == 112);
     assert!(offset_of!(JPH_CharacterVirtualSettings, innerBodyIDOverride) == 120);
     assert!(offset_of!(JPH_CharacterVirtualSettings, innerBodyLayer) == 124);
+
+    assert!(size_of::<JPH_VehicleConstraintSettings>() == 96);
+    assert!(align_of::<JPH_VehicleConstraintSettings>() == 8);
+    assert!(offset_of!(JPH_VehicleConstraintSettings, base) == 0);
+    assert!(offset_of!(JPH_VehicleConstraintSettings, up) == 32);
+    assert!(offset_of!(JPH_VehicleConstraintSettings, forward) == 44);
+    assert!(offset_of!(JPH_VehicleConstraintSettings, maxPitchRollAngle) == 56);
+    assert!(offset_of!(JPH_VehicleConstraintSettings, wheelsCount) == 60);
+    assert!(offset_of!(JPH_VehicleConstraintSettings, wheels) == 64);
+    assert!(offset_of!(JPH_VehicleConstraintSettings, antiRollBarsCount) == 72);
+    assert!(offset_of!(JPH_VehicleConstraintSettings, antiRollBars) == 80);
+    assert!(offset_of!(JPH_VehicleConstraintSettings, controller) == 88);
+
+    assert!(size_of::<JPH_VehicleEngineSettings>() == 32);
+    assert!(align_of::<JPH_VehicleEngineSettings>() == 8);
+    assert!(offset_of!(JPH_VehicleEngineSettings, maxTorque) == 0);
+    assert!(offset_of!(JPH_VehicleEngineSettings, minRPM) == 4);
+    assert!(offset_of!(JPH_VehicleEngineSettings, maxRPM) == 8);
+    assert!(offset_of!(JPH_VehicleEngineSettings, normalizedTorque) == 16);
+    assert!(offset_of!(JPH_VehicleEngineSettings, inertia) == 24);
+    assert!(offset_of!(JPH_VehicleEngineSettings, angularDamping) == 28);
 
     assert!(align_of::<JPH_CharacterContact>() == 8);
     assert!(offset_of!(JPH_CharacterContact, hash) == 0);
