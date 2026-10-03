@@ -163,40 +163,69 @@ impl Scene {
         digest
     }
 
-    fn restore(&mut self, state: &WorldState) {
-        self.world.restore_state(state).unwrap();
-        assert_eq!(
-            &self.world.save_state(),
-            state,
-            "a restore saves what it restored"
+    /// What the world reports now: every body as [`record_body`] writes it and the
+    /// character's saved state. A [`WorldState`] has no bytes to compare, so tests compare this.
+    /// The wheel contacts are left out: a restore empties them until the next step. A removed
+    /// character or ragdoll is skipped.
+    fn snapshot(&self) -> Vec<u8> {
+        let character = self.world.character(self.character).ok();
+        let mut ids = self.bodies.clone();
+        ids.extend(
+            character
+                .as_ref()
+                .and_then(|character| character.inner_body()),
+        );
+        if let Ok(ragdoll) = self.world.ragdoll(self.ragdoll) {
+            ids.extend_from_slice(ragdoll.body_ids());
+        }
+        let mut bytes = Vec::new();
+        for id in ids {
+            record_body(&self.world, id, &mut bytes);
+        }
+        if let Some(character) = character {
+            bytes.extend(character.save_state().as_bytes());
+        }
+        bytes
+    }
+
+    /// Saves the world's state together with its [`snapshot`](Self::snapshot).
+    fn save(&self) -> Saved {
+        Saved {
+            state: self.world.save_state(),
+            snapshot: self.snapshot(),
+        }
+    }
+
+    /// Restores `saved` and checks that the world reports what it reported at the save.
+    fn restore(&mut self, saved: &Saved) {
+        self.world.restore_state(&saved.state).unwrap();
+        assert!(
+            self.snapshot() == saved.snapshot,
+            "a restore brings back what was saved"
         );
     }
 }
 
-/// A rollback: the run after the save point, the replay after restoring the save, and the
-/// final states of both runs.
+/// A saved state and what the world reported when it was saved.
+struct Saved {
+    state: WorldState,
+    snapshot: Vec<u8>,
+}
+
+/// A rollback: the run after the save point and the replay after restoring the save.
 struct Rollback {
     first: Digest,
     replay: Digest,
-    first_final: WorldState,
-    replay_final: WorldState,
 }
 
 fn rollback(worker_threads: u32) -> Rollback {
     let mut scene = Scene::new(worker_threads);
     scene.run(BEFORE_SAVE);
-    let saved = scene.world.save_state();
+    let saved = scene.save();
     let first = scene.recorded_run(AFTER_SAVE);
-    let first_final = scene.world.save_state();
     scene.restore(&saved);
     let replay = scene.recorded_run(AFTER_SAVE);
-    let replay_final = scene.world.save_state();
-    Rollback {
-        first,
-        replay,
-        first_final,
-        replay_final,
-    }
+    Rollback { first, replay }
 }
 
 #[test]
@@ -208,7 +237,6 @@ fn rollback_replays_every_tick_bit_for_bit() {
             &run.first,
             &run.replay,
         );
-        assert!(run.first_final == run.replay_final, "final states differ");
     }
     assert_same("1 vs 4 workers", &runs[0].first, &runs[1].first);
     // The scene moves: the run is not trivially equal to itself.
@@ -235,11 +263,11 @@ fn rollback_replay_is_identical_across_processes() {
     assert_same("1 vs 4 workers in two processes", &one, &four);
 }
 
-// A kinematic inner body on its own never fell asleep within 600 ticks in this setup, so the test
-// checks that the inner body's activation and sleep data (timer and test spheres) come back
-// after the character was moved, which resets them.
+// Jolt runs no sleep test on kinematic bodies, so a character's inner body never falls asleep on
+// its own; the test checks that the inner body and the character come back after the character
+// was moved.
 #[test]
-fn a_character_inner_body_restores_its_sleep_data() {
+fn a_moved_character_and_its_inner_body_restore() {
     let (mut world, layers) = car_world(GRAVITY, 1);
     add_floor(&mut world);
     let capsule = Shape::new_capsule(0.7, 0.4).unwrap();
@@ -256,7 +284,8 @@ fn a_character_inner_body_restores_its_sleep_data() {
     step(&mut world, 60);
 
     let saved = world.save_state();
-    let sleeping = world.body(inner).unwrap().is_sleeping();
+    let inner_saved = body_bits(&world, inner);
+    let character_saved = world.character(character).unwrap().save_state();
     world
         .character_mut(character)
         .unwrap()
@@ -264,14 +293,17 @@ fn a_character_inner_body_restores_its_sleep_data() {
         .unwrap();
     step(&mut world, 1);
     world.restore_state(&saved).unwrap();
-    assert_eq!(world.body(inner).unwrap().is_sleeping(), sleeping);
-    assert_eq!(world.save_state(), saved);
+    assert_eq!(body_bits(&world, inner), inner_saved);
+    assert_eq!(
+        world.character(character).unwrap().save_state(),
+        character_saved
+    );
 }
 
 #[test]
 fn a_state_saved_before_the_first_step_restores() {
     let mut scene = Scene::new(1);
-    let saved = scene.world.save_state();
+    let saved = scene.save();
     let first = scene.recorded_run(AFTER_SAVE);
     scene.restore(&saved);
     let replay = scene.recorded_run(AFTER_SAVE);
@@ -282,7 +314,7 @@ fn a_state_saved_before_the_first_step_restores() {
 fn a_state_restores_any_number_of_times() {
     let mut scene = Scene::new(1);
     scene.run(BEFORE_SAVE);
-    let saved = scene.world.save_state();
+    let saved = scene.save();
     let first = scene.recorded_run(20);
     for _ in 0..3 {
         scene.restore(&saved);
@@ -295,7 +327,7 @@ fn a_state_restores_any_number_of_times() {
 fn restore_undoes_saved_constraint_targets() {
     let mut scene = Scene::new(1);
     scene.run(BEFORE_SAVE);
-    let saved = scene.world.save_state();
+    let saved = scene.save();
     let mut motor = scene.world.constraint_mut(scene.hinge).unwrap();
     motor.set_target_angle(0.7).unwrap();
     motor.set_target_angular_velocity(-2.0).unwrap();
@@ -313,7 +345,7 @@ fn restore_undoes_saved_constraint_targets() {
 fn restore_does_not_undo_unsaved_configuration() {
     let mut scene = Scene::new(1);
     scene.run(BEFORE_SAVE);
-    let saved = scene.world.save_state();
+    let saved = scene.save();
     let baseline = scene.recorded_run(AFTER_SAVE);
     scene.restore(&saved);
 
@@ -367,14 +399,14 @@ fn assert_refused_after<T>(
     let saved = scene.world.save_state();
     scene.tick();
     change(&mut scene, prepared);
-    let after = scene.world.save_state();
+    let after = scene.snapshot();
     assert_eq!(
         scene.world.restore_state(&saved),
         Err(StateError::WorldChanged),
         "{what}"
     );
     assert!(
-        scene.world.save_state() == after,
+        scene.snapshot() == after,
         "{what}: the refusal changed the world"
     );
 }
@@ -552,7 +584,7 @@ fn restore_after_a_structural_change_is_refused_and_changes_nothing() {
 fn a_noop_rebase_keeps_a_state_restorable() {
     let mut scene = Scene::new(1);
     scene.run(5);
-    let saved = scene.world.save_state();
+    let saved = scene.save();
     scene.tick();
     let bodies = scene.all_bodies();
     scene
@@ -569,7 +601,7 @@ fn a_rejected_structural_call_keeps_a_state_restorable() {
     let removed = extra_cube(&mut scene, 9.0);
     scene.world.remove_body(removed).unwrap();
     scene.bodies.pop();
-    let saved = scene.world.save_state();
+    let saved = scene.save();
     scene.tick();
 
     assert_eq!(
@@ -611,12 +643,9 @@ fn a_state_of_another_world_is_refused() {
     a.run(5);
     b.run(5);
     let state = a.world.save_state();
-    let before = b.world.save_state();
+    let before = b.snapshot();
     assert_eq!(b.world.restore_state(&state), Err(StateError::WrongWorld));
-    assert!(
-        b.world.save_state() == before,
-        "the refusal changed the world"
-    );
+    assert!(b.snapshot() == before, "the refusal changed the world");
 }
 
 /// The structural calls of the id test at fixed ticks of a recorded run: a cube created at tick
@@ -662,7 +691,7 @@ fn bodies_created_after_the_restore_point_get_the_original_ids() {
 
     let mut rolled_back = Scene::new(1);
     rolled_back.run(BEFORE_SAVE);
-    let saved = rolled_back.world.save_state();
+    let saved = rolled_back.save();
     rolled_back.run(AFTER_SAVE);
     rolled_back.restore(&saved);
     let (replay, ids) = structural_run(&mut rolled_back, AFTER_SAVE);
@@ -685,7 +714,6 @@ fn a_selected_bodies_state_replays_when_the_rest_is_static() {
     );
     let moving: Vec<BodyId> = scene.all_bodies()[1..].to_vec();
     let partial = scene.world.save_state_of(&moving).unwrap();
-    assert!(partial.as_bytes().len() < scene.world.save_state().as_bytes().len());
 
     let first = scene.recorded_run(AFTER_SAVE);
     scene.world.restore_state(&partial).unwrap();
@@ -699,29 +727,75 @@ fn body_bits(world: &PhysicsWorld, id: BodyId) -> Vec<u8> {
     bits
 }
 
-#[test]
-fn bodies_left_out_of_a_state_keep_their_current_state() {
+/// Runs the scene, saves the bodies `selection` makes of every body but one, runs on and
+/// restores: the saved bodies come back, and the one left out, the second hinge cube that the
+/// motor keeps turning, keeps its current state.
+fn assert_left_out_body_keeps_its_state(selection: impl FnOnce(&[BodyId]) -> Vec<BodyId>) {
     let mut scene = Scene::new(1);
     scene.run(BEFORE_SAVE);
-    // The second hinge cube, which the motor keeps turning.
     let left_out = scene.bodies[10];
     let selected: Vec<BodyId> = scene
         .all_bodies()
         .into_iter()
         .filter(|&id| id != left_out)
         .collect();
-    let partial = scene.world.save_state_of(&selected).unwrap();
+    let partial = scene.world.save_state_of(&selection(&selected)).unwrap();
     let saved: Vec<Vec<u8>> = selected
         .iter()
         .map(|&id| body_bits(&scene.world, id))
         .collect();
+    let left_out_at_save = body_bits(&scene.world, left_out);
 
     scene.run(20);
     let current = body_bits(&scene.world, left_out);
+    assert_ne!(current, left_out_at_save);
     scene.world.restore_state(&partial).unwrap();
     assert_eq!(body_bits(&scene.world, left_out), current);
     for (&id, saved) in selected.iter().zip(&saved) {
         assert_eq!(&body_bits(&scene.world, id), saved, "{id:?}");
+    }
+}
+
+#[test]
+fn bodies_left_out_of_a_state_keep_their_current_state() {
+    assert_left_out_body_keeps_its_state(<[BodyId]>::to_vec);
+}
+
+#[test]
+fn a_selection_in_any_order_with_duplicates_saves_those_bodies() {
+    assert_left_out_body_keeps_its_state(|selected| {
+        let mut shuffled: Vec<BodyId> = selected.iter().rev().copied().collect();
+        shuffled.extend_from_slice(&selected[..3]);
+        shuffled.extend_from_slice(&selected[..3]);
+        shuffled
+    });
+}
+
+#[test]
+fn an_empty_selection_saves_no_body() {
+    let mut scene = Scene::new(1);
+    scene.run(BEFORE_SAVE);
+    let empty = scene.world.save_state_of(&[]).unwrap();
+    scene.run(20);
+    // The character's inner body is left out: the restored character moves it to its pose.
+    let inner = scene
+        .world
+        .character(scene.character)
+        .unwrap()
+        .inner_body()
+        .unwrap();
+    let bodies: Vec<BodyId> = scene
+        .all_bodies()
+        .into_iter()
+        .filter(|&id| id != inner)
+        .collect();
+    let current: Vec<Vec<u8>> = bodies
+        .iter()
+        .map(|&id| body_bits(&scene.world, id))
+        .collect();
+    scene.world.restore_state(&empty).unwrap();
+    for (&id, current) in bodies.iter().zip(&current) {
+        assert_eq!(&body_bits(&scene.world, id), current, "{id:?}");
     }
 }
 

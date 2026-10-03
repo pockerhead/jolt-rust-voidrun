@@ -2,6 +2,7 @@
 //! `PhysicsSystem::SaveState` and `RestoreState`, plus every character's own state).
 
 use std::fmt;
+use std::mem::MaybeUninit;
 
 use joltphysics_sys::*;
 
@@ -55,25 +56,24 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 /// right after a restore until the next step, because Jolt clears a wheel's contact body on
 /// restore.
 ///
-/// # Bytes and equality
-/// [`as_bytes`](Self::as_bytes) gives the state as bytes for diagnostics. No API reads them
-/// back: they are specific to this build, carry no version, and Jolt reads its stream without
-/// any checks, so they are not a save-game or network format.
-///
-/// Jolt also writes fields it has never initialised: a wheel's contact position, normal and
-/// lateral direction before the wheel's first contact (`VehicleConstraint::SaveState`). Jolt
-/// reads them only once the wheel has a contact, so a restore is not affected, but two worlds
-/// built with the same calls can give different bytes. Equality (`==`) compares the bytes, so it
-/// is meaningful between states of one world, such as a state and the state saved right after
-/// restoring it, and not as a digest across worlds or processes.
-#[derive(Clone, PartialEq, Eq)]
+/// # No bytes, no equality
+/// A state is opaque: it gives neither its bytes nor `==`. Jolt writes fields it has never
+/// initialised into its stream, a wheel's contact position, normal and lateral direction before
+/// the wheel's first contact (`VehicleConstraint::SaveState`), so the stream may hold bytes
+/// without a defined value. A restore copies them back as they were, and Jolt uses them only
+/// for a wheel with a contact, so a restore is not affected, but Rust may not read them as `u8`: the state keeps them as
+/// [`MaybeUninit<u8>`](std::mem::MaybeUninit), which only Jolt copies. Compare what a world
+/// reports (poses, velocities, character and vehicle state) instead. Loading a state into another
+/// world, which would need the bytes, is not supported.
+#[derive(Clone)]
 pub struct WorldState {
     world: WorldTag,
     epoch: u64,
     body_count: u32,
     constraint_count: u32,
     character_ids: Vec<u32>,
-    jolt: Vec<u8>,
+    /// Jolt's stream, which may hold bytes without a defined value (see above).
+    jolt: Vec<MaybeUninit<u8>>,
     characters: Vec<CharacterState>,
 }
 
@@ -86,27 +86,6 @@ impl fmt::Debug for WorldState {
             .field("characters", &self.character_ids.len())
             .field("jolt_bytes", &self.jolt.len())
             .finish_non_exhaustive()
-    }
-}
-
-impl WorldState {
-    /// The state as bytes, for diagnostics, all lengths and counts little-endian:
-    /// the `u64` length of Jolt's stream and the stream, then the `u32` character count and per
-    /// character the `u64` length of [`CharacterState::as_bytes`] and those bytes. The bytes are
-    /// specific to this build (precision, Jolt revision), carry no version and may hold bytes
-    /// Jolt never initialised (see [`WorldState`]); there is no way back.
-    pub fn as_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(self.jolt.len() + 16);
-        bytes.extend_from_slice(&(self.jolt.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(&self.jolt);
-        let count = u32::try_from(self.characters.len()).expect("character ids are u32");
-        bytes.extend_from_slice(&count.to_le_bytes());
-        for character in &self.characters {
-            let character = character.as_bytes();
-            bytes.extend_from_slice(&(character.len() as u64).to_le_bytes());
-            bytes.extend_from_slice(&character);
-        }
-        bytes
     }
 }
 
@@ -141,9 +120,11 @@ impl PhysicsWorld {
     }
 
     /// Saves the simulation state with only the bodies in `bodies` (any order, duplicates
-    /// allowed); global state, contacts, constraints and characters are saved whole.
+    /// allowed, no body for an empty slice); global state, contacts, constraints and characters
+    /// are saved whole.
     ///
-    /// Restoring it leaves every other body in its current state, so a replay from it is exact
+    /// Restoring it leaves every other body in its current state, except that a character's
+    /// inner body moves to the restored character's pose, so a replay from it is exact
     /// only when those bodies did not change since the save, for example static bodies the caller
     /// never moved. Fails with [`BodyError::WrongWorld`] for an id of another world and
     /// [`BodyError::NotFound`] for a removed body, before anything is saved.
@@ -178,9 +159,10 @@ impl PhysicsWorld {
             return Err(StateError::WorldChanged);
         }
 
-        // The characters go first: restoring one moves its inner body to the character's pose
-        // (`CharacterVirtual::SetPosition`), which also resets that body's sleep timer. The
-        // system restore then writes the inner body's saved state and activation back.
+        // The characters go first, so that the system restore has the last word on their inner
+        // bodies: restoring a character moves its inner body to the character's pose, which
+        // resets that body's sleep timer. Inner bodies are kinematic and Jolt runs no sleep test
+        // on kinematic bodies, so the order does not change any step result today.
         let ids: Vec<_> = self.character_ids().collect();
         for (id, character_state) in ids.into_iter().zip(&state.characters) {
             let restored = self
@@ -208,7 +190,7 @@ impl PhysicsWorld {
     }
 
     /// A state of this world now, around Jolt's saved stream `jolt`.
-    fn state_with(&self, jolt: Vec<u8>) -> WorldState {
+    fn state_with(&self, jolt: Vec<MaybeUninit<u8>>) -> WorldState {
         let characters = self
             .character_ids()
             .map(|id| {
@@ -230,7 +212,7 @@ impl PhysicsWorld {
 
     /// Jolt's saved stream of every part of the system's state, with only the bodies whose raw
     /// ids are in `bodies`, or with every body for `None`.
-    fn record(&self, bodies: Option<&[u32]>) -> Vec<u8> {
+    fn record(&self, bodies: Option<&[u32]>) -> Vec<MaybeUninit<u8>> {
         // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
         let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
             .unwrap_or_else(|| unreachable!("`new` does not return null"));
@@ -246,7 +228,8 @@ impl PhysicsWorld {
         // SAFETY: the system is live and no step runs: `step` needs `&mut self`. `SaveState` is
         // const in Jolt and takes the body and constraint locks itself (see `Sync for
         // PhysicsWorld`). The recorder is live and used by this thread only. `ids` is null or
-        // readable for `count` ids, which the extension copies.
+        // readable for `count` ids, which the extension copies; for an empty selection it is
+        // dangling with `count` 0, and the extension then does not touch it.
         let size = unsafe {
             JPH_PhysicsSystem_SaveState(
                 self.system.as_ptr(),
@@ -257,20 +240,23 @@ impl PhysicsWorld {
             );
             JPH_StateRecorder_GetDataSize(recorder.as_ptr())
         };
-        let mut jolt = vec![0_u8; size];
-        // SAFETY: `jolt` holds exactly `size` writable bytes, which joltc copies at most.
+        let mut jolt = vec![MaybeUninit::uninit(); size];
+        // SAFETY: `jolt` holds exactly `size` writable bytes, which joltc copies at most with
+        // `memcpy`. The copied bytes may lack a defined value, which `MaybeUninit` allows; Rust
+        // never reads them.
         unsafe { JPH_StateRecorder_CopyData(recorder.as_ptr(), jolt.as_mut_ptr().cast(), size) };
         jolt
     }
 
     /// Restores Jolt's saved stream `jolt`; whether Jolt read it without failing.
-    fn restore_jolt(&mut self, jolt: &[u8]) -> bool {
+    fn restore_jolt(&mut self, jolt: &[MaybeUninit<u8>]) -> bool {
         // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
         let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
             .unwrap_or_else(|| unreachable!("`new` does not return null"));
         // SAFETY: the recorder is live and used by this thread only, and `jolt` is readable for
-        // its length. The bytes are a complete stream that `SaveState` of this world wrote at
-        // the current structure epoch (`restore_state` checked both, and `WorldState` has no
+        // its length; the recorder copies it byte for byte, bytes without a defined value
+        // included, and Jolt uses those only for a wheel with a contact. The bytes are a
+        // complete stream that `SaveState` of this world wrote at the current structure epoch (`restore_state` checked both, and `WorldState` has no
         // other constructor), so the bodies and constraints it names exist, in the same
         // constraint order, and `RestoreState` reads exactly what was written. The world is
         // borrowed mutably, so no step, query or body access runs meanwhile; this thread holds
