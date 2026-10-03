@@ -21,7 +21,9 @@ use joltphysics_sys::*;
 
 pub use linear::{
     DistanceConstraintSettings, DistanceRange, FixedConstraintSettings, PointConstraintSettings,
+    SliderConstraintSettings,
 };
+pub use rotational::ConeConstraintSettings;
 pub(crate) use world::ConstraintEntry;
 pub use world::{
     AnyConstraintId, ConeConstraint, ConstraintId, ConstraintKind, ConstraintMut, ConstraintRef,

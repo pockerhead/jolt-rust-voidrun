@@ -235,14 +235,14 @@ pub use character::{
     ExtendedUpdateSettings, GroundState, InnerBody,
 };
 pub use constraint::{
-    AnyConstraintId, ConeConstraint, ConstraintId, ConstraintKind, ConstraintMut, ConstraintRef,
-    ConstraintSettings, ConstraintSpace, ConstraintType, DistanceConstraint,
-    DistanceConstraintSettings, DistanceRange, FixedConstraint, FixedConstraintSettings,
-    GearConstraint, HingeConstraint, HingeConstraintSettings, MotorSettings, MotorState,
-    PathConstraint, PointConstraint, PointConstraintSettings, PulleyConstraint,
-    RackAndPinionConstraint, SixDofAxis, SixDofConstraint, SixDofConstraintAxis,
-    SixDofConstraintSettings, SliderConstraint, SpringSettings, SwingTwistConstraint,
-    SwingTwistConstraintSettings, SwingType,
+    AnyConstraintId, ConeConstraint, ConeConstraintSettings, ConstraintId, ConstraintKind,
+    ConstraintMut, ConstraintRef, ConstraintSettings, ConstraintSpace, ConstraintType,
+    DistanceConstraint, DistanceConstraintSettings, DistanceRange, FixedConstraint,
+    FixedConstraintSettings, GearConstraint, HingeConstraint, HingeConstraintSettings,
+    MotorSettings, MotorState, PathConstraint, PointConstraint, PointConstraintSettings,
+    PulleyConstraint, RackAndPinionConstraint, SixDofAxis, SixDofConstraint, SixDofConstraintAxis,
+    SixDofConstraintSettings, SliderConstraint, SliderConstraintSettings, SpringSettings,
+    SwingTwistConstraint, SwingTwistConstraintSettings, SwingType,
 };
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};

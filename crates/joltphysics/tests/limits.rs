@@ -1440,3 +1440,236 @@ fn constraint_friction_at_f32_max_steps_finitely() {
         step_at_both_extremes(&mut world, &[body], &format!("friction, mass {mass}"));
     }
 }
+
+/// A static anchor and a dynamic sphere of `mass` at the origin joined by `settings`.
+fn joined_sphere<S: ConstraintSettings>(
+    mass: f32,
+    settings: &S,
+) -> (
+    PhysicsWorld,
+    BodyId,
+    Result<ConstraintId<S::Kind>, ConstraintError>,
+) {
+    let mut world = empty_world();
+    let anchor = world
+        .create_body(
+            &sphere(),
+            &BodySettings::new_static().position(RVec3::new(0.0, 5.0, 0.0)),
+        )
+        .unwrap();
+    let body = world
+        .create_body(&sphere(), &BodySettings::new_dynamic().mass(mass))
+        .unwrap();
+    let id = world.create_constraint(anchor, body, settings);
+    (world, body, id)
+}
+
+const AXIS_X: Vec3 = Vec3::new(1.0, 0.0, 0.0);
+const AXIS_Y: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+
+#[test]
+fn slider_cone_swing_twist_and_six_dof_targets_are_bounded() {
+    let extent = limits::MAX_SHAPE_EXTENT;
+    let speed = limits::MAX_LINEAR_VELOCITY;
+    let spin = limits::MAX_ANGULAR_VELOCITY;
+    let slider = || SliderConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y);
+    for (min, max) in [(-extent, extent), (0.0, extent), (-extent, 0.0)] {
+        assert!(joined_sphere(1.0, &slider().limits(min, max)).2.is_ok());
+    }
+    for (min, max) in [
+        (-extent.next_up(), 0.0),
+        (0.0, extent.next_up()),
+        (0.1, 1.0),
+    ] {
+        assert!(constraint_invalid(
+            joined_sphere(1.0, &slider().limits(min, max)).2
+        ));
+    }
+    let (mut world, _, id) = joined_sphere(1.0, &slider());
+    let mut slider = world.constraint_mut(id.unwrap()).unwrap();
+    for position in [extent, -extent] {
+        assert!(slider.set_target_position(position).is_ok());
+    }
+    for position in [extent.next_up(), (-extent).next_down(), f32::NAN] {
+        assert!(constraint_invalid(slider.set_target_position(position)));
+    }
+    for velocity in [speed, -speed] {
+        assert!(slider.set_target_velocity(velocity).is_ok());
+    }
+    for velocity in [speed.next_up(), (-speed).next_down()] {
+        assert!(constraint_invalid(slider.set_target_velocity(velocity)));
+    }
+    assert!(slider.set_limits(Some((-extent, extent))).is_ok());
+    assert!(constraint_invalid(
+        slider.set_limits(Some((-extent, extent.next_up())))
+    ));
+    assert!(slider.set_limits(None).is_ok());
+
+    let cone = |angle| ConeConstraintSettings::new(RVec3::ZERO, AXIS_X, angle);
+    for angle in [0.0, PI] {
+        assert!(joined_sphere(1.0, &cone(angle)).2.is_ok());
+    }
+    for angle in [-1.0e-6, PI.next_up(), f32::NAN] {
+        assert!(constraint_invalid(joined_sphere(1.0, &cone(angle)).2));
+    }
+    let (mut world, _, id) = joined_sphere(1.0, &cone(0.5));
+    let mut cone = world.constraint_mut(id.unwrap()).unwrap();
+    assert!(cone.set_half_cone_angle(PI).is_ok());
+    assert!(constraint_invalid(cone.set_half_cone_angle(PI.next_up())));
+
+    let rotation_bound = |set: &mut dyn FnMut(Quat) -> Result<(), ConstraintError>| {
+        assert!(set(Quat::from_xyzw(0.0, 0.6, 0.0, 0.8)).is_ok());
+        assert!(constraint_invalid(set(Quat::from_xyzw(
+            0.0, 0.6, 0.0, 0.81
+        ))));
+        assert!(constraint_invalid(set(Quat::from_xyzw(
+            f32::NAN,
+            0.0,
+            0.0,
+            1.0
+        ))));
+    };
+    let swing_twist = SwingTwistConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y)
+        .half_cone_angles(1.0, 1.0)
+        .twist_limits(-1.0, 1.0);
+    let (mut world, _, id) = joined_sphere(1.0, &swing_twist);
+    let mut joint = world.constraint_mut(id.unwrap()).unwrap();
+    for velocity in on_axes(spin) {
+        assert!(joint.set_target_angular_velocity_cs(velocity).is_ok());
+    }
+    for velocity in on_axes(spin.next_up()) {
+        assert!(constraint_invalid(
+            joint.set_target_angular_velocity_cs(velocity)
+        ));
+    }
+    rotation_bound(&mut |q| joint.set_target_orientation_cs(q));
+
+    let (mut world, _, id) = joined_sphere(1.0, &SixDofConstraintSettings::default());
+    let mut joint = world.constraint_mut(id.unwrap()).unwrap();
+    for velocity in on_axes(speed) {
+        assert!(joint.set_target_velocity_cs(velocity).is_ok());
+    }
+    for velocity in on_axes(speed.next_up()) {
+        assert!(constraint_invalid(joint.set_target_velocity_cs(velocity)));
+    }
+    for velocity in on_axes(spin) {
+        assert!(joint.set_target_angular_velocity_cs(velocity).is_ok());
+    }
+    for velocity in on_axes(spin.next_up()) {
+        assert!(constraint_invalid(
+            joint.set_target_angular_velocity_cs(velocity)
+        ));
+    }
+    for position in on_axes(extent) {
+        assert!(joint.set_target_position_cs(position).is_ok());
+    }
+    for position in on_axes(extent.next_up()) {
+        assert!(constraint_invalid(joint.set_target_position_cs(position)));
+    }
+    rotation_bound(&mut |q| joint.set_target_orientation_cs(q));
+}
+
+#[test]
+fn slider_swing_twist_and_six_dof_motor_springs_are_bounded() {
+    // As in `world_constraint_springs_are_bounded_by_the_bodies_effective_mass`, for the motor
+    // setters of the other driven kinds.
+    let mass = limits::MAX_MASS;
+    let bound = 1.0 / f64::from(1.0 / mass);
+    let fits = |frequency: f32| {
+        let omega = 2.0 * std::f64::consts::PI * f64::from(frequency);
+        bound * omega * omega <= f64::from(limits::MAX_SPRING_COEFFICIENT)
+    };
+    let mut frequency = ((f64::from(limits::MAX_SPRING_COEFFICIENT) / bound).sqrt()
+        / (2.0 * std::f64::consts::PI)) as f32;
+    while !fits(frequency) {
+        frequency = frequency.next_down();
+    }
+    while fits(frequency.next_up()) {
+        frequency = frequency.next_up();
+    }
+    let motor = |frequency| {
+        MotorSettings::default().spring(SpringSettings::FrequencyAndDamping {
+            frequency,
+            damping: 0.0,
+        })
+    };
+    let check = |set: &mut dyn FnMut(MotorSettings) -> Result<(), ConstraintError>| {
+        assert!(set(motor(frequency)).is_ok());
+        assert!(constraint_invalid(set(motor(frequency.next_up()))));
+    };
+
+    let slider = SliderConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y);
+    assert!(joined_sphere(mass, &slider.clone().motor(motor(frequency)))
+        .2
+        .is_ok());
+    assert!(constraint_invalid(
+        joined_sphere(mass, &slider.clone().motor(motor(frequency.next_up()))).2
+    ));
+    let (mut world, _, id) = joined_sphere(mass, &slider);
+    let mut slider = world.constraint_mut(id.unwrap()).unwrap();
+    check(&mut |m| slider.set_motor_settings(m));
+
+    let (mut world, _, id) = joined_sphere(mass, &SwingTwistConstraintSettings::default());
+    let mut joint = world.constraint_mut(id.unwrap()).unwrap();
+    check(&mut |m| joint.set_swing_motor_settings(m));
+    check(&mut |m| joint.set_twist_motor_settings(m));
+
+    let (mut world, _, id) = joined_sphere(mass, &SixDofConstraintSettings::default());
+    let mut joint = world.constraint_mut(id.unwrap()).unwrap();
+    for axis in [
+        SixDofConstraintAxis::TranslationX,
+        SixDofConstraintAxis::RotationZ,
+    ] {
+        check(&mut |m| joint.set_motor_settings(axis, m));
+    }
+}
+
+#[test]
+fn slider_and_swing_twist_friction_at_f32_max_steps_finitely() {
+    // As for the hinge: a slider sliding and a swing-twist joint spinning at the velocity
+    // bounds, with unlimited friction, on bodies of both mass extremes.
+    for mass in [limits::MIN_MASS, limits::MAX_MASS] {
+        let slider =
+            SliderConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y).max_friction_force(f32::MAX);
+        let (mut world, body, id) = joined_sphere(mass, &slider);
+        world
+            .constraint_mut(id.unwrap())
+            .unwrap()
+            .set_max_friction_force(f32::MAX)
+            .unwrap();
+        world
+            .body_mut(body)
+            .unwrap()
+            .set_linear_velocity(Vec3::new(limits::MAX_LINEAR_VELOCITY, 0.0, 0.0))
+            .unwrap();
+        for tick in 0..120 {
+            let _ = world.step(DT).unwrap();
+            assert_body_finite(&world, body, &format!("slider, mass {mass}, tick {tick}"));
+        }
+        step_at_both_extremes(&mut world, &[body], &format!("slider, mass {mass}"));
+
+        let joint = SwingTwistConstraintSettings::new(RVec3::ZERO, AXIS_X, AXIS_Y)
+            .twist_limits(-PI, PI)
+            .max_friction_torque(f32::MAX);
+        let (mut world, body, id) = joined_sphere(mass, &joint);
+        world
+            .constraint_mut(id.unwrap())
+            .unwrap()
+            .set_max_friction_torque(f32::MAX)
+            .unwrap();
+        world
+            .body_mut(body)
+            .unwrap()
+            .set_angular_velocity(Vec3::new(limits::MAX_ANGULAR_VELOCITY, 0.0, 0.0))
+            .unwrap();
+        for tick in 0..120 {
+            let _ = world.step(DT).unwrap();
+            assert_body_finite(
+                &world,
+                body,
+                &format!("swing-twist, mass {mass}, tick {tick}"),
+            );
+        }
+        step_at_both_extremes(&mut world, &[body], &format!("swing-twist, mass {mass}"));
+    }
+}

@@ -1,4 +1,5 @@
-//! World constraints that limit or drive a rotation: hinge.
+//! World constraints that limit or drive a rotation: hinge, cone, swing-twist and six degrees of
+//! freedom.
 
 use std::f32::consts::PI;
 use std::ptr::NonNull;
@@ -6,11 +7,16 @@ use std::ptr::NonNull;
 use joltphysics_sys::*;
 
 use super::world::{check_spring, sealed, ConstraintSettings};
-use super::{non_negative, validate_hinge_limits, within, MotorSettings, SpringSettings};
+use super::{
+    constraint_base, non_negative, validate_hinge_limits, validate_point, within, ConstraintSpace,
+    MotorSettings, SpringSettings,
+};
 use crate::limits;
+use crate::math::is_unit;
 use crate::{
-    ConstraintError, ConstraintMut, ConstraintRef, HingeConstraint, HingeConstraintSettings,
-    MotorState, Vec3,
+    ConeConstraint, ConstraintError, ConstraintMut, ConstraintRef, HingeConstraint,
+    HingeConstraintSettings, MotorState, Quat, RVec3, SixDofConstraint, SixDofConstraintAxis,
+    SixDofConstraintSettings, SwingTwistConstraint, SwingTwistConstraintSettings, Vec3,
 };
 
 /// `Err(InvalidValue)` unless `motor` is valid and its spring fits `bound`.
@@ -223,5 +229,576 @@ impl ConstraintMut<'_, HingeConstraint> {
         // SAFETY: as in `set_motor_state`; `spring` is a live local.
         unsafe { JPH_HingeConstraint_GetLimitsSpringSettings(self.ptr(), &mut spring) };
         SpringSettings::from_jph(spring)
+    }
+}
+
+/// `Err(InvalidValue)` unless `rotation` is a finite unit quaternion.
+fn check_rotation(rotation: Quat) -> Result<(), ConstraintError> {
+    if rotation.is_valid_rotation() {
+        Ok(())
+    } else {
+        Err(ConstraintError::InvalidValue(
+            "target orientation must be a finite unit quaternion",
+        ))
+    }
+}
+
+/// `Err(InvalidValue)` unless `velocity` is an angular velocity within
+/// [`limits::MAX_ANGULAR_VELOCITY`].
+fn check_angular_velocity(velocity: Vec3) -> Result<(), ConstraintError> {
+    if limits::is_angular_velocity(velocity) {
+        Ok(())
+    } else {
+        Err(ConstraintError::InvalidValue(
+            "target angular velocity must be finite and at most limits::MAX_ANGULAR_VELOCITY long",
+        ))
+    }
+}
+
+/// A cone constraint (Jolt `ConeConstraintSettings`): a ball joint whose body 2 twist axis
+/// stays within a cone of half angle `half_cone_angle` around body 1's; the twist about it is
+/// free.
+///
+/// The default is Jolt's: both points at the origin with twist axis +X, world space, half cone
+/// angle 0.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConeConstraintSettings {
+    space: ConstraintSpace,
+    point1: RVec3,
+    twist_axis1: Vec3,
+    point2: RVec3,
+    twist_axis2: Vec3,
+    half_cone_angle: f32,
+}
+
+impl Default for ConeConstraintSettings {
+    fn default() -> Self {
+        Self::new(RVec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 0.0)
+    }
+}
+
+impl ConeConstraintSettings {
+    /// A cone at `point` around the unit `twist_axis` on both bodies, in world space, with half
+    /// angle `half_cone_angle`, radians in `[0, π]`.
+    pub fn new(point: RVec3, twist_axis: Vec3, half_cone_angle: f32) -> Self {
+        Self {
+            space: ConstraintSpace::WorldSpace,
+            point1: point,
+            twist_axis1: twist_axis,
+            point2: point,
+            twist_axis2: twist_axis,
+            half_cone_angle,
+        }
+    }
+
+    /// The space the points and axes are given in. Default [`ConstraintSpace::WorldSpace`].
+    #[must_use]
+    pub fn space(mut self, value: ConstraintSpace) -> Self {
+        self.space = value;
+        self
+    }
+
+    /// The point and unit twist axis on body 1.
+    #[must_use]
+    pub fn frame1(mut self, point: RVec3, twist_axis: Vec3) -> Self {
+        self.point1 = point;
+        self.twist_axis1 = twist_axis;
+        self
+    }
+
+    /// The point and unit twist axis on body 2.
+    #[must_use]
+    pub fn frame2(mut self, point: RVec3, twist_axis: Vec3) -> Self {
+        self.point2 = point;
+        self.twist_axis2 = twist_axis;
+        self
+    }
+}
+
+/// What a cone's half angle must satisfy, as Jolt's `ConeConstraint::SetHalfConeAngle` asserts.
+fn validate_half_cone_angle(angle: f32) -> Result<(), &'static str> {
+    if within(angle, 0.0, PI) {
+        Ok(())
+    } else {
+        Err("half cone angle must be between 0 and pi")
+    }
+}
+
+impl sealed::Settings for ConeConstraintSettings {
+    fn validate(&self) -> Result<(), &'static str> {
+        validate_point(self.point1)?;
+        validate_point(self.point2)?;
+        if !(is_unit(self.twist_axis1) && is_unit(self.twist_axis2)) {
+            return Err("constraint frame axes must be unit vectors");
+        }
+        validate_half_cone_angle(self.half_cone_angle)
+    }
+
+    fn springs(&self) -> Vec<SpringSettings> {
+        Vec::new()
+    }
+
+    unsafe fn create(
+        &self,
+        body1: NonNull<JPH_Body>,
+        body2: NonNull<JPH_Body>,
+    ) -> *mut JPH_Constraint {
+        let settings = JPH_ConeConstraintSettings {
+            base: constraint_base(),
+            space: self.space.to_jph(),
+            point1: self.point1.to_jph(),
+            twistAxis1: self.twist_axis1.to_jph(),
+            point2: self.point2.to_jph(),
+            twistAxis2: self.twist_axis2.to_jph(),
+            halfConeAngle: self.half_cone_angle,
+        };
+        // SAFETY: the caller locks both live bodies (trait contract); `settings` is a live,
+        // validated local that joltc converts.
+        unsafe { JPH_ConeConstraint_Create(&settings, body1.as_ptr(), body2.as_ptr()) }.cast()
+    }
+}
+
+impl ConstraintSettings for ConeConstraintSettings {
+    type Kind = ConeConstraint;
+}
+
+impl ConstraintRef<'_, ConeConstraint> {
+    /// The half angle of the cone, radians, as Jolt stores it (its cosine) turned back into an
+    /// angle.
+    pub fn half_cone_angle(&self) -> f32 {
+        // SAFETY: the world borrowed here owns the constraint; the getter reads a member.
+        let cos = unsafe { JPH_ConeConstraint_GetCosHalfConeAngle(self.ptr()) };
+        cos.clamp(-1.0, 1.0).acos()
+    }
+
+    /// The impulse in N·s that kept the points together in the last step.
+    pub fn total_lambda_position(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `half_cone_angle`; `value` is a live local.
+        unsafe { JPH_ConeConstraint_GetTotalLambdaPosition(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+
+    /// The angular impulse in N·m·s the cone applied in the last step.
+    pub fn total_lambda_rotation(&self) -> f32 {
+        // SAFETY: as in `half_cone_angle`.
+        unsafe { JPH_ConeConstraint_GetTotalLambdaRotation(self.ptr()) }
+    }
+}
+
+impl ConstraintMut<'_, ConeConstraint> {
+    /// Sets the half angle of the cone, radians in `[0, π]`. Wakes the constraint's bodies.
+    pub fn set_half_cone_angle(&mut self, angle: f32) -> Result<(), ConstraintError> {
+        validate_half_cone_angle(angle).map_err(ConstraintError::InvalidValue)?;
+        // SAFETY: the world is borrowed mutably through this view and owns the constraint; no
+        // step runs. Jolt asserts the range checked above.
+        unsafe { JPH_ConeConstraint_SetHalfConeAngle(self.ptr(), angle) };
+        self.wake_bodies();
+        Ok(())
+    }
+}
+
+impl sealed::Settings for SwingTwistConstraintSettings {
+    fn validate(&self) -> Result<(), &'static str> {
+        SwingTwistConstraintSettings::validate(self)
+    }
+
+    fn springs(&self) -> Vec<SpringSettings> {
+        SwingTwistConstraintSettings::springs(self).collect()
+    }
+
+    unsafe fn create(
+        &self,
+        body1: NonNull<JPH_Body>,
+        body2: NonNull<JPH_Body>,
+    ) -> *mut JPH_Constraint {
+        let settings = self.to_jph();
+        // SAFETY: as in `ConeConstraintSettings::create`.
+        unsafe { JPH_SwingTwistConstraint_Create(&settings, body1.as_ptr(), body2.as_ptr()) }.cast()
+    }
+}
+
+impl ConstraintSettings for SwingTwistConstraintSettings {
+    type Kind = SwingTwistConstraint;
+}
+
+impl ConstraintRef<'_, SwingTwistConstraint> {
+    /// The rotation of body 2's constraint frame relative to body 1's.
+    pub fn rotation_in_constraint_space(&self) -> Quat {
+        let mut value = Quat::IDENTITY.to_jph();
+        // SAFETY: the world borrowed here owns the constraint. Jolt's
+        // `GetRotationInConstraintSpace` is const and reads the frames and the bodies'
+        // rotations, which change only behind `&mut PhysicsWorld`; `value` is a live local.
+        unsafe { JPH_SwingTwistConstraint_GetRotationInConstraintSpace(self.ptr(), &mut value) };
+        Quat::from_jph(value)
+    }
+
+    /// The swing motor's state.
+    pub fn swing_motor_state(&self) -> MotorState {
+        // SAFETY: as in `rotation_in_constraint_space`; the getter reads a member.
+        MotorState::from_jph(unsafe { JPH_SwingTwistConstraint_GetSwingMotorState(self.ptr()) })
+    }
+
+    /// The twist motor's state.
+    pub fn twist_motor_state(&self) -> MotorState {
+        // SAFETY: as in `swing_motor_state`.
+        MotorState::from_jph(unsafe { JPH_SwingTwistConstraint_GetTwistMotorState(self.ptr()) })
+    }
+
+    /// The orientation position motors drive to, in constraint space, as Jolt stores it after
+    /// clamping it to the limits.
+    pub fn target_orientation_cs(&self) -> Quat {
+        let mut value = Quat::IDENTITY.to_jph();
+        // SAFETY: as in `swing_motor_state`; `value` is a live local.
+        unsafe { JPH_SwingTwistConstraint_GetTargetOrientationCS(self.ptr(), &mut value) };
+        Quat::from_jph(value)
+    }
+
+    /// The angular velocity velocity motors drive to, rad/s in constraint space.
+    pub fn target_angular_velocity_cs(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `target_orientation_cs`.
+        unsafe { JPH_SwingTwistConstraint_GetTargetAngularVelocityCS(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+
+    /// The swing half angles about the normal and the plane axis, radians.
+    pub fn half_cone_angles(&self) -> (f32, f32) {
+        // SAFETY: as in `swing_motor_state`; Jolt's getters are const member reads, joltc
+        // declares the handle of the first one mutable.
+        unsafe {
+            (
+                JPH_SwingTwistConstraint_GetNormalHalfConeAngle(self.ptr()),
+                JPH_SwingTwistConstraint_GetPlaneHalfConeAngle(self.ptr()),
+            )
+        }
+    }
+
+    /// The twist range, radians: `(min, max)`.
+    pub fn twist_limits(&self) -> (f32, f32) {
+        // SAFETY: as in `swing_motor_state`.
+        unsafe {
+            (
+                JPH_SwingTwistConstraint_GetTwistMinAngle(self.ptr()),
+                JPH_SwingTwistConstraint_GetTwistMaxAngle(self.ptr()),
+            )
+        }
+    }
+
+    /// The friction torque in N·m applied while no motor drives the joint.
+    pub fn max_friction_torque(&self) -> f32 {
+        // SAFETY: as in `swing_motor_state`.
+        unsafe { JPH_SwingTwistConstraint_GetMaxFrictionTorque(self.ptr()) }
+    }
+
+    /// The impulse in N·s that kept the points together in the last step.
+    pub fn total_lambda_position(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `target_orientation_cs`.
+        unsafe { JPH_SwingTwistConstraint_GetTotalLambdaPosition(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+
+    /// The angular impulses in N·m·s the twist, swing Y and swing Z limits applied in the last
+    /// step.
+    pub fn total_lambda_limits(&self) -> [f32; 3] {
+        // SAFETY: as in `swing_motor_state`.
+        unsafe {
+            [
+                JPH_SwingTwistConstraint_GetTotalLambdaTwist(self.ptr()),
+                JPH_SwingTwistConstraint_GetTotalLambdaSwingY(self.ptr()),
+                JPH_SwingTwistConstraint_GetTotalLambdaSwingZ(self.ptr()),
+            ]
+        }
+    }
+
+    /// The angular impulse in N·m·s the motors applied in the last step.
+    pub fn total_lambda_motor(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `target_orientation_cs`.
+        unsafe { JPH_SwingTwistConstraint_GetTotalLambdaMotor(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+}
+
+impl ConstraintMut<'_, SwingTwistConstraint> {
+    /// Switches the swing motor and wakes the constraint's bodies.
+    pub fn set_swing_motor_state(&mut self, state: MotorState) {
+        // SAFETY: the world is borrowed mutably through this view and owns the constraint; no
+        // step runs. Jolt asserts valid motor settings for a running motor: every setting stored
+        // was validated.
+        unsafe { JPH_SwingTwistConstraint_SetSwingMotorState(self.ptr(), state.to_jph()) };
+        self.wake_bodies();
+    }
+
+    /// Switches the twist motor and wakes the constraint's bodies.
+    pub fn set_twist_motor_state(&mut self, state: MotorState) {
+        // SAFETY: as in `set_swing_motor_state`.
+        unsafe { JPH_SwingTwistConstraint_SetTwistMotorState(self.ptr(), state.to_jph()) };
+        self.wake_bodies();
+    }
+
+    /// Sets the orientation position motors drive to: body 2's constraint frame relative to body
+    /// 1's, a finite unit quaternion. Jolt clamps it to the limits. Wakes the constraint's
+    /// bodies.
+    pub fn set_target_orientation_cs(&mut self, rotation: Quat) -> Result<(), ConstraintError> {
+        check_rotation(rotation)?;
+        let rotation = rotation.to_jph();
+        // SAFETY: as in `set_swing_motor_state`; `rotation` is a live local.
+        unsafe { JPH_SwingTwistConstraint_SetTargetOrientationCS(self.ptr(), &rotation) };
+        self.wake_bodies();
+        Ok(())
+    }
+
+    /// Sets the angular velocity velocity motors drive to, rad/s in constraint space, at most
+    /// [`limits::MAX_ANGULAR_VELOCITY`] long. Wakes the constraint's bodies.
+    pub fn set_target_angular_velocity_cs(
+        &mut self,
+        velocity: Vec3,
+    ) -> Result<(), ConstraintError> {
+        check_angular_velocity(velocity)?;
+        let velocity = velocity.to_jph();
+        // SAFETY: as in `set_swing_motor_state`; `velocity` is a live local.
+        unsafe { JPH_SwingTwistConstraint_SetTargetAngularVelocityCS(self.ptr(), &velocity) };
+        self.wake_bodies();
+        Ok(())
+    }
+
+    /// Replaces the swing motor settings, checked as at creation and bounded through the
+    /// bodies' effective mass.
+    pub fn set_swing_motor_settings(
+        &mut self,
+        motor: MotorSettings,
+    ) -> Result<(), ConstraintError> {
+        check_motor(motor, self.effective_mass_bound())?;
+        let motor = motor.to_jph();
+        // SAFETY: as in `set_swing_motor_state`; `motor` is a live local that joltc copies.
+        unsafe { JPH_SwingTwistConstraint_SetSwingMotorSettings(self.ptr(), &motor) };
+        Ok(())
+    }
+
+    /// Replaces the twist motor settings, checked as at creation and bounded through the
+    /// bodies' effective mass.
+    pub fn set_twist_motor_settings(
+        &mut self,
+        motor: MotorSettings,
+    ) -> Result<(), ConstraintError> {
+        check_motor(motor, self.effective_mass_bound())?;
+        let motor = motor.to_jph();
+        // SAFETY: as in `set_swing_motor_settings`.
+        unsafe { JPH_SwingTwistConstraint_SetTwistMotorSettings(self.ptr(), &motor) };
+        Ok(())
+    }
+
+    /// Sets the friction torque in N·m applied while no motor drives the joint, finite and at
+    /// least 0.
+    pub fn set_max_friction_torque(&mut self, torque: f32) -> Result<(), ConstraintError> {
+        check_friction(torque)?;
+        // SAFETY: as in `set_swing_motor_state`.
+        unsafe { JPH_SwingTwistConstraint_SetMaxFrictionTorque(self.ptr(), torque) };
+        Ok(())
+    }
+}
+
+impl sealed::Settings for SixDofConstraintSettings {
+    fn validate(&self) -> Result<(), &'static str> {
+        SixDofConstraintSettings::validate(self)
+    }
+
+    fn springs(&self) -> Vec<SpringSettings> {
+        SixDofConstraintSettings::springs(self).collect()
+    }
+
+    unsafe fn create(
+        &self,
+        body1: NonNull<JPH_Body>,
+        body2: NonNull<JPH_Body>,
+    ) -> *mut JPH_Constraint {
+        let settings = self.to_jph();
+        // SAFETY: as in `ConeConstraintSettings::create`.
+        unsafe { JPH_SixDOFConstraint_Create(&settings, body1.as_ptr(), body2.as_ptr()) }.cast()
+    }
+}
+
+impl ConstraintSettings for SixDofConstraintSettings {
+    type Kind = SixDofConstraint;
+}
+
+impl ConstraintRef<'_, SixDofConstraint> {
+    /// The state of the motor of `axis`.
+    pub fn motor_state(&self, axis: SixDofConstraintAxis) -> MotorState {
+        // SAFETY: the world borrowed here owns the constraint; Jolt's getter is a const member
+        // read, joltc only declares the handle mutable.
+        MotorState::from_jph(unsafe {
+            JPH_SixDOFConstraint_GetMotorState(self.ptr(), axis.to_jph())
+        })
+    }
+
+    /// The rotation of body 2's constraint frame relative to body 1's.
+    pub fn rotation_in_constraint_space(&self) -> Quat {
+        let mut value = Quat::IDENTITY.to_jph();
+        // SAFETY: as in `motor_state`; Jolt's getter is const and reads the frames and the
+        // bodies' rotations. `value` is a live local.
+        unsafe { JPH_SixDOFConstraint_GetRotationInConstraintSpace(self.ptr(), &mut value) };
+        Quat::from_jph(value)
+    }
+
+    /// The limits of `axis`: `None` for a free axis, `(min, max)` otherwise; a fixed axis reads
+    /// as Jolt stores it.
+    pub fn limits(&self, axis: SixDofConstraintAxis) -> Option<(f32, f32)> {
+        // SAFETY: as in `motor_state`.
+        unsafe {
+            (!JPH_SixDOFConstraint_IsFreeAxis(self.ptr(), axis.to_jph())).then(|| {
+                (
+                    JPH_SixDOFConstraint_GetLimitsMin(self.ptr(), axis.to_jph()),
+                    JPH_SixDOFConstraint_GetLimitsMax(self.ptr(), axis.to_jph()),
+                )
+            })
+        }
+    }
+
+    /// The velocity translation motors drive to, m/s in constraint space.
+    pub fn target_velocity_cs(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `rotation_in_constraint_space`.
+        unsafe { JPH_SixDOFConstraint_GetTargetVelocityCS(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+
+    /// The angular velocity rotation motors drive to, rad/s in constraint space.
+    pub fn target_angular_velocity_cs(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `rotation_in_constraint_space`.
+        unsafe { JPH_SixDOFConstraint_GetTargetAngularVelocityCS(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+
+    /// The position translation motors drive to, metres in constraint space.
+    pub fn target_position_cs(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `rotation_in_constraint_space`.
+        unsafe { JPH_SixDOFConstraint_GetTargetPositionCS(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+
+    /// The orientation rotation motors drive to, in constraint space, after Jolt's clamping.
+    pub fn target_orientation_cs(&self) -> Quat {
+        let mut value = Quat::IDENTITY.to_jph();
+        // SAFETY: as in `rotation_in_constraint_space`.
+        unsafe { JPH_SixDOFConstraint_GetTargetOrientationCS(self.ptr(), &mut value) };
+        Quat::from_jph(value)
+    }
+
+    /// The impulse in N·s the translation limits applied in the last step.
+    pub fn total_lambda_position(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `rotation_in_constraint_space`.
+        unsafe { JPH_SixDOFConstraint_GetTotalLambdaPosition(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+
+    /// The angular impulse in N·m·s the rotation limits applied in the last step.
+    pub fn total_lambda_rotation(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `rotation_in_constraint_space`.
+        unsafe { JPH_SixDOFConstraint_GetTotalLambdaRotation(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+
+    /// The impulse in N·s the translation motors applied in the last step.
+    pub fn total_lambda_motor_translation(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `rotation_in_constraint_space`.
+        unsafe { JPH_SixDOFConstraint_GetTotalLambdaMotorTranslation(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+
+    /// The angular impulse in N·m·s the rotation motors applied in the last step.
+    pub fn total_lambda_motor_rotation(&self) -> Vec3 {
+        let mut value = Vec3::ZERO.to_jph();
+        // SAFETY: as in `rotation_in_constraint_space`.
+        unsafe { JPH_SixDOFConstraint_GetTotalLambdaMotorRotation(self.ptr(), &mut value) };
+        Vec3::from_jph(value)
+    }
+}
+
+impl ConstraintMut<'_, SixDofConstraint> {
+    /// Switches the motor of `axis` and wakes the constraint's bodies.
+    pub fn set_motor_state(&mut self, axis: SixDofConstraintAxis, state: MotorState) {
+        // SAFETY: the world is borrowed mutably through this view and owns the constraint; no
+        // step runs. Jolt asserts valid motor settings for a running motor: every setting stored
+        // was validated.
+        unsafe { JPH_SixDOFConstraint_SetMotorState(self.ptr(), axis.to_jph(), state.to_jph()) };
+        self.wake_bodies();
+    }
+
+    /// Replaces the motor settings of `axis`, checked as at creation and bounded through the
+    /// bodies' effective mass.
+    pub fn set_motor_settings(
+        &mut self,
+        axis: SixDofConstraintAxis,
+        motor: MotorSettings,
+    ) -> Result<(), ConstraintError> {
+        check_motor(motor, self.effective_mass_bound())?;
+        let motor = motor.to_jph();
+        // SAFETY: as in `set_motor_state`; `motor` is a live local that joltc copies.
+        unsafe { JPH_SixDOFConstraint_SetMotorSettings(self.ptr(), axis.to_jph(), &motor) };
+        Ok(())
+    }
+
+    /// Sets the velocity translation motors drive to, m/s in constraint space, at most
+    /// [`limits::MAX_LINEAR_VELOCITY`] long. Wakes the constraint's bodies.
+    pub fn set_target_velocity_cs(&mut self, velocity: Vec3) -> Result<(), ConstraintError> {
+        if !limits::is_linear_velocity(velocity) {
+            return Err(ConstraintError::InvalidValue(
+                "target velocity must be finite and at most limits::MAX_LINEAR_VELOCITY long",
+            ));
+        }
+        let mut velocity = velocity.to_jph();
+        // SAFETY: as in `set_motor_state`; `velocity` is a live local that joltc copies.
+        unsafe { JPH_SixDOFConstraint_SetTargetVelocityCS(self.ptr(), &mut velocity) };
+        self.wake_bodies();
+        Ok(())
+    }
+
+    /// Sets the angular velocity rotation motors drive to, rad/s in constraint space, at most
+    /// [`limits::MAX_ANGULAR_VELOCITY`] long. Wakes the constraint's bodies.
+    pub fn set_target_angular_velocity_cs(
+        &mut self,
+        velocity: Vec3,
+    ) -> Result<(), ConstraintError> {
+        check_angular_velocity(velocity)?;
+        let mut velocity = velocity.to_jph();
+        // SAFETY: as in `set_target_velocity_cs`.
+        unsafe { JPH_SixDOFConstraint_SetTargetAngularVelocityCS(self.ptr(), &mut velocity) };
+        self.wake_bodies();
+        Ok(())
+    }
+
+    /// Sets the position translation motors drive to, metres in constraint space, within
+    /// [`limits::MAX_SHAPE_EXTENT`] per axis. Wakes the constraint's bodies.
+    pub fn set_target_position_cs(&mut self, position: Vec3) -> Result<(), ConstraintError> {
+        if !limits::is_local_offset(position) {
+            return Err(ConstraintError::InvalidValue(
+                "target position must be finite and within limits::MAX_SHAPE_EXTENT per axis",
+            ));
+        }
+        let mut position = position.to_jph();
+        // SAFETY: as in `set_target_velocity_cs`.
+        unsafe { JPH_SixDOFConstraint_SetTargetPositionCS(self.ptr(), &mut position) };
+        self.wake_bodies();
+        Ok(())
+    }
+
+    /// Sets the orientation rotation motors drive to: body 2's constraint frame relative to
+    /// body 1's, a finite unit quaternion. Jolt clamps it to the limits. Wakes the constraint's
+    /// bodies.
+    pub fn set_target_orientation_cs(&mut self, rotation: Quat) -> Result<(), ConstraintError> {
+        check_rotation(rotation)?;
+        let mut rotation = rotation.to_jph();
+        // SAFETY: as in `set_target_velocity_cs`.
+        unsafe { JPH_SixDOFConstraint_SetTargetOrientationCS(self.ptr(), &mut rotation) };
+        self.wake_bodies();
+        Ok(())
     }
 }
