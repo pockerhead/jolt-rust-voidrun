@@ -2,8 +2,8 @@
 
 How `PhysicsWorld` records contact, body activation and soft body contact events, and which
 Jolt code paths produce them. Line numbers refer to the vendored Jolt 5.6 sources
-(`crates/joltphysics-sys/vendor/JoltPhysics/Jolt/Physics/`) and joltc
-(`crates/joltphysics-sys/vendor/joltc/src/joltc.cpp`).
+(`crates/oxijolt-sys/vendor/JoltPhysics/Jolt/Physics/`) and joltc
+(`crates/oxijolt-sys/vendor/joltc/src/joltc.cpp`).
 
 ## Listeners
 
@@ -83,7 +83,7 @@ the order they happened in.
   are in vertex order, and the sensors are sorted by id because Jolt removes sensors from its
   list by swapping in the last one (`SoftBodyMotionProperties.cpp:835-839`).
 
-The event determinism test (`crates/joltphysics/tests/event_determinism.rs`) compares the
+The event determinism test (`crates/oxijolt/tests/event_determinism.rs`) compares the
 serialized events of every step, with every bit, for 1 and 4 worker threads and for caller job
 systems, and checks that its scene stepped with every event on and a no-op contact listener
 simulates bit for bit like the same scene with nothing installed. It requires every step to be
@@ -130,7 +130,7 @@ Rejections sort by pair and error like the other events of a step.
 
 ## Leaks
 
-`crates/joltphysics/tests/listener_leaks.rs` measures the process's private bytes over two
+`crates/oxijolt/tests/listener_leaks.rs` measures the process's private bytes over two
 phases: replacing listeners and materials in one world, and creating, stepping and dropping a
 world with listeners, material shapes, bodies and a cloth every round (dropped with its
 listeners attached and its bodies alive). A new world per round grows private bytes by about

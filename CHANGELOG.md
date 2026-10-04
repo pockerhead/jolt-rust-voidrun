@@ -4,21 +4,23 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
-- Renamed the crates: `joltc-sys` is now `joltphysics-sys` (`crates/joltphysics-sys`, Rust path
-  `joltphysics_sys`) and `rolt` is now `joltphysics` (`crates/joltphysics`); the old names belong to
-  jolt-rust on crates.io. The prebuilt manifest is now `joltphysics-sys-manifest.txt`; `JOLTC_LIB_DIR` and
-  the features are unchanged. Existing checkouts run `git submodule sync && git submodule update --init` once.
+- Renamed the crates: `joltc-sys` is now `oxijolt-sys` (`crates/oxijolt-sys`, Rust path `oxijolt_sys`)
+  and `rolt` is now `oxijolt` (`crates/oxijolt`); the old names belong to jolt-rust on crates.io. Before
+  the first release the crates were briefly called `joltphysics-sys` and `joltphysics`. The repository is
+  now https://github.com/pockerhead/oxijolt. The prebuilt manifest is now `oxijolt-sys-manifest.txt`;
+  `JOLTC_LIB_DIR` and the features are unchanged. Existing checkouts run
+  `git submodule sync && git submodule update --init` once.
 - Project rules (`AGENTS.md`) and lineage (`LINEAGE.md`) for the fork.
 - The raw layer moved from JoltC to [joltc](https://github.com/amerkoleci/joltc) over Jolt Physics 5.6.0:
-  `joltphysics-sys` now exposes joltc's `JPH_*` API. joltc and Jolt are pinned submodules under
-  `crates/joltphysics-sys/vendor`, and the native build no longer fetches anything from the network.
+  `oxijolt-sys` now exposes joltc's `JPH_*` API. joltc and Jolt are pinned submodules under
+  `crates/oxijolt-sys/vendor`, and the native build no longer fetches anything from the network.
 - Layout assertions for the FFI types in use, on the C++ side and the Rust side.
 - Eight joltc ragdoll and skeleton-mapper functions that cast 4-aligned matrices to 16-aligned ones are
   left out of the bindings.
 - Removed the `object-layer-u32` feature: joltc always uses 32-bit object layers.
 - `JOLTC_LIB_DIR` links a prebuilt native library and skips CMake; the prefix is validated against a
   manifest. Rust-only changes no longer rerun CMake.
-- `joltphysics` is a new safe API on the joltc raw layer: a physics world with collision layers, box and
+- `oxijolt` is a new safe API on the joltc raw layer: a physics world with collision layers, box and
   sphere shapes and rigid bodies, with a headless `hello_world` example.
 - CI on GitHub Actions (Windows MSVC: build, test, clippy, docs, formatting) with a cached native build.
 - `PhysicsWorld::step` returns `Result<StepReport, StepError>`. `Err` now means the step was rejected and
@@ -52,7 +54,7 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   out of the native libraries without the feature.
 - A guide (`docs/guide.md`) with a headless example of a terrain, a chunk compound, an item, queries
   and a rebase, run as a doctest.
-- `joltphysics-sys` gains a C extension in joltc's naming (`native/joltc_ext`): a state recorder,
+- `oxijolt-sys` gains a C extension in joltc's naming (`native/joltc_ext`): a state recorder,
   `JPH_CharacterVirtual_SaveState` and `_RestoreState`, and `JPH_CharacterVirtual_ExtendedUpdate2` and
   `_RefreshContacts2`, which take explicit gravity, filters and temp allocator.
 - Virtual characters (Jolt `CharacterVirtual`) owned by the world: `PhysicsWorld::create_character`,
@@ -76,7 +78,7 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   threads, and a leak gate covers characters.
 - The guide has a section on characters, with a character walking on a small planet run as a
   doctest, and explains how a game builds its own autostep for steps with sharp edges.
-- Benchmarks against the game's budgets (`cargo bench -p joltphysics --bench budgets`, results in
+- Benchmarks against the game's budgets (`cargo bench -p oxijolt --bench budgets`, results in
   `docs/benchmarks.md`); the `character_cost` example moved into this bench.
 - `Shape::new_offset_center_of_mass` (Jolt `OffsetCenterOfMassShape`) moves a shape's centre of
   mass without moving its surface, for a vehicle chassis with a low centre of mass.
@@ -111,7 +113,7 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   velocities; `SettleDetector` tells when a ragdoll has come to rest.
 - Determinism gates for a car driving a route, a fleet of 40 vehicles and a pile of 16 ragdolls
   (1 against 4 worker threads), and leak gates for vehicles and ragdolls.
-- `joltphysics-sys` extension: `JPH_VehicleConstraint_AsConstraint`, ragdoll part and joint
+- `oxijolt-sys` extension: `JPH_VehicleConstraint_AsConstraint`, ragdoll part and joint
   setters that keep every setting (`JPH_RagdollSettings_SetPart`,
   `_SetPartToParentSwingTwist`, `_SetPartToParentHinge`, `_SetPartToParentSixDOF`),
   `JPH_RagdollSettings_CalculateConstraintPriorities`, and swing-twist and hinge motor access.

@@ -1,13 +1,13 @@
 # Benchmarks against the game's budgets
 
-`crates/joltphysics/benches/budgets.rs` times the physics work of one VOIDRUN tick and compares it
+`crates/oxijolt/benches/budgets.rs` times the physics work of one VOIDRUN tick and compares it
 with the game's budgets. The numbers are wall-clock times on one machine, reported and never
 checked by a test: they vary between runs and between machines.
 
 ## How to run
 
 ```bash
-cargo bench -p joltphysics --bench budgets
+cargo bench -p oxijolt --bench budgets
 ```
 
 Run one cargo process at a time on a quiet machine with a fixed power plan ("High performance"
@@ -15,7 +15,7 @@ below). The first run builds Jolt and joltc in Release under `target/release` un
 `JOLTC_LIB_DIR` points at a matching prebuilt prefix. Without the `--bench` argument that
 `cargo bench` passes (for example under `cargo test --benches`) the binary returns at once. Words
 after `--` run only the cases whose names contain one of them, for example
-`cargo bench -p joltphysics --bench budgets -- tick`. The names are `update_character`, `near step`,
+`cargo bench -p oxijolt --bench budgets -- tick`. The names are `update_character`, `near step`,
 `landing`, `steady step`, `ray` and `tick`, and a word matches any part of a name: `-- step` runs
 both the near step and the steady step. A word that matches no case prints an empty table, without
 a warning.

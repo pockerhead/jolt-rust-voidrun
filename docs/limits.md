@@ -1,9 +1,9 @@
 # Limits
 
 Derivations behind the magnitudes the safe API accepts. The audit table with one row per input
-lives in the rustdoc of `joltphysics::limits`; this file holds the reasoning that does not fit
+lives in the rustdoc of `oxijolt::limits`; this file holds the reasoning that does not fit
 in a table row. Line numbers refer to the vendored Jolt 5.6 sources
-(`crates/joltphysics-sys/vendor/JoltPhysics/Jolt/Physics/`).
+(`crates/oxijolt-sys/vendor/JoltPhysics/Jolt/Physics/`).
 
 ## Contact settings
 

@@ -1,0 +1,30 @@
+[package]
+name = "oxijolt"
+description = "Safe Rust API for Jolt Physics"
+version = "0.4.0+jolt-5.6.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pockerhead/oxijolt"
+edition = "2021"
+
+[features]
+double-precision = ["oxijolt-sys/double-precision"]
+cross-platform-deterministic = ["oxijolt-sys/cross-platform-deterministic"]
+# Debug wireframe of colliders as line data (`PhysicsWorld::debug_lines`); also compiles Jolt's
+# debug renderer into the native libraries.
+debug-renderer = ["oxijolt-sys/debug-renderer"]
+# Compiles Jolt with its debug assertions (`oxijolt-sys/asserts`); a failed assertion prints its
+# message and aborts the process.
+asserts = ["oxijolt-sys/asserts"]
+# Generates the raw bindings with libclang at build time (`oxijolt-sys/bindgen`).
+bindgen = ["oxijolt-sys/bindgen"]
+
+[dependencies]
+oxijolt-sys = { version = "0.4.0", path = "../oxijolt-sys" }
+
+[dev-dependencies]
+rayon = "1.11"
+
+[[bench]]
+name = "budgets"
+harness = false
+test = false

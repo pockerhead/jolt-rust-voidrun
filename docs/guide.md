@@ -1,10 +1,10 @@
 # Guide: a headless game world
 
-This guide builds the scene `joltphysics` was written for: terrain, a building made of several
+This guide builds the scene `oxijolt` was written for: terrain, a building made of several
 parts with their own collision groups, a dropped item, the queries a game runs every frame and a
 floating origin, then a character walking on a small planet, then a car on terrain and a ragdoll
 in a second world. Everything runs headless; nothing is drawn. The three complete programs run as
-tests (`cargo test -p joltphysics --doc`).
+tests (`cargo test -p oxijolt --doc`).
 
 Units are metres, seconds, kilograms and radians. Jolt is right-handed with Y up.
 
@@ -141,7 +141,7 @@ in its own code after the update, with shape casts, which report the geometry's 
 grounded walker was held back by a steep contact, cast the capsule up by the step height (head
 room), forward by the free room the step needs, and down onto the step; if the top is walkable and
 not a dynamic body, set the character's position there and refresh its contacts. The repository's
-reference controller for VOIDRUN does exactly this in `crates/joltphysics/tests/common/walker.rs`
+reference controller for VOIDRUN does exactly this in `crates/oxijolt/tests/common/walker.rs`
 (a 0.45 m step with 0.5 m of free room on a planet of radius 99, with underground recovery, the
 vertical speed rules, stick to floor as the floor snap and a chained replay). It is test support,
 not part of the API: copy and adapt it.
@@ -149,7 +149,7 @@ not part of the API: copy and adapt it.
 ## The whole example
 
 ```rust
-use joltphysics::*;
+use oxijolt::*;
 
 /// The game's collision groups, stored as compound child user data.
 const STRUCTURE: u32 = 1;
@@ -298,7 +298,7 @@ the filter's group mask. Halfway through the walk the character's state is saved
 world continues from it bit for bit.
 
 ```rust
-use joltphysics::*;
+use oxijolt::*;
 
 /// The game's collision groups, stored as compound child user data.
 const STRUCTURE: u32 = 1;
@@ -597,7 +597,7 @@ and head joined by swing-twist joints, thighs on six-DOF hips with asymmetric li
 hinged knees.
 
 ```rust
-use joltphysics::*;
+use oxijolt::*;
 
 type Error = Box<dyn std::error::Error>;
 

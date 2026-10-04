@@ -1,6 +1,6 @@
-[submodule "crates/joltphysics-sys/vendor/joltc"]
-	path = crates/joltphysics-sys/vendor/joltc
+[submodule "crates/oxijolt-sys/vendor/joltc"]
+	path = crates/oxijolt-sys/vendor/joltc
 	url = https://github.com/amerkoleci/joltc.git
-[submodule "crates/joltphysics-sys/vendor/JoltPhysics"]
-	path = crates/joltphysics-sys/vendor/JoltPhysics
+[submodule "crates/oxijolt-sys/vendor/JoltPhysics"]
+	path = crates/oxijolt-sys/vendor/JoltPhysics
 	url = https://github.com/jrouwe/JoltPhysics.git
