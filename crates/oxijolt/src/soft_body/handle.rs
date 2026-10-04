@@ -36,13 +36,11 @@ impl PhysicsWorld {
     /// Jolt computes the body's inertia in `f32` about the body origin from every vertex and
     /// decomposes it (unless a vertex is kinematic), which fails for vertices far from the
     /// origin compared with their spread, or on one line. Such a body is refused with
-    /// [`BodyError::InvalidValue`] (see [docs/limits.md#soft-body-inertia]): an
-    /// 11 × 11 cloth of 1 m is accepted at 11 m from its origin and refused from 12 m. Give the
-    /// vertices around the origin and place the body with [`SoftBodySettings::position`]. The
-    /// check is conservative for thin bodies: a free ribbon narrower than about 1/70 of its
-    /// length or a tube of radius below about 1/130 of its length (a 2.5 m strip 2 cm wide, a
-    /// 3 m rope of radius 2 cm) is refused even centred on the origin, although Jolt decomposes
-    /// it. Widen it or make a vertex kinematic, which skips the check.
+    /// [`BodyError::InvalidValue`] ([docs/limits.md#soft-body-inertia]). Give the vertices
+    /// around the origin and place the body with [`SoftBodySettings::position`]. The check is
+    /// conservative for thin bodies: a free ribbon narrower than about 1/70 of its length or a
+    /// tube of radius below about 1/130 of its length is refused even centred on the origin,
+    /// although Jolt decomposes it. Widen it or make a vertex kinematic, which skips the check.
     ///
     /// ```
     /// use oxijolt::*;

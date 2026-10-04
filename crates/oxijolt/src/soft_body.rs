@@ -187,10 +187,10 @@ impl SoftBodyVertexAttributes {
     /// within `1..=`[`limits::MAX_RATIO`] (1.01 lets the vertex move 1 % further away).
     /// Default [`LongRangeAttachment::None`] with multiplier 1.
     ///
-    /// The bound keeps Jolt's arithmetic finite: an LRA rest distance is at most the sum of all
-    /// edge lengths, below `2³² · 2√3 ·` [`limits::MAX_SHAPE_EXTENT`] (about 3e13 m); times the
-    /// multiplier it is at most 3e17 m, and Jolt's square of it (`SoftBodyMotionProperties.cpp:695`)
-    /// stays below 1e35.
+    /// The bound keeps Jolt's square of the stretched rest distance finite
+    /// ([docs/limits.md#soft-body-long-range-attachments]).
+    ///
+    /// [docs/limits.md#soft-body-long-range-attachments]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#soft-body-long-range-attachments
     #[must_use]
     pub fn long_range_attachment(mut self, kind: LongRangeAttachment, multiplier: f32) -> Self {
         self.long_range_attachment = kind;

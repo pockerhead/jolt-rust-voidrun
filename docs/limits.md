@@ -187,6 +187,13 @@ Jolt only asserts that a rest length is above zero (`SoftBodySharedSettings.cpp:
 divides by edge lengths while it solves; `MIN_SOFT_BODY_EDGE_LENGTH` keeps a degenerate edge out
 of the solver with a margin.
 
+## Soft body long-range attachments
+
+An LRA rest distance is at most the sum of all edge lengths, below
+`2³² · 2√3 · MAX_SHAPE_EXTENT` (about 3e13 m). With the multiplier of
+`SoftBodyVertexAttributes::long_range_attachment` at most `MAX_RATIO` it is at most 3e17 m, and
+Jolt's square of it (`SoftBodyMotionProperties.cpp:695`) stays below 1e35.
+
 ## Soft body compliance
 
 Jolt divides each compliance by the squared sub-step

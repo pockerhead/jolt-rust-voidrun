@@ -59,8 +59,8 @@ impl Default for SoftBodySettings {
 impl SoftBodySettings {
     /// Largest number of solver iterations per step.
     ///
-    /// Crate policy: Jolt divides the step into this many sub-steps, which bounds the smallest
-    /// sub-step that [`limits::MAX_COMPLIANCE`] is derived for.
+    /// Jolt divides the step into this many sub-steps; the bound fixes the smallest sub-step
+    /// that [`limits::MAX_COMPLIANCE`] is derived for.
     pub const MAX_ITERATIONS: u32 = 100;
 
     /// Initial position of the body origin in metres, every component at most
