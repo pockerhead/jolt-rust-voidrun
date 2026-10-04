@@ -222,8 +222,9 @@ pub struct FloorRemedy {
     /// Refresh the contacts after the move, so that the snap's gate reads the ground state at the
     /// new position instead of the one the move's sweep left (crests).
     pub refresh_before_snap: bool,
-    /// The snap also accepts a steep structure hit that faces up and that the capsule moved down
-    /// to reach (ledge edges below it, not a wall beside it).
+    /// The snap also accepts a steep structure hit that the capsule moved down to reach and that
+    /// lies well below its lower sphere centre (ledge edges under it, not a wall beside it); see
+    /// [`crate::study::passes::snap`].
     pub snap_on_structure_edges: bool,
 }
 

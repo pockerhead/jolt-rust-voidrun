@@ -110,11 +110,11 @@ pub enum SceneKey {
     RadialWall,
     /// A sharp platform over `-4 <= x <= 0` whose edge at x = 0 drops [`HIGH_LEDGE_DROP`] to flat
     /// terrain, and a sharp wall along x whose face passes z = `face_mm` at the height of a body
-    /// origin resting on the platform, leaning back by `lean_decideg` tenths of a degree (its face
+    /// origin resting on the platform, leaning back by `lean_cdeg` hundredths of a degree (its face
     /// then looks up; negative: an overhang).
-    HighLedgeBesideWall { face_mm: u16, lean_decideg: i16 },
+    HighLedgeBesideWall { face_mm: u16, lean_cdeg: i16 },
     /// As `HighLedgeBesideWall` on the anchor chunk of the planet.
-    RadialHighLedgeBesideWall { face_mm: u16, lean_decideg: i16 },
+    RadialHighLedgeBesideWall { face_mm: u16, lean_cdeg: i16 },
 }
 
 impl SceneKey {
@@ -357,19 +357,13 @@ impl Builder {
                 self.planet_chunk(0.0);
                 self.block([0.45, 1.0, 0.0], [0.1, 1.0, 2.0], 0.0, 0.0);
             }
-            SceneKey::HighLedgeBesideWall {
-                face_mm,
-                lean_decideg,
-            } => {
+            SceneKey::HighLedgeBesideWall { face_mm, lean_cdeg } => {
                 self.flat();
-                self.high_ledge_beside_wall(face_mm, lean_decideg);
+                self.high_ledge_beside_wall(face_mm, lean_cdeg);
             }
-            SceneKey::RadialHighLedgeBesideWall {
-                face_mm,
-                lean_decideg,
-            } => {
+            SceneKey::RadialHighLedgeBesideWall { face_mm, lean_cdeg } => {
                 self.planet_chunk(0.0);
-                self.high_ledge_beside_wall(face_mm, lean_decideg);
+                self.high_ledge_beside_wall(face_mm, lean_cdeg);
             }
         }
     }
@@ -377,7 +371,7 @@ impl Builder {
     /// The platform and the wall of [`SceneKey::HighLedgeBesideWall`] over ground at height 0.
     /// The wall turns about x around its face point at the resting origin's height, which
     /// turns its face normal from -z to `(0, sin lean, -cos lean)`.
-    fn high_ledge_beside_wall(&mut self, face_mm: u16, lean_decideg: i16) {
+    fn high_ledge_beside_wall(&mut self, face_mm: u16, lean_cdeg: i16) {
         let top = HIGH_LEDGE_DROP;
         self.block([-2.0, top - 1.5, 0.0], [2.0, 1.5, 2.0], 0.0, 0.0);
         let face = [
@@ -387,7 +381,7 @@ impl Builder {
         ];
         let half = [4.0, 0.5 * top + 1.5, 0.1];
         let upright_centre = [0.0, 0.5 * top + 0.5, face[2] + half[2]];
-        let lean = (f64::from(lean_decideg) / 10.0).to_radians() as f32;
+        let lean = (f64::from(lean_cdeg) / 100.0).to_radians() as f32;
         let turn = quat_about(Vec3::new(1.0, 0.0, 0.0), lean);
         let centre = add(face, rotate(turn, sub(upright_centre, face)));
         self.turned_block(centre, half, turn, 0.0);

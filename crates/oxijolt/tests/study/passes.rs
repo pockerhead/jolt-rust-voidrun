@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use oxijolt::*;
 
-use crate::common::math::{add, dot, f3, norm, rvec3, scale, V3};
+use crate::common::math::{add, dot, f3, norm, rvec3, scale, sub, v3, V3};
 use crate::common::walker::{capsule, from_y_to, CENTRE_UP, RADIUS, SNAP};
 use crate::common::Groups;
 
@@ -98,11 +98,19 @@ pub struct Snap {
     pub normal: V3,
 }
 
+/// How far below the lower sphere centre, where the snap's cast stops, a steep structure hit
+/// must lie for [`snap`] to take it as a ledge edge, metres. A hit on the lower sphere lies
+/// radius + padding times `n.up` below that centre, so 0.05 m rejects faces steeper than 83
+/// degrees (walls leaning back by less than 7 degrees); the law cases' edge hits lie 0.063 m or
+/// more below it.
+pub const EDGE_DEPTH: f64 = 0.05;
+
 /// Q5, the floor snap: the capsule cast along -up by `SNAP` with target distance `p`; a
 /// walkable, not dynamic hit gives the distance to move down. With `structure_edges`, a steep
 /// hit on a structure is accepted too when the capsule moved down to reach it (fraction above
-/// 0) and its normal faces up: a ledge edge below the capsule, not a wall the padded capsule
-/// already touches (a study remedy, not the game's pass).
+/// 0) and the hit lies at least [`EDGE_DEPTH`] below the lower sphere centre where the cast
+/// stops: a ledge edge under the capsule, not a wall beside it, upright or leaning back (a study
+/// remedy, not the game's pass).
 pub fn snap(
     world: &PhysicsWorld,
     filter: &QueryFilter<'_>,
@@ -125,7 +133,9 @@ pub fn snap(
     let structure = hit
         .compound_child
         .is_some_and(|child| child.user_data == Groups::STRUCTURE);
-    let edge_below = structure && hit.fraction > 0.0 && dot(normal, up) > 0.0;
+    let stopped = sub(origin, scale(up, f64::from(hit.distance)));
+    let depth = dot(sub(stopped, v3(hit.point)), up);
+    let edge_below = structure && hit.fraction > 0.0 && depth >= EDGE_DEPTH;
     let dynamic = world.body(hit.body).unwrap().motion_type() == MotionType::Dynamic;
     ((walkable || (structure_edges && edge_below)) && !dynamic).then_some(Snap {
         distance: f64::from(hit.distance),

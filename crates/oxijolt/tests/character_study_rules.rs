@@ -1,17 +1,22 @@
 //! The study caller's rule 7 (spec D.2): steep terrain is a wall the character slides down, a
 //! steep structure (a step edge reads steep) holds it, the terrain veto stands after the
-//! autostep and the floor snap, and a structure wall beside a high ledge does not hold a
-//! character that walks off it. `docs/character-study.md` describes the study.
+//! autostep and the floor snap, a structure wall beside a high ledge does not hold a character
+//! that walks off it, and the structure-edge snap takes a ledge edge and not a leaning wall.
+//! `docs/character-study.md` describes the study.
 
 mod common;
 mod study;
 
-use common::math::{add, dot, norm, normalize, scale, sub, V3};
-use common::walker::{from_y_to, Carry, CENTRE, G, R, RADIUS, REST_HEIGHT};
+use common::math::{add, dot, f3, norm, normalize, rvec3, scale, sub, v3, vec3, V3};
+use common::walker::{
+    capsule, controller_filter, from_y_to, Carry, CENTRE, CENTRE_UP, G, R, RADIUS, REST_HEIGHT,
+    SNAP,
+};
 use common::DT;
 use oxijolt::*;
 use study::config::{Config, Rule7};
 use study::controller::{carried, ends_grounded, feed, tick, Held, TickReport};
+use study::passes::{snap, EDGE_DEPTH};
 use study::scenes::{Scene, SceneKey, HIGH_LEDGE_DROP};
 
 /// Under spec D.2's rule 7, steep terrain support vetoes every way of grounding, the autostep
@@ -172,11 +177,54 @@ fn walking_off_a_high_ledge_beside_a_wall_falls_to_the_floor() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// The Q5 snap's structure-edge change takes a ledge edge under the capsule and not a wall
+/// beside it. Past the high ledge, beside a wall 0.43 m from the path that leans back by 2 or
+/// 5 degrees, the padded capsule does not touch the wall; the snap's cast reaches it after
+/// moving down (fraction above 0) and finds a face looking up, which the snap must still reject.
+/// 0.35 m past the edge the cast meets the platform's edge first, steep and 0.23 m below the
+/// lower sphere centre, which the snap takes.
+#[test]
+fn the_structure_edge_snap_takes_a_ledge_edge_and_not_a_wall_leaning_back() {
+    let config = Config::d2_noq4_floor();
+    let p = config.settings.padding;
+    let up = [0.0, 1.0, 0.0];
+    for (lean_cdeg, x, takes) in [(200, 1.0, false), (500, 1.0, false), (200, 0.35, true)] {
+        let mut scene = Scene::build(planar_ledge(430, lean_cdeg));
+        let origin = [x, HIGH_LEDGE_DROP + f64::from(REST_HEIGHT), 0.0];
+        let walker = config.create_character(&mut scene, origin);
+        let layers = [scene.layers.terrain, scene.layers.chunk, scene.layers.actor];
+        let filter = controller_filter(&walker, &layers);
+        let shape = capsule();
+        let cast = ShapeCast::new(
+            &shape,
+            rvec3(add(origin, scale(up, f64::from(CENTRE_UP)))),
+            from_y_to(up),
+            vec3(scale(up, -f64::from(SNAP))),
+        )
+        .target_distance(p);
+        let hit = scene.world.cast_shape(&cast, &filter).unwrap();
+        let hit = hit.unwrap_or_else(|| panic!("lean {lean_cdeg}, x {x}: the cast hits nothing"));
+        let n_up = dot(f3(hit.normal), up);
+        assert!(
+            hit.fraction > 0.0 && n_up > 0.0 && n_up < std::f64::consts::FRAC_1_SQRT_2,
+            "lean {lean_cdeg}, x {x}: the cast must find a steep face looking up after moving"
+        );
+        let found = snap(&scene.world, &filter, origin, up, p, true);
+        assert_eq!(found.is_some(), takes, "lean {lean_cdeg}, x {x}: {found:?}");
+        if let Some(found) = found {
+            let below = dot(sub(origin, v3(hit.point)), up) - found.distance;
+            assert!(below >= EDGE_DEPTH, "the edge lies {below} m below");
+        }
+    }
+}
+
 /// Counts, for every row of the ledge test, the variants of the high ledge beside a wall in which
 /// the character hangs or does not land, and what held it. Upright walls: faces from 0.40 to
 /// 0.43 m, presses into the wall of 0 to 1 m/s and three start offsets across the wall, on the
-/// plane and on the planet. Leaning walls: 0.5 to 9 degrees back (face looking up) or forward
-/// (overhang), face at 0.42 m, without and with a 0.5 m/s press, on the plane and on the planet.
+/// plane and on the planet. Walls leaning back (face looking up) by 0.1 to 9 degrees, per lean:
+/// faces 0.415, 0.42 and 0.43 m, without and with a 0.5 m/s press, on the plane and the planet.
+/// Overhangs of 0.5 to 9 degrees: face 0.42 m. Jumps on the platform along a wall at 0.42 m,
+/// upright or leaning back by 0.1 to 2 degrees, per lean, without and with a 0.5 m/s press.
 #[test]
 #[ignore = "a survey; run it on purpose"]
 fn high_ledge_beside_wall_survey() {
@@ -192,20 +240,68 @@ fn high_ledge_beside_wall_survey() {
                 }
             }
         }
-        let (mut back, mut forward) = (Tally::default(), Tally::default());
-        for lean in [5, 20, 50, 90] {
-            for (tally, lean) in [(&mut back, lean), (&mut forward, -lean)] {
-                for key in scenes(420, lean) {
+        let mut overhang = Tally::default();
+        for lean in [50, 200, 500, 900] {
+            for key in scenes(420, -lean) {
+                for press in [0.0, 0.5] {
+                    overhang.add(key, walk_off_the_ledge(key, &config, press, 0.0));
+                }
+            }
+        }
+        let mut back = PerLean::default();
+        for lean in [10, 15, 20, 25, 35, 40, 50, 200, 500, 900] {
+            for face_mm in [415, 420, 430] {
+                for key in scenes(face_mm, lean) {
                     for press in [0.0, 0.5] {
-                        tally.add(key, walk_off_the_ledge(key, &config, press, 0.0));
+                        back.add(lean, key, walk_off_the_ledge(key, &config, press, 0.0));
                     }
                 }
             }
         }
-        println!(
-            "{}: upright {upright}; leaning back {back}; overhang {forward}",
-            config.name
-        );
+        let mut jump = PerLean::default();
+        for lean in [0, 10, 15, 20, 25, 35, 50, 200] {
+            for key in scenes(420, lean) {
+                for press in [0.0, 0.5] {
+                    jump.add(lean, key, jump_beside_the_wall(key, &config, press));
+                }
+            }
+        }
+        println!("{}: upright {upright}; overhang {overhang}", config.name);
+        println!("    walking off, leaning back {back}");
+        println!("    jumping {jump}");
+    }
+}
+
+/// Tallies per lean of the wall, in hundredths of a degree, and over all leans.
+#[derive(Default)]
+struct PerLean {
+    leans: Vec<(i16, Tally)>,
+    all: Tally,
+}
+
+impl PerLean {
+    fn add(&mut self, lean_cdeg: i16, key: SceneKey, outcome: LedgeOutcome) {
+        if self.leans.last().is_none_or(|(lean, _)| *lean != lean_cdeg) {
+            self.leans.push((lean_cdeg, Tally::default()));
+        }
+        self.leans.last_mut().unwrap().1.add(key, outcome);
+        self.all.add(key, outcome);
+    }
+}
+
+impl std::fmt::Display for PerLean {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (lean, tally) in &self.leans {
+            write!(
+                f,
+                "{} deg: {}+{}/{}, ",
+                f64::from(*lean) / 100.0,
+                tally.plane,
+                tally.planet,
+                tally.played
+            )?;
+        }
+        write!(f, "routes {:?}", self.all.by_route)
     }
 }
 
@@ -250,18 +346,12 @@ impl std::fmt::Display for Tally {
 /// The wall face of the pinned ledge test: 5 mm inside the padded capsule's reach at z = 0.
 const WALL_FACE_MM: u16 = 415;
 
-fn planar_ledge(face_mm: u16, lean_decideg: i16) -> SceneKey {
-    SceneKey::HighLedgeBesideWall {
-        face_mm,
-        lean_decideg,
-    }
+fn planar_ledge(face_mm: u16, lean_cdeg: i16) -> SceneKey {
+    SceneKey::HighLedgeBesideWall { face_mm, lean_cdeg }
 }
 
-fn radial_ledge(face_mm: u16, lean_decideg: i16) -> SceneKey {
-    SceneKey::RadialHighLedgeBesideWall {
-        face_mm,
-        lean_decideg,
-    }
+fn radial_ledge(face_mm: u16, lean_cdeg: i16) -> SceneKey {
+    SceneKey::RadialHighLedgeBesideWall { face_mm, lean_cdeg }
 }
 
 /// Every pinned row and the survey rows with the Q5 snap changes.
@@ -276,19 +366,20 @@ fn ledge_rows() -> Vec<Config> {
         .collect()
 }
 
-/// How a walk off the high ledge ended.
+/// How a walk off the high ledge, or a jump beside its wall, ended.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum LedgeOutcome {
-    /// Never grounded in the air past the edge, and landed on the terrain.
+    /// Never grounded in the air, and landed: on the terrain past the edge, on the platform
+    /// after a jump.
     Falls,
-    /// Grounded in the air past the edge at `tick`, `height` metres above the terrain.
+    /// Grounded in the air at `tick`, `height` metres above the ground it would land on.
     Hangs {
         tick: usize,
         height: f64,
         snapped: bool,
         ground: GroundState,
     },
-    /// Not grounded on the terrain after 120 ticks.
+    /// Not grounded on the ground it would land on at the end of the run.
     NoLanding { height: f64 },
 }
 
@@ -337,6 +428,51 @@ fn walk_off_the_ledge(key: SceneKey, config: &Config, press: f64, z0: f64) -> Le
     }
     let height = height_above_terrain(key, at);
     if grounded && (height - f64::from(REST_HEIGHT)).abs() < 0.05 {
+        LedgeOutcome::Falls
+    } else {
+        LedgeOutcome::NoLanding { height }
+    }
+}
+
+/// Plays 80 ticks of `config` jumping at 4 m/s from rest at x = -3.5 on the platform of `key`,
+/// walking +x at 2 m/s and pressing into the wall at `press` m/s; it lands on the platform. A
+/// tick grounded more than 0.05 m above the rest height over the platform's top is a hang.
+fn jump_beside_the_wall(key: SceneKey, config: &Config, press: f64) -> LedgeOutcome {
+    let mut scene = Scene::build(key);
+    let rest = HIGH_LEDGE_DROP + f64::from(REST_HEIGHT);
+    let start = [-3.5, rest, 0.0];
+    let walker = config.create_character(&mut scene, start);
+    let mut carry = Carry {
+        vel_up: 4.0,
+        grounded: false,
+    };
+    let mut at = start;
+    let mut grounded = false;
+    for t in 0..80 {
+        let up = scene.up.up_at(at);
+        let flat = |d: V3| normalize(sub(d, scale(up, dot(d, up))));
+        let velocity = add(
+            scale(flat([1.0, 0.0, 0.0]), 2.0),
+            scale(flat([0.0, 0.0, 1.0]), press),
+        );
+        let desired = scale(velocity, f64::from(DT));
+        let report = tick(&mut scene, &walker, config, &mut carry, desired, None);
+        scene.place_actor(report.end, from_y_to(report.up));
+        at = report.end;
+        grounded = report.grounded;
+        // The platform's top is the world plane y = HIGH_LEDGE_DROP on the plane and the planet.
+        let height = at[1] - HIGH_LEDGE_DROP;
+        if grounded && height > f64::from(REST_HEIGHT) + 0.05 {
+            return LedgeOutcome::Hangs {
+                tick: t,
+                height,
+                snapped: report.snapped,
+                ground: report.ground,
+            };
+        }
+    }
+    let height = at[1] - HIGH_LEDGE_DROP;
+    if grounded && (at[1] - rest).abs() < 0.05 {
         LedgeOutcome::Falls
     } else {
         LedgeOutcome::NoLanding { height }
