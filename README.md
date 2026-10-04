@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/oxijolt-logo-dark.png">
+    <img alt="oxijolt" src="docs/assets/oxijolt-logo-light.png" width="420">
+  </picture>
+</p>
+
 # joltphysics
 [![CI](https://github.com/pockerhead/jolt-rust-voidrun/actions/workflows/ci.yml/badge.svg)](https://github.com/pockerhead/jolt-rust-voidrun/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
