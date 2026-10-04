@@ -91,6 +91,33 @@
 //! - `debug-renderer`: collider wireframes as line data, see above.
 //! - `asserts`: Jolt's debug assertions, reported as above.
 //! - `bindgen`: generates the raw bindings with libclang at build time.
+//! - `glam`: `From` conversions both ways between [`Vec3`], [`Quat`], [`RVec3`] and glam's
+//!   `Vec3`, `Quat` and vector of [`Real`] (`DVec3` in double precision), for glam 0.32.
+//! - `mint`: `From` conversions both ways between [`Vec3`], [`Quat`], [`RVec3`] and mint's
+//!   `Vector3<f32>`, `Quaternion<f32>` and `Vector3<Real>`.
+//!
+//! The conversions copy the fields: a value converted there and back has the same bits, and
+//! nothing is normalized or checked until a call takes the value.
+//!
+//! ```
+//! # #[cfg(feature = "glam")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use oxijolt::{BodySettings, PhysicsWorld, Shape, WorldSettings};
+//!
+//! let mut world = PhysicsWorld::new(WorldSettings::default())?;
+//! let ball = world.create_body(
+//!     &Shape::new_sphere(0.5)?,
+//!     &BodySettings::new_dynamic()
+//!         .rotation(glam::Quat::from_rotation_y(1.0).into())
+//!         .linear_velocity(glam::Vec3::new(1.0, 0.0, 0.0).into()),
+//! )?;
+//! let velocity: glam::Vec3 = world.body(ball)?.linear_velocity().into();
+//! assert_eq!(velocity, glam::Vec3::X);
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "glam"))]
+//! # fn main() {}
+//! ```
 //!
 //! [guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/guide.md
 //! [constraints guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/constraints.md
@@ -117,6 +144,8 @@ mod constraint;
 mod debug;
 mod error;
 mod filter;
+#[cfg(feature = "glam")]
+mod glam_interop;
 mod job_system;
 mod jolt_assert;
 mod layers;
@@ -124,6 +153,8 @@ pub mod limits;
 mod listener;
 mod material;
 mod math;
+#[cfg(feature = "mint")]
+mod mint_interop;
 mod owned;
 mod query;
 mod ragdoll;
