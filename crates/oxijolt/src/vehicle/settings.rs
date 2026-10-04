@@ -272,9 +272,8 @@ impl VehicleSettings {
                     dt_s_r_div_iw,
                     dt_s_r_div_iw * largest_clutch_to_wheel_ratio,
                 ]) {
-                    return invalid(
-                        "clutch strength, gear and differential ratios and wheel inertia give a non-finite step coefficient",
-                    );
+                    // From clutch strength, gear and differential ratios and wheel inertia.
+                    return invalid("drivetrain ratios and wheel inertia give a non-finite step");
                 }
             }
         }

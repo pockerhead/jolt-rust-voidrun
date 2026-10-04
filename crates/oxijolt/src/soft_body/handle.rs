@@ -366,8 +366,7 @@ impl SoftBodyMut<'_> {
         .ok_or(BodyError::NotFound(self.id))?;
         require_body(
             written,
-            "the force added this step would exceed the soft body force bound of limits with \
-             this inverse mass; step or reset forces first",
+            "force added this step exceeds the soft body force bound; step or reset forces first",
         )?;
         self.activate();
         Ok(())

@@ -313,7 +313,7 @@ impl WheelSettings {
             && self.suspension_max_length >= self.suspension_min_length)
         {
             return invalid(
-                "suspension max length must be at least the min length and at most limits::MAX_SHAPE_EXTENT",
+                "suspension max length must be within min length..=limits::MAX_SHAPE_EXTENT",
             );
         }
         if !is_local_distance(self.suspension_preload_length) {

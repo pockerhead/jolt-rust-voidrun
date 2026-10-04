@@ -111,10 +111,11 @@ pub(super) fn soft_body_force(state: &SoftLoadState, force: Vec3) -> Result<Vec3
     // accumulated force to the vertex velocities, which are stored in that frame.
     let local = jolt_rotate(state.rotation.conjugated(), force);
     let new_force = sum(state.force, local, [0.0; 3]);
+    // At most `MAX_ACCELERATION` for a vertex of this soft body, and at most
+    // `MAX_ACCELERATION * MAX_MASS` in all.
     require(
         is_soft_body_force(new_force, state.largest_inverse_mass, state.vertex_count),
-        "accumulated force would exceed limits::MAX_ACCELERATION for a vertex of this soft \
-         body, or limits::MAX_ACCELERATION * limits::MAX_MASS",
+        "accumulated soft body force would exceed the limits acceleration bounds",
     )?;
     Ok(local)
 }

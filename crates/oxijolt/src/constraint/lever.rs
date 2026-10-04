@@ -156,7 +156,7 @@ impl LeverMotion {
 /// damping derived from the bodies' effective mass are at most
 /// [`limits::MAX_SPRING_COEFFICIENT`].
 const SPRING_BOUND_RULE: &str =
-    "spring stiffness and damping must be at most limits::MAX_SPRING_COEFFICIENT";
+    "derived spring stiffness or damping exceeds limits::MAX_SPRING_COEFFICIENT";
 
 impl PhysicsWorld {
     /// `Err(InvalidValue)` unless every point where `anchors` hold the dynamic ones of
