@@ -29,17 +29,16 @@ use crate::WorldError;
 /// when the pool runs a job late or never; a job the stepping thread already ran does nothing
 /// when the pool runs it.
 ///
-/// Jolt does not let a job start inside another job on the same thread: some jobs release the
-/// jobs that depend on them while they still hold their body access rights, which Jolt's
-/// assertions track per thread (`BodyAccess::Grant`). A job that is run or dropped while
-/// [`queue_job`](Self::queue_job) is on the same thread's stack is therefore not started there;
-/// it is left to the stepping thread, and the step hands it back to Jolt after the update.
+/// A job that is run or dropped while [`queue_job`](Self::queue_job) is on the same thread's
+/// stack is not started there, because Jolt does not let a job start inside another job on one
+/// thread; it is left to the stepping thread, and the step hands it back to Jolt after the
+/// update.
 ///
 /// Jolt documents its simulation as deterministic for the same binary, the same initial state
 /// and the same calls in the same order (Jolt docs, "Deterministic Simulation"); which threads
-/// ran the jobs is not part of that state. This crate's determinism gates compare a Rayon pool
-/// and a job system that calls [`Job::run`] inside `queue_job` with Jolt's thread pool. Side
-/// effects of the caller's own code in `queue_job` are not covered.
+/// ran the jobs is not part of that state. Side effects of the caller's own code in `queue_job`
+/// are the caller's to keep deterministic ([docs/guide.md#determinism] says what the tests
+/// compare).
 ///
 /// Several worlds may share one job system and step on different threads at the same time.
 ///
@@ -87,6 +86,8 @@ use crate::WorldError;
 /// The spawned closure only calls [`Job::run`], which does not panic, so Rayon's default of
 /// aborting the process when a spawned task panics does not come into play; an adapter that
 /// does more in the spawned closure owns that risk.
+///
+/// [docs/guide.md#determinism]: https://github.com/pockerhead/oxijolt/blob/main/docs/guide.md#determinism
 pub trait JobSystem: Send + Sync + 'static {
     /// The most jobs that may run at the same time, counting the thread that calls
     /// [`PhysicsWorld::step`](crate::PhysicsWorld::step).

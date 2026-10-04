@@ -89,6 +89,13 @@ calls that drive the world, and sort `collide_shape` hits before acting on them.
 across platforms and compilers need the `cross-platform-deterministic` feature; the README's
 Determinism section has the details.
 
+The determinism tests compare a caller `JobSystem` with Jolt's own thread pool: a Rayon pool and
+a job system that calls `Job::run` inside `queue_job` give the same results. The tests do not
+cover side effects of the caller's own code in `queue_job`. Jolt does not let a job start inside
+another job on one thread (some jobs release their dependents while they still hold body access
+rights, which Jolt's assertions track per thread in `BodyAccess::Grant`), so such a job is left
+to the stepping thread.
+
 ## Debug lines
 
 With the `debug-renderer` feature, `PhysicsWorld::debug_lines` fills a `DebugLines` buffer with the
