@@ -466,7 +466,8 @@ fn check_ext_header(prebuilt: &Path) -> anyhow::Result<()> {
         |path: &Path| fs::read(path).with_context(|| format!("cannot read {}", path.display()));
     if targets::normalize_crlf(&read(prebuilt)?) != targets::normalize_crlf(&read(&ours)?) {
         bail!(
-            "{} differs from {}: the prebuilt prefix is from another revision of the joltc              additions. Rebuild it or unset JOLTC_LIB_DIR.",
+            "{} differs from {}: the prebuilt prefix is from another revision of the joltc \
+             additions. Rebuild it or unset JOLTC_LIB_DIR.",
             prebuilt.display(),
             ours.display()
         );
