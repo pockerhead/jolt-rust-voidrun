@@ -86,10 +86,7 @@ fn bindings(args: &[String]) -> anyhow::Result<()> {
 
 /// Bindgen reads these from the environment and would change the output.
 fn refuse_ambient_clang_args() -> anyhow::Result<()> {
-    let ambient: Vec<String> = env::vars_os()
-        .filter_map(|(key, _)| key.into_string().ok())
-        .filter(|key| key == "TARGET" || key.starts_with("BINDGEN_EXTRA_CLANG_ARGS"))
-        .collect();
+    let ambient = ambient_clang_vars();
     if !ambient.is_empty() {
         bail!("unset {} first: bindgen reads them", ambient.join(", "));
     }
@@ -98,6 +95,37 @@ fn refuse_ambient_clang_args() -> anyhow::Result<()> {
     }
     println!("libclang {}", bindgen::clang_version().full);
     Ok(())
+}
+
+/// Bindgen reads `TARGET`, `BINDGEN_EXTRA_CLANG_ARGS` and, with `TARGET` set,
+/// `BINDGEN_EXTRA_CLANG_ARGS_<target>`. Windows looks environment names up regardless of case,
+/// so there `target` is `TARGET`.
+const CASE_INSENSITIVE_ENV: bool = cfg!(windows);
+
+/// Whether bindgen may read the variable `name`.
+fn is_bindgen_var(name: &str, case_insensitive: bool) -> bool {
+    let name = if case_insensitive {
+        name.to_ascii_uppercase()
+    } else {
+        name.to_owned()
+    };
+    name == "TARGET" || name.starts_with("BINDGEN_EXTRA_CLANG_ARGS")
+}
+
+/// The variables bindgen would read, spelled as the environment has them.
+fn ambient_clang_vars() -> Vec<String> {
+    let mut found: Vec<String> = env::vars_os()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .filter(|name| is_bindgen_var(name, CASE_INSENSITIVE_ENV))
+        .collect();
+    // Bindgen's own lookups decide; they also match spellings an ASCII case fold misses.
+    for name in ["TARGET", "BINDGEN_EXTRA_CLANG_ARGS"] {
+        let listed = found.iter().any(|f| f.eq_ignore_ascii_case(name));
+        if env::var_os(name).is_some() && !listed {
+            found.push(name.to_owned());
+        }
+    }
+    found
 }
 
 /// The eight bindings files and the fingerprint record, generated in memory.
@@ -239,7 +267,32 @@ fn write(root: &Path, output: &Output) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::is_bindgen_var;
     use super::targets::*;
+
+    #[test]
+    fn bindgen_vars_are_matched_without_case_where_the_os_does() {
+        for name in [
+            "TARGET",
+            "target",
+            "Target",
+            "BINDGEN_EXTRA_CLANG_ARGS",
+            "bindgen_extra_clang_args",
+            "Bindgen_Extra_Clang_Args_x86_64-pc-windows-msvc",
+            "bindgen_extra_clang_args_x86_64_unknown_linux_gnu",
+        ] {
+            assert!(is_bindgen_var(name, true), "{name}");
+        }
+        assert!(is_bindgen_var(
+            "BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_msvc",
+            false
+        ));
+        assert!(!is_bindgen_var("target", false));
+        assert!(!is_bindgen_var("bindgen_extra_clang_args", false));
+        for name in ["TARGET_DIR", "CARGO_TARGET_DIR", "BINDGEN", "LIBCLANG_PATH"] {
+            assert!(!is_bindgen_var(name, true), "{name}");
+        }
+    }
 
     #[test]
     fn every_registered_target_is_accepted() {
@@ -322,5 +375,20 @@ mod tests {
         paths.sort();
         paths.dedup();
         assert_eq!(paths.len(), 8);
+    }
+
+    #[test]
+    fn every_selectable_bindings_file_is_committed() {
+        let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("crates")
+            .join("joltphysics-sys");
+        for family in FAMILIES {
+            for (dp, dr) in [(false, false), (false, true), (true, false), (true, true)] {
+                let path = crate_dir.join(bindings_file(family.name, dp, dr));
+                assert!(path.is_file(), "{} is missing", path.display());
+            }
+        }
+        assert!(crate_dir.join(INPUTS_FILE).is_file());
     }
 }
