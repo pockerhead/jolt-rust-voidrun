@@ -1,5 +1,5 @@
-//! `cargo xtask bindings` refuses to run while bindgen would read clang arguments or a target
-//! from the environment, before it loads libclang.
+//! `cargo xtask bindings` refuses to run while bindgen or libclang would read clang arguments,
+//! a target or include paths from the environment, before it loads libclang.
 
 use std::process::Command;
 
@@ -45,6 +45,20 @@ fn target_and_clang_args_are_refused() {
     );
 }
 
+#[test]
+fn clang_include_paths_are_refused() {
+    let dir = std::env::temp_dir().to_string_lossy().into_owned();
+    for name in [
+        "CPATH",
+        "C_INCLUDE_PATH",
+        "CPLUS_INCLUDE_PATH",
+        "OBJC_INCLUDE_PATH",
+        "OBJCPLUS_INCLUDE_PATH",
+    ] {
+        assert_refused(name, &dir);
+    }
+}
+
 /// Windows resolves environment names regardless of case, and so does bindgen's lookup there.
 #[cfg(windows)]
 #[test]
@@ -61,4 +75,6 @@ fn other_spellings_are_refused_on_windows() {
         "Bindgen_Extra_Clang_Args_X86_64_Pc_Windows_Msvc",
         "-DJPH_DOUBLE_PRECISION",
     );
+    assert_refused("cpath", "include");
+    assert_refused("Cplus_Include_Path", "include");
 }

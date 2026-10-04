@@ -84,7 +84,7 @@ fn bindings(args: &[String]) -> anyhow::Result<()> {
     )
 }
 
-/// Bindgen reads these from the environment and would change the output.
+/// Bindgen and libclang read these from the environment and would change the output.
 fn refuse_ambient_clang_args() -> anyhow::Result<()> {
     let ambient = ambient_clang_vars();
     if !ambient.is_empty() {
@@ -98,18 +98,31 @@ fn refuse_ambient_clang_args() -> anyhow::Result<()> {
 }
 
 /// Bindgen reads `TARGET`, `BINDGEN_EXTRA_CLANG_ARGS` and, with `TARGET` set,
-/// `BINDGEN_EXTRA_CLANG_ARGS_<target>`. Windows looks environment names up regardless of case,
+/// `BINDGEN_EXTRA_CLANG_ARGS_<target>`; libclang adds the include directories in
+/// [`CLANG_INCLUDE_VARS`]. Windows looks environment names up regardless of case,
 /// so there `target` is `TARGET`.
 const CASE_INSENSITIVE_ENV: bool = cfg!(windows);
 
-/// Whether bindgen may read the variable `name`.
+/// Include path variables libclang honours (clang's "Environment" documentation). A header found
+/// through them can redefine the configuration macros.
+const CLANG_INCLUDE_VARS: [&str; 5] = [
+    "CPATH",
+    "C_INCLUDE_PATH",
+    "CPLUS_INCLUDE_PATH",
+    "OBJC_INCLUDE_PATH",
+    "OBJCPLUS_INCLUDE_PATH",
+];
+
+/// Whether bindgen or libclang may read the variable `name`.
 fn is_bindgen_var(name: &str, case_insensitive: bool) -> bool {
     let name = if case_insensitive {
         name.to_ascii_uppercase()
     } else {
         name.to_owned()
     };
-    name == "TARGET" || name.starts_with("BINDGEN_EXTRA_CLANG_ARGS")
+    name == "TARGET"
+        || name.starts_with("BINDGEN_EXTRA_CLANG_ARGS")
+        || CLANG_INCLUDE_VARS.contains(&name.as_str())
 }
 
 /// The variables bindgen would read, spelled as the environment has them.
@@ -118,8 +131,11 @@ fn ambient_clang_vars() -> Vec<String> {
         .map(|(name, _)| name.to_string_lossy().into_owned())
         .filter(|name| is_bindgen_var(name, CASE_INSENSITIVE_ENV))
         .collect();
-    // Bindgen's own lookups decide; they also match spellings an ASCII case fold misses.
-    for name in ["TARGET", "BINDGEN_EXTRA_CLANG_ARGS"] {
+    // The readers' own lookups decide; they also match spellings an ASCII case fold misses.
+    for name in ["TARGET", "BINDGEN_EXTRA_CLANG_ARGS"]
+        .into_iter()
+        .chain(CLANG_INCLUDE_VARS)
+    {
         let listed = found.iter().any(|f| f.eq_ignore_ascii_case(name));
         if env::var_os(name).is_some() && !listed {
             found.push(name.to_owned());
@@ -280,6 +296,12 @@ mod tests {
             "bindgen_extra_clang_args",
             "Bindgen_Extra_Clang_Args_x86_64-pc-windows-msvc",
             "bindgen_extra_clang_args_x86_64_unknown_linux_gnu",
+            "CPATH",
+            "cpath",
+            "C_INCLUDE_PATH",
+            "cplus_include_path",
+            "OBJC_INCLUDE_PATH",
+            "ObjCPlus_Include_Path",
         ] {
             assert!(is_bindgen_var(name, true), "{name}");
         }
@@ -289,7 +311,15 @@ mod tests {
         ));
         assert!(!is_bindgen_var("target", false));
         assert!(!is_bindgen_var("bindgen_extra_clang_args", false));
-        for name in ["TARGET_DIR", "CARGO_TARGET_DIR", "BINDGEN", "LIBCLANG_PATH"] {
+        assert!(!is_bindgen_var("cpath", false));
+        for name in [
+            "TARGET_DIR",
+            "CARGO_TARGET_DIR",
+            "BINDGEN",
+            "LIBCLANG_PATH",
+            "INCLUDE",
+            "CPATH_X",
+        ] {
             assert!(!is_bindgen_var(name, true), "{name}");
         }
     }
