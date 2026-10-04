@@ -42,7 +42,7 @@ jobs:
           version=${version%%+*}
           safe=$(jq -r --arg sys "$name" '[.packages[] | select(any(.dependencies[]; .name == $sys and .kind == null))]
             | if length == 1 then .[0].name else error("expected one package depending on \($sys)") end' "$RUNNER_TEMP/metadata.json")
-          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
             echo "tag $GITHUB_REF_NAME does not match the crate version $version"
             exit 1
           fi
