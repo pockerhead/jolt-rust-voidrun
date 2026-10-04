@@ -114,13 +114,10 @@ impl Shape {
         let settings = unsafe {
             ShapeSettings::from_raw(JPH_BoxShapeSettings_Create(&half_extent, convex_radius).cast())
         }?;
-        // SAFETY: the settings are live, owned by the guard and were created as box settings,
-        // which derive from convex settings. The returned box holds one reference, which `Self`
-        // takes over.
-        unsafe {
-            Self::attach_material(&settings, material);
-            Self::from_created(JPH_BoxShapeSettings_CreateShape(settings.as_ptr()).cast())
-        }
+        // SAFETY: the settings are live, owned by the guard, have not created a shape yet and
+        // were created as box settings, which derive from convex settings.
+        unsafe { Self::attach_material(&settings, material) };
+        settings.create()
     }
 
     /// [`new_sphere`](Self::new_sphere) made of `material`; the same rules apply.
@@ -134,13 +131,10 @@ impl Shape {
         // takes over.
         let settings =
             unsafe { ShapeSettings::from_raw(JPH_SphereShapeSettings_Create(radius).cast()) }?;
-        // SAFETY: the settings are live, owned by the guard and were created as sphere
-        // settings, which derive from convex settings. The returned sphere holds one reference,
-        // which `Self` takes over.
-        unsafe {
-            Self::attach_material(&settings, material);
-            Self::from_created(JPH_SphereShapeSettings_CreateShape(settings.as_ptr()).cast())
-        }
+        // SAFETY: the settings are live, owned by the guard, have not created a shape yet and
+        // were created as sphere settings, which derive from convex settings.
+        unsafe { Self::attach_material(&settings, material) };
+        settings.create()
     }
 
     /// [`new_capsule`](Self::new_capsule) made of `material`; the same rules apply.
@@ -158,13 +152,10 @@ impl Shape {
                 JPH_CapsuleShapeSettings_Create(half_height_of_cylinder, radius).cast(),
             )
         }?;
-        // SAFETY: the settings are live, owned by the guard and were created as capsule
-        // settings, which derive from convex settings. The returned capsule holds one reference,
-        // which `Self` takes over.
-        unsafe {
-            Self::attach_material(&settings, material);
-            Self::from_created(JPH_CapsuleShapeSettings_CreateShape(settings.as_ptr()).cast())
-        }
+        // SAFETY: the settings are live, owned by the guard, have not created a shape yet and
+        // were created as capsule settings, which derive from convex settings.
+        unsafe { Self::attach_material(&settings, material) };
+        settings.create()
     }
 
     /// [`new_cylinder_with_convex_radius`](Self::new_cylinder_with_convex_radius) made of
@@ -184,13 +175,10 @@ impl Shape {
                 JPH_CylinderShapeSettings_Create(half_height, radius, convex_radius).cast(),
             )
         }?;
-        // SAFETY: the settings are live, owned by the guard and were created as cylinder
-        // settings, which derive from convex settings. The returned cylinder holds one reference,
-        // which `Self` takes over.
-        unsafe {
-            Self::attach_material(&settings, material);
-            Self::from_created(JPH_CylinderShapeSettings_CreateShape(settings.as_ptr()).cast())
-        }
+        // SAFETY: the settings are live, owned by the guard, have not created a shape yet and
+        // were created as cylinder settings, which derive from convex settings.
+        unsafe { Self::attach_material(&settings, material) };
+        settings.create()
     }
 
     /// [`new_height_field`](Self::new_height_field) with a material per cell.
@@ -249,7 +237,7 @@ impl Shape {
     /// # Safety
     /// `settings` are live convex shape settings (single inheritance from
     /// `ConvexShapeSettings`) that have not created a shape yet.
-    unsafe fn attach_material(settings: &ShapeSettings, material: &PhysicsMaterial) {
+    pub(crate) unsafe fn attach_material(settings: &ShapeSettings, material: &PhysicsMaterial) {
         // SAFETY: the settings are live and convex (contract); the material is live.
         unsafe { JPH_ConvexShapeSettings_SetMaterial(settings.as_ptr(), material.as_ptr()) };
     }

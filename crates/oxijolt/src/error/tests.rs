@@ -3,7 +3,7 @@ use std::error::Error as _;
 use super::*;
 
 const WORLD: WorldError = WorldError::InitFailed;
-const SHAPE: ShapeError = ShapeError::Rejected;
+const SHAPE: ShapeError = ShapeError::ConvexHull(HullError::Coplanar);
 const BODY: BodyError = BodyError::TooManyBodies;
 const STEP: StepError = StepError::InvalidDeltaTime;
 const QUERY: QueryError = QueryError::InvalidValue("ray direction");
@@ -86,4 +86,65 @@ fn error_is_send_sync_static_and_copy() {
     assert_bounds::<Error>();
     let boxed = Box::<dyn std::error::Error + Send + Sync>::from(Error::from(STEP));
     assert_eq!(boxed.to_string(), STEP.to_string());
+}
+
+#[test]
+fn errors_stay_small() {
+    // clippy's `result_large_err` fires at 128 bytes; the margin keeps `Result<_, Error>` cheap.
+    assert!(size_of::<ShapeError>() <= 88, "{}", size_of::<ShapeError>());
+    assert!(size_of::<Error>() <= 96, "{}", size_of::<Error>());
+}
+
+#[test]
+fn shape_error_variants_display_their_payload() {
+    assert_eq!(
+        ShapeError::ConvexHull(HullError::TooFewPoints).to_string(),
+        "invalid convex hull: a convex hull needs at least 4 points"
+    );
+    assert_eq!(
+        ShapeError::ConvexHull(HullError::Degenerate).to_string(),
+        "invalid convex hull: the points do not span a triangle"
+    );
+    assert_eq!(
+        ShapeError::ConvexHull(HullError::Coplanar).to_string(),
+        "invalid convex hull: the points lie in one plane"
+    );
+    let message = JoltMessage::from_c_buffer(b"Too few points\0garbage");
+    assert_eq!(
+        ShapeError::Rejected(message).to_string(),
+        "Jolt rejected the shape settings: Too few points"
+    );
+    assert_eq!(format!("{message:?}"), "\"Too few points\"");
+}
+
+#[test]
+fn jolt_message_reads_up_to_the_nul() {
+    assert_eq!(JoltMessage::from_c_buffer(b"\0rest").as_str(), "");
+    assert_eq!(JoltMessage::from_c_buffer(b"").as_str(), "");
+    let exact = [b'a'; JoltMessage::CAPACITY];
+    let mut buffer = exact.to_vec();
+    buffer.push(0);
+    assert_eq!(
+        JoltMessage::from_c_buffer(&buffer).as_str().as_bytes(),
+        exact
+    );
+}
+
+#[test]
+fn jolt_message_without_nul_is_cut_to_capacity() {
+    let buffer = [b'b'; JoltMessage::CAPACITY + 1];
+    let message = JoltMessage::from_c_buffer(&buffer);
+    assert_eq!(message.as_str().len(), JoltMessage::CAPACITY);
+}
+
+#[test]
+fn jolt_message_drops_a_character_cut_at_the_end() {
+    // 78 ASCII bytes and a two-byte character: the cut at 79 bytes splits the character.
+    let mut buffer = vec![b'c'; JoltMessage::CAPACITY - 1];
+    buffer.extend_from_slice("\u{e9}".as_bytes());
+    buffer.push(0);
+    let message = JoltMessage::from_c_buffer(&buffer);
+    assert_eq!(message.as_str(), "c".repeat(JoltMessage::CAPACITY - 1));
+    // An invalid byte inside the text keeps the valid part before it.
+    assert_eq!(JoltMessage::from_c_buffer(b"ok\xffno\0").as_str(), "ok");
 }

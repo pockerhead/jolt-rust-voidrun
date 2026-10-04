@@ -9,6 +9,9 @@ use crate::limits;
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
+
+mod create;
+mod hull;
 use crate::{Quat, ShapeError, Vec3};
 
 /// A collision shape that bodies are created from.
@@ -536,11 +539,7 @@ impl Shape {
                 JPH_CylinderShapeSettings_Create(half_height, radius, convex_radius).cast(),
             )
         }?;
-        // SAFETY: the settings are live, owned by the guard and were created as cylinder
-        // settings. The returned shape holds one reference, which `Self` takes over.
-        unsafe {
-            Self::from_created(JPH_CylinderShapeSettings_CreateShape(settings.as_ptr()).cast())
-        }
+        settings.create()
     }
 
     /// A capsule along the local Y axis, centred on the origin: a cylinder
@@ -628,14 +627,7 @@ impl Shape {
         // guarantees the material contract.
         let jolt_settings =
             unsafe { height_field_settings(sample_count, samples, settings, materials) }?;
-        // SAFETY: the settings are live, owned by the guard and were created as heightfield
-        // settings. The returned shape holds one reference, which `Self` takes over.
-        unsafe {
-            Self::from_created(
-                JPH_HeightFieldShapeSettings_CreateShape(jolt_settings.as_ptr()).cast(),
-            )
-        }?
-        .within_extent_bounds()
+        jolt_settings.create()?.within_extent_bounds()
     }
 
     /// The stored surface point of heightfield sample `(x, y)` in shape-local space, after
@@ -724,18 +716,8 @@ impl Shape {
                 );
             }
         }
-        // SAFETY: the settings are live, owned by the guard and of the type each call expects.
-        // Both calls run Jolt's `Create` and return a shape holding one reference, which `Self`
-        // takes over; null means Jolt refused the settings (for example a hierarchy that needs
-        // more than 32 sub-shape id bits).
-        unsafe {
-            Self::from_created(if single {
-                JPH_MutableCompoundShape_Create(settings.as_ptr()).cast()
-            } else {
-                JPH_StaticCompoundShape_Create(settings.as_ptr()).cast()
-            })
-        }?
-        .within_extent_bounds()
+        // Jolt refuses, for example, a hierarchy that needs more than 32 sub-shape id bits.
+        settings.create()?.within_extent_bounds()
     }
 
     /// `shape` with its centre of mass moved by `offset` (shape space, metres, each component at
@@ -806,18 +788,6 @@ impl Shape {
         unsafe { Owned::from_raw(ptr) }
             .map(Self)
             .ok_or(ShapeError::AllocationFailed)
-    }
-
-    /// Takes over a shape returned by a settings `Create` call, where null means Jolt refused
-    /// the settings.
-    ///
-    /// # Safety
-    /// `ptr` is null or a live shape holding one reference that the caller hands over.
-    pub(crate) unsafe fn from_created(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
-        // SAFETY: the caller hands over one reference to a live shape, or null.
-        unsafe { Owned::from_raw(ptr) }
-            .map(Self)
-            .ok_or(ShapeError::Rejected)
     }
 
     pub(crate) fn as_ptr(&self) -> *const JPH_Shape {

@@ -48,8 +48,10 @@ pub enum ShapeError {
     InvalidDimensions(&'static str),
     /// A setting other than a dimension is out of range; the payload names it.
     InvalidSettings(&'static str),
-    /// Jolt refused the shape settings (joltc does not pass on Jolt's message).
-    Rejected,
+    /// The points of a convex hull do not span a volume.
+    ConvexHull(HullError),
+    /// Jolt refused the shape settings; the payload is Jolt's message.
+    Rejected(JoltMessage),
     /// joltc returned null.
     AllocationFailed,
 }
@@ -60,13 +62,93 @@ impl fmt::Display for ShapeError {
             Self::InitFailed => f.write_str("Jolt initialisation failed"),
             Self::InvalidDimensions(what) => write!(f, "invalid shape dimensions: {what}"),
             Self::InvalidSettings(what) => write!(f, "invalid shape setting: {what}"),
-            Self::Rejected => f.write_str("Jolt rejected the shape settings"),
+            Self::ConvexHull(error) => write!(f, "invalid convex hull: {error}"),
+            Self::Rejected(message) => write!(f, "Jolt rejected the shape settings: {message}"),
             Self::AllocationFailed => f.write_str("could not create the shape"),
         }
     }
 }
 
 impl std::error::Error for ShapeError {}
+
+/// Why [`Shape::new_convex_hull`](crate::Shape::new_convex_hull) refused its points.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HullError {
+    /// Fewer than 4 points.
+    TooFewPoints,
+    /// The points lie on a line or in a single point: no triangle of them is larger than Jolt's
+    /// minimum initial triangle.
+    Degenerate,
+    /// The points lie in one plane, so the hull has no volume.
+    Coplanar,
+}
+
+impl fmt::Display for HullError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::TooFewPoints => "a convex hull needs at least 4 points",
+            Self::Degenerate => "the points do not span a triangle",
+            Self::Coplanar => "the points lie in one plane",
+        })
+    }
+}
+
+impl std::error::Error for HullError {}
+
+/// Jolt's diagnostic text for a refused shape, truncated to [`JoltMessage::CAPACITY`] bytes.
+///
+/// The wording is Jolt's and not a stable format: match on the typed [`ShapeError`] variants
+/// instead of parsing it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct JoltMessage {
+    len: u8,
+    bytes: [u8; JoltMessage::CAPACITY],
+}
+
+impl JoltMessage {
+    /// Most bytes a message keeps.
+    pub const CAPACITY: usize = 79;
+
+    /// The message read from a C buffer: the bytes up to the first NUL (all of them when there
+    /// is none), cut to [`CAPACITY`](Self::CAPACITY) bytes and then to the longest valid UTF-8
+    /// prefix.
+    pub(crate) fn from_c_buffer(buffer: &[u8]) -> Self {
+        let end = buffer
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(buffer.len());
+        let text = &buffer[..end.min(Self::CAPACITY)];
+        let valid = match std::str::from_utf8(text) {
+            Ok(_) => text.len(),
+            Err(error) => error.valid_up_to(),
+        };
+        let mut bytes = [0; Self::CAPACITY];
+        bytes[..valid].copy_from_slice(&text[..valid]);
+        Self {
+            len: valid as u8,
+            bytes,
+        }
+    }
+
+    /// The message text.
+    pub fn as_str(&self) -> &str {
+        // `from_c_buffer`, the only constructor, keeps a valid UTF-8 prefix.
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or_default()
+    }
+}
+
+impl fmt::Display for JoltMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl fmt::Debug for JoltMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_str(), f)
+    }
+}
 
 /// Why a [`ContactSettings`](crate::ContactSettings) or
 /// [`SoftBodyContactSettings`](crate::SoftBodyContactSettings) setter refused a value, or why

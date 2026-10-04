@@ -189,8 +189,8 @@ pub use constraint::{
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, ConstraintError, ContactSettingsError, QueryError, RagdollError,
-    ShapeError, SoftBodyError, StateError, StepError, VehicleError, WorldError,
+    BodyError, CharacterError, ConstraintError, ContactSettingsError, HullError, QueryError,
+    RagdollError, ShapeError, SoftBodyError, StateError, StepError, VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
