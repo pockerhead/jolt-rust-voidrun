@@ -1,12 +1,15 @@
 name: Release
 
 # Prebuilt native libraries for JOLTC_LIB_DIR: one archive per target and feature subset.
-# A manual run builds and checks the archives as workflow artifacts; pushing a `v<version>` tag
-# also attaches them to the GitHub release of that tag.
+# A manual run, or a branch push that changes this file, builds and checks the archives as
+# workflow artifacts; pushing a `v<version>` tag also attaches them to the GitHub release of
+# that tag. Path filters do not apply to tag pushes.
 
 on:
   push:
     tags: ['v*']
+    branches: ['**']
+    paths: ['.github/workflows/release.yml']
   workflow_dispatch:
 
 permissions:
