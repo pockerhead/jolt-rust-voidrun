@@ -6,6 +6,11 @@ floating origin, then a character walking on a small planet, then a car on terra
 in a second world. Everything runs headless; nothing is drawn. The three complete programs run as
 tests (`cargo test -p oxijolt --doc`).
 
+Other topics have guides of their own: [constraints](constraints.md), [soft bodies](soft-bodies.md),
+[events and contact listeners](events.md), [saving and restoring a world](state.md),
+[running jobs on your own thread pool](job-system.md), [determinism](determinism.md) and
+[building](building.md).
+
 Units are metres, seconds, kilograms and radians. Jolt is right-handed with Y up.
 
 ## Layers and groups
@@ -37,6 +42,11 @@ actor's own). An unset part accepts everything.
   Heightfields are for static bodies only.
 - `Shape::new_compound` places children with their own pose and user data. Child order is part of
   the shape.
+- A dynamic or kinematic body needs an inertia tensor Jolt can decompose. When the tensor is not
+  exactly diagonal (a rotated compound child, an offset centre of mass), a slender part is refused
+  past about 54 times longer than wide for a square box and about 47 times longer than its
+  diameter for a capsule or cylinder ([limits.md](limits.md#rigid-body-inertia)). A shape with an
+  exactly diagonal tensor, such as an unrotated primitive, is not affected.
 
 A `Shape` holds one Jolt reference and every body holds its own, so a shape can be dropped after
 creating bodies and shared between bodies and worlds.
@@ -69,32 +79,44 @@ outward surface normal of the obstacle: a floor below gives a normal pointing up
 
 `PhysicsWorld::rebase(bodies, rotation, translation)` moves the whole world into a new frame with
 one rigid change of coordinates: positions, rotations, velocities and gravity. No body wakes up or
-falls asleep, and resting bodies keep their contacts. The list must name every body of the world
-once, in a stable order of the caller's choice. Rebase between steps, before adding the tick's
-forces.
+falls asleep, and resting bodies keep their contacts, because Jolt caches contacts relative to the
+bodies. The list must name every body of the world once, in a stable order of the caller's choice.
+Rebase between steps, before adding the tick's forces: forces added since the last step are not
+rotated. Queries see the new poses at once; `optimize_broad_phase` afterwards is optional and only
+makes queries faster until the next step.
 
-A pulley's fixed points are world points, so a rebase recreates the pulley in the new frame. A
-taut rope's length then rounds differently in `f32`; a step in which it comes out just under the
-maximum length leaves the rope slack, and a hanging pair drifts by a few millimetres from where it
-would be without the rebase before the drift decays; 0.0023 m was measured after a turn of
-0.4 rad. In double precision the slack step can come later than the first step after the
-rebase.
+Awake bodies restart Jolt's sleep timer, as for every pose change, so they may fall asleep later
+than without the rebase. New positions are only checked to be finite, not to lie within
+`limits::MAX_POSITION`: a body the simulation carried out of the frame does not block a rebase.
+
+The rest of the world moves along:
+- **Characters** move in id order after the bodies: position and rotation as for bodies, up and
+  velocity as vectors. Their cached contacts and ground stay in the old frame; after a rotating
+  rebase call `refresh_character_contacts` for every character before its next update.
+- **Vehicles** move with their chassis. A rotation also rotates each vehicle's gravity override and
+  the up of a ray or sphere tester. The wheel contacts stay in the old frame until the next step.
+- **Ragdolls, soft bodies and constraints** are stored relative to their bodies and need no change.
+  A soft body's vertices turn with it, which leaves its body rotation non-identity.
+- **Pulleys** are the exception: their fixed points are world points, so a rebase recreates each
+  pulley in the new frame, in id order after the vehicles. It keeps its id, enabled state, ratio
+  and lengths, and drops its warm start; the new pulley goes to the end of Jolt's constraint order.
+  A taut rope's length then rounds differently in `f32`; a step in which it comes out just under
+  the maximum length leaves the rope slack, and a hanging pair drifts by a few millimetres from
+  where it would be without the rebase before the drift decays; 0.0023 m was measured after a turn
+  of 0.4 rad. In double precision the slack step can come later than the first step after the
+  rebase.
+
+A rebase that moves anything makes earlier `WorldState`s unrestorable ([state.md](state.md)).
 
 ## Determinism
 
-On one machine the same calls in the same order give bit-identical results for any
-`WorldSettings::worker_threads`. The order in which bodies are created and removed is part of the
-state: it decides the `BodyId`s. Keep hash-map iteration order, time and thread identity out of the
-calls that drive the world, and sort `collide_shape` hits before acting on them. Equal results
-across platforms and compilers need the `cross-platform-deterministic` feature; the README's
-Determinism section has the details.
-
-The determinism tests compare a caller `JobSystem` with Jolt's own thread pool: a Rayon pool and
-a job system that calls `Job::run` inside `queue_job` give the same results. The tests do not
-cover side effects of the caller's own code in `queue_job`. Jolt does not let a job start inside
-another job on one thread (some jobs release their dependents while they still hold body access
-rights, which Jolt's assertions track per thread in `BodyAccess::Grant`), so such a job is left
-to the stepping thread.
+The requirement is that on one machine the same calls in the same order give bit-identical
+results whatever the job system. The tests check it with 1 and 4 worker threads and with caller
+job systems, on the scenes [determinism.md](determinism.md) lists. The order in which bodies are
+created and removed is part of the state: it decides the `BodyId`s. Keep hash-map iteration order,
+time and thread identity out of the calls that drive the world, and sort `collide_shape` hits
+before acting on them. Equal results across platforms and compilers need the
+`cross-platform-deterministic` feature.
 
 ## Debug lines
 
@@ -560,6 +582,15 @@ gravity is applied, then engine, brakes and tire friction act through the constr
 - **Rebase.** `PhysicsWorld::rebase` moves the chassis like any body and rotates each vehicle's
   gravity override and the up of a ray or sphere tester; the reported contacts stay in the old
   frame until the next step.
+- **Tester accuracy.** `wheel_contacts_match_the_ground_geometry` checks every tester on flat
+  ground within 1e-3 m. A one-off measurement on a chassis rolled 6° or pitched -4° over box and
+  heightfield ground and a 6° slope found the ray and sphere testers' suspension length within
+  1.1e-7 m of the analytic value and their contact point within 2.5e-6 m. The cylinder tester's
+  suspension length was within 5.6e-5 m, but its contact point slid up to 1.7 mm along the rim
+  (Jolt resolves it with GJK/EPA, which converges in height, not along the rim). Judge cylinder
+  contacts by suspension length, normal and distance to the ground.
+- **Soft bodies.** Wheels look through soft bodies and report only the rigid ground below them:
+  Jolt's vehicle constraint solves the body under a wheel as a rigid body.
 
 ## Ragdolls
 
@@ -593,13 +624,16 @@ factor, initial velocity) at the part's bind pose in world space, and the joint 
   dozen ticks before the constraints pull them mostly back. These are measurements, not bounds:
   in the repository's drop test (a 12-part humanoid dropped with its pelvis 1.5 m above the
   terrain) the worst overshoot is 0.29 rad and 0.0037 rad remain at rest; the test's bounds,
-  0.40 rad during the fall and 0.01 rad at rest, hold for that drop only. Over a sweep of 126
-  drops of that humanoid (from 1 to 2.5 m, with raw and stabilized masses) the overshoot reached
-  0.48 rad, the joints were up to 0.15 rad outside their limits when the ragdoll came to rest,
-  and hinges bent about their fixed axes by up to 0.57 rad on impact. Check joint limits at rest,
-  with a tolerance, not on every tick. In that sweep the centre of a thin limb dropped from 2.5 m
-  ended up to 0.15 m below the terrain surface with the default `MotionQuality::Discrete`;
-  `MotionQuality::LinearCast` on the limbs is the setting to try for high falls.
+  0.40 rad during the fall and 0.01 rad at rest, hold for that drop only. A sweep of 126 drops
+  of that humanoid, run once outside the test suite and not kept in the repository (7 sideways
+  and 3 forward offsets, drops of 1.0, 1.5 and 2.5 m with different yaw, raw and stabilized
+  masses, caller-applied gravity), found an overshoot above 0.40 rad in 4 drops (up to 0.48 rad),
+  joints more than 0.01 rad outside their limits at rest in 40 (up to 0.15 rad), 3 drops that
+  needed more than 600 ticks to settle, and hinges bent about their fixed axes by up to 0.57 rad
+  on impact. Check joint limits at rest, with a tolerance, not on every tick. In that sweep the
+  centre of a thin limb dropped from 2.5 m ended up to 0.15 m below the terrain surface with the
+  default `MotionQuality::Discrete`; `MotionQuality::LinearCast` on the limbs is the setting to
+  try for high falls.
 - **Lifecycle.** `remove_ragdoll` removes the parts and wakes what rested on them; `remove_body`
   refuses a part.
 

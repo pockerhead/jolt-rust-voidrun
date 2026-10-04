@@ -16,9 +16,9 @@ below). The first run builds Jolt and joltc in Release under `target/release` un
 `cargo bench` passes (for example under `cargo test --benches`) the binary returns at once. Words
 after `--` run only the cases whose names contain one of them, for example
 `cargo bench -p oxijolt --bench budgets -- tick`. The names are `update_character`, `near step`,
-`landing`, `steady step`, `ray` and `tick`, and a word matches any part of a name: `-- step` runs
-both the near step and the steady step. A word that matches no case prints an empty table, without
-a warning.
+`landing`, `steady step`, `ray`, `tick` and `events`, and a word matches any part of a name:
+`-- step` runs both the near step and the steady step. A word that matches no case prints an empty
+table, without a warning.
 
 ## Machine
 
@@ -69,6 +69,9 @@ Other programs were not closed for the run, so single samples (the max column) c
   from the anchor at 2 m/s, mostly over open ground (few rays hit), and with every actor on a
   structure top, on another one every tick (every ray hits). The two rows bound the hit mix. The
   world has 4 worker threads, but the near steps and the rays run on the calling thread.
+- **Events**: an awake pile of 64 cubes on a floor, 4 worker threads, stepped once recording no
+  events and once recording every event and taking them after each step. It shows what recording
+  events costs; the results below predate this case and have no rows for it.
 
 ## Samples
 
@@ -79,6 +82,7 @@ Other programs were not closed for the run, so single samples (the max column) c
 | steady step | 300 ticks | 5,000 steps |
 | rays | 1,000 rays | 10,000 rays (5,000 of each kind) |
 | tick (each of the two variants) | 300 ticks | 5,000 ticks |
+| events (each of the two variants) | 300 steps | 5,000 steps |
 
 The first call after a scene is built is shown on its own "cold first call" row and is not among
 the samples. The landing has this row for the insertion only, and the rays for the first ray, a
