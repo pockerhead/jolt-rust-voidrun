@@ -216,3 +216,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - Documentation: the README is a front page; the per-feature test table moved to
   `docs/coverage.md`; new guides for constraints, soft bodies, events, state save and restore,
   caller job systems, determinism and building (`docs/`), whose examples run as doctests.
+- `CharacterRef::penetration_recovery_speed` and `CharacterMut::set_penetration_recovery_speed`
+  read and set a character's penetration recovery speed while it runs (finite, `0..=1`).
+- A study of which character laws CharacterVirtual's built-in mechanisms carry
+  ([docs/character-study.md](docs/character-study.md)): law scenarios and pinned results in
+  `tests/character_study.rs`, and a bench of every configuration's cost per move
+  (`cargo bench -p oxijolt --bench character_study`).

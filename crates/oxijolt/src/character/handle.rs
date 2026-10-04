@@ -5,7 +5,7 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
-use super::settings::{is_unit, UP_RULE};
+use super::settings::{is_recovery_speed, is_unit, RECOVERY_SPEED_RULE, UP_RULE};
 use super::{CharacterContact, CharacterId, CharacterState, GroundState, INVALID_ID};
 use crate::limits::{self, LINEAR_VELOCITY_RULE, POSITION_RULE};
 use crate::math::ROTATION_RULE;
@@ -176,6 +176,16 @@ impl CharacterRef<'_> {
         unsafe { JPH_CharacterVirtual_GetMaxHitsExceeded(self.ptr()) }
     }
 
+    /// Fraction in `[0, 1]` of a penetration the next update resolves: the creation setting
+    /// ([`CharacterSettings::penetration_recovery_speed`]) or the last
+    /// [`CharacterMut::set_penetration_recovery_speed`].
+    ///
+    /// [`CharacterSettings::penetration_recovery_speed`]: crate::CharacterSettings::penetration_recovery_speed
+    pub fn penetration_recovery_speed(&self) -> f32 {
+        // SAFETY: as in `position`.
+        unsafe { JPH_CharacterVirtual_GetPenetrationRecoverySpeed(self.ptr()) }
+    }
+
     /// The character's persistent state, to restore later with
     /// [`CharacterMut::restore_state`].
     pub fn save_state(&self) -> CharacterState {
@@ -264,6 +274,22 @@ impl CharacterMut<'_> {
             return Err(CharacterError::InvalidValue(LINEAR_VELOCITY_RULE));
         }
         self.write_linear_velocity(velocity);
+        Ok(())
+    }
+
+    /// Sets the fraction of a penetration that each update resolves, from the next update on:
+    /// 0 resolves nothing, 1 all of it at once. Must be finite and in `[0, 1]`; otherwise
+    /// returns [`CharacterError::InvalidValue`] and changes nothing.
+    ///
+    /// The value is not part of [`CharacterState`] (Jolt's `CharacterVirtual::SaveState` does not
+    /// write it), so [`restore_state`](Self::restore_state) keeps the current value; a replay
+    /// sets it again.
+    pub fn set_penetration_recovery_speed(&mut self, value: f32) -> Result<(), CharacterError> {
+        if !is_recovery_speed(value) {
+            return Err(CharacterError::InvalidValue(RECOVERY_SPEED_RULE));
+        }
+        // SAFETY: as in `set_up`; the setter writes a member.
+        unsafe { JPH_CharacterVirtual_SetPenetrationRecoverySpeed(self.ptr(), value) };
         Ok(())
     }
 

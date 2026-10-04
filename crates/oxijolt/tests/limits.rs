@@ -482,7 +482,22 @@ fn character_settings_and_setters_are_bounded() {
     for v in on_axes(limits::MAX_LINEAR_VELOCITY.next_up()) {
         assert!(character_invalid(character.set_linear_velocity(v)));
     }
+    for speed in [0.0, 1.0] {
+        character.set_penetration_recovery_speed(speed).unwrap();
+    }
+    for speed in [
+        -f32::MIN_POSITIVE,
+        1.0 + f32::EPSILON,
+        f32::NAN,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+    ] {
+        assert!(character_invalid(
+            character.set_penetration_recovery_speed(speed)
+        ));
+    }
     let reached = world.character(id).unwrap();
+    assert_eq!(reached.penetration_recovery_speed(), 1.0);
     assert_eq!(
         real_bits(reached.position()),
         real_bits(RVec3::new(0.0, 0.0, -limits::MAX_POSITION))

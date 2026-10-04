@@ -28,3 +28,8 @@ rayon = "1.11"
 name = "budgets"
 harness = false
 test = false
+
+[[bench]]
+name = "character_study"
+harness = false
+test = false

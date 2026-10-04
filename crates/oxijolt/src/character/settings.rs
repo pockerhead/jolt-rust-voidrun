@@ -317,10 +317,8 @@ impl<'a> CharacterSettings<'a> {
         if !self.hit_reduction_cos_max_angle.is_finite() {
             return invalid("hit reduction cos max angle must be finite");
         }
-        if !(is_finite_non_negative(self.penetration_recovery_speed)
-            && self.penetration_recovery_speed <= 1.0)
-        {
-            return invalid("penetration recovery speed must be between 0 and 1");
+        if !is_recovery_speed(self.penetration_recovery_speed) {
+            return invalid(RECOVERY_SPEED_RULE);
         }
         // SAFETY: the shape is live for the call; the getter only reads it.
         if unsafe { JPH_Shape_GetType(self.shape.as_ptr()) } != JPH_ShapeType_Convex {
@@ -382,6 +380,14 @@ impl<'a> CharacterSettings<'a> {
 /// What a character's up must satisfy ([`is_unit`]).
 pub(super) const UP_RULE: &str = "up must be a finite unit vector";
 
+/// What a penetration recovery speed must satisfy ([`is_recovery_speed`]).
+pub(super) const RECOVERY_SPEED_RULE: &str = "penetration recovery speed must be between 0 and 1";
+
+/// Whether `value` is a penetration recovery speed: finite and in `[0, 1]`.
+pub(super) fn is_recovery_speed(value: f32) -> bool {
+    is_finite_non_negative(value) && value <= 1.0
+}
+
 /// Whether `v` is finite and of unit length within Jolt's `Vec3::IsNormalized` tolerance
 /// (`|length² − 1| <= 1e-5`).
 pub(super) fn is_unit(v: Vec3) -> bool {
@@ -424,6 +430,11 @@ impl ExtendedUpdateSettings {
     /// How far down the character looks for floor to stick to when it was supported before the
     /// update and is not after it, without moving up. Every component at most
     /// [`limits::MAX_SHAPE_EXTENT`] in absolute value. Default `(0, -0.5, 0)`.
+    ///
+    /// The [character study] measures where this holds a character on the floor, and where it
+    /// does not (over crests, after a contact refresh).
+    ///
+    /// [character study]: https://github.com/pockerhead/oxijolt/blob/main/docs/character-study.md
     #[must_use]
     pub fn stick_to_floor_step_down(mut self, value: Vec3) -> Self {
         self.stick_to_floor_step_down = value;
@@ -438,7 +449,10 @@ impl ExtendedUpdateSettings {
     /// too, so measure it. Jolt judges a step by the surface normal at the contact; on a box with
     /// sharp edges (convex radius 0) the contact sits on the top edge, where float rounding
     /// decides between the top face's normal and the side's, so walk stairs climbs such a step
-    /// unreliably.
+    /// unreliably. The [character study] measured step-up + 0.137 m for a capsule of radius 0.4
+    /// with padding 0.02 on rounded steps.
+    ///
+    /// [character study]: https://github.com/pockerhead/oxijolt/blob/main/docs/character-study.md
     #[must_use]
     pub fn walk_stairs_step_up(mut self, value: Vec3) -> Self {
         self.walk_stairs_step_up = value;

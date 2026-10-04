@@ -1,0 +1,253 @@
+//! The study's measured results: one cell per pinned row and law column, as the survey found
+//! them. The law tests replay the rows and check these cells; `docs/character-study.md` carries
+//! the same table.
+
+/// A row's verdict on one law column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cell {
+    /// Every case passes.
+    Held,
+    /// The named case fails, under every start perturbation.
+    Broken(&'static str),
+    /// Some case passes or fails depending on a 1 mm start perturbation or the build.
+    Variable,
+}
+
+use Cell::{Broken, Held};
+
+/// The pinned cells, columns `1, 2, 3s, 3r, 4, 5v, 5r, 6, radial`.
+pub const PINNED: &[(&str, [Cell; 9])] = &[
+    (
+        "bare",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/boxramp40/descent/v1.6"),
+            Broken("3s/h0.4/heading0/v1.6/z0.37/d1"),
+            Broken("3r/h0.4/heading0/v1.6/z0.37/d1"),
+            Broken("4/boxramp40/diagonal/v1.6"),
+            Broken("5v/plane30-0.1/contour"),
+            Broken("5r/burial1/still"),
+            Broken("6/descent44.5/across/v3.5"),
+            Broken("radial/1/spiral45.5/x2/still"),
+        ],
+    ),
+    (
+        "jolt-defaults",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ramp40/crest-descent/v3.5"),
+            Broken("3s/h0.5/heading0/v1.6/z0.37/d1"),
+            Broken("3r/h0.5/heading0/v1.6/z0.37/d1"),
+            Held,
+            Broken("5v/plane30-0.1/contour"),
+            Broken("5r/burial1/still"),
+            Broken("6/descent44.5/along/v7"),
+            Broken("radial/2+4/crest44.5/descent/v3.5"),
+        ],
+    ),
+    (
+        "spec-d1",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ramp40/crest-descent/v3.5"),
+            Broken("3s/h0.5/heading0/v1.6/z0.37/d1"),
+            Broken("3r/h0.5/heading0/v1.6/z0.37/d1"),
+            Held,
+            Broken("5v/plane30-0.1/contour"),
+            Broken("5r/burial1/still"),
+            Broken("6/flat/across/v3.5"),
+            Broken("radial/1/spiral45.5/x2/still"),
+        ],
+    ),
+    (
+        "spec-d1+refresh",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ledge0.15-rounded/v1.6"),
+            Broken("3s/h0.5/heading0/v1.6/z0.37/d1"),
+            Broken("3r/h0.5/heading0/v1.6/z0.37/d1"),
+            Held,
+            Broken("5v/plane30-0.1/contour"),
+            Broken("5r/burial1/still"),
+            Broken("6/flat/across/v3.5"),
+            Broken("radial/1/spiral45.5/x2/still"),
+        ],
+    ),
+    (
+        "walker",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ramp40/crest-descent/v3.5"),
+            Held,
+            Held,
+            Held,
+            Broken("5v/plane30-0.1/contour"),
+            Held,
+            Broken("6/flat/across/v3.5"),
+            Broken("radial/1/spiral45.5/x2/still"),
+        ],
+    ),
+    (
+        "spec-d2",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ledge0.15-rounded/v1.6"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("6/descent44.5/diagonal/v3.5"),
+            Broken("radial/2+4/crest44.5/descent/v7"),
+        ],
+    ),
+    (
+        "d2-stick",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ledge0.15-rounded/v1.6"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("6/flat/across/v3.5"),
+            Broken("radial/2+4/crest44.5/descent/v1.6"),
+        ],
+    ),
+    (
+        "d2-stick-norefresh",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ramp40/crest-descent/v3.5"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("6/flat/across/v3.5"),
+            Broken("radial/2+4/crest44.5/descent/v7"),
+        ],
+    ),
+    (
+        "d2-noq4",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ledge0.15-rounded/v1.6"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("6/descent44.5/diagonal/v3.5"),
+            Broken("radial/1/spiral45.5/x2/still"),
+        ],
+    ),
+    (
+        "d2-still",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ledge0.15-rounded/v1.6"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("6/descent44.5/diagonal/v3.5"),
+            Broken("radial/2+4/crest44.5/descent/v7"),
+        ],
+    ),
+    (
+        "d2-inmove",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ledge0.15-rounded/v1.6"),
+            Held,
+            Held,
+            Held,
+            Broken("5v/plane30-0.1/contour"),
+            Held,
+            Broken("6/descent44.5/diagonal/v3.5"),
+            Broken("radial/2+4/crest44.5/descent/v7"),
+        ],
+    ),
+    (
+        "d2-stairs",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ledge0.15-rounded/v1.6"),
+            Broken("3s/h0.5/heading0/v1.6/z0.37/d1"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("6/descent44.5/diagonal/v3.5"),
+            Broken("radial/2+4/crest44.5/descent/v7"),
+        ],
+    ),
+    (
+        "d2-noground",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ledge0.15-rounded/v1.6"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("5r/burial1/still"),
+            Broken("6/descent44.5/diagonal/v3.5"),
+            Broken("radial/2+4/crest44.5/descent/v7"),
+        ],
+    ),
+    (
+        "d2-noq4-floor",
+        [
+            Broken("1/ridge50/apex/still"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("6/descent44.5/diagonal/v3.5"),
+            Broken("radial/1/spiral45.5/x2/still"),
+        ],
+    ),
+    (
+        "max-slope-50",
+        [
+            Broken("1/plane45.5/x-4z0.37/still"),
+            Broken("2/ramp40/crest-descent/v3.5"),
+            Broken("3s/h0.5/heading0/v1.6/z0.37/d1"),
+            Broken("3r/h0.5/heading0/v1.6/z0.37/d1"),
+            Held,
+            Broken("5v/plane30-0.1/contour"),
+            Broken("5r/burial1/still"),
+            Broken("6/flat/across/v3.5"),
+            Broken("radial/1/spiral45.5/x2/still"),
+        ],
+    ),
+    (
+        "recommended",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ramp40/crest-descent/v3.5"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("6/flat/across/v3.5"),
+            Broken("radial/2+4/crest44.5/descent/v7"),
+        ],
+    ),
+];
+
+/// The pinned cells of row `name`.
+pub fn pinned(name: &str) -> [Cell; 9] {
+    PINNED
+        .iter()
+        .find(|(row, _)| *row == name)
+        .map(|(_, cells)| *cells)
+        .unwrap_or_else(|| panic!("row {name} is not pinned"))
+}

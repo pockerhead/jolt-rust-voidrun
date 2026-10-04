@@ -33,23 +33,26 @@
 
 #[path = "../tests/common/mod.rs"]
 mod common;
+#[path = "budgets/planet.rs"]
+mod planet;
 #[path = "budgets/report.rs"]
 mod report;
 
 use std::error::Error;
 use std::time::Instant;
 
-use common::math::{add, normalize, rvec3, scale, v3, vec3};
+use common::math::{add, rvec3, scale, v3, vec3};
 use common::walker::{
-    add_terrain, add_walker, fixture_world, flat_terrain, from_y_to, near_tick, tangent, up_at,
-    Carry, Layers as PlanetLayers, Walker, CENTRE, R, REST_HEIGHT,
+    flat_terrain, from_y_to, near_tick, tangent, up_at, Carry, Layers as PlanetLayers,
 };
 use common::{is_calm, Groups};
 use oxijolt::*;
+use planet::{
+    chunk_body, chunk_parts, ground_at, planet_chunk_compound, planet_chunk_pose, planet_scene,
+    planet_walkers, wanted, CHARACTERS, CHUNK_SIDE,
+};
 use report::{micros, print_machine, print_table, Limit, Row};
 
-const CHUNK_SIDE: f32 = 32.0;
-const CHARACTERS: usize = 30;
 const DT: f32 = 1.0 / 60.0;
 const GRAVITY: Vec3 = Vec3::new(0.0, -9.8, 0.0);
 
@@ -264,115 +267,6 @@ fn run(with_terrain: bool) -> Result<[Row; 2], Box<dyn Error>> {
 #[allow(clippy::unnecessary_cast)]
 fn horizontal(p: RVec3) -> (f32, f32) {
     (p.x as f32, p.z as f32)
-}
-
-/// Pose of the planet chunk `(i, k)` of the grid around the anchor: its centre on the planet's
-/// surface, its local Y along the radial up there.
-fn planet_chunk_pose(i: i32, k: i32) -> (RVec3, Quat) {
-    let spacing = 2.0 * (f64::from(CHUNK_SIDE) / 2.0 / R).asin();
-    let up = normalize([
-        (f64::from(i) * spacing).tan(),
-        1.0,
-        (f64::from(k) * spacing).tan(),
-    ]);
-    (rvec3(add(CENTRE, scale(up, R))), from_y_to(up))
-}
-
-/// The compound of planet chunk `(i, k)`: 20 sharp boxes (structures) and cylinders (features)
-/// standing on its ground, placed from a seed of `(i, k)`.
-fn planet_chunk_compound(
-    i: i32,
-    k: i32,
-    block: &Shape,
-    pillar: &Shape,
-) -> Result<Shape, ShapeError> {
-    let mut state = (((i + 1) * 3 + k + 1) as u32).wrapping_mul(2_654_435_761);
-    let mut next = move || {
-        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        f64::from(state >> 8) / f64::from(1 << 24) - 0.5
-    };
-    let children: Vec<CompoundChild<'_>> = (0..20)
-        .map(|n| {
-            let (x, z) = (next() * 28.0, next() * 28.0);
-            let ground = (R * R - x * x - z * z).sqrt() - R;
-            let (shape, half, group) = if n % 2 == 0 {
-                (block, 1.0, Groups::STRUCTURE)
-            } else {
-                (pillar, 1.5, Groups::FEATURE)
-            };
-            CompoundChild {
-                shape,
-                position: vec3([x, ground + half, z]),
-                rotation: Quat::IDENTITY,
-                user_data: group,
-            }
-        })
-        .collect();
-    Shape::new_compound(&children)
-}
-
-/// The shapes every planet chunk compound is made of: a structure block and a feature pillar.
-fn chunk_parts() -> Result<(Shape, Shape), ShapeError> {
-    Ok((
-        Shape::new_box_with_convex_radius(Vec3::new(0.8, 1.0, 0.6), 0.0)?,
-        Shape::new_cylinder(1.5, 0.4)?,
-    ))
-}
-
-/// Static body settings of a planet chunk part at `pose` in `layer`.
-fn chunk_body(pose: (RVec3, Quat), layer: ObjectLayer) -> BodySettings {
-    BodySettings::new_static()
-        .position(pose.0)
-        .rotation(pose.1)
-        .object_layer(layer)
-}
-
-/// The 3 x 3 planet chunks around the anchor, each a flat terrain heightfield and a compound,
-/// with an optimised broad phase.
-fn planet_scene(worker_threads: u32) -> Result<(PhysicsWorld, PlanetLayers), Box<dyn Error>> {
-    let (mut world, layers) = fixture_world(worker_threads);
-    let (block, pillar) = chunk_parts()?;
-    for i in -1..=1 {
-        for k in -1..=1 {
-            let pose = planet_chunk_pose(i, k);
-            add_terrain(&mut world, &layers, &flat_terrain(), pose);
-            world.create_body(
-                &planet_chunk_compound(i, k, &block, &pillar)?,
-                &chunk_body(pose, layers.chunk),
-            )?;
-        }
-    }
-    world.optimize_broad_phase();
-    Ok((world, layers))
-}
-
-/// The point of the planet's surface over chart position `(x, z)` near the anchor.
-fn ground_at(x: f64, z: f64) -> [f64; 3] {
-    [x, (R * R - x * x - z * z).sqrt() - R, z]
-}
-
-/// 30 walkers resting on rings around the anchor.
-fn planet_walkers(world: &mut PhysicsWorld, layers: &PlanetLayers) -> Vec<Walker> {
-    (0..CHARACTERS)
-        .map(|n| {
-            let angle = n as f64 / CHARACTERS as f64 * std::f64::consts::TAU;
-            let radius = 6.0 + (n % 5) as f64 * 7.0;
-            let ground = ground_at(radius * angle.cos(), radius * angle.sin());
-            let origin = add(ground, scale(up_at(ground), f64::from(REST_HEIGHT)));
-            add_walker(world, layers, origin)
-        })
-        .collect()
-}
-
-/// What walker `n` wants at `tick`: 2 m/s along a heading that turns slowly.
-fn wanted(world: &PhysicsWorld, walker: &Walker, n: usize, tick: usize) -> [f64; 3] {
-    let heading = n as f64 + tick as f64 * 0.01;
-    let direction = [heading.cos(), 0.0, heading.sin()];
-    tangent(
-        common::walker::origin(world, walker),
-        direction,
-        2.0 * f64::from(DT),
-    )
 }
 
 /// The near step of 30 walkers on the planet chunks, one sample per walker step.
