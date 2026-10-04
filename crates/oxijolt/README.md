@@ -4,7 +4,8 @@ The safe API of [oxijolt](https://github.com/pockerhead/oxijolt) over the raw bi
 headless.
 
 A `PhysicsWorld` holds:
-- rigid bodies of box, sphere, cylinder, capsule, heightfield and compound shapes;
+- rigid bodies of box, sphere, cylinder, capsule, tapered capsule and cylinder, convex hull,
+  triangle mesh, heightfield, compound and scaled shapes;
 - scene queries;
 - characters, wheeled vehicles and ragdolls;
 - twelve kinds of constraints;

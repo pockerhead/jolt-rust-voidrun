@@ -165,3 +165,28 @@ description), not what they time, and the table shows the labels and notes the b
 
   In this run the batch readout took about a quarter of the per-body time at the median and at p99.
 - Maximum values are single outliers (the machine's scheduler) and vary most between runs.
+
+## Shape creation
+
+Building a triangle mesh or a convex hull costs time and memory once, when the shape is created,
+not per step. Measured once on the machine above in a release build, each time the median of five
+creations; the meshes are height grids, the hulls random points in a unit cube. The memory is the
+growth of the process's private bytes while the shape is alive, which the allocator's reuse makes
+noisy for the smaller meshes.
+
+| triangles | `FavorRuntimePerformance` ms | `FavorBuildSpeed` ms | private bytes held | `Shape::scaled` by 2 ms |
+|---:|---:|---:|---:|---:|
+| 1 058 | 0.42 | 0.40 | about 20 kB | 0.16 |
+| 10 082 | 4.8 | 3.2 | up to 0.6 MB | 0.64 |
+| 100 352 | 48 | 32 | about 1.35 MB | 6.1 |
+| 1 002 528 | 641 | 457 | about 15.6 MB | 69 |
+
+| hull points | `Shape::new_convex_hull` ms |
+|---:|---:|
+| 100 | 0.08 |
+| 10 000 | 3.6 |
+| 100 000 | 34 |
+
+`Shape::scaled` reads every stored triangle of a mesh once to check that it stays collidable,
+which is the last column. A game that streams meshes builds them off the simulation thread, like
+the chunk shapes above.

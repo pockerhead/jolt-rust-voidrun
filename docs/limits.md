@@ -19,6 +19,114 @@ not a Jolt assertion threshold.
 objects of 0.1 to 2000 m; the bound applies on each side of the centre of mass. It bounds a shape's
 inertia to at most `6 · mass · MAX_SHAPE_EXTENT²`.
 
+## Convex hulls
+
+`Shape::new_convex_hull` replays the start of Jolt's hull builder (`ConvexHullBuilder::Initialize`,
+`Geometry/ConvexHullBuilder.cpp:300-470`) in `f64` before Jolt sees the points: the first point
+farthest from the origin, the first point farthest from it, the point that makes the largest
+triangle with both, and the point farthest from that triangle's plane. Write `L` for the distance
+of the first two points, `w` for the third point's distance from their line (no point lies farther
+from it), `t` for the farthest point's distance from the triangle's plane, `c` for Jolt's coplanar
+distance `3 · FLT_EPSILON · (max |x| + max |y| + max |z|)` (`DetermineCoplanarDistance`), and `T` for
+`max(1e-3 m, c)`, the tolerance the builder uses (`ConvexHullShapeSettings::mHullTolerance` is 1 mm).
+The constructor refuses:
+
+- fewer than 4 points: Jolt accepts 3, but a triangle has no volume;
+- `|(p1 - p) × (p2 - p)|² < 1e-12` for every third point `p`, Jolt's `cMinTriangleAreaSq`, as
+  `Degenerate`;
+- `w · T < 0.25 · L · c` as `Degenerate`: rounding a position by about `c` tilts a face built
+  across the width by `c / w` and moves it by `L · c / w` at the far end, which must stay well inside
+  the tolerance;
+- `t < 200 · c` as `Coplanar`. Jolt itself builds a flat hull of two faces up to `6 · c`
+  (`cCoplanarSlopFactor`), which gives a dynamic body zero mass, and asserts on slabs a little
+  thicker.
+
+The two last bounds are measured, not derived. In an asserts build, 37 440 near-line and
+near-plane clouds (lengths 0.1 to 1900 m, 5 to 200 points, up to 900 m from the origin) asserted
+396 times. The 395 needles among them asserted at `ConvexHullBuilder.cpp:641`
+(`edges.size() >= 3`), all with `w · T / (L · c)` at most 0.052, so the needle bound keeps a factor
+of about 5; the slab bound refuses the other one. Slabs asserted up to `t / c = 10.9`, and a
+seeded run found one cloud of 279 points on a sphere of radius 0.047 m about 1 km from the origin
+that asserted at `t / c = 60.3` (`ConvexHullBuilder.cpp:779`, `IsFacing`); the slab bound keeps a
+factor of about 3 over it. With both bounds in place, 40 000 random clouds of aspect ratios
+1e-7 to 1, sizes 1 mm to 1900 m and offsets up to 1 km, 30 000 compact clouds 5 to 5000 coplanar
+distances wide placed up to 1900 m from the origin, and four seeded stress runs of 6000 hull cases
+with dropped and queried bodies built and stepped without an assertion. Both bounds grow with the
+distance of the points from the shape origin: centre the points on the origin for the thinnest
+hulls. Near a bound Jolt's `f32` arithmetic can differ from the `f64` replay; Jolt then refuses
+with its own message.
+
+Jolt keeps at most 256 vertices of a hull (`cMaxPointsInHull`) and drops the points inside it. It
+reduces the convex radius until twice the radius fits the hull's thinnest direction and its
+sharpest edges (`ConvexHullShape.cpp:269-345`).
+
+## Triangle meshes
+
+`Shape::new_mesh` checks every vertex, referenced or not, against `MAX_SHAPE_EXTENT`, and every
+index against the vertex count, because Jolt's clean-up reads `vertices[index]` without a check
+(`MeshShapeSettings::Sanitize`, `Collision/Shape/MeshShape.cpp:94-111`). Vertex and triangle counts
+are at most `i32::MAX`, the index type of Jolt's clean-up and edge search. A mesh's local bounds
+are those of its referenced vertices, so the extent bound applies to the vertices themselves.
+
+Jolt stores the vertices quantized to 21 bits over the mesh's bounds
+(`TriangleCodecIndexed8BitPackSOA4Flags`) and, when it collides a triangle, transforms it into the
+other shape's space in `f32`. Its collision then asserts when the triangle's cross product
+`(v1 - v0) × (v2 - v0)` is shorter than 1e-6 (`IsNearZero` in
+`Geometry/EPAPenetrationDepth.h:113`; Jolt's comment there blames slivers). The constructor
+therefore drops, like Jolt's degenerate triangles, every triangle whose cross product is below
+`1e-5 + 8 · d · e`, where `e` is its longest edge and `d` the distance a vertex can move: one
+quantization step (the largest side of the bounds over `2^21 - 1`) plus `4 · FLT_EPSILON` times the
+largest coordinate. A right triangle with legs of 3.2 mm near the origin is kept and one with legs
+of 3.1 mm dropped; a sliver 10 m long near the origin must be about 0.08 mm wide. The seeded stress runs that found
+`EPAPenetrationDepth.h:113` with sliver soups (third vertices 1e-7 to 1e-3 of the mesh size from
+the first) dropped four probes on every fourth accepted mesh without an assertion afterwards,
+over four seeds of 1500 meshes each.
+
+Once these triangles are gone, Jolt's own clean-up can only drop duplicates. One clean-up pass
+alone is not enough without the margin: removing triangles shrinks the bounds and moves the
+quantization grid, so a sliver that survived the pass can collapse in the shape constructor, which
+then refuses the mesh (`MeshShape.cpp:133-143`).
+
+## Scaled shapes
+
+`Shape::scaled` adds no numeric bound of its own on the scale. Jolt checks the rest
+(`Shape::IsValidScale`, `ScaleHelpers.h`): every component at least `1e-6` in absolute value, uniform
+within a squared tolerance of `1e-8` for spheres, capsules and tapered capsules (an absolute
+tolerance, so very small scales count as uniform), uniform in X and Z for cylinders and tapered
+cylinders, and for a compound a scale each rotated child can take on its own axes. Jolt lets NaN and
+infinity through, so the constructor checks that the components are finite first.
+
+What the scale can break is checked on the result: the scaled bounds against `MAX_SHAPE_EXTENT`,
+the scaled centre of mass (bounds are relative to it, and a compound's centre of mass moves with the
+scale) against the same bound, and every stored triangle of a mesh or heightfield inside the shape
+against the triangle floor of [Triangle meshes](#triangle-meshes), with the rounding of the scaled
+coordinates. Mass and inertia scale with the shape and go through the mass range and the
+[rigid body inertia](#rigid-body-inertia) floor when a moving body is created; a static body
+computes no mass. A diagonal inertia must have positive moments: Jolt's `MassProperties::Scale`
+rebuilds the diagonal from differences that can round below zero for thin shapes.
+
+## Tapered shapes
+
+A tapered capsule is a sphere when Jolt's `TaperedCapsuleShapeSettings::IsSphere` holds,
+`max(t, b) >= 2h + min(t, b)` (`Collision/Shape/TaperedCapsuleShape.cpp:32-35`); the constructor
+evaluates it in `f32` exactly as Jolt does (`2h` is exact, so one rounding each side) and refuses
+it. Jolt then computes `sinα = d / ((h + d/2) - (-h + d/2))` with `d = b - t`
+(`TaperedCapsuleShape.cpp:117-124`) and asserts `|sinα| <= 1`. With `|d/2| <= h` the denominator is at
+least `2h (1 - 3u)` and the quotient grows by at most `(1 + u)`, `u = 2^-24`, so any
+`|d| <= 2h (1 - 4u)` keeps `|sinα| <= 1`; the constructor requires `|d| <= 2h (1 - 2^-21)`, which is
+`2h (1 - 8u)`.
+
+A tapered cylinder's centre of mass divides by `t² + t·b + b²` (`TaperedCylinderShape.cpp:108-123`).
+The constructor requires the larger radius to be at least `2^-63` m, about 1.08e-19 m, so that sum
+is at least `2^-126`, a normal `f32`. Equal radii make Jolt build a plain cylinder; the constructor
+refuses them and points to the cylinder constructor. One radius may be 0, a cone. The shape's
+bounds count from its centre of mass, a quarter of the height above a cone's base, so a cone may be
+half as tall as `2 · MAX_SHAPE_EXTENT`.
+
+Three seeded stress runs of 10 000 cases each around both boundaries (tapers within 1e-8 of the sphere
+case, radius ratios down to 1e-6, larger radii down to 1e-20 m) created, dropped and stepped them
+without an assertion.
+
 ## Accelerations
 
 `MAX_ACCELERATION` is `MAX_LINEAR_VELOCITY / PhysicsWorld::MIN_DELTA_TIME`, about 5e8 m/s². A larger
