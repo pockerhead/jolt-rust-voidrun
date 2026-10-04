@@ -1,5 +1,5 @@
 //! Body controls: locked axes (allowed degrees of freedom) and where they are refused, sensor
-//! bodies, user data and impulses.
+//! bodies, user data, impulses and kinematic moves.
 
 mod common;
 
@@ -1046,4 +1046,240 @@ fn impulses_ignore_static_and_kinematic_bodies_and_refuse_soft_bodies() {
         Err(BodyError::SoftBody(cloth))
     );
     step(&mut world, 5);
+}
+
+/// A kinematic body of `shape` at `position`, awake or asleep as `activation` says.
+fn add_kinematic(
+    world: &mut PhysicsWorld,
+    shape: &Shape,
+    position: RVec3,
+    activation: Activation,
+) -> BodyId {
+    world
+        .create_body(
+            shape,
+            &BodySettings::new_kinematic()
+                .position(position)
+                .activation(activation),
+        )
+        .unwrap()
+}
+
+/// The angle in radians between two rotations.
+fn angle_between(a: Quat, b: Quat) -> f32 {
+    let dot = (a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w)
+        .abs()
+        .min(1.0);
+    2.0 * dot.acos()
+}
+
+/// The distance between two points, in `f64`.
+fn distance(a: RVec3, b: RVec3) -> f64 {
+    let d = [a.x - b.x, a.y - b.y, a.z - b.z].map(f64::from);
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+}
+
+#[test]
+fn a_kinematic_platform_moves_toward_its_target() {
+    let mut world = world(GRAVITY, 1);
+    let block = Shape::new_box(Vec3::new(1.0, 0.2, 1.0)).unwrap();
+    let off_centre = Shape::new_offset_center_of_mass(&block, Vec3::new(0.3, 0.0, -0.2)).unwrap();
+    for (i, shape) in [&block, &off_centre].into_iter().enumerate() {
+        let start = RVec3::new(10.0 * i as Real, 0.0, 0.0);
+        let platform = add_kinematic(&mut world, shape, start, Activation::Activate);
+        let target = RVec3::new(start.x + 0.5, 0.2, -0.1);
+        let turn = quat_about(Vec3::new(0.0, 1.0, 0.0), 0.03);
+        world
+            .body_mut(platform)
+            .unwrap()
+            .move_kinematic(target, turn, DT)
+            .unwrap();
+        step(&mut world, 1);
+        let body = world.body(platform).unwrap();
+        assert!(distance(body.position(), target) < 1.0e-5, "{i}");
+        // Jolt's small-angle angular velocity turns by 2 sin(θ/2) instead of θ.
+        let error = angle_between(body.rotation(), turn);
+        assert!(error < 2.0e-6, "{i}: {error}");
+    }
+}
+
+#[test]
+fn a_kinematic_move_keeps_its_velocity_after_the_step() {
+    let mut world = world(Vec3::ZERO, 1);
+    let platform = add_kinematic(&mut world, &cube_shape(), RVec3::ZERO, Activation::Activate);
+    world
+        .body_mut(platform)
+        .unwrap()
+        .move_kinematic(RVec3::new(0.1, 0.0, 0.0), Quat::IDENTITY, DT)
+        .unwrap();
+    let velocity = world.body(platform).unwrap().linear_velocity();
+    step(&mut world, 2);
+    let body = world.body(platform).unwrap();
+    assert_eq!(body.linear_velocity(), velocity);
+    assert!(distance(body.position(), RVec3::new(0.2, 0.0, 0.0)) < 1.0e-5);
+}
+
+#[test]
+fn a_tiny_move_does_not_wake_a_sleeping_kinematic_body() {
+    let mut world = world(Vec3::ZERO, 1);
+    let platform = add_kinematic(
+        &mut world,
+        &cube_shape(),
+        RVec3::ZERO,
+        Activation::DontActivate,
+    );
+    let mut body = world.body_mut(platform).unwrap();
+    // 1e-9 m in 1/60 s: a squared speed of 3.6e-15 m²/s², below Jolt's 1e-12.
+    body.move_kinematic(RVec3::new(1.0e-9, 0.0, 0.0), Quat::IDENTITY, DT)
+        .unwrap();
+    assert!(body.is_sleeping());
+    step(&mut world, 1);
+    assert_eq!(world.body(platform).unwrap().position(), RVec3::ZERO);
+    let mut body = world.body_mut(platform).unwrap();
+    body.move_kinematic(RVec3::new(1.0e-3, 0.0, 0.0), Quat::IDENTITY, DT)
+        .unwrap();
+    assert!(body.is_active());
+}
+
+#[test]
+fn kinematic_moves_respect_locked_axes() {
+    let mut world = world(Vec3::ZERO, 1);
+    let rail = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_kinematic()
+                .allowed_dofs(AllowedDofs::TRANSLATION_X | AllowedDofs::ROTATION_Y),
+        )
+        .unwrap();
+    let turn = quat_about(Vec3::new(0.6, 0.8, 0.0), 0.2);
+    world
+        .body_mut(rail)
+        .unwrap()
+        .move_kinematic(RVec3::new(1.0, 2.0, 3.0), turn, DT)
+        .unwrap();
+    let body = world.body(rail).unwrap();
+    let (v, w) = (body.linear_velocity(), body.angular_velocity());
+    assert_eq!((v.y, v.z, w.x, w.z), (0.0, 0.0, 0.0, 0.0));
+    assert!(v.x > 59.0 && w.y > 0.0, "{v:?} {w:?}");
+    step(&mut world, 1);
+    let p = world.body(rail).unwrap().position();
+    assert_eq!((p.y, p.z), (0.0, 0.0));
+}
+
+#[test]
+fn a_kinematic_platform_carries_a_resting_cube() {
+    let mut world = world(GRAVITY, 1);
+    let deck = Shape::new_box(Vec3::new(2.0, 0.2, 2.0)).unwrap();
+    let platform = add_kinematic(&mut world, &deck, RVec3::ZERO, Activation::Activate);
+    let cube = add_cube(&mut world, RVec3::new(0.0, 0.7, 0.0));
+    step(&mut world, 30);
+    for tick in 1..=60 {
+        let target = RVec3::new(tick as Real / 60.0, 0.0, 0.0);
+        world
+            .body_mut(platform)
+            .unwrap()
+            .move_kinematic(target, Quat::IDENTITY, DT)
+            .unwrap();
+        step(&mut world, 1);
+    }
+    let platform_x = world.body(platform).unwrap().position().x;
+    let cube_x = world.body(cube).unwrap().position().x;
+    assert!((platform_x - 1.0).abs() < 1.0e-4, "{platform_x}");
+    // Friction accelerates the cube to the platform's 1 m/s within about half a second.
+    assert!(cube_x > 0.7, "{cube_x}");
+    let cube_speed = world.body(cube).unwrap().linear_velocity().x;
+    assert!((cube_speed - 1.0).abs() < 0.05, "{cube_speed}");
+}
+
+#[test]
+fn kinematic_moves_are_bounded_by_the_velocities_they_imply() {
+    let mut world = world(Vec3::ZERO, 1);
+    // dt = 1/64: a move of 7.8125 m is exactly 500 m/s.
+    let dt = 1.0 / 64.0;
+    let platform = add_kinematic(&mut world, &cube_shape(), RVec3::ZERO, Activation::Activate);
+    let along = |distance: f32| RVec3::new(Real::from(distance), 0.0, 0.0);
+    let mut body = world.body_mut(platform).unwrap();
+    assert!(invalid(body.move_kinematic(
+        along(7.8125_f32.next_up()),
+        Quat::IDENTITY,
+        dt
+    )));
+    body.move_kinematic(along(7.8125), Quat::IDENTITY, dt)
+        .unwrap();
+    assert_eq!(body.linear_velocity(), Vec3::new(500.0, 0.0, 0.0));
+    assert!(world.step(dt).unwrap().is_complete());
+    assert_eq!(world.body(platform).unwrap().position(), along(7.8125));
+
+    // The largest turn about z the bound accepts, found on the angle's bits.
+    let spinner = add_kinematic(
+        &mut world,
+        &cube_shape(),
+        RVec3::new(0.0, 5.0, 0.0),
+        Activation::Activate,
+    );
+    let mut body = world.body_mut(spinner).unwrap();
+    let here = body.position();
+    let about_z = |angle: f32| quat_about(Z, angle);
+    let largest = largest_accepted(1.5, |angle| {
+        body.move_kinematic(here, about_z(angle), dt).is_ok()
+    });
+    assert!(
+        (largest - limits::MAX_ANGULAR_VELOCITY * dt).abs() < 1.0e-3,
+        "{largest}"
+    );
+    assert!(invalid(body.move_kinematic(
+        here,
+        about_z(largest.next_up()),
+        dt
+    )));
+    body.move_kinematic(here, about_z(largest), dt).unwrap();
+    let spin = length(body.angular_velocity());
+    assert!(
+        spin <= limits::MAX_ANGULAR_VELOCITY * (1.0 + 1.0e-6),
+        "{spin}"
+    );
+    assert!(world.step(dt).unwrap().is_complete());
+    assert_finite(&world, spinner);
+
+    // Invalid inputs change nothing.
+    let mut body = world.body_mut(platform).unwrap();
+    let before = (body.linear_velocity(), body.angular_velocity());
+    let far = RVec3::new(limits::MAX_POSITION.next_up(), 0.0, 0.0);
+    assert!(invalid(body.move_kinematic(far, Quat::IDENTITY, dt)));
+    let skewed = Quat::from_xyzw(0.0, 0.0, 0.0, 2.0);
+    assert!(invalid(body.move_kinematic(along(8.0), skewed, dt)));
+    for bad_dt in [0.0, -dt, f32::NAN, PhysicsWorld::MAX_DELTA_TIME * 2.0] {
+        assert!(invalid(body.move_kinematic(
+            along(8.0),
+            Quat::IDENTITY,
+            bad_dt
+        )));
+    }
+    assert_eq!((body.linear_velocity(), body.angular_velocity()), before);
+
+    let ball = add_cube(&mut world, RVec3::new(0.0, -5.0, 0.0));
+    let fixed = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_static().position(RVec3::new(0.0, -10.0, 0.0)),
+        )
+        .unwrap();
+    for id in [ball, fixed] {
+        assert_eq!(
+            world
+                .body_mut(id)
+                .unwrap()
+                .move_kinematic(RVec3::ZERO, Quat::IDENTITY, dt),
+            Err(BodyError::NotKinematic(id))
+        );
+    }
+    let cloth = add_cloth(&mut world, RVec3::new(0.0, 20.0, 0.0), Quat::IDENTITY);
+    assert_eq!(
+        world
+            .body_mut(cloth)
+            .unwrap()
+            .move_kinematic(RVec3::ZERO, Quat::IDENTITY, dt),
+        Err(BodyError::SoftBody(cloth))
+    );
+    step(&mut world, 1);
 }

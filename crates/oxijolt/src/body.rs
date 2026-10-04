@@ -17,12 +17,14 @@ mod access;
 mod control;
 mod dofs;
 mod handle;
+mod kinematic;
 mod load;
 mod lock;
 mod poses;
 
 pub use dofs::AllowedDofs;
 pub use handle::{BodyMut, BodyRef};
+pub(crate) use kinematic::kinematic_velocities;
 pub(crate) use lock::{with_locked_bodies, with_locked_body, with_read_locked_body};
 pub use poses::BodyPose;
 

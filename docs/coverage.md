@@ -146,6 +146,7 @@ check it at its boundary.
 | `BodyMut::add_impulse` | finite; on a dynamic body `|J| / m <=` `MAX_VELOCITY_CHANGE` | `body_controls.rs`: `impulses_are_bounded_by_the_velocity_change_they_give` |
 | `BodyMut::add_angular_impulse` | finite; on a dynamic body `|L|` times the largest principal inverse inertia `<=` `MAX_ANGULAR_VELOCITY_CHANGE` | `body_controls.rs`: `angular_impulses_are_bounded_by_the_angular_velocity_change` |
 | `BodyMut::add_impulse_at_point` | both impulse rules with `L = (p - com) × J`; point within `MAX_POSITION`; `f32` cross product products | `body_controls.rs`: `point_impulses_are_bounded_by_the_angular_impulse_of_their_lever`, `angular_impulses_are_bounded_by_the_angular_velocity_change` |
+| `BodyMut::move_kinematic` | position within `MAX_POSITION`, unit rotation, step delta time; Jolt's implied velocities within `MAX_LINEAR_VELOCITY` and `MAX_ANGULAR_VELOCITY` | `body_controls.rs`: `kinematic_moves_are_bounded_by_the_velocities_they_imply` |
 | `BodyMut::reset_forces` | none | `reset_forces_ignores_static_and_kinematic_bodies` |
 | `CharacterSettings::mass` | `0..=MAX_MASS` | `character_settings_and_setters_are_bounded` |
 | `CharacterSettings::shape_offset` | `MAX_SHAPE_EXTENT` per axis | `character_settings_and_setters_are_bounded` |

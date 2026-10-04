@@ -1,14 +1,21 @@
-//! Momentary inputs to one body: impulses.
+//! Momentary inputs to one body: impulses and kinematic moves.
 
 use oxijolt_sys::*;
 
 use super::load::{point_torque, read_load, require, Load, LoadState};
-use super::with_read_locked_body;
+use super::{kinematic_velocities, with_read_locked_body, MotionType};
 use crate::limits::{
-    is_angular_velocity_change, is_in_frame, is_velocity_change, ANGULAR_VELOCITY_CHANGE_RULE,
-    VELOCITY_CHANGE_RULE,
+    is_angular_velocity, is_angular_velocity_change, is_in_frame, is_linear_velocity,
+    is_velocity_change, ANGULAR_VELOCITY_CHANGE_RULE, POSITION_RULE, VELOCITY_CHANGE_RULE,
 };
-use crate::{BodyError, BodyMut, RVec3, Vec3};
+use crate::math::ROTATION_RULE;
+use crate::world::DELTA_TIME_RULE;
+use crate::{BodyError, BodyMut, PhysicsWorld, Quat, RVec3, Vec3};
+
+/// What [`BodyMut::move_kinematic`] must satisfy: the velocities Jolt derives are within the
+/// speed bounds.
+const KINEMATIC_MOVE_RULE: &str =
+    "a kinematic move must imply velocities within the limits velocity bounds";
 
 /// `v` in `f64`.
 fn wide(v: Vec3) -> [f64; 3] {
@@ -113,6 +120,77 @@ impl BodyMut<'_> {
         // SAFETY: as in `add_impulse`; joltc only reads the two live locals.
         unsafe {
             JPH_BodyInterface_AddImpulse2(self.interface(), self.id.raw, &mut impulse, &mut point)
+        };
+        Ok(())
+    }
+
+    /// Sets the velocities of a kinematic body so that it moves toward `position` (of the body
+    /// origin, metres) and `rotation` over the next step of `delta_time` seconds (Jolt
+    /// `BodyInterface::MoveKinematic`), and wakes it when they are not near zero.
+    ///
+    /// Jolt aims the centre of mass at where it is in the target pose, turns with a small-angle
+    /// approximation and zeroes the locked axes, so the body approaches the pose rather than
+    /// meeting it exactly. The velocity
+    /// stays after the step: call this every step the body should move, and set a zero velocity
+    /// to stop it. A sleeping body whose new velocities have a squared length of at most 1e-12
+    /// is not woken and does not move in the next step.
+    ///
+    /// `position` must be within [`limits::MAX_POSITION`], `rotation` a unit quaternion and
+    /// `delta_time` within the bounds of [`PhysicsWorld::step`], and the velocities Jolt derives
+    /// (before it zeroes the locked axes) at most [`limits::MAX_LINEAR_VELOCITY`] and
+    /// [`limits::MAX_ANGULAR_VELOCITY`] long, as Jolt computes them; otherwise
+    /// [`BodyError::InvalidValue`] is returned and nothing changes. Fails with
+    /// [`BodyError::NotKinematic`] for a static or dynamic body and with
+    /// [`BodyError::SoftBody`] for a soft body. [docs/limits.md#kinematic-drive] has the
+    /// derivation.
+    ///
+    /// [`limits::MAX_POSITION`]: crate::limits::MAX_POSITION
+    /// [`limits::MAX_LINEAR_VELOCITY`]: crate::limits::MAX_LINEAR_VELOCITY
+    /// [`limits::MAX_ANGULAR_VELOCITY`]: crate::limits::MAX_ANGULAR_VELOCITY
+    /// [docs/limits.md#kinematic-drive]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#kinematic-drive
+    pub fn move_kinematic(
+        &mut self,
+        position: RVec3,
+        rotation: Quat,
+        delta_time: f32,
+    ) -> Result<(), BodyError> {
+        self.reject_soft_body()?;
+        if self.motion_type() != MotionType::Kinematic {
+            return Err(BodyError::NotKinematic(self.id));
+        }
+        require(is_in_frame(position), POSITION_RULE)?;
+        require(rotation.is_valid_rotation(), ROTATION_RULE)?;
+        require(
+            PhysicsWorld::is_valid_delta_time(delta_time),
+            DELTA_TIME_RULE,
+        )?;
+        // SAFETY: the world is borrowed mutably through this view and holds the body, a rigid
+        // body; this thread holds no body lock.
+        let velocities = unsafe {
+            kinematic_velocities(
+                self.inner.body_interface,
+                self.id,
+                position,
+                rotation,
+                delta_time,
+            )
+        };
+        let within_limits = velocities.is_some_and(|(linear, angular)| {
+            is_linear_velocity(linear) && is_angular_velocity(angular)
+        });
+        require(within_limits, KINEMATIC_MOVE_RULE)?;
+        let mut position = position.to_jph();
+        let mut rotation = rotation.to_jph();
+        // SAFETY: as in `add_impulse`. The body is kinematic, as Jolt's `Body::MoveKinematic`
+        // asserts (not static, rigid), and the inputs were validated above.
+        unsafe {
+            JPH_BodyInterface_MoveKinematic(
+                self.interface(),
+                self.id.raw,
+                &mut position,
+                &mut rotation,
+                delta_time,
+            )
         };
         Ok(())
     }

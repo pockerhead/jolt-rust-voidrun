@@ -583,9 +583,12 @@ second failure, so the bound is the measured onset divided by 2.7.
 ## Kinematic drive
 
 Jolt's `MoveKinematic` sets a velocity of `move / dt` without clamping it
-(`MotionProperties.inl:9-21`). `RagdollMut::drive_to_pose_using_kinematics` computes every part's
-velocity with Jolt's own operations first and accepts the drive only when each stays within
-`MAX_LINEAR_VELOCITY` and `MAX_ANGULAR_VELOCITY`, the bounds of every other velocity input.
+(`MotionProperties.inl:9-21`). `BodyMut::move_kinematic` and
+`RagdollMut::drive_to_pose_using_kinematics` compute the velocity with Jolt's own operations first
+(the `f32` difference of the centre of mass and `Quat::GetAngularVelocity` with its small-angle
+branch) and accept the move only when it stays within `MAX_LINEAR_VELOCITY` and
+`MAX_ANGULAR_VELOCITY`, the bounds of every other velocity input. The check uses the velocity
+before Jolt zeroes the locked axes, which can only make it shorter.
 
 ## Six-DOF translation limits
 

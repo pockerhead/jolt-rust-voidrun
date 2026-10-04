@@ -353,6 +353,8 @@ pub enum BodyError {
     /// The operation needs a body with all six degrees of freedom and the body was created with
     /// fewer ([`BodySettings::allowed_dofs`](crate::BodySettings::allowed_dofs)).
     RestrictedDofs(BodyId),
+    /// The operation needs a kinematic body and the body is static or dynamic.
+    NotKinematic(BodyId),
 }
 
 impl fmt::Display for BodyError {
@@ -389,6 +391,7 @@ impl fmt::Display for BodyError {
             Self::RestrictedDofs(id) => {
                 write!(f, "body {id:?} does not have all six degrees of freedom")
             }
+            Self::NotKinematic(id) => write!(f, "body {id:?} is not kinematic"),
         }
     }
 }

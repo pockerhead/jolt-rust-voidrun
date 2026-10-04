@@ -22,13 +22,12 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
-use crate::body::with_locked_body;
+use crate::body::{kinematic_velocities, with_locked_body};
 use crate::constraint::SixDofConstraintAxis;
 use crate::limits::{self, ANGULAR_VELOCITY_RULE, LINEAR_VELOCITY_RULE};
-use crate::math::{jolt_angular_velocity, jolt_product, jolt_rotate};
 use crate::owned::{JoltObject, Owned};
 use crate::world::{advance_structure_epoch, WorldTag, DELTA_TIME_RULE};
-use crate::{Activation, BodyId, MotionType, PhysicsWorld, Quat, RVec3, RagdollError, Real, Vec3};
+use crate::{Activation, BodyId, MotionType, PhysicsWorld, Quat, RVec3, RagdollError, Vec3};
 
 use settings::JointKind;
 pub use settings::{
@@ -332,50 +331,6 @@ impl RagdollMut<'_> {
         Ok(())
     }
 
-    /// The linear and angular velocity Jolt's `Body::MoveKinematic` gives part `id` to reach
-    /// `position` and `rotation` in `delta_time` (`Body.cpp:81-95`, `MotionProperties.inl:9-21`),
-    /// computed with Jolt's own operations so that they have the bits Jolt writes. `None` when
-    /// the rotation from the part's rotation to `rotation` is not a unit quaternion within
-    /// Jolt's tolerance, for which Jolt asserts.
-    fn kinematic_velocities(
-        &self,
-        id: BodyId,
-        position: RVec3,
-        rotation: Quat,
-        delta_time: f32,
-    ) -> Option<(Vec3, Vec3)> {
-        let interface = self.interface();
-        let (mut center_of_mass, mut part_rotation) =
-            (RVec3::new(0.0, 0.0, 0.0).to_jph(), Quat::IDENTITY.to_jph());
-        let mut shape_center_of_mass = Vec3::ZERO.to_jph();
-        // SAFETY: the world is borrowed mutably through this view and holds the part; this
-        // thread holds no body lock, so the getters can lock it. They write live locals. The
-        // shape pointer is the part's own shape, which the body keeps alive during the call
-        // that reads its centre of mass.
-        unsafe {
-            JPH_BodyInterface_GetCenterOfMassPosition(interface, id.to_raw(), &mut center_of_mass);
-            JPH_BodyInterface_GetRotation(interface, id.to_raw(), &mut part_rotation);
-            let shape = JPH_BodyInterface_GetShape(interface, id.to_raw());
-            JPH_Shape_GetCenterOfMass(shape, &mut shape_center_of_mass);
-        }
-        let center_of_mass = RVec3::from_jph(center_of_mass);
-        let offset = jolt_rotate(rotation, Vec3::from_jph(shape_center_of_mass));
-        let delta = |target: Real, offset: f32, current: Real| {
-            // Jolt narrows the position difference to `f32` (`Vec3(new_com - mPosition)`).
-            #[allow(clippy::unnecessary_cast)]
-            let delta = (target + Real::from(offset) - current) as f32;
-            delta / delta_time
-        };
-        let linear = Vec3::new(
-            delta(position.x, offset.x, center_of_mass.x),
-            delta(position.y, offset.y, center_of_mass.y),
-            delta(position.z, offset.z, center_of_mass.z),
-        );
-        let turn = jolt_product(rotation, Quat::from_jph(part_rotation).conjugated());
-        let angular = jolt_angular_velocity(turn, delta_time)?;
-        Some((linear, angular))
-    }
-
     /// Sets each part's velocities so that it reaches `pose` in `delta_time` seconds (Jolt
     /// `Ragdoll::DriveToPoseUsingKinematics`), waking it when it moves. Meant for kinematic
     /// parts ([`set_motion_type`](Self::set_motion_type)); a dynamic part gets the velocity
@@ -396,8 +351,17 @@ impl RagdollMut<'_> {
         }
         for (index, &id) in self.entry.bodies.iter().enumerate() {
             let rotation = pose.joints[index].rotation;
-            let velocities =
-                self.kinematic_velocities(id, pose.position(index), rotation, delta_time);
+            // SAFETY: the world is borrowed mutably through this view and holds the part, a
+            // rigid body; this thread holds no body lock.
+            let velocities = unsafe {
+                kinematic_velocities(
+                    self.body_interface,
+                    id,
+                    pose.position(index),
+                    rotation,
+                    delta_time,
+                )
+            };
             let within_limits = velocities.is_some_and(|(linear, angular)| {
                 limits::is_linear_velocity(linear) && limits::is_angular_velocity(angular)
             });
