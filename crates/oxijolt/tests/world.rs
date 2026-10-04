@@ -2,6 +2,7 @@
 
 mod common;
 
+use common::math::bits;
 use common::*;
 use oxijolt::*;
 
@@ -52,10 +53,6 @@ fn invalid_settings_are_rejected() {
             "{settings:?} was accepted"
         );
     }
-}
-
-fn bits(v: Vec3) -> [u32; 3] {
-    <[f32; 3]>::from(v).map(f32::to_bits)
 }
 
 #[test]

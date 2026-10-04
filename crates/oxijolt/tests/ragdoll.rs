@@ -7,8 +7,8 @@ mod common;
 
 use std::thread;
 
+use common::math::{add, f3, norm, rvec3, sub, v3};
 use common::ragdoll::*;
-use common::walker::{add, f3, norm, rvec3, sub, v3};
 use common::*;
 use oxijolt::*;
 
@@ -902,7 +902,7 @@ fn rebase_moves_a_settled_ragdoll_rigidly() {
             "part {part}: {before:?} -> {after:?}"
         );
     }
-    let centre = add(common::walker::rotate(rotation, PLANET_CENTRE), translation);
+    let centre = add(common::math::rotate(rotation, PLANET_CENTRE), translation);
     // The rotated frame turns Jolt's friction tangents a little, which may nudge a part past
     // the calm limit for a tick or two; the ragdoll settles again at once and stays in place.
     let pelvis = scene.world.ragdoll(ragdoll).unwrap().body_ids()[PELVIS];

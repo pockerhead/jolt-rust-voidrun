@@ -29,10 +29,10 @@ mod common;
 
 use common::determinism::*;
 use common::jobs::{self, JobChoice};
+use common::math::{self, cross, rvec3, scale, v3, vec3, V3};
 use common::ragdoll as humanoid;
 use common::walker::{
-    add_walker, record_walker, rvec3, scale, script_scene, script_start, script_tick, up_at, v3,
-    vec3, Player,
+    add_walker, record_walker, script_scene, script_start, script_tick, up_at, Player,
 };
 use common::*;
 use oxijolt::*;
@@ -179,29 +179,13 @@ const TERRAIN_SAMPLES: u32 = 33;
 /// Convex radius of the chunk's boxes and cylinder, metres (Jolt's default).
 const CHILD_CONVEX_RADIUS: f32 = 0.05;
 
-type V = [f64; 3];
-
-// `Real` is already `f64` with the `double-precision` feature.
-#[allow(clippy::useless_conversion)]
-fn real3(p: RVec3) -> V {
-    [f64::from(p.x), f64::from(p.y), f64::from(p.z)]
-}
-
-fn cross(a: V, b: V) -> V {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
 /// `p` rotated by `rotation` and moved by `translation`, in `f64`.
-fn map_point(rotation: Quat, translation: RVec3, p: V) -> V {
+fn map_point(rotation: Quat, translation: RVec3, p: V3) -> V3 {
     let [x, y, z, w] = [rotation.x, rotation.y, rotation.z, rotation.w].map(f64::from);
     let q = [x, y, z];
     let t = cross(q, p).map(|c| 2.0 * c);
     let u = cross(q, t);
-    let translation = real3(translation);
+    let translation = v3(translation);
     [0, 1, 2].map(|i| p[i] + w * t[i] + u[i] + translation[i])
 }
 
@@ -444,14 +428,14 @@ fn create_item(world: &mut PhysicsWorld, layer: ObjectLayer, item: &mut Item) {
 
 /// The world-space bounds `(min, max)` of a live item: its box turned by the body's rotation,
 /// as Jolt's `AABox::Transformed` computes them.
-fn item_bounds(world: &PhysicsWorld, id: BodyId) -> (V, V) {
+fn item_bounds(world: &PhysicsWorld, id: BodyId) -> (V3, V3) {
     let body = world.body(id).unwrap();
-    let centre = real3(body.position());
+    let centre = v3(body.position());
     let half = <[f32; 3]>::from(ITEM_HALF_EXTENT).map(f64::from);
     let rotation = body.rotation();
     let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
         .map(|axis| map_point(rotation, RVec3::ZERO, axis));
-    let reach: V = [0, 1, 2].map(|i| (0..3).map(|a| axes[a][i].abs() * half[a]).sum());
+    let reach: V3 = [0, 1, 2].map(|i| (0..3).map(|a| axes[a][i].abs() * half[a]).sum());
     (
         [0, 1, 2].map(|i| centre[i] - reach[i]),
         [0, 1, 2].map(|i| centre[i] + reach[i]),
@@ -459,7 +443,7 @@ fn item_bounds(world: &PhysicsWorld, id: BodyId) -> (V, V) {
 }
 
 /// Whether two bounds overlap, touching included, as Jolt's `AABox::Overlaps`.
-fn overlap((a_min, a_max): (V, V), (b_min, b_max): (V, V)) -> bool {
+fn overlap((a_min, a_max): (V3, V3), (b_min, b_max): (V3, V3)) -> bool {
     (0..3).all(|i| a_min[i] <= b_max[i] && b_min[i] <= a_max[i])
 }
 
@@ -634,8 +618,8 @@ fn run_chunk(worker_threads: u32, variant: &str) -> Digest {
             let Phase::Live(id) = item.phase else {
                 continue;
             };
-            let position = real3(world.body(id).unwrap().position());
-            let towards: V = [0, 1, 2].map(|i| centre[i] - position[i]);
+            let position = v3(world.body(id).unwrap().position());
+            let towards: V3 = [0, 1, 2].map(|i| centre[i] - position[i]);
             let distance =
                 (towards[0] * towards[0] + towards[1] * towards[1] + towards[2] * towards[2])
                     .sqrt();
@@ -1412,7 +1396,7 @@ fn fleet_input(key: usize, tick: usize, nudged: bool) -> DriverInput {
 /// under its tread, outside the cylinder's rounded edges.
 fn straddles_seam(world: &PhysicsWorld, chassis: BodyId, wheel: usize) -> bool {
     let body = world.body(chassis).unwrap();
-    let offset = walker::rotate(body.rotation(), walker::f3(vehicle::WHEEL_POSITIONS[wheel]));
+    let offset = math::rotate(body.rotation(), math::f3(vehicle::WHEEL_POSITIONS[wheel]));
     let x = v3(body.position())[0] + offset[0];
     let limit = 0.5 * vehicle::WHEEL_WIDTH - SEAM_CYLINDER_CONVEX_RADIUS;
     (x - f64::from(SEAM_X)).abs() <= f64::from(limit)
@@ -1445,10 +1429,10 @@ impl TwinProbe<'_> {
     fn twins_tie(&self, chassis: BodyId, wheel: usize) -> bool {
         let body = self.world.body(chassis).unwrap();
         let rotation = body.rotation();
-        let attachment = walker::rotate(rotation, walker::f3(vehicle::WHEEL_POSITIONS[wheel]));
-        let origin = walker::rvec3(walker::add(v3(body.position()), attachment));
+        let attachment = math::rotate(rotation, math::f3(vehicle::WHEEL_POSITIONS[wheel]));
+        let origin = math::rvec3(math::add(v3(body.position()), attachment));
         let travel = [0.0, -f64::from(vehicle::SUSPENSION_MAX), 0.0];
-        let direction = walker::vec3(walker::rotate(rotation, travel));
+        let direction = math::vec3(math::rotate(rotation, travel));
         // The cylinder's axis turned onto the wheel's axle, body x for the unsteered seam
         // wheels.
         let axle = quat_mul(

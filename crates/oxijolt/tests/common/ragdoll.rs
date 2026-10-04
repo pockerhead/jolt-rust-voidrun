@@ -8,8 +8,8 @@ use std::f32::consts::FRAC_PI_2;
 
 use oxijolt::*;
 
+use super::math::{add, f3, norm, rvec3, scale, sub, v3, vec3, V3};
 use super::quat_about;
-use super::walker::{add, f3, norm, rvec3, scale, sub, v3, vec3, V3};
 
 /// Total mass, kg.
 pub const MASS: f32 = 80.0;
@@ -423,7 +423,7 @@ pub fn pose_from(world: &[(V3, Quat)]) -> SkeletonPose {
 pub fn transformed_pose(pose: &SkeletonPose, rotation: Quat, translation: V3) -> SkeletonPose {
     let world: Vec<(V3, Quat)> = (0..pose.joints.len())
         .map(|index| {
-            let p = super::walker::rotate(rotation, joint_position(pose, index));
+            let p = super::math::rotate(rotation, joint_position(pose, index));
             (
                 add(p, translation),
                 mul(rotation, pose.joints[index].rotation),

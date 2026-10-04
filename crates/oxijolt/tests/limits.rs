@@ -7,8 +7,8 @@ mod common;
 
 use std::f32::consts::PI;
 
+use common::math::{bits, f3, v3, wide};
 use common::vehicle::*;
-use common::walker::{f3, v3};
 use common::*;
 use oxijolt::*;
 
@@ -48,16 +48,6 @@ fn real_on_axes(value: Real) -> Vec<RVec3> {
 }
 
 const NON_FINITE: [f32; 3] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
-
-fn bits(v: Vec3) -> [u32; 3] {
-    <[f32; 3]>::from(v).map(f32::to_bits)
-}
-
-/// `value` as `f64`, which it already is with the `double-precision` feature.
-#[allow(clippy::useless_conversion)]
-fn wide(value: Real) -> f64 {
-    f64::from(value)
-}
 
 fn real_bits(v: RVec3) -> [u64; 3] {
     <[Real; 3]>::from(v).map(|c| wide(c).to_bits())
@@ -3452,7 +3442,7 @@ fn stabilized_ragdoll_inertia_at_its_bound_decomposes() {
                 .map(|(index, mass)| {
                     let height = 3.0 * length * index as f32;
                     let joint = HingeConstraintSettings::new(
-                        common::walker::rvec3([0.0, f64::from(height - 1.5 * length), 0.0]),
+                        common::math::rvec3([0.0, f64::from(height - 1.5 * length), 0.0]),
                         Vec3::new(0.0, 0.0, 1.0),
                         Vec3::new(1.0, 0.0, 0.0),
                     );
@@ -3460,7 +3450,7 @@ fn stabilized_ragdoll_inertia_at_its_bound_decomposes() {
                         shape: &shapes[index],
                         body: BodySettings::new_dynamic()
                             .object_layer(layers.ragdoll)
-                            .position(common::walker::rvec3([0.0, f64::from(height), 0.0]))
+                            .position(common::math::rvec3([0.0, f64::from(height), 0.0]))
                             .mass(mass),
                         joint: (index > 0).then_some(RagdollJoint::Hinge(joint)),
                     }

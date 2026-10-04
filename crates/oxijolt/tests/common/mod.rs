@@ -6,6 +6,7 @@
 pub mod determinism;
 pub mod events;
 pub mod jobs;
+pub mod math;
 #[cfg(windows)]
 pub mod memory;
 pub mod ragdoll;

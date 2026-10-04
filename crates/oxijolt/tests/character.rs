@@ -4,6 +4,7 @@
 
 mod common;
 
+use common::math::{rotate, v3, vec3};
 use common::*;
 use oxijolt::*;
 
@@ -26,13 +27,8 @@ fn dot(a: Vec3, b: Vec3) -> f32 {
     a.x * b.x + a.y * b.y + a.z * b.z
 }
 
-#[allow(clippy::useless_conversion)]
-fn real3(p: RVec3) -> [f64; 3] {
-    [f64::from(p.x), f64::from(p.y), f64::from(p.z)]
-}
-
 fn distance(a: RVec3, b: RVec3) -> f64 {
-    let (a, b) = (real3(a), real3(b));
+    let (a, b) = (v3(a), v3(b));
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
 
@@ -500,7 +496,7 @@ fn up_and_rotation_set_per_update_give_the_same_walk_in_another_frame() {
         for _ in 0..60 {
             update(&mut world, id, velocity, up, &QueryFilter::new());
             let character = world.character(id).unwrap();
-            path.push((real3(character.position()), character.ground_state()));
+            path.push((v3(character.position()), character.ground_state()));
         }
         path
     };
@@ -556,7 +552,7 @@ fn linear_velocity_round_trips_and_moves_a_free_character() {
         )
         .unwrap();
     let character = world.character(id).unwrap();
-    let moved = real3(character.position());
+    let moved = v3(character.position());
     for (axis, (moved, v)) in moved.iter().zip(set).enumerate() {
         let expected = f64::from(v * DT);
         assert!(
@@ -882,7 +878,7 @@ fn record(world: &PhysicsWorld, id: CharacterId) -> Record {
     assert!(!character.max_hits_exceeded());
     let velocity: [f32; 3] = character.linear_velocity().into();
     Record {
-        position: real3(character.position()).map(f64::to_bits).to_vec(),
+        position: v3(character.position()).map(f64::to_bits).to_vec(),
         velocity: velocity.map(f32::to_bits).to_vec(),
         ground: character.ground_state(),
         state: character.save_state().as_bytes(),
@@ -1035,7 +1031,7 @@ fn inner_pose(world: &PhysicsWorld, id: CharacterId) -> (Vec<u64>, [u32; 4]) {
     let body = world.body(inner).unwrap();
     let rotation = body.rotation();
     (
-        real3(body.position()).map(f64::to_bits).to_vec(),
+        v3(body.position()).map(f64::to_bits).to_vec(),
         [rotation.x, rotation.y, rotation.z, rotation.w].map(f32::to_bits),
     )
 }
@@ -1083,31 +1079,8 @@ fn frame() -> (Quat, RVec3) {
 /// `p` mapped through the frame, in f64.
 fn map_point(rotation: Quat, translation: RVec3, p: [f64; 3]) -> [f64; 3] {
     let r = rotate(rotation, p);
-    let t = real3(translation);
+    let t = v3(translation);
     [r[0] + t[0], r[1] + t[1], r[2] + t[2]]
-}
-
-fn rotate(q: Quat, v: [f64; 3]) -> [f64; 3] {
-    let [x, y, z, w] = [q.x, q.y, q.z, q.w].map(f64::from);
-    let u = [x, y, z];
-    let cross = |a: [f64; 3], b: [f64; 3]| {
-        [
-            a[1] * b[2] - a[2] * b[1],
-            a[2] * b[0] - a[0] * b[2],
-            a[0] * b[1] - a[1] * b[0],
-        ]
-    };
-    let t = cross(u, v).map(|c| 2.0 * c);
-    let s = cross(u, t);
-    [
-        v[0] + w * t[0] + s[0],
-        v[1] + w * t[1] + s[1],
-        v[2] + w * t[2] + s[2],
-    ]
-}
-
-fn to_vec3(v: [f64; 3]) -> Vec3 {
-    Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32)
 }
 
 #[test]
@@ -1149,16 +1122,16 @@ fn a_character_crosses_a_rebase_with_the_world() {
                 [0.0, f64::from(HALF_HEIGHT + RADIUS), 0.0],
             );
             let new_up = character.up();
-            let p = real3(character.position());
+            let p = v3(character.position());
             let expected =
                 [0, 1, 2].map(|i| p[i] + offset[i] + 0.02 * f64::from(<[f32; 3]>::from(new_up)[i]));
-            let actual = real3(world.body(inner).unwrap().position());
+            let actual = v3(world.body(inner).unwrap().position());
             let gap = (0..3)
                 .map(|i| (expected[i] - actual[i]).abs())
                 .fold(0.0, f64::max);
             assert!(gap < 1e-5, "inner body {actual:?}, expected {expected:?}");
-            up = to_vec3(rotate(rotation, [0.0, 1.0, 0.0]));
-            horizontal = to_vec3(rotate(rotation, [2.0, 0.0, 0.5]));
+            up = vec3(rotate(rotation, [0.0, 1.0, 0.0]));
+            horizontal = vec3(rotate(rotation, [2.0, 0.0, 0.5]));
             world
                 .refresh_character_contacts(id, &QueryFilter::new())
                 .unwrap();
@@ -1173,7 +1146,7 @@ fn a_character_crosses_a_rebase_with_the_world() {
             update(&mut world, id, v, up, &QueryFilter::new());
             let character = world.character(id).unwrap();
             assert_eq!(character.ground_state(), GroundState::OnGround);
-            path.push(real3(character.position()));
+            path.push(v3(character.position()));
         }
         path
     };

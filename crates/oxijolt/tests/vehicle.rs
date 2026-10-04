@@ -3,8 +3,8 @@
 
 mod common;
 
+use common::math::{f3, rotate, v3};
 use common::vehicle::*;
-use common::walker::{f3, rotate, v3};
 use common::*;
 use oxijolt::*;
 
