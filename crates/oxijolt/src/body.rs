@@ -461,8 +461,13 @@ pub(crate) fn has_finite_inverse(properties: &JPH_MassProperties) -> bool {
         let diagonal = [x.x, y.y, z.z];
         let length_sq: f32 = diagonal.iter().map(|value| value * value).sum();
         // Jolt `Vec3::IsNearZero` (squared length at most 1e-12) selects the unit-sphere
-        // fallback.
-        return length_sq <= 1.0e-12 || diagonal.iter().all(|value| (1.0 / value).is_finite());
+        // fallback. Otherwise every moment must be positive, as the non-diagonal path requires:
+        // Jolt's `MassProperties::Scale` rebuilds the diagonal from differences that can round
+        // below zero for thin shapes.
+        return length_sq <= 1.0e-12
+            || diagonal
+                .iter()
+                .all(|&value| value > 0.0 && (1.0 / value).is_finite());
     }
     limits::is_rigid_body_inertia(tensor.map(|row| row.map(f64::from)))
 }

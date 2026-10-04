@@ -273,3 +273,31 @@ fn tiny_ill_conditioned_rotated_inertia_is_rejected() {
     assert_ne!(properties.inertia.column[0].y, 0.0);
     assert!(!has_finite_inverse(&properties));
 }
+
+/// Mass 1 with the diagonal inertia `moments`.
+fn diagonal_inertia(moments: [f32; 3]) -> JPH_MassProperties {
+    let mut properties = JPH_MassProperties {
+        mass: 1.0,
+        ..ZERO_MASS_PROPERTIES
+    };
+    for (axis, column) in properties.inertia.column.iter_mut().take(3).enumerate() {
+        let mut entries = [0.0; 3];
+        entries[axis] = moments[axis];
+        *column = JPH_Vec4 {
+            x: entries[0],
+            y: entries[1],
+            z: entries[2],
+            w: 0.0,
+        };
+    }
+    properties
+}
+
+#[test]
+fn diagonal_inertia_must_be_positive_unless_near_zero() {
+    assert!(has_finite_inverse(&diagonal_inertia([1.0, 2.0, 3.0])));
+    assert!(!has_finite_inverse(&diagonal_inertia([-1.0, 2.0, 3.0])));
+    assert!(!has_finite_inverse(&diagonal_inertia([0.0, 1.0, 1.0])));
+    // All zero: Jolt uses the inertia of a unit sphere.
+    assert!(has_finite_inverse(&diagonal_inertia([0.0, 0.0, 0.0])));
+}
