@@ -9,7 +9,17 @@ use crate::limits;
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
+
+mod create;
+mod geometry;
+mod hull;
+mod mesh;
+mod scaled;
+mod static_only;
+mod tapered;
+
 use crate::{Quat, ShapeError, Vec3};
+pub use mesh::{DroppedTriangles, MeshBuildQuality, MeshSettings};
 
 /// A collision shape that bodies are created from.
 ///
@@ -536,11 +546,7 @@ impl Shape {
                 JPH_CylinderShapeSettings_Create(half_height, radius, convex_radius).cast(),
             )
         }?;
-        // SAFETY: the settings are live, owned by the guard and were created as cylinder
-        // settings. The returned shape holds one reference, which `Self` takes over.
-        unsafe {
-            Self::from_created(JPH_CylinderShapeSettings_CreateShape(settings.as_ptr()).cast())
-        }
+        settings.create()
     }
 
     /// A capsule along the local Y axis, centred on the origin: a cylinder
@@ -628,14 +634,7 @@ impl Shape {
         // guarantees the material contract.
         let jolt_settings =
             unsafe { height_field_settings(sample_count, samples, settings, materials) }?;
-        // SAFETY: the settings are live, owned by the guard and were created as heightfield
-        // settings. The returned shape holds one reference, which `Self` takes over.
-        unsafe {
-            Self::from_created(
-                JPH_HeightFieldShapeSettings_CreateShape(jolt_settings.as_ptr()).cast(),
-            )
-        }?
-        .within_extent_bounds()
+        jolt_settings.create()?.within_extent_bounds()
     }
 
     /// The stored surface point of heightfield sample `(x, y)` in shape-local space, after
@@ -724,18 +723,8 @@ impl Shape {
                 );
             }
         }
-        // SAFETY: the settings are live, owned by the guard and of the type each call expects.
-        // Both calls run Jolt's `Create` and return a shape holding one reference, which `Self`
-        // takes over; null means Jolt refused the settings (for example a hierarchy that needs
-        // more than 32 sub-shape id bits).
-        unsafe {
-            Self::from_created(if single {
-                JPH_MutableCompoundShape_Create(settings.as_ptr()).cast()
-            } else {
-                JPH_StaticCompoundShape_Create(settings.as_ptr()).cast()
-            })
-        }?
-        .within_extent_bounds()
+        // Jolt refuses, for example, a hierarchy that needs more than 32 sub-shape id bits.
+        settings.create()?.within_extent_bounds()
     }
 
     /// `shape` with its centre of mass moved by `offset` (shape space, metres, each component at
@@ -747,7 +736,7 @@ impl Shape {
     /// `shape` puts them, and mass and inertia are computed about the new centre. A vehicle
     /// chassis gets a low centre of mass this way. The new shape holds its own reference to
     /// `shape`, which may be dropped afterwards. A decorated shape that only static bodies may
-    /// use (a heightfield) stays static-only. [`compound_sub_shape`](Self::compound_sub_shape)
+    /// use (a heightfield or mesh) stays static-only. [`compound_sub_shape`](Self::compound_sub_shape)
     /// does not look through the decorator: it returns `None` for an offset compound.
     pub fn new_offset_center_of_mass(shape: &Shape, offset: Vec3) -> Result<Self, ShapeError> {
         if !limits::is_local_offset(offset) {
@@ -808,18 +797,6 @@ impl Shape {
             .ok_or(ShapeError::AllocationFailed)
     }
 
-    /// Takes over a shape returned by a settings `Create` call, where null means Jolt refused
-    /// the settings.
-    ///
-    /// # Safety
-    /// `ptr` is null or a live shape holding one reference that the caller hands over.
-    pub(crate) unsafe fn from_created(ptr: *mut JPH_Shape) -> Result<Self, ShapeError> {
-        // SAFETY: the caller hands over one reference to a live shape, or null.
-        unsafe { Owned::from_raw(ptr) }
-            .map(Self)
-            .ok_or(ShapeError::Rejected)
-    }
-
     pub(crate) fn as_ptr(&self) -> *const JPH_Shape {
         self.0.as_ptr()
     }
@@ -830,8 +807,8 @@ impl Shape {
         unsafe { JPH_Shape_GetSubType(self.as_ptr()) }
     }
 
-    /// Whether Jolt allows this shape only on static bodies (heightfields and compounds that
-    /// contain one).
+    /// Whether Jolt allows this shape only on static bodies (meshes, heightfields and compound
+    /// or decorated shapes that contain one).
     pub(crate) fn must_be_static(&self) -> bool {
         // SAFETY: the shape is live for the call; the getter only reads it.
         unsafe { JPH_Shape_MustBeStatic(self.as_ptr()) }

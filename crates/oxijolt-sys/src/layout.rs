@@ -40,6 +40,14 @@ const _: () = {
     assert!(offset_of!(JPH_RayCastResult, fraction) == 4);
     assert!(offset_of!(JPH_RayCastResult, subShapeID2) == 8);
 
+    assert!(size_of::<JPH_IndexedTriangle>() == 20);
+    assert!(align_of::<JPH_IndexedTriangle>() == 4);
+    assert!(offset_of!(JPH_IndexedTriangle, i1) == 0);
+    assert!(offset_of!(JPH_IndexedTriangle, i2) == 4);
+    assert!(offset_of!(JPH_IndexedTriangle, i3) == 8);
+    assert!(offset_of!(JPH_IndexedTriangle, materialIndex) == 12);
+    assert!(offset_of!(JPH_IndexedTriangle, userData) == 16);
+
     assert!(size_of::<JPH_SoftVertex>() == 28);
     assert!(align_of::<JPH_SoftVertex>() == 4);
     assert!(offset_of!(JPH_SoftVertex, position) == 0);

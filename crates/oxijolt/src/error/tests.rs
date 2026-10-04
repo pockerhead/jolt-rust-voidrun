@@ -3,7 +3,7 @@ use std::error::Error as _;
 use super::*;
 
 const WORLD: WorldError = WorldError::InitFailed;
-const SHAPE: ShapeError = ShapeError::Rejected;
+const SHAPE: ShapeError = ShapeError::ConvexHull(HullError::Coplanar);
 const BODY: BodyError = BodyError::TooManyBodies;
 const STEP: StepError = StepError::InvalidDeltaTime;
 const QUERY: QueryError = QueryError::InvalidValue("ray direction");
@@ -86,4 +86,100 @@ fn error_is_send_sync_static_and_copy() {
     assert_bounds::<Error>();
     let boxed = Box::<dyn std::error::Error + Send + Sync>::from(Error::from(STEP));
     assert_eq!(boxed.to_string(), STEP.to_string());
+}
+
+#[test]
+fn errors_stay_small() {
+    // clippy's `result_large_err` fires at 128 bytes; the margin keeps `Result<_, Error>` cheap.
+    assert!(size_of::<ShapeError>() <= 88, "{}", size_of::<ShapeError>());
+    assert!(size_of::<Error>() <= 96, "{}", size_of::<Error>());
+}
+
+#[test]
+fn shape_error_variants_display_their_payload() {
+    assert_eq!(
+        ShapeError::ConvexHull(HullError::TooFewPoints).to_string(),
+        "invalid convex hull: a convex hull needs at least 4 points"
+    );
+    assert_eq!(
+        ShapeError::ConvexHull(HullError::Degenerate).to_string(),
+        "invalid convex hull: the points lie on or close to a line"
+    );
+    assert_eq!(
+        ShapeError::ConvexHull(HullError::Coplanar).to_string(),
+        "invalid convex hull: the points lie on or close to a plane; thicken the cloud or centre \
+         it on the shape origin"
+    );
+    assert_eq!(
+        ShapeError::Mesh(MeshError::NoTriangles).to_string(),
+        "invalid triangle mesh: no triangle is left after dropping small, thin and degenerate ones"
+    );
+    let message = JoltMessage::from_c_buffer(b"Too few points\0garbage");
+    assert_eq!(
+        ShapeError::Rejected(message).to_string(),
+        "Jolt rejected the shape settings: Too few points"
+    );
+    assert_eq!(format!("{message:?}"), "\"Too few points\"");
+}
+
+#[test]
+fn thin_triangles_name_the_scale_and_the_extent() {
+    let error = ThinTrianglesError {
+        scale: Vec3::new(0.2, 1.0, 0.5),
+        max_convex_extent: 1100.0,
+    };
+    assert_eq!(
+        ShapeError::ThinTriangles(error).to_string(),
+        "invalid scale: mesh or heightfield triangles scaled by (0.2, 1, 0.5) are too thin for \
+         convex shapes up to 1100 m"
+    );
+    assert_eq!(error, error);
+    let other = ThinTrianglesError {
+        max_convex_extent: 1.0,
+        ..error
+    };
+    assert_ne!(error, other);
+}
+
+#[test]
+fn jolt_message_reads_up_to_the_nul() {
+    assert_eq!(JoltMessage::from_c_buffer(b"\0rest").as_str(), "");
+    assert_eq!(JoltMessage::from_c_buffer(b"").as_str(), "");
+    let exact = [b'a'; JoltMessage::CAPACITY];
+    let mut buffer = exact.to_vec();
+    buffer.push(0);
+    assert_eq!(
+        JoltMessage::from_c_buffer(&buffer).as_str().as_bytes(),
+        exact
+    );
+}
+
+#[test]
+fn long_jolt_messages_are_cut_after_a_whole_word() {
+    let long = b"Hull building failed, point 1010 had an error of 0.0934095 (relative to tolerance: 0.001)\0";
+    assert_eq!(
+        JoltMessage::from_c_buffer(long).as_str(),
+        "Hull building failed, point 1010 had an error of 0.0934095 (relative to..."
+    );
+    // Without a space the cut falls inside the word.
+    let buffer = [b'b'; JoltMessage::CAPACITY + 1];
+    let message = JoltMessage::from_c_buffer(&buffer);
+    assert_eq!(message.as_str().len(), JoltMessage::CAPACITY);
+    assert!(message.as_str().ends_with("bb..."));
+}
+
+#[test]
+fn jolt_message_keeps_whole_characters() {
+    // 75 ASCII bytes, a two-byte character and more: the cut 76 bytes in, before `...`,
+    // splits the character, which is dropped.
+    let mut buffer = vec![b'c'; JoltMessage::CAPACITY - 4];
+    buffer.extend_from_slice("\u{e9}tail".as_bytes());
+    buffer.push(0);
+    let message = JoltMessage::from_c_buffer(&buffer);
+    assert_eq!(
+        message.as_str(),
+        format!("{}...", "c".repeat(JoltMessage::CAPACITY - 4))
+    );
+    // An invalid byte inside the text keeps the valid part before it.
+    assert_eq!(JoltMessage::from_c_buffer(b"ok\xffno\0").as_str(), "ok");
 }

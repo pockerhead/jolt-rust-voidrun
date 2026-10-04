@@ -3,8 +3,11 @@
 What the safe API, `oxijolt`, covers today. The [roadmap](../README.md#roadmap) in the README lists
 what is planned next.
 
-- Rigid bodies: static, kinematic and dynamic; box, sphere, cylinder, capsule, heightfield and
-  compound shapes; physics materials with user data; forces, sleeping, continuous collision.
+- Rigid bodies: static, kinematic and dynamic; box, sphere, cylinder, capsule, tapered capsule and
+  cylinder (cones too), convex hull, triangle mesh (with a material per triangle and a report of
+  the triangles too thin to collide with, for static and kinematic bodies), heightfield, compound
+  and scaled shapes; physics materials with user data;
+  forces, sleeping, continuous collision.
 - Scene queries: ray casts, shape casts and collide-shape, filtered by layer, compound child
   group and body.
 - A character controller (Jolt's `CharacterVirtual`) with stair walking, floor sticking and an up

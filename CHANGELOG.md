@@ -4,6 +4,28 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Shapes: convex hulls (`Shape::new_convex_hull`, `new_convex_hull_with_material`, `HullError`),
+  triangle meshes with a material per triangle for static and kinematic bodies (`Shape::new_mesh`,
+  `new_mesh_with_settings`, `MeshSettings`, `MeshBuildQuality`, `MeshError`), scaled shapes
+  (`Shape::scaled`) and tapered capsules and cylinders, cones among them
+  (`Shape::new_tapered_capsule`, `new_tapered_cylinder`). Point clouds, scales and radii that Jolt
+  cannot build or collide with reliably are refused with typed errors; anything else Jolt refuses
+  comes back as `ShapeError::Rejected` with Jolt's message (`JoltMessage`, cut after a whole word).
+- Mesh triangles too small or too thin to collide with are dropped and returned as
+  `DroppedTriangles` (indices and area). The rule counts the rounding of the triangle in the space
+  of the convex shape it collides with, up to `MeshSettings::max_convex_extent` (default 1100 m,
+  below `limits::MAX_SHAPE_EXTENT`; see `docs/limits.md`), and does not depend on the order of a
+  triangle's corners. `Shape::scaled` checks a mesh inside it for the extent the mesh was built
+  with and refuses a scale that leaves its triangles too thin with `ShapeError::ThinTriangles`
+  (`ThinTrianglesError`: the scale and the extent).
+- With the `asserts` feature Jolt's hull builder can abort on point clouds with many nearly
+  coplanar faces that pass the hull rules: about one densely sampled noisy box in 1000 and 1 to 2 %
+  of dense flat cones and domes; without it Jolt refuses most of them as `ShapeError::Rejected`
+  and builds the rest. See `docs/limits.md`. The
+  `HullError::Coplanar` message suggests thickening the cloud or centring it on the shape origin.
+- joltc extension: `JPH_ShapeSettings_CreateShapeWithError`, `JPH_MeshShapeSettings_Create3`
+  (materials), `JPH_MeshShapeSettings_GetTriangleCount` and `JPH_Shape_GetTriangles`.
+
 ## 0.4.0 — 2026-10-04
 
 First release on crates.io.

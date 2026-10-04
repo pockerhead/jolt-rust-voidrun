@@ -19,6 +19,237 @@ not a Jolt assertion threshold.
 objects of 0.1 to 2000 m; the bound applies on each side of the centre of mass. It bounds a shape's
 inertia to at most `6 · mass · MAX_SHAPE_EXTENT²`.
 
+## Convex hulls
+
+`Shape::new_convex_hull` replays the start of Jolt's hull builder (`ConvexHullBuilder::Initialize`,
+`Geometry/ConvexHullBuilder.cpp:300-470`) in `f64` before Jolt sees the points: the first point
+farthest from the origin, the first point farthest from it, the point that makes the largest
+triangle with both, and the point farthest from that triangle's plane. Write `L` for the distance
+of the first two points, `w` for the third point's distance from their line (no point lies farther
+from it), `t` for the farthest point's distance from the triangle's plane, `c` for Jolt's coplanar
+distance `3 · FLT_EPSILON · (max |x| + max |y| + max |z|)` (`DetermineCoplanarDistance`), and `T` for
+`max(1e-3 m, c)`, the tolerance the builder uses (`ConvexHullShapeSettings::mHullTolerance` is 1 mm).
+The constructor refuses:
+
+- fewer than 4 points: Jolt accepts 3, but a triangle has no volume;
+- `|(p1 - p) × (p2 - p)|² < 1e-12` for every third point `p`, Jolt's `cMinTriangleAreaSq`, as
+  `Degenerate`;
+- `w · T < 0.25 · L · c` as `Degenerate`: rounding a position by about `c` tilts a face built
+  across the width by `c / w` and moves it by `L · c / w` at the far end, which must stay well inside
+  the tolerance;
+- `t < 200 · c` as `Coplanar`. Jolt itself builds a flat hull of two faces up to `6 · c`
+  (`cCoplanarSlopFactor`), which gives a dynamic body zero mass, and asserts on slabs a little
+  thicker.
+
+The two last bounds are measured, not derived. In an asserts build, 37 440 near-line and
+near-plane clouds (lengths 0.1 to 1900 m, 5 to 200 points, up to 900 m from the origin) asserted
+396 times. The 395 needles among them asserted at `ConvexHullBuilder.cpp:641`
+(`edges.size() >= 3`), all with `w · T / (L · c)` at most 0.052, so the needle bound keeps a factor
+of about 5; the slab bound refuses the other one. Slabs asserted up to `t / c = 10.9`, and a
+seeded run found one cloud of 279 points on a sphere of radius 0.047 m about 1 km from the origin
+that asserted at `t / c = 60.3` (`ConvexHullBuilder.cpp:779`, `IsFacing`); the slab bound keeps a
+factor of about 3 over it. With both bounds in place, 40 000 random clouds of aspect ratios
+1e-7 to 1, sizes 1 mm to 1900 m and offsets up to 1 km, 30 000 compact clouds 5 to 5000 coplanar
+distances wide placed up to 1900 m from the origin, and seeded stress runs with dropped and
+queried bodies, among them well-spread clouds with a nearly collinear spike, a nearly flat cap
+above one face or near copies of their extreme points in shuffled order, built and stepped
+without an assertion.
+
+Near the origin `200 · c` is a fraction of a millimetre (a 2 m plank must be about 0.14 mm thick);
+1.8 km out it is about 0.21 m. Both bounds grow with the distance of the points from the shape
+origin: centre the points on the origin for the thinnest hulls. Near a bound Jolt's `f32`
+arithmetic can differ from the `f64` replay; Jolt then refuses with its own message.
+
+### Clouds the hull builder asserts on
+
+Both bounds measure the builder's initial simplex, while the assertions sit in later steps (the
+horizon of a new point, the facing test of a later face). With the `asserts` feature Jolt's builder
+therefore still aborts on some clouds that pass them, all with many nearly coplanar faces:
+
+- faces sampled densely and moved a few coplanar distances off their planes, as scanned or
+  decimated geometry is: about one in 1000 such boxes with `t / c` between 200 and 1000 asserted,
+  none of 92 000 above 2000, and 1 of 2953 sized like the cones below, at 210;
+- dense flat cones and domes, a rim of hundreds of points a few coplanar distances off its plane
+  under an apex. Sized across 200 to 6000 coplanar distances, 40 of 2958 such caps and domes
+  (1.4 %) asserted, at `t / c` from about 350 to 10 000, and 64 of 2997 far cones moved to the
+  origin by the caller (2.1 %), from about 280 to 7700.
+
+They abort at `ConvexHullBuilder.cpp:1220`
+(`e->mNeighbourEdge->mFace != other_edge->mNeighbourEdge->mFace`), `:779` (`IsFacing`) or `:858`,
+from `t / c` of about 210. No slab bound separates them from good clouds: one above `1e5 · c` would
+refuse a 2 m plank thinner than 7 cm near the origin. This is a limit of the `asserts` feature.
+
+Without it Jolt refuses most of these clouds itself with "Hull building failed"
+(`ShapeError::Rejected`) and builds a hull from the rest: of the 105 clouds that asserted in the
+sizing run above, 92 were refused and 13 built. `hull_shapes.rs` checks six refused and two
+built ones. The seeded stress, which runs with asserts too, draws sparse clouds only.
+Recentring a far cloud does not move it out of the second group: the cloud keeps the rounding of
+its far coordinates, about a twentieth of its coplanar distance there, and at the origin that
+rounding is several coplanar distances of the moved cloud.
+
+Jolt also refuses, in every build, about one cloud in eight of densely sampled boxes whose faces are
+noisy by up to 10 coplanar distances, with "Hull building failed": thin out scanned or decimated
+clouds, or snap their faces.
+
+Jolt keeps at most 256 vertices of a hull (`cMaxPointsInHull`) and drops the points inside it. It
+reduces the convex radius until twice the radius fits the hull's thinnest direction and its
+sharpest edges (`ConvexHullShape.cpp:269-345`).
+
+### Thin dynamic hulls on a floor
+
+Observed, under investigation: flat cones 0.4 to 7 cm thick of the families in
+[Clouds the hull builder asserts on](#clouds-the-hull-builder-asserts-on), built without asserts,
+do not come to rest as dynamic bodies dropped onto a box floor, whether or not they assert with
+asserts. After 2 s they still sink at about 0.3 to 0.6 m/s, with their origin about 7 cm below the floor's
+top (1.4 m in one case).
+
+## Triangle meshes
+
+`Shape::new_mesh` checks every vertex, referenced or not, against `MAX_SHAPE_EXTENT`, and every
+index against the vertex count, because Jolt's clean-up reads `vertices[index]` without a check
+(`MeshShapeSettings::Sanitize`, `Collision/Shape/MeshShape.cpp:94-111`). Vertex and triangle counts
+are at most `i32::MAX`, the index type of Jolt's clean-up and edge search. A mesh's local bounds
+are those of its referenced vertices, so the extent bound applies to the vertices themselves.
+
+Jolt stores the vertices quantized to 21 bits over the bounds of the triangles it keeps, with one
+step per axis (`TriangleCodecIndexed8BitPackSOA4Flags`), and, when it collides a triangle, scales it
+and transforms it into the convex shape's space in `f32` (`CollideConvexVsTriangles::Collide`). Its
+collision then asserts when the triangle's cross product `(v1 - v0) × (v2 - v0)` is shorter than
+1e-6 (`IsNearZero` in `Geometry/EPAPenetrationDepth.h:113`; Jolt's comment there blames slivers).
+The constructor therefore drops a triangle, and reports it in `DroppedTriangles`, unless twice its
+area is at least `1e-5 + 2 · Δ`, where `Δ` bounds how much the cross product can shrink:
+
+- each corner can move by the quantization step on each axis (the bounds' side on that axis over
+  `2^21 - 1`), plus `4 · FLT_EPSILON` times the triangle's largest distance from the shape origin
+  (the `f32` rounding of the transform), plus `FLT_EPSILON` times the convex extent and the
+  triangle's longest edge (the rounding of the result in the convex shape's space, see
+  [Convex shapes against meshes](#convex-shapes-against-meshes)); an edge moves by twice that;
+- with edges `ab`, `ac` from one corner moved by `e1`, `e2`, the cross product's length is at
+  least its component along the unmoved unit normal `n`, which changes by `e2 · (n × ab) + e1 ·
+  (ac × n) + n · (e1 × e2)`. The first two terms are bounded per axis, the third by `|e1| |e2|`.
+  The cross product is the same from every corner, so the smallest of the three corners' bounds
+  holds, and the rule does not depend on the order of a triangle's corners. Jolt's `f32` cross
+  product adds `2 · FLT_EPSILON · |ab| |ac|` for the corner where that is largest.
+
+Moves within the triangle's plane across an edge shrink it; moves along an edge or out of the plane
+do not, so a thin strip keeps its width wherever the quantization along its narrow direction is
+fine. With the default convex extent a right triangle with legs of 3.8 mm near the origin is kept
+and one with legs of 3.7 mm dropped. A strip 1 m long near the origin, made of two triangles split
+along either diagonal, is kept from 0.54 mm wide along the axes and from 0.93 mm in the worst of
+2000 seeded orientations; a single triangle with its apex at mid-length needs the same. In a level mesh with one triangle 1500 m out along x, the x step is 0.7 mm and
+the z step 5 µm: a 1 m by 2 mm strip is kept when its 2 mm lie along z and dropped when they lie
+along x. Triangles that fail the rule without any quantization are left out of the bounds first;
+they are dropped either way, and a far degenerate triangle then does not coarsen the grid for the
+others.
+
+Every triangle that survives keeps the same rule under Jolt's actual bounds, which are those of the
+surviving triangles and so no larger, so Jolt's own clean-up only drops duplicates (keeping one
+copy). The seeded stress (`tests/shape_stress.rs`), which found `EPAPenetrationDepth.h:113` with
+sliver soups, includes level-like grids carrying strips 1 µm to 1 cm wide next to far triangles
+along x, along z or below (a quarter of them at the origin, where the thinnest strips are kept),
+drops its probes onto every such mesh and overlaps it with a box as large as the default convex
+extent, the mesh near one of the box's bottom corners. Without the convex shape's term it hits the
+assertion at its normal size.
+
+## Convex shapes against meshes
+
+Jolt collides a triangle in the convex shape's centre-of-mass space
+(`CollideConvexVsTriangles.cpp:43-48`) and goes on only with triangles whose bounds overlap the
+convex shape's local bounds grown by the query's separation distance. There every coordinate is at
+most the convex extent `E` plus the triangle's longest edge, and the `f32` transform rounds it by
+up to half an ulp: a sliver 1 m long and 14 µm wide near the mesh origin keeps its width in its
+own space and loses it under a box of half extent 300 m, where coordinates near 300 have an ulp of
+31 µm. Half an ulp is at most `FLT_EPSILON / 2` of the coordinate, so each corner moves by at most
+`FLT_EPSILON / 2 · (E + longest edge)` on each of the convex shape's axes, and by at most `√3` times
+that, under `FLT_EPSILON · (E + longest edge)`, on each of the mesh's. The triangle rule counts
+that per corner, with `E` from `MeshSettings::max_convex_extent`: the largest absolute coordinate of a convex shape's local
+bounds (relative to its centre of mass, after scaling) plus the separation distance of a collide
+query. Bodies collide with Jolt's 0.02 m speculative contact distance, characters with their
+predictive contact distance; compound children count one by one. The sphere is collided in the
+mesh's space instead (`CollideSphereVsTriangles`), which the rule covers too. Shape casts keep the
+triangle in the mesh's space (`CastConvexVsTriangles`).
+
+The default `E = 1100 m` is the largest round extent at which the rule keeps a strip 1 m long and
+1 mm wide, made of two triangles, near the mesh origin in every one of 2000 seeded orientations:
+along the axes it is kept up to about 2050 m, turned the worst way up to about 1175 m. That is
+below `MAX_SHAPE_EXTENT`, so a convex shape whose bounds reach beyond 1100 m from its centre (a
+box of half extent above 1100 m, or above 1099.98 m for a body, whose 0.02 m speculative distance
+counts) can meet a triangle the rule kept for 1100 m and trip `EPAPenetrationDepth.h:113` in an
+asserts build, or get a distorted contact in a release one. A mesh that must collide with such
+shapes needs a larger `max_convex_extent`, up to `2 · MAX_SHAPE_EXTENT`, and keeps only thicker
+triangles. Near the origin the thinnest 1 m strip kept is:
+
+| `E` | along the axes | worst orientation |
+|---|---|---|
+| 750 m | 0.37 mm | 0.64 mm |
+| 1100 m (default) | 0.54 mm | 0.93 mm |
+| 2000 m | 0.97 mm | 1.7 mm |
+| 4000 m | 1.9 mm | 3.3 mm |
+
+A mesh keeps the extent it was built with, and `Shape::scaled` checks its triangles for that
+extent.
+
+In an asserts build the thinnest sliver the rule keeps (to 1 %) rests under boxes of half extent
+300 and 1100 m with the default and 1500 and 2000 m with an extent of 2000 m, queried in three
+orientations and as a heavy body (`the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent`).
+With the convex term scaled by 0.25 or 0.1 Jolt finds no contact with the sliver in that test, and
+at 0 it asserts. In seeded sweeps of the thinnest kept slivers lying along a convex shape's axes,
+about 35 000 cases with convex shapes as large as the 1100 m default and 1.8 and 3 times larger
+asserted nothing. With a mesh built for 110 m, convex shapes 2, 3, 5 and 7 times larger asserted
+nothing in 10 000 cases each, and 10 times larger asserted in 9 of 10 seeds of 2000 cases: the
+margin is about 7. At the default no factor above about 3.6 can be built: a convex shape's extent
+stops at 2000 m plus a separation distance of at most 2000 m.
+
+## Scaled shapes
+
+`Shape::scaled` adds no numeric bound of its own on the scale. Jolt checks the rest
+(`Shape::IsValidScale`, `ScaleHelpers.h`): every component at least `1e-6` in absolute value, uniform
+within a squared tolerance of `1e-8` for spheres, capsules and tapered capsules (an absolute
+tolerance, so very small scales count as uniform), uniform in X and Z for cylinders and tapered
+cylinders, and for a compound a scale each rotated child can take on its own axes. Jolt lets NaN and
+infinity through, so the constructor checks that the components are finite first.
+
+What the scale can break is checked on the result: the scaled bounds against `MAX_SHAPE_EXTENT`,
+the scaled centre of mass (bounds are relative to it, and a compound's centre of mass moves with the
+scale) against the same bound, and every stored triangle of a mesh or heightfield inside the shape
+against the triangle rule of [Triangle meshes](#triangle-meshes), for the convex extent the mesh was
+built with (the default for a heightfield) and without its quantization term (the stored triangles
+are quantized already). A refusal is `ShapeError::ThinTriangles`, which names the scale and the
+extent. The coordinates
+checked are the ones Jolt rounds: a mesh's own stored coordinates times the scale accumulated above
+it, turned by the rotations above it. Jolt
+folds compound child positions, rotated-translated positions and centre-of-mass offsets into the
+transform it applies afterwards (`ScaledShape`, `RotatedTranslatedShape`, `OffsetCenterOfMassShape`
+and `CompoundShape` collision dispatch), so they move a triangle without changing its rounding: a
+mesh built 1000 m from its own origin keeps the rounding of 1000 m coordinates however far an offset
+moves its centre of mass, and a small mesh at its origin keeps its precision when the centre of mass
+is far away. Mass and inertia scale with the shape and go through the mass range and the
+[rigid body inertia](#rigid-body-inertia) floor when a moving body is created; a static body
+computes no mass. A diagonal inertia must have positive moments: Jolt's `MassProperties::Scale`
+rebuilds the diagonal from differences that can round below zero for thin shapes.
+
+## Tapered shapes
+
+A tapered capsule is a sphere when Jolt's `TaperedCapsuleShapeSettings::IsSphere` holds,
+`max(t, b) >= 2h + min(t, b)` (`Collision/Shape/TaperedCapsuleShape.cpp:32-35`); the constructor
+evaluates it in `f32` exactly as Jolt does (`2h` is exact, so one rounding each side) and refuses
+it. Jolt then computes `sinα = d / ((h + d/2) - (-h + d/2))` with `d = b - t`
+(`TaperedCapsuleShape.cpp:117-124`) and asserts `|sinα| <= 1`. With `|d/2| <= h` the denominator is at
+least `2h (1 - 3u)` and the quotient grows by at most `(1 + u)`, `u = 2^-24`, so any
+`|d| <= 2h (1 - 4u)` keeps `|sinα| <= 1`; the constructor requires `|d| <= 2h (1 - 2^-21)`, which is
+`2h (1 - 8u)`.
+
+A tapered cylinder's centre of mass divides by `t² + t·b + b²` (`TaperedCylinderShape.cpp:108-123`).
+The constructor requires the larger radius to be at least `2^-63` m, about 1.08e-19 m, so that sum
+is at least `2^-126`, a normal `f32`. Equal radii make Jolt build a plain cylinder; the constructor
+refuses them and points to the cylinder constructor. One radius may be 0, a cone. The shape's
+bounds count from its centre of mass, a quarter of the height above a cone's base, so a cone may be
+half as tall as `2 · MAX_SHAPE_EXTENT`.
+
+Three seeded stress runs of 10 000 cases each around both boundaries (tapers within 1e-8 of the sphere
+case, radius ratios down to 1e-6, larger radii down to 1e-20 m) created, dropped and stepped them
+without an assertion.
+
 ## Accelerations
 
 `MAX_ACCELERATION` is `MAX_LINEAR_VELOCITY / PhysicsWorld::MIN_DELTA_TIME`, about 5e8 m/s². A larger

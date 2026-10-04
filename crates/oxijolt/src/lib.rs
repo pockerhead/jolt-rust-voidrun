@@ -33,8 +33,9 @@
 //! ```
 //!
 //! # What a world holds
-//! - Rigid bodies of box, sphere, cylinder, capsule, heightfield and compound [`Shape`]s, with
-//!   [`PhysicsMaterial`]s that carry the caller's user data.
+//! - Rigid bodies of box, sphere, cylinder, capsule, tapered capsule and cylinder, convex hull,
+//!   triangle mesh, heightfield, compound and scaled [`Shape`]s, with [`PhysicsMaterial`]s that
+//!   carry the caller's user data.
 //! - Scene queries on `&PhysicsWorld`: [`PhysicsWorld::cast_ray`], [`PhysicsWorld::cast_shape`]
 //!   and [`PhysicsWorld::collide_shape`], filtered by [`QueryFilter`].
 //! - Virtual characters: [`PhysicsWorld::create_character`].
@@ -189,8 +190,9 @@ pub use constraint::{
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, ConstraintError, ContactSettingsError, QueryError, RagdollError,
-    ShapeError, SoftBodyError, StateError, StepError, VehicleError, WorldError,
+    BodyError, CharacterError, ConstraintError, ContactSettingsError, HullError, MeshError,
+    QueryError, RagdollError, ShapeError, SoftBodyError, StateError, StepError, ThinTrianglesError,
+    VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
@@ -207,7 +209,10 @@ pub use ragdoll::{
     JointReading, JointTransform, RagdollId, RagdollJoint, RagdollMut, RagdollPart, RagdollRef,
     RagdollSettings, SettleDetector, Skeleton, SkeletonJoint, SkeletonPose,
 };
-pub use shape::{CompoundChild, CompoundSubShape, HeightFieldSettings, Shape, SubShapeId};
+pub use shape::{
+    CompoundChild, CompoundSubShape, DroppedTriangles, HeightFieldSettings, MeshBuildQuality,
+    MeshSettings, Shape, SubShapeId,
+};
 pub use soft_body::{
     LongRangeAttachment, SoftBodyBendType, SoftBodyDihedralBend, SoftBodyEdge, SoftBodyMut,
     SoftBodyRef, SoftBodySettings, SoftBodySharedSettings, SoftBodySharedSettingsBuilder,

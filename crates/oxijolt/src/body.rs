@@ -204,6 +204,14 @@ pub(crate) const LINEAR_DAMPING_RULE: &str = "linear damping must be finite and 
 /// What Jolt asks of a shape that `Shape::MustBeStatic` reports.
 pub(crate) const STATIC_SHAPE_RULE: &str = "this shape can only be used by static bodies";
 
+/// Why a dynamic body cannot use a mesh: a mesh has no volume, so Jolt computes no mass or
+/// inertia for it.
+pub(crate) const MESH_DYNAMIC_RULE: &str = "mesh shapes cannot be used by dynamic bodies";
+
+/// Why a kinematic body with a mesh needs [`BodySettings::mass`]: Jolt computes a zero mass for
+/// a mesh, and a kinematic body's motion properties need a positive one.
+pub(crate) const KINEMATIC_MESH_MASS_RULE: &str = "a kinematic body with a mesh shape needs a mass";
+
 impl BodySettings {
     /// A dynamic body in [`ObjectLayer::MOVING`]; the same as [`Default`].
     pub fn new_dynamic() -> Self {
@@ -303,6 +311,9 @@ impl BodySettings {
     /// inertia is computed from the shape and scaled to this mass (Jolt
     /// `EOverrideMassProperties::CalculateInertia`).
     /// By default Jolt computes mass and inertia from the shape with a density of 1000 kg/m³.
+    /// A kinematic body whose shape contains a mesh needs this override: Jolt computes no mass
+    /// for a mesh. A body of a mesh alone has zero inertia, for which Jolt uses that of a unit
+    /// sphere; a compound keeps the inertia of its other children.
     ///
     /// [`PhysicsWorld::create_body`]: crate::PhysicsWorld::create_body
     #[must_use]
@@ -451,8 +462,13 @@ pub(crate) fn has_finite_inverse(properties: &JPH_MassProperties) -> bool {
         let diagonal = [x.x, y.y, z.z];
         let length_sq: f32 = diagonal.iter().map(|value| value * value).sum();
         // Jolt `Vec3::IsNearZero` (squared length at most 1e-12) selects the unit-sphere
-        // fallback.
-        return length_sq <= 1.0e-12 || diagonal.iter().all(|value| (1.0 / value).is_finite());
+        // fallback. Otherwise every moment must be positive, as the non-diagonal path requires:
+        // Jolt's `MassProperties::Scale` rebuilds the diagonal from differences that can round
+        // below zero for thin shapes.
+        return length_sq <= 1.0e-12
+            || diagonal
+                .iter()
+                .all(|&value| value > 0.0 && (1.0 / value).is_finite());
     }
     limits::is_rigid_body_inertia(tensor.map(|row| row.map(f64::from)))
 }

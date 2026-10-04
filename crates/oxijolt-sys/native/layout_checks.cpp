@@ -20,6 +20,7 @@
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/CollectFacesMode.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeID.h>
 #include <Jolt/Physics/Constraints/Constraint.h>
@@ -82,6 +83,20 @@ OXIJOLT_SYS_ASSERT_LAYOUT(JPH_RayCastResult, 12, 4);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_RayCastResult, bodyID, 0);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_RayCastResult, fraction, 4);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_RayCastResult, subShapeID2, 8);
+
+// Mesh triangles. joltc and the extension copy JPH_IndexedTriangle field by field
+// (JPH_MeshShapeSettings_Create2/_Create3), so only the C ABI is pinned here.
+OXIJOLT_SYS_ASSERT_LAYOUT(JPH_IndexedTriangle, 20, 4);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_IndexedTriangle, i1, 0);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_IndexedTriangle, i2, 4);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_IndexedTriangle, i3, 8);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_IndexedTriangle, materialIndex, 12);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_IndexedTriangle, userData, 16);
+static_assert(sizeof(JPH_Mesh_Shape_BuildQuality) == 4, "JPH_Mesh_Shape_BuildQuality: unexpected size");
+static_assert(int(JPH_Mesh_Shape_BuildQuality_FavorRuntimePerformance) == int(JPH::MeshShapeSettings::EBuildQuality::FavorRuntimePerformance),
+              "JPH_Mesh_Shape_BuildQuality_FavorRuntimePerformance");
+static_assert(int(JPH_Mesh_Shape_BuildQuality_FavorBuildSpeed) == int(JPH::MeshShapeSettings::EBuildQuality::FavorBuildSpeed),
+              "JPH_Mesh_Shape_BuildQuality_FavorBuildSpeed");
 
 // Soft body values. joltc copies JPH_SoftVertex and JPH_SoftFace field by field
 // (JPH_SoftBodySharedSettings_AddVertices/_AddFaces), and the extension copies

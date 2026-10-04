@@ -51,7 +51,9 @@ impl<'a> CollideShape<'a> {
     }
 
     /// Also reports obstacles up to `metres` away from the shape, with a negative
-    /// [`CollideShapeHit::penetration_depth`]; finite and not negative. Default 0.
+    /// [`CollideShapeHit::penetration_depth`]; finite and not negative. Default 0. Against a
+    /// mesh it counts toward the convex extent the mesh was built for
+    /// ([`MeshSettings::max_convex_extent`](crate::MeshSettings::max_convex_extent)).
     #[must_use]
     pub fn max_separation_distance(mut self, metres: f32) -> Self {
         self.max_separation_distance = metres;
@@ -159,7 +161,7 @@ impl PhysicsWorld {
     ///
     /// The position must be finite and within [`limits::MAX_POSITION`], the rotation a finite unit
     /// quaternion, the maximum separation distance between 0 and [`limits::MAX_SHAPE_EXTENT`], the
-    /// shape not a heightfield, and the filter valid for this world; otherwise
+    /// shape not a mesh or heightfield, and the filter valid for this world; otherwise
     /// [`QueryError::InvalidValue`] is returned.
     pub fn collide_shape(
         &self,

@@ -9,7 +9,7 @@
 
 use std::fmt;
 
-use crate::{AnyConstraintId, BodyId, CharacterId, ObjectLayer, RagdollId, VehicleId};
+use crate::{AnyConstraintId, BodyId, CharacterId, ObjectLayer, RagdollId, Vec3, VehicleId};
 
 /// Why a [`PhysicsWorld`](crate::PhysicsWorld) could not be created or changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,8 +48,14 @@ pub enum ShapeError {
     InvalidDimensions(&'static str),
     /// A setting other than a dimension is out of range; the payload names it.
     InvalidSettings(&'static str),
-    /// Jolt refused the shape settings (joltc does not pass on Jolt's message).
-    Rejected,
+    /// The points of a convex hull do not span a volume.
+    ConvexHull(HullError),
+    /// A triangle mesh has nothing Jolt can build.
+    Mesh(MeshError),
+    /// A scale leaves mesh or heightfield triangles too thin to collide with.
+    ThinTriangles(ThinTrianglesError),
+    /// Jolt refused the shape settings; the payload is Jolt's message.
+    Rejected(JoltMessage),
     /// joltc returned null.
     AllocationFailed,
 }
@@ -60,13 +66,180 @@ impl fmt::Display for ShapeError {
             Self::InitFailed => f.write_str("Jolt initialisation failed"),
             Self::InvalidDimensions(what) => write!(f, "invalid shape dimensions: {what}"),
             Self::InvalidSettings(what) => write!(f, "invalid shape setting: {what}"),
-            Self::Rejected => f.write_str("Jolt rejected the shape settings"),
+            Self::ConvexHull(error) => write!(f, "invalid convex hull: {error}"),
+            Self::Mesh(error) => write!(f, "invalid triangle mesh: {error}"),
+            Self::ThinTriangles(error) => write!(f, "invalid scale: {error}"),
+            Self::Rejected(message) => write!(f, "Jolt rejected the shape settings: {message}"),
             Self::AllocationFailed => f.write_str("could not create the shape"),
         }
     }
 }
 
 impl std::error::Error for ShapeError {}
+
+/// Why [`Shape::new_convex_hull`](crate::Shape::new_convex_hull) refused its points.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HullError {
+    /// Fewer than 4 points.
+    TooFewPoints,
+    /// The points lie in one spot, on a line, or so close to a line that Jolt's hull builder
+    /// cannot build a reliable hull of them.
+    Degenerate,
+    /// The points lie in one plane, or so close to one that the hull has next to no volume.
+    Coplanar,
+}
+
+impl fmt::Display for HullError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::TooFewPoints => "a convex hull needs at least 4 points",
+            Self::Degenerate => "the points lie on or close to a line",
+            Self::Coplanar => {
+                "the points lie on or close to a plane; thicken the cloud or centre it on the shape origin"
+            }
+        })
+    }
+}
+
+impl std::error::Error for HullError {}
+
+/// Why [`Shape::new_mesh`](crate::Shape::new_mesh) built nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MeshError {
+    /// Every triangle was too small, too thin or degenerate to collide with.
+    NoTriangles,
+}
+
+impl fmt::Display for MeshError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NoTriangles => {
+                "no triangle is left after dropping small, thin and degenerate ones"
+            }
+        })
+    }
+}
+
+impl std::error::Error for MeshError {}
+
+/// Why [`Shape::scaled`](crate::Shape::scaled) refused a scale: a stored triangle of a mesh or
+/// heightfield inside the shape, scaled, would be too thin for Jolt to collide with convex shapes
+/// up to `max_convex_extent`.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct ThinTrianglesError {
+    /// The scale that was refused.
+    pub scale: Vec3,
+    /// The [`MeshSettings::max_convex_extent`](crate::MeshSettings::max_convex_extent) the mesh
+    /// was built with, or its default for a heightfield, metres.
+    pub max_convex_extent: f32,
+}
+
+/// Equal when every value has the same bits, so that the error is `Eq`.
+impl PartialEq for ThinTrianglesError {
+    fn eq(&self, other: &Self) -> bool {
+        let bits = |error: &Self| {
+            [
+                error.scale.x,
+                error.scale.y,
+                error.scale.z,
+                error.max_convex_extent,
+            ]
+            .map(f32::to_bits)
+        };
+        bits(self) == bits(other)
+    }
+}
+
+impl Eq for ThinTrianglesError {}
+
+impl fmt::Display for ThinTrianglesError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Vec3 { x, y, z } = self.scale;
+        write!(
+            f,
+            "mesh or heightfield triangles scaled by ({x}, {y}, {z}) are too thin for convex shapes up to {} m",
+            self.max_convex_extent
+        )
+    }
+}
+
+impl std::error::Error for ThinTrianglesError {}
+
+/// Jolt's diagnostic text for a refused shape, at most [`JoltMessage::CAPACITY`] bytes.
+///
+/// The wording is Jolt's and not a stable format: match on the typed [`ShapeError`] variants
+/// instead of parsing it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct JoltMessage {
+    len: u8,
+    bytes: [u8; JoltMessage::CAPACITY],
+}
+
+impl JoltMessage {
+    /// Most bytes a message keeps. A longer message keeps the words that fit before a
+    /// closing `...`.
+    pub const CAPACITY: usize = 79;
+    /// What ends a message that was cut.
+    const CUT: &'static str = "...";
+
+    /// The message read from a C buffer: the bytes up to the first NUL (all of them when there
+    /// is none), up to their longest valid UTF-8 prefix. A text longer than
+    /// [`CAPACITY`](Self::CAPACITY) is cut after the last whole word that leaves room for
+    /// `...`, or inside the word when there is no space.
+    pub(crate) fn from_c_buffer(buffer: &[u8]) -> Self {
+        let end = buffer
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(buffer.len());
+        let text = &buffer[..end];
+        let (kept, cut) = if text.len() <= Self::CAPACITY {
+            (valid_prefix(text), "")
+        } else {
+            let room = valid_prefix(&text[..Self::CAPACITY - Self::CUT.len()]);
+            let words = room
+                .rfind(' ')
+                .map_or(room, |space| room[..space].trim_end());
+            (words, Self::CUT)
+        };
+        let mut bytes = [0; Self::CAPACITY];
+        bytes[..kept.len()].copy_from_slice(kept.as_bytes());
+        bytes[kept.len()..kept.len() + cut.len()].copy_from_slice(cut.as_bytes());
+        Self {
+            len: (kept.len() + cut.len()) as u8,
+            bytes,
+        }
+    }
+
+    /// The message text.
+    pub fn as_str(&self) -> &str {
+        // `from_c_buffer`, the only constructor, keeps a valid UTF-8 prefix.
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or_default()
+    }
+}
+
+/// The longest prefix of `bytes` that is valid UTF-8.
+fn valid_prefix(bytes: &[u8]) -> &str {
+    let valid = match std::str::from_utf8(bytes) {
+        Ok(_) => bytes.len(),
+        Err(error) => error.valid_up_to(),
+    };
+    std::str::from_utf8(&bytes[..valid]).unwrap_or_default()
+}
+
+impl fmt::Display for JoltMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl fmt::Debug for JoltMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_str(), f)
+    }
+}
 
 /// Why a [`ContactSettings`](crate::ContactSettings) or
 /// [`SoftBodyContactSettings`](crate::SoftBodyContactSettings) setter refused a value, or why

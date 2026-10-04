@@ -9,6 +9,7 @@ pub mod jobs;
 pub mod math;
 #[cfg(windows)]
 pub mod memory;
+pub mod meshes;
 pub mod ragdoll;
 pub mod soft_body;
 pub mod vehicle;

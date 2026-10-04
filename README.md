@@ -78,7 +78,7 @@ The full list of what works today, with links to the guides, is in
 - [x] Builds without LLVM; Windows and Linux in CI; prebuilt libraries in releases
 - [x] `glam` and `mint` conversions
 - [x] One-call pose readout, a crate-wide error type, a prelude
-- [ ] Convex hull, triangle mesh, scaled and tapered shapes
+- [x] Convex hull, triangle mesh, scaled and tapered shapes
 - [ ] Body controls: impulses, kinematic moves, activation, sensors, user data, changing shape
       and motion type
 - [x] First release on crates.io and docs.rs
