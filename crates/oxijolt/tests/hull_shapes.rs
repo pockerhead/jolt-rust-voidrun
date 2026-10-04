@@ -154,8 +154,8 @@ fn queries_hit_a_static_hull_from_above() {
 /// Clouds on which Jolt's hull builder asserts in a build with the `asserts` feature
 /// (docs/limits.md#convex-hulls): flat cones with a dense rim a few coplanar distances off its
 /// plane, at the origin or recentred from far out, and a densely sampled noisy box 1.8 km out.
-/// They pass the hull rules.
-const BUILDER_ASSERT_CLOUDS: [(&str, &str); 6] = [
+/// They pass the hull rules. Without asserts Jolt refuses the first six and builds the last two.
+const BUILDER_ASSERT_CLOUDS: [(&str, &str); 8] = [
     (
         "flat_cone_1",
         include_str!("fixtures/hulls/flat_cone_1.txt"),
@@ -180,6 +180,14 @@ const BUILDER_ASSERT_CLOUDS: [(&str, &str); 6] = [
         "far_noisy_box",
         include_str!("fixtures/hulls/far_noisy_box.txt"),
     ),
+    (
+        "built_flat_cone",
+        include_str!("fixtures/hulls/built_flat_cone.txt"),
+    ),
+    (
+        "built_recentred_cone",
+        include_str!("fixtures/hulls/built_recentred_cone.txt"),
+    ),
 ];
 
 /// Points of a fixture: one point per line, three numbers each.
@@ -203,20 +211,25 @@ fn clouds_the_hull_builder_asserts_on_are_refused_or_built_without_asserts() {
         return;
     }
     for (name, text) in BUILDER_ASSERT_CLOUDS {
-        let hull = match Shape::new_convex_hull(&fixture_points(text), 0.0) {
+        let points = fixture_points(text);
+        let hull = match Shape::new_convex_hull(&points, 0.0) {
             Err(ShapeError::Rejected(_)) => continue,
             Ok(hull) => hull,
             Err(error) => panic!("{name}: {error}"),
         };
-        // Whatever Jolt builds is a usable shape.
-        let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
-        add_floor(&mut world);
+        // Whatever Jolt builds is a usable shape: a ray down through the mean of the points,
+        // which lies inside the hull, hits it.
+        let mut world = world(Vec3::ZERO, 1);
         let settings = BodySettings::new_static().position(RVec3::new(0.0, 100.0, 0.0));
-        world.create_body(&hull, &settings).unwrap();
-        let ray = RayCast::new(RVec3::new(0.0, 300.0, 0.0), Vec3::new(0.0, -400.0, 0.0));
-        assert!(
-            world.cast_ray(ray, &QueryFilter::new()).unwrap().is_some(),
-            "{name}"
+        let id = world.create_body(&hull, &settings).unwrap();
+        let count = points.len() as f32;
+        let mean_x = points.iter().map(|p| p.x).sum::<f32>() / count;
+        let mean_z = points.iter().map(|p| p.z).sum::<f32>() / count;
+        let ray = RayCast::new(
+            RVec3::new(mean_x as Real, 300.0, mean_z as Real),
+            Vec3::new(0.0, -400.0, 0.0),
         );
+        let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap();
+        assert_eq!(hit.map(|hit| hit.body), Some(id), "{name}");
     }
 }
