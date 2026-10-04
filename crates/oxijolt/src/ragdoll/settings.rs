@@ -6,8 +6,8 @@ use std::ffi::CString;
 
 use oxijolt_sys::*;
 
-use crate::body::{has_finite_inverse, mass_properties, CreationSettings, INERTIA_RULE, MASS_RULE};
-use crate::limits;
+use crate::body::{has_finite_inverse, mass_properties, CreationSettings, INERTIA_RULE};
+use crate::limits::{self, MASS_RULE};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
 use crate::{

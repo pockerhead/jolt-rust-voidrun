@@ -912,6 +912,9 @@ fn transpose(a: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     std::array::from_fn(|i| std::array::from_fn(|j| a[j][i]))
 }
 
+/// What a caller-given position must satisfy ([`is_in_frame`]).
+pub(crate) const POSITION_RULE: &str = "position must be finite and within limits::MAX_POSITION";
+
 /// Whether every component of `position` is at most [`MAX_POSITION`] in absolute value.
 pub(crate) fn is_in_frame(position: RVec3) -> bool {
     [position.x, position.y, position.z]
@@ -946,21 +949,37 @@ pub(crate) fn is_local_distance(distance: f32) -> bool {
     (0.0..=MAX_SHAPE_EXTENT).contains(&distance)
 }
 
+/// What a caller-given linear velocity must satisfy ([`is_linear_velocity`]).
+pub(crate) const LINEAR_VELOCITY_RULE: &str =
+    "linear velocity must be finite and at most limits::MAX_LINEAR_VELOCITY long";
+
 /// Whether `velocity` is finite and Jolt's own length of it at most [`MAX_LINEAR_VELOCITY`].
 pub(crate) fn is_linear_velocity(velocity: Vec3) -> bool {
     velocity.is_finite() && jolt_length(velocity) <= MAX_LINEAR_VELOCITY
 }
+
+/// What a caller-given angular velocity must satisfy ([`is_angular_velocity`]).
+pub(crate) const ANGULAR_VELOCITY_RULE: &str =
+    "angular velocity must be finite and at most limits::MAX_ANGULAR_VELOCITY long";
 
 /// Whether `velocity` is finite and Jolt's own length of it at most [`MAX_ANGULAR_VELOCITY`].
 pub(crate) fn is_angular_velocity(velocity: Vec3) -> bool {
     velocity.is_finite() && jolt_length(velocity) <= MAX_ANGULAR_VELOCITY
 }
 
+/// What a gravity vector must satisfy ([`is_acceleration`]).
+pub(crate) const GRAVITY_RULE: &str =
+    "gravity must be finite and at most limits::MAX_ACCELERATION long";
+
 /// Whether `acceleration` is finite and its length, computed in `f64`, at most
 /// [`MAX_ACCELERATION`].
 pub(crate) fn is_acceleration(acceleration: Vec3) -> bool {
     acceleration.is_finite() && f64_length(acceleration) <= f64::from(MAX_ACCELERATION)
 }
+
+/// What a gravity factor must satisfy ([`is_gravity_factor`]).
+pub(crate) const GRAVITY_FACTOR_RULE: &str =
+    "gravity factor must be finite and within limits::MAX_GRAVITY_FACTOR";
 
 /// Whether `factor` is finite and at most [`MAX_GRAVITY_FACTOR`] in absolute value.
 pub(crate) fn is_gravity_factor(factor: f32) -> bool {
@@ -971,6 +990,10 @@ pub(crate) fn is_gravity_factor(factor: f32) -> bool {
 pub(crate) fn is_contact_scale(scale: f32) -> bool {
     scale == 0.0 || (MIN_CONTACT_SCALE..=1.0).contains(&scale)
 }
+
+/// What a body friction must satisfy ([`is_friction`]).
+pub(crate) const FRICTION_RULE: &str =
+    "friction must be finite and between 0 and limits::MAX_FRICTION";
 
 /// Whether `friction` is finite and within `0..=MAX_FRICTION`.
 pub(crate) fn is_friction(friction: f32) -> bool {
@@ -983,6 +1006,9 @@ pub(crate) fn is_friction(friction: f32) -> bool {
 pub(crate) fn is_weight_impulse(mass: f32, gravity: Vec3, delta_time: f32) -> bool {
     f64::from(mass) * f64_length(gravity) * f64::from(delta_time) <= f64::from(MAX_WEIGHT_IMPULSE)
 }
+
+/// What a dynamic body's mass must satisfy ([`is_mass`]).
+pub(crate) const MASS_RULE: &str = "mass must be between limits::MIN_MASS and limits::MAX_MASS";
 
 /// Whether `mass` is finite and within `MIN_MASS..=MAX_MASS`.
 pub(crate) fn is_mass(mass: f32) -> bool {

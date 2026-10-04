@@ -1,6 +1,6 @@
 use super::shared::{is_edge_length, EDGE_LENGTH_RULE, TOTAL_MASS_RULE, VERTEX_INVERSE_MASS_RULE};
 use super::*;
-use crate::body::LINEAR_VELOCITY_RULE;
+use crate::limits::LINEAR_VELOCITY_RULE;
 use crate::owned::Owned;
 use crate::world::ensure_initialized;
 use crate::{ObjectLayer, Quat, RVec3};

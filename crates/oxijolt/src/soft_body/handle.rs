@@ -9,11 +9,12 @@ use oxijolt_sys::*;
 use super::settings::creation_settings;
 use super::shared::{vertex_mass, INERTIA_RULE, TOTAL_MASS_RULE, VERTEX_INVERSE_MASS_RULE};
 use super::{SoftBodySettings, SoftBodySharedSettings};
-use crate::body::{with_locked_body, with_read_locked_body, INVALID_BODY_ID, LINEAR_VELOCITY_RULE};
+use crate::body::{with_locked_body, with_read_locked_body, INVALID_BODY_ID};
 use crate::limits::{
     self, is_in_frame, is_linear_velocity, is_soft_body_force, is_soft_body_inertia,
-    is_soft_body_pressure, is_vertex_inverse_mass, SoftBodyMassDistribution,
+    is_soft_body_pressure, is_vertex_inverse_mass, SoftBodyMassDistribution, LINEAR_VELOCITY_RULE,
 };
+use crate::world::DELTA_TIME_RULE;
 use crate::{BodyError, BodyId, PhysicsWorld, RVec3, Real, Vec3};
 
 impl PhysicsWorld {
@@ -392,7 +393,7 @@ impl SoftBodyMut<'_> {
         )?;
         require_body(
             PhysicsWorld::is_valid_delta_time(delta_time),
-            "delta time must be one that PhysicsWorld::step accepts",
+            DELTA_TIME_RULE,
         )?;
         let (positions, _, inverse_masses) = self.arrays();
         self.check_index(index, positions.len())?;

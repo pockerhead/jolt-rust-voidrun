@@ -7,11 +7,12 @@ use std::ptr::NonNull;
 use oxijolt_sys::*;
 
 use super::load::{length, point_torque, read_load, require, soft_body_force, sum, Load};
-use super::{
-    with_locked_body, with_read_locked_body, Activation, BodyId, MotionType, ANGULAR_VELOCITY_RULE,
-    LINEAR_VELOCITY_RULE,
+use super::{with_locked_body, with_read_locked_body, Activation, BodyId, MotionType};
+use crate::limits::{
+    self, is_angular_velocity, is_in_frame, is_linear_velocity, ANGULAR_VELOCITY_RULE,
+    LINEAR_VELOCITY_RULE, POSITION_RULE,
 };
-use crate::limits::{self, is_angular_velocity, is_in_frame, is_linear_velocity};
+use crate::math::ROTATION_RULE;
 use crate::{BodyError, PhysicsWorld, Quat, RVec3, Vec3};
 
 /// Read access to one body, borrowed from its world.
@@ -148,9 +149,6 @@ impl<'w> Deref for BodyMut<'w> {
     }
 }
 
-/// What a caller-given body position must satisfy.
-const POSITION_RULE: &str = "position must be finite and within limits::MAX_POSITION";
-
 impl BodyMut<'_> {
     /// Moves the body origin to `position`, every component at most [`limits::MAX_POSITION`] in
     /// absolute value.
@@ -180,10 +178,7 @@ impl BodyMut<'_> {
         rotation: Quat,
         activation: Activation,
     ) -> Result<(), BodyError> {
-        require(
-            rotation.is_valid_rotation(),
-            "rotation must be a finite unit quaternion",
-        )?;
+        require(rotation.is_valid_rotation(), ROTATION_RULE)?;
         let mut rotation = rotation.to_jph();
         // SAFETY: as in `set_position`.
         unsafe {
@@ -206,10 +201,7 @@ impl BodyMut<'_> {
         activation: Activation,
     ) -> Result<(), BodyError> {
         require(is_in_frame(position), POSITION_RULE)?;
-        require(
-            rotation.is_valid_rotation(),
-            "rotation must be a finite unit quaternion",
-        )?;
+        require(rotation.is_valid_rotation(), ROTATION_RULE)?;
         let position = position.to_jph();
         let rotation = rotation.to_jph();
         // SAFETY: as in `set_position`.

@@ -23,12 +23,11 @@ use std::ptr::NonNull;
 use oxijolt_sys::*;
 
 use crate::body::with_locked_body;
-use crate::body::{ANGULAR_VELOCITY_RULE, LINEAR_VELOCITY_RULE};
 use crate::constraint::SixDofConstraintAxis;
-use crate::limits;
+use crate::limits::{self, ANGULAR_VELOCITY_RULE, LINEAR_VELOCITY_RULE};
 use crate::math::{jolt_angular_velocity, jolt_product, jolt_rotate};
 use crate::owned::{JoltObject, Owned};
-use crate::world::{advance_structure_epoch, WorldTag};
+use crate::world::{advance_structure_epoch, WorldTag, DELTA_TIME_RULE};
 use crate::{Activation, BodyId, MotionType, PhysicsWorld, Quat, RVec3, RagdollError, Real, Vec3};
 
 use settings::JointKind;
@@ -390,9 +389,7 @@ impl RagdollMut<'_> {
     ) -> Result<(), RagdollError> {
         self.validate(pose)?;
         if !PhysicsWorld::is_valid_delta_time(delta_time) {
-            return Err(RagdollError::InvalidValue(
-                "delta time must be finite and between MIN_DELTA_TIME and MAX_DELTA_TIME",
-            ));
+            return Err(RagdollError::InvalidValue(DELTA_TIME_RULE));
         }
         for (index, &id) in self.entry.bodies.iter().enumerate() {
             let rotation = pose.joints[index].rotation;

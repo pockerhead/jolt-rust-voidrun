@@ -10,9 +10,9 @@ use oxijolt_sys::*;
 
 use super::{
     has_finite_inverse, mass_properties, with_locked_body, BodyId, BodyMut, BodyRef, BodySettings,
-    CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID, MASS_RULE,
+    CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID,
 };
-use crate::limits::is_mass;
+use crate::limits::{is_mass, MASS_RULE};
 use crate::owned::Owned;
 use crate::{BodyError, PhysicsWorld, Shape, Vec3};
 

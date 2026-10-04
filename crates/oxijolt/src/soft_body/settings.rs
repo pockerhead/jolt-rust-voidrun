@@ -5,7 +5,7 @@ use oxijolt_sys::*;
 use super::SoftBodySharedSettings;
 use crate::body::Activation;
 use crate::limits::{self, is_friction, is_gravity_factor, is_in_frame, is_local_distance};
-use crate::math::is_finite_non_negative;
+use crate::math::{is_finite_non_negative, ROTATION_RULE};
 use crate::owned::{JoltObject, Owned};
 use crate::{BodyError, ObjectLayer, Quat, RVec3};
 
@@ -207,14 +207,8 @@ impl SoftBodySettings {
                 Err(BodyError::InvalidValue(what))
             }
         };
-        check(
-            is_in_frame(self.position),
-            "position must be finite and within limits::MAX_POSITION",
-        )?;
-        check(
-            self.rotation.is_valid_rotation(),
-            "rotation must be a finite unit quaternion",
-        )?;
+        check(is_in_frame(self.position), limits::POSITION_RULE)?;
+        check(self.rotation.is_valid_rotation(), ROTATION_RULE)?;
         check(
             (1..=Self::MAX_ITERATIONS).contains(&self.num_iterations),
             "iterations must be within 1..=SoftBodySettings::MAX_ITERATIONS",
@@ -232,17 +226,14 @@ impl SoftBodySettings {
             (0.0..=1.0).contains(&self.restitution),
             "restitution must be between 0 and 1",
         )?;
-        check(
-            is_friction(self.friction),
-            "friction must be finite and between 0 and limits::MAX_FRICTION",
-        )?;
+        check(is_friction(self.friction), limits::FRICTION_RULE)?;
         check(
             (0.0..=limits::MAX_SOFT_BODY_PRESSURE).contains(&self.pressure),
             "pressure must be finite and within 0..=limits::MAX_SOFT_BODY_PRESSURE",
         )?;
         check(
             is_gravity_factor(self.gravity_factor),
-            "gravity factor must be finite and within limits::MAX_GRAVITY_FACTOR",
+            limits::GRAVITY_FACTOR_RULE,
         )?;
         check(
             is_local_distance(self.vertex_radius),

@@ -373,13 +373,6 @@ impl<'a> CharacterSettings<'a> {
     }
 }
 
-/// What a caller-given character position must satisfy.
-pub(super) const POSITION_RULE: &str = "position must be finite and within limits::MAX_POSITION";
-
-/// What a caller-given character velocity must satisfy.
-pub(super) const LINEAR_VELOCITY_RULE: &str =
-    "linear velocity must be finite and at most limits::MAX_LINEAR_VELOCITY long";
-
 /// Whether `v` is finite and of unit length within Jolt's `Vec3::IsNormalized` tolerance
 /// (`|length² − 1| <= 1e-5`).
 pub(super) fn is_unit(v: Vec3) -> bool {

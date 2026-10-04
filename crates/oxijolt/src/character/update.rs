@@ -5,14 +5,15 @@ use std::ptr::{null, NonNull};
 
 use oxijolt_sys::*;
 
-use super::settings::POSITION_RULE;
 use super::{
     CharacterEntry, CharacterId, CharacterMut, CharacterRef, CharacterSettings,
     ExtendedUpdateSettings, INVALID_ID,
 };
 use crate::filter::with_query_filters;
-use crate::limits;
+use crate::limits::{self, POSITION_RULE};
+use crate::math::ROTATION_RULE;
 use crate::owned::Owned;
+use crate::world::DELTA_TIME_RULE;
 use crate::{BodyId, CharacterError, PhysicsWorld, Quat, QueryFilter, RVec3, Vec3};
 
 impl PhysicsWorld {
@@ -40,9 +41,7 @@ impl PhysicsWorld {
             return Err(CharacterError::InvalidValue(POSITION_RULE));
         }
         if !rotation.is_valid_rotation() {
-            return Err(CharacterError::InvalidValue(
-                "rotation must be a finite unit quaternion",
-            ));
+            return Err(CharacterError::InvalidValue(ROTATION_RULE));
         }
         let raw = self.next_character_id;
         // Jolt's invalid `CharacterID`.
@@ -266,14 +265,10 @@ impl PhysicsWorld {
         filter: &QueryFilter<'_>,
     ) -> Result<(), CharacterError> {
         if !Self::is_valid_delta_time(delta_time) {
-            return Err(CharacterError::InvalidValue(
-                "delta time must be finite and between MIN_DELTA_TIME and MAX_DELTA_TIME",
-            ));
+            return Err(CharacterError::InvalidValue(DELTA_TIME_RULE));
         }
         if !limits::is_acceleration(gravity) {
-            return Err(CharacterError::InvalidValue(
-                "gravity must be finite and at most limits::MAX_ACCELERATION long",
-            ));
+            return Err(CharacterError::InvalidValue(limits::GRAVITY_RULE));
         }
         settings.validate()?;
         let entry = self.character_entry(id)?;

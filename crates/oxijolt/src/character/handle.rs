@@ -5,9 +5,10 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
-use super::settings::{is_unit, LINEAR_VELOCITY_RULE, POSITION_RULE};
+use super::settings::is_unit;
 use super::{CharacterContact, CharacterId, CharacterState, GroundState, INVALID_ID};
-use crate::limits;
+use crate::limits::{self, LINEAR_VELOCITY_RULE, POSITION_RULE};
+use crate::math::ROTATION_RULE;
 use crate::owned::Owned;
 use crate::{
     BodyId, CharacterError, CompoundSubShape, ObjectLayer, PhysicsWorld, Quat, RVec3, SubShapeId,
@@ -234,9 +235,7 @@ impl CharacterMut<'_> {
     /// Sets the rotation, a finite unit quaternion. Also rotates the inner body.
     pub fn set_rotation(&mut self, rotation: Quat) -> Result<(), CharacterError> {
         if !rotation.is_valid_rotation() {
-            return Err(CharacterError::InvalidValue(
-                "rotation must be a finite unit quaternion",
-            ));
+            return Err(CharacterError::InvalidValue(ROTATION_RULE));
         }
         let rotation = rotation.to_jph();
         // SAFETY: as in `set_position`.

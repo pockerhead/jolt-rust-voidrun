@@ -5,10 +5,9 @@ use std::collections::BTreeMap;
 use oxijolt_sys::*;
 
 use super::{SoftBodyBendType, SoftBodyVertex, SoftBodyVertexAttributes};
-use crate::body::LINEAR_VELOCITY_RULE;
 use crate::limits::{
     self, is_compliance, is_linear_velocity, is_local_offset, is_vertex_inverse_mass,
-    SoftBodyMassDistribution, SoftBodyPressureGeometry,
+    SoftBodyMassDistribution, SoftBodyPressureGeometry, LINEAR_VELOCITY_RULE,
 };
 use crate::math::jolt_length;
 use crate::owned::{JoltObject, Owned};

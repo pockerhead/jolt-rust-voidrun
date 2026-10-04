@@ -8,7 +8,7 @@ use crate::limits::{
     self, is_angular_velocity, is_friction, is_gravity_factor, is_in_frame, is_linear_velocity,
     is_mass,
 };
-use crate::math::is_finite_non_negative;
+use crate::math::{is_finite_non_negative, ROTATION_RULE};
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyError, ObjectLayer, Quat, RVec3, Shape, Vec3};
@@ -347,19 +347,19 @@ impl BodySettings {
     pub(crate) fn validate_values(&self) -> Result<(), BodyError> {
         let invalid = |what| Err(BodyError::InvalidValue(what));
         if !is_in_frame(self.position) {
-            return invalid("position must be finite and within limits::MAX_POSITION");
+            return invalid(limits::POSITION_RULE);
         }
         if !self.rotation.is_valid_rotation() {
-            return invalid("rotation must be a finite unit quaternion");
+            return invalid(ROTATION_RULE);
         }
         if !is_linear_velocity(self.linear_velocity) {
-            return invalid(LINEAR_VELOCITY_RULE);
+            return invalid(limits::LINEAR_VELOCITY_RULE);
         }
         if !is_angular_velocity(self.angular_velocity) {
-            return invalid(ANGULAR_VELOCITY_RULE);
+            return invalid(limits::ANGULAR_VELOCITY_RULE);
         }
         if !is_friction(self.friction) {
-            return invalid("friction must be finite and between 0 and limits::MAX_FRICTION");
+            return invalid(limits::FRICTION_RULE);
         }
         if !(0.0..=1.0).contains(&self.restitution) {
             return invalid("restitution must be between 0 and 1");
@@ -371,25 +371,17 @@ impl BodySettings {
             return invalid("angular damping must be finite and not negative");
         }
         if !is_gravity_factor(self.gravity_factor) {
-            return invalid("gravity factor must be finite and within limits::MAX_GRAVITY_FACTOR");
+            return invalid(limits::GRAVITY_FACTOR_RULE);
         }
         if let Some(mass) = self.mass {
             if !is_mass(mass) {
-                return invalid(MASS_RULE);
+                return invalid(limits::MASS_RULE);
             }
         }
         Ok(())
     }
 }
 
-/// What a caller-given linear velocity must satisfy.
-pub(crate) const LINEAR_VELOCITY_RULE: &str =
-    "linear velocity must be finite and at most limits::MAX_LINEAR_VELOCITY long";
-/// What a caller-given angular velocity must satisfy.
-pub(crate) const ANGULAR_VELOCITY_RULE: &str =
-    "angular velocity must be finite and at most limits::MAX_ANGULAR_VELOCITY long";
-/// What a dynamic body's mass must satisfy.
-pub(crate) const MASS_RULE: &str = "mass must be between limits::MIN_MASS and limits::MAX_MASS";
 /// What the mass properties of a body that is not static must satisfy ([`has_finite_inverse`]).
 pub(crate) const INERTIA_RULE: &str = "mass and shape must give a finite inverse mass and inertia, and an inertia that is not diagonal must meet the rigid body inertia floor of limits";
 

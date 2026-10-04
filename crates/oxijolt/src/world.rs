@@ -61,9 +61,6 @@ fn lock_joltc_globals() -> MutexGuard<'static, ()> {
     GLOBALS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// What world gravity must satisfy.
-const GRAVITY_RULE: &str = "gravity must be finite and at most limits::MAX_ACCELERATION long";
-
 /// Which job system a world runs its jobs on.
 #[derive(Clone)]
 enum JobSystemChoice {
@@ -239,7 +236,7 @@ impl WorldSettings {
             return invalid("temp_allocator_size must be at least 1");
         }
         if !limits::is_acceleration(self.gravity) {
-            return invalid(GRAVITY_RULE);
+            return invalid(limits::GRAVITY_RULE);
         }
         self.layers.validate()
     }
@@ -461,6 +458,10 @@ unsafe impl Send for PhysicsWorld {}
 // settings.
 unsafe impl Sync for PhysicsWorld {}
 
+/// What a step length must satisfy ([`PhysicsWorld::is_valid_delta_time`]).
+pub(crate) const DELTA_TIME_RULE: &str =
+    "delta time must be finite and between MIN_DELTA_TIME and MAX_DELTA_TIME";
+
 impl PhysicsWorld {
     /// Largest time step [`step`](Self::step) accepts, in seconds, inclusive.
     ///
@@ -607,7 +608,7 @@ impl PhysicsWorld {
     /// zero is allowed. Sleeping bodies stay asleep.
     pub fn set_gravity(&mut self, gravity: Vec3) -> Result<(), WorldError> {
         if !limits::is_acceleration(gravity) {
-            return Err(WorldError::InvalidSettings(GRAVITY_RULE));
+            return Err(WorldError::InvalidSettings(limits::GRAVITY_RULE));
         }
         let gravity = gravity.to_jph();
         // SAFETY: the system is live and borrowed mutably; `gravity` is a live local.

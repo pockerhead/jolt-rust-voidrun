@@ -379,9 +379,7 @@ impl VehicleMut<'_> {
     /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_gravity(&mut self, gravity: Vec3) -> Result<(), VehicleError> {
         if !limits::is_acceleration(gravity) {
-            return Err(VehicleError::InvalidValue(
-                "gravity must be finite and at most limits::MAX_ACCELERATION long",
-            ));
+            return Err(VehicleError::InvalidValue(limits::GRAVITY_RULE));
         }
         let gravity = gravity.to_jph();
         // SAFETY: as in `set_driver_input`; `gravity` is a live local.
