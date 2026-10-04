@@ -294,7 +294,9 @@ fn the_walker_row_reproduces_the_reference_near_step_bit_for_bit() {
     }
 }
 
-/// Maintenance, move and post-move displacements add up to each tick's displacement.
+/// Maintenance, move and post-move displacements add up to each tick's displacement, and the
+/// depenetration push is never longer than radius + padding (spec D.2 rule 2), also against the
+/// 0.5 m wall overlap.
 #[test]
 fn tick_reports_account_for_every_displacement() {
     let mut scenes = Scenes::default();
@@ -304,11 +306,13 @@ fn tick_reports_account_for_every_displacement() {
             .into_iter()
             .take(4),
     );
+    let limit = f64::from(RADIUS + 0.02) + 1e-9;
+    let mut longest: f64 = 0.0;
     for config in [Config::spec_d2(), Config::d2_still(), Config::walker()] {
         for case in &cases {
             let scene = scenes.get(case.scene);
-            let run = play(scene, &config, case, case.start, false);
-            for (t, r) in run.reports.iter().enumerate() {
+            let run = play(scene, &config, case, case.start, true);
+            for (t, (r, traced)) in run.reports.iter().zip(&run.traces).enumerate() {
                 let sum = add(add(r.maintenance, r.moving), r.post);
                 let error = norm(sub(sum, sub(r.end, r.start)));
                 assert!(
@@ -317,9 +321,21 @@ fn tick_reports_account_for_every_displacement() {
                     config.name,
                     case.id
                 );
+                let push = norm(traced.q6_push);
+                assert!(
+                    push <= limit,
+                    "{} {}: tick {t} pushed {push}",
+                    config.name,
+                    case.id
+                );
+                longest = longest.max(push);
             }
         }
     }
+    assert!(
+        longest > 0.4,
+        "the deep overlap reaches the push limit: {longest}"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
