@@ -139,8 +139,16 @@ process): with 50 warm-up rounds, four consecutive blocks of 3 000 rounds grew b
 0.19 MB, 0 and 0; this holds with Jolt's thread pool (1 or 4 workers) or a caller job system,
 for empty, populated and stepped worlds, with or without listeners, and spawning and joining a
 thread alone does not grow it. After the plateau, blocks of 6 000 rounds moved between -1.8 MB
-and +0.2 MB. It is the heap settling, not an object per world left behind. The world phase
-therefore warms up for 4 000 rounds and allows 100 bytes per round (600 kB over 6 000 rounds);
-a dropped world that forgot its listeners grew by 7 MB and failed it. A leak of one small native
-object per world (a forgotten `JPH_ContactListener` alone: about 33 bytes per round) stays below
-what the block noise lets this gate resolve.
+and +0.2 MB. It is the heap settling, not an object per world left behind.
+
+The settling also comes late: a single window of 6 000 rounds after 4 000 warm-up rounds grew by
+1.8 MB and 2.0 MB in two CI runs on `windows-latest`. Locally it grew by 1.7 to 1.8 MB in two of
+nine runs, each time inside one block of 1 000 rounds while every other block stayed within
+±210 kB, and another run released 1.8 MB in one block. So each phase measures seven consecutive
+blocks of 1 000 rounds (the world phase after 4 000 warm-up rounds, the replacement phase after
+500) and allows the median block 100 bytes per round (100 kB). A leak grows every block, a heap
+step only one. Against this gate, materials that were never released gave a median of 370 kB per block,
+native contact listeners that were never destroyed 780 kB, and a dropped world that forgot its
+listeners 1.26 MB; each failed it. A leak of one small native object per world (a forgotten
+`JPH_ContactListener` alone: about 33 bytes per round) stays below what the block noise lets this
+gate resolve.
