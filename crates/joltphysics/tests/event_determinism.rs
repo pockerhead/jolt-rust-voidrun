@@ -196,7 +196,8 @@ fn add_cloth(world: &mut PhysicsWorld) -> BodyId {
 }
 
 /// Every event of a step, each written with `Debug`, which prints floats in their shortest
-/// exact form (so equal text means equal bits, `-0.0` apart from `0.0`).
+/// exact form (so equal text means equal bits, `-0.0` apart from `0.0`). `Debug` prints every
+/// NaN alike, so no event may hold one.
 fn record_events(events: &WorldEvents, out: &mut Vec<u8>) {
     let lines = events
         .contacts
@@ -211,6 +212,7 @@ fn record_events(events: &WorldEvents, out: &mut Vec<u8>) {
         )
         .chain(events.soft_body_contacts.iter().map(|e| format!("{e:?}")));
     for line in lines {
+        assert!(!line.contains("NaN"), "{line}");
         out.extend_from_slice(line.as_bytes());
         out.push(b'\n');
     }

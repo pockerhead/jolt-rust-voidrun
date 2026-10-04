@@ -7,14 +7,15 @@ Jolt code paths produce them. Line numbers refer to the vendored Jolt 5.6 source
 
 ## Listeners
 
-A world installs nothing until `set_event_settings` asks for events. It then creates the
-listeners the settings need and attaches them to its Jolt system:
+A world installs nothing until `set_event_settings` asks for events or `set_contact_listener`
+sets a listener. It then creates the native listeners these need and attaches them to its Jolt
+system:
 
 | Listener | Created when | Jolt interface |
 |---|---|---|
-| joltc's `ManagedContactListener` (`joltc.cpp:7923-8037`) | `contacts` | `ContactListener` |
+| joltc's `ManagedContactListener` (`joltc.cpp:7923-8037`) | `contacts`, or a contact listener is set | `ContactListener` |
 | joltc's `ManagedBodyActivationListener` (`joltc.cpp:8040-8095`) | `body_activation` | `BodyActivationListener` |
-| the extension's `ManagedSoftBodyContactListener` (`native/joltc_ext/joltc_ext_listener.cpp`) | `soft_body_contacts` or `soft_body_validations` | `SoftBodyContactListener` |
+| the extension's `ManagedSoftBodyContactListener` (`native/joltc_ext/joltc_ext_listener.cpp`) | `soft_body_contacts` or `soft_body_validations`, or a contact listener is set | `SoftBodyContactListener` |
 
 Each listener type calls one process-global proc table, installed once; per-world state goes
 through the listener's `userData`, which points at a context the world shares with the native
@@ -45,7 +46,9 @@ changes the world or keeps a pointer.
 - Added and Persisted read both bodies' ids (`JPH_Body_GetID`), the manifold through joltc's
   getters (`joltc.cpp:8099-8132`), and each side's material: the body's shape
   (`JPH_Body_GetShape`, which calls Jolt's const `Body::GetShape`) and
-  `Shape::GetMaterial(sub-shape id)`. Jolt does not change a body's shape during a step.
+  `Shape::GetMaterial(sub-shape id)`. Jolt does not change a body's shape during a step. For
+  the checks of the contact settings they also read whether either body is a sensor
+  (`JPH_Body_IsSensor`) and body 1's centre of mass (`JPH_Body_GetCenterOfMassPosition`).
 - Removed reads the four ids of the pair through the extension's `JPH_SubShapeIDPair_*`
   getters, which use Jolt's accessors.
 - Activation records the id Jolt passes; Jolt calls it under its active-bodies mutex.
@@ -104,3 +107,35 @@ Every callback runs its body under `catch_unwind`. The first panic is kept and r
 `take_events` when it happened between steps; later panics of the same update are dropped, also
 when their payload's `Drop` panics. Recording continues after a panic, and the next step works
 normally.
+
+Once a panic is kept, callbacks that start skip the user's `ContactListener` until the panic is
+resumed. A worker that already passed that check, or is inside the listener, finishes its call;
+its settings are still applied when they are valid.
+
+A `ContactListener` can assign a whole `ContactSettings` value it kept from another contact. The
+setters checked that value against the contact it was read for, so the callback checks the
+returned value again, field by field, against the contact it runs for: its sensor bodies and
+the lever of its surface velocity (`docs/limits.md`, "Contact settings"). A value that fails
+is not written to Jolt, which keeps its own settings for that contact, and the refusal is kept
+like a panic, with the message `contact listener settings rejected: <error>`. Without this check
+a kept ordinary value turns a sensor contact into a solid one, which Jolt asserts against
+(`ContactConstraintManager.cpp:915`). The unit test
+`settings_moved_to_a_contact_they_do_not_fit_are_rejected` covers both cases for Added and
+Persisted.
+
+## Leaks
+
+`crates/joltphysics/tests/listener_leaks.rs` measures the process's private bytes over two
+phases: replacing listeners and materials in one world, and creating, stepping and dropping a
+world with listeners, material shapes, bodies and a cloth every round (dropped with its
+listeners attached and its bodies alive). A new world per round grows private bytes by about
+1 to 2 MB over its first few thousand rounds and then stops. Measured locally (one test per
+process): with 50 warm-up rounds, four consecutive blocks of 3 000 rounds grew by 1.8 MB,
+0.19 MB, 0 and 0; this holds with Jolt's thread pool (1 or 4 workers) or a caller job system,
+for empty, populated and stepped worlds, with or without listeners, and spawning and joining a
+thread alone does not grow it. After the plateau, blocks of 6 000 rounds moved between -1.8 MB
+and +0.2 MB. It is the heap settling, not an object per world left behind. The world phase
+therefore warms up for 4 000 rounds and allows 100 bytes per round (600 kB over 6 000 rounds);
+a dropped world that forgot its listeners grew by 7 MB and failed it. A leak of one small native
+object per world (a forgotten `JPH_ContactListener` alone: about 33 bytes per round) stays below
+what the block noise lets this gate resolve.
