@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::math::v3;
+use common::math::{rvec3, v3};
 use common::DT;
 use oxijolt::*;
 
@@ -21,7 +21,7 @@ fn wall_scene() -> (PhysicsWorld, CharacterId) {
     world
         .create_body(
             &wall,
-            &BodySettings::new_static().position(RVec3::new(face + 0.1, 1.0, 0.0)),
+            &BodySettings::new_static().position(rvec3([f64::from(face) + 0.1, 1.0, 0.0])),
         )
         .unwrap();
     let capsule = Shape::new_capsule(HALF_HEIGHT, RADIUS).unwrap();
