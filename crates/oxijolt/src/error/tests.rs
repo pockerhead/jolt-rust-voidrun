@@ -111,7 +111,7 @@ fn shape_error_variants_display_their_payload() {
     );
     assert_eq!(
         ShapeError::Mesh(MeshError::NoTriangles).to_string(),
-        "invalid triangle mesh: no triangle is left after dropping small, thin, degenerate and duplicate ones"
+        "invalid triangle mesh: no triangle is left after dropping small, thin and degenerate ones"
     );
     let message = JoltMessage::from_c_buffer(b"Too few points\0garbage");
     assert_eq!(
@@ -135,20 +135,31 @@ fn jolt_message_reads_up_to_the_nul() {
 }
 
 #[test]
-fn jolt_message_without_nul_is_cut_to_capacity() {
+fn long_jolt_messages_are_cut_after_a_whole_word() {
+    let long = b"Hull building failed, point 1010 had an error of 0.0934095 (relative to tolerance: 0.001)\0";
+    assert_eq!(
+        JoltMessage::from_c_buffer(long).as_str(),
+        "Hull building failed, point 1010 had an error of 0.0934095 (relative to..."
+    );
+    // Without a space the cut falls inside the word.
     let buffer = [b'b'; JoltMessage::CAPACITY + 1];
     let message = JoltMessage::from_c_buffer(&buffer);
     assert_eq!(message.as_str().len(), JoltMessage::CAPACITY);
+    assert!(message.as_str().ends_with("bb..."));
 }
 
 #[test]
-fn jolt_message_drops_a_character_cut_at_the_end() {
-    // 78 ASCII bytes and a two-byte character: the cut at 79 bytes splits the character.
-    let mut buffer = vec![b'c'; JoltMessage::CAPACITY - 1];
-    buffer.extend_from_slice("\u{e9}".as_bytes());
+fn jolt_message_keeps_whole_characters() {
+    // 75 ASCII bytes, a two-byte character and more: the cut 76 bytes in, before `...`,
+    // splits the character, which is dropped.
+    let mut buffer = vec![b'c'; JoltMessage::CAPACITY - 4];
+    buffer.extend_from_slice("\u{e9}tail".as_bytes());
     buffer.push(0);
     let message = JoltMessage::from_c_buffer(&buffer);
-    assert_eq!(message.as_str(), "c".repeat(JoltMessage::CAPACITY - 1));
+    assert_eq!(
+        message.as_str(),
+        format!("{}...", "c".repeat(JoltMessage::CAPACITY - 4))
+    );
     // An invalid byte inside the text keeps the valid part before it.
     assert_eq!(JoltMessage::from_c_buffer(b"ok\xffno\0").as_str(), "ok");
 }

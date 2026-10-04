@@ -103,7 +103,7 @@ impl std::error::Error for HullError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MeshError {
-    /// Every triangle was too small, too thin or degenerate to collide with, or a duplicate.
+    /// Every triangle was too small, too thin or degenerate to collide with.
     NoTriangles,
 }
 
@@ -111,7 +111,7 @@ impl fmt::Display for MeshError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::NoTriangles => {
-                "no triangle is left after dropping small, thin, degenerate and duplicate ones"
+                "no triangle is left after dropping small, thin and degenerate ones"
             }
         })
     }
@@ -119,7 +119,7 @@ impl fmt::Display for MeshError {
 
 impl std::error::Error for MeshError {}
 
-/// Jolt's diagnostic text for a refused shape, truncated to [`JoltMessage::CAPACITY`] bytes.
+/// Jolt's diagnostic text for a refused shape, at most [`JoltMessage::CAPACITY`] bytes.
 ///
 /// The wording is Jolt's and not a stable format: match on the typed [`ShapeError`] variants
 /// instead of parsing it.
@@ -130,26 +130,36 @@ pub struct JoltMessage {
 }
 
 impl JoltMessage {
-    /// Most bytes a message keeps.
+    /// Most bytes a message keeps. A longer message keeps the words that fit before a
+    /// closing `...`.
     pub const CAPACITY: usize = 79;
+    /// What ends a message that was cut.
+    const CUT: &'static str = "...";
 
     /// The message read from a C buffer: the bytes up to the first NUL (all of them when there
-    /// is none), cut to [`CAPACITY`](Self::CAPACITY) bytes and then to the longest valid UTF-8
-    /// prefix.
+    /// is none), up to their longest valid UTF-8 prefix. A text longer than
+    /// [`CAPACITY`](Self::CAPACITY) is cut after the last whole word that leaves room for
+    /// `...`, or inside the word when there is no space.
     pub(crate) fn from_c_buffer(buffer: &[u8]) -> Self {
         let end = buffer
             .iter()
             .position(|&byte| byte == 0)
             .unwrap_or(buffer.len());
-        let text = &buffer[..end.min(Self::CAPACITY)];
-        let valid = match std::str::from_utf8(text) {
-            Ok(_) => text.len(),
-            Err(error) => error.valid_up_to(),
+        let text = &buffer[..end];
+        let (kept, cut) = if text.len() <= Self::CAPACITY {
+            (valid_prefix(text), "")
+        } else {
+            let room = valid_prefix(&text[..Self::CAPACITY - Self::CUT.len()]);
+            let words = room
+                .rfind(' ')
+                .map_or(room, |space| room[..space].trim_end());
+            (words, Self::CUT)
         };
         let mut bytes = [0; Self::CAPACITY];
-        bytes[..valid].copy_from_slice(&text[..valid]);
+        bytes[..kept.len()].copy_from_slice(kept.as_bytes());
+        bytes[kept.len()..kept.len() + cut.len()].copy_from_slice(cut.as_bytes());
         Self {
-            len: valid as u8,
+            len: (kept.len() + cut.len()) as u8,
             bytes,
         }
     }
@@ -159,6 +169,15 @@ impl JoltMessage {
         // `from_c_buffer`, the only constructor, keeps a valid UTF-8 prefix.
         std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or_default()
     }
+}
+
+/// The longest prefix of `bytes` that is valid UTF-8.
+fn valid_prefix(bytes: &[u8]) -> &str {
+    let valid = match std::str::from_utf8(bytes) {
+        Ok(_) => bytes.len(),
+        Err(error) => error.valid_up_to(),
+    };
+    std::str::from_utf8(&bytes[..valid]).unwrap_or_default()
 }
 
 impl fmt::Display for JoltMessage {

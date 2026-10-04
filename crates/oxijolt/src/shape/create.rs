@@ -13,7 +13,8 @@ impl ShapeSettings {
     /// Fails with [`ShapeError::Rejected`] carrying Jolt's message when Jolt refuses the
     /// settings. Jolt caches the result in the settings, so later setters have no effect.
     pub(crate) fn create(&self) -> Result<Shape, ShapeError> {
-        let mut message = [0u8; JoltMessage::CAPACITY + 1];
+        // One byte more than a message keeps, and the NUL: a longer message shows as cut.
+        let mut message = [0u8; JoltMessage::CAPACITY + 2];
         // SAFETY: the settings are live and owned by `self`; every joltc settings type derives
         // from `ShapeSettings` with single inheritance, so the generic handle reaches Jolt's
         // virtual `Create`. `message` is a live buffer of the capacity passed. A returned shape

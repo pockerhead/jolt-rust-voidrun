@@ -278,8 +278,8 @@ impl Shape {
     ///   either, an index beyond `vertices`, or a setting out of range (see [`MeshSettings`]);
     /// - [`ShapeError::InvalidDimensions`]: a vertex (referenced or not) that is not finite or
     ///   has a component beyond [`limits::MAX_SHAPE_EXTENT`] in absolute value;
-    /// - [`ShapeError::Mesh`]: no triangle is left after dropping small, thin, degenerate and
-    ///   duplicate ones;
+    /// - [`ShapeError::Mesh`]: no triangle is left after dropping small, thin and degenerate
+    ///   ones;
     /// - [`ShapeError::Rejected`]: anything else Jolt refuses.
     ///
     /// Building cost grows with the triangle count; see [docs/benchmarks.md] and
