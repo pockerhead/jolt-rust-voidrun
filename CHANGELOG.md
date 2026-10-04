@@ -127,12 +127,13 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - A magnitude policy for the safe API: the public `oxijolt::limits` module holds the bounds
   (positions within `MAX_POSITION`, shape extents, velocities, accelerations, masses, friction,
   spring coefficients, ratios, ...), and the setters of those inputs check them before they reach
-  Jolt. Some inputs, such as damping and ray directions, are only checked to be finite. Some bounds
-  are derived from Jolt's arithmetic (`docs/limits.md`), some paths are covered only by tests at
-  the bounds, and some cases no bound excludes (`docs/coverage.md` lists all three). New checks refuse values that were accepted before, among
-  them `WorldSettings::max_contact_constraints` above `WorldSettings::MAX_CONTACT_CONSTRAINTS`,
-  body friction above `limits::MAX_FRICTION`, a character weight impulse above
-  `limits::MAX_WEIGHT_IMPULSE` and six-DOF translation limits beyond `limits::MAX_SHAPE_EXTENT`.
+  Jolt. Some inputs, such as damping and ray directions, are only checked to be finite.
+  `docs/limits.md` shows how the bounds follow from Jolt's arithmetic; `docs/coverage.md` says
+  which values only tests check and which no bound covers. New checks refuse values that were
+  accepted before, among them `WorldSettings::max_contact_constraints` above
+  `WorldSettings::MAX_CONTACT_CONSTRAINTS`, body friction above `limits::MAX_FRICTION`, a
+  character weight impulse above `limits::MAX_WEIGHT_IMPULSE` and six-DOF translation limits
+  beyond `limits::MAX_SHAPE_EXTENT`.
 - The `asserts` feature of `oxijolt` (forwarded to `oxijolt-sys/asserts`), and Jolt's assertion
   handler: oxijolt installs it before `JPH_Init`; with `asserts` a failed assertion prints its
   expression, message, file and line and aborts the process, except the physics-update-error

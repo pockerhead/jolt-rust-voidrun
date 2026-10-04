@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     motor.set_target_angular_velocity(2.0)?;
     motor.set_motor_state(MotorState::Velocity);
     for _ in 0..60 {
-        world.step(1.0 / 60.0)?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
     }
     let spin = world.body(disc2)?.angular_velocity().z;
     assert!((spin + 1.0).abs() < 0.02);

@@ -19,13 +19,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let saved = world.save_state();
     for _ in 0..60 {
-        world.step(1.0 / 60.0)?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
     }
     let first_run = world.body(ball)?.position();
 
     world.restore_state(&saved)?;
     for _ in 0..60 {
-        world.step(1.0 / 60.0)?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
     }
     assert_eq!(world.body(ball)?.position(), first_run);
     Ok(())
@@ -87,13 +87,14 @@ setters change only poses and velocities, which are saved. A target changed afte
 hinge's target angle, is part of the saved state and is undone.
 
 A setting the caller applies again before every step, such as a vehicle's gravity on a planet,
-replays exactly as long as that gravity is not zero. A vehicle's world up is not saved: every step
-sets it to the opposite of the gravity the vehicle uses, but a zero gravity (world gravity or
-`VehicleMut::set_gravity`) keeps the world up of the step before, so after a restore it is the one
-the abandoned run ended with. A vehicle with a pitch and roll limit
-(`VehicleSettings::max_pitch_roll_angle` below π) in zero gravity then replays differently when that
-run's gravity pointed elsewhere. Jolt has no setter for the world up, so a restore cannot put it
-back.
+replays exactly as long as that gravity is not zero.
+
+A vehicle's world up is not saved, and Jolt has no setter for it, so a restore cannot put it back.
+Each step sets the world up to the opposite of the gravity the vehicle uses (world gravity or
+`VehicleMut::set_gravity`). In zero gravity a step keeps the world up it had. So after a restore
+in zero gravity, the vehicle keeps the world up the abandoned run ended with. If that run had
+gravity in another direction, a vehicle with a pitch and roll limit
+(`VehicleSettings::max_pitch_roll_angle` below π) replays differently.
 
 The wheel contacts a vehicle reports are empty right after a restore until the next step, because
 Jolt clears a wheel's contact body on restore.

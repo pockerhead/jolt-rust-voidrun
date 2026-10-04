@@ -73,12 +73,12 @@ impl PhysicsWorld {
     /// )?;
     ///
     /// let saved = world.save_state();
-    /// world.step(1.0 / 60.0)?;
+    /// assert!(world.step(1.0 / 60.0)?.is_complete());
     /// let after_one_step = world.body(ball)?.position();
     ///
     /// world.restore_state(&saved)?;
     /// assert_eq!(world.body(ball)?.position(), RVec3::new(0.0, 2.0, 0.0));
-    /// world.step(1.0 / 60.0)?;
+    /// assert!(world.step(1.0 / 60.0)?.is_complete());
     /// assert_eq!(world.body(ball)?.position(), after_one_step);
     /// # Ok(())
     /// # }

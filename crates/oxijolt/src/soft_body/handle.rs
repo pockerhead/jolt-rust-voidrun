@@ -75,7 +75,7 @@ impl PhysicsWorld {
     ///     &SoftBodySettings::default().position(RVec3::new(0.0, 2.0, 0.0)),
     /// )?;
     /// for _ in 0..30 {
-    ///     world.step(1.0 / 60.0)?;
+    ///     assert!(world.step(1.0 / 60.0)?.is_complete());
     /// }
     /// let vertices = world.soft_body(id)?.vertices();
     /// assert_eq!(vertices[0].inverse_mass, 0.0);

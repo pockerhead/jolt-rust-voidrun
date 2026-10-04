@@ -33,7 +33,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     for _ in 0..120 {
-        world.step(1.0 / 60.0)?;
+        // A step that had to drop contacts says so; raise a `WorldSettings` limit then.
+        let report = world.step(1.0 / 60.0)?;
+        assert!(report.is_complete(), "{report:?}");
     }
     println!("the ball rests at {:?}", world.body(ball)?.position());
 
@@ -66,19 +68,26 @@ oxijolt = { git = "https://github.com/pockerhead/oxijolt" }
   ([guide](docs/constraints.md)).
 - Soft bodies: cloth, pressurised and volume-preserving bodies, with vertex readout and pinning
   ([guide](docs/soft-bodies.md)).
-- Contact, activation and soft body contact events in a thread-count-independent order, and a
-  contact listener that changes friction, restitution, mass scales or surface velocity per contact
-  ([guide](docs/events.md)).
+- Contact, activation and soft body contact events in an order that does not depend on the
+  thread count, and a contact listener that changes friction, restitution, mass scales or surface
+  velocity per contact ([guide](docs/events.md)).
 - Saving and restoring a world's state for rollback and replays ([guide](docs/state.md)).
 - A floating origin (`PhysicsWorld::rebase`) and optional `f64` world positions.
 - Jolt's jobs on Jolt's thread pool or on your own, such as Rayon ([guide](docs/job-system.md)).
 - Debug wireframes as line data (feature `debug-renderer`); nothing is drawn.
 
-Not in the safe API yet: mesh, convex hull, scaled and tapered shapes. A rigid body cannot yet take
-an impulse, be moved kinematically to a target, be activated or deactivated on demand, be created
-as a sensor, or change its shape or motion type after creation; `oxijolt-sys` has the joltc
-functions for all of them. [docs/coverage.md](docs/coverage.md) lists every bound feature with the
-tests that check it, and the rest of what is not bound yet.
+Not in the safe API yet:
+
+- mesh, convex hull, scaled and tapered shapes;
+- impulses on rigid bodies;
+- moving a kinematic body to a target;
+- activating or deactivating a body on demand;
+- sensor bodies;
+- changing a body's shape or motion type after creation.
+
+The raw layer, `oxijolt-sys`, has the joltc functions for all of them.
+[docs/coverage.md](docs/coverage.md) lists every bound feature with the tests that check it, and
+the rest of what is not bound yet.
 
 ## Status
 
@@ -98,10 +107,10 @@ tests that check it, and the rest of what is not bound yet.
   `StepReport`.
 - **Magnitudes.** Values Jolt checks only with debug assertions (non-finite poses, non-unit
   quaternions, zero dimensions, ids of another world) and magnitudes outside `oxijolt::limits`
-  are refused with a typed error before they reach Jolt. Some bounds are derived from Jolt's
-  arithmetic ([limits](docs/limits.md)), some paths are covered only by tests at the bounds, and
-  some cases no bound excludes; [coverage](docs/coverage.md) lists all three. The `asserts` leg of
-  CI runs every test with Jolt's assertions on.
+  are refused with a typed error before they reach Jolt. Not every accepted value is proven safe:
+  [limits](docs/limits.md) shows how the bounds follow from Jolt's arithmetic, and
+  [coverage](docs/coverage.md) says which values only tests check and which no bound covers. CI
+  also runs every test with Jolt's assertions on.
 - **Determinism.** On one machine the tests get bit-identical results with 1 and 4 worker threads
   and with caller job systems, under Jolt's conditions (same binary, same calls in the same
   order). Across platforms and compilers results agree only with `cross-platform-deterministic`
@@ -116,11 +125,11 @@ tests that check it, and the rest of what is not bound yet.
 [rolt](https://crates.io/crates/rolt) and joltc-sys, from Second Half Games, are the Rust
 bindings listed in Jolt's README. On crates.io they are at 0.3.1 with Jolt 5.0.0 (May 2024), and
 they have no character controller, vehicles, ragdolls or heightfields. oxijolt binds Jolt 5.6
-through [joltc] and has a safe API for those as well as twelve constraint kinds, soft bodies,
-contact events, state save and restore and caller job systems. It also has determinism gates over
-thread counts and job systems, the magnitude policy with a CI leg under Jolt's assertions, and
-builds without LLVM. Its shape and rigid-body API is not complete yet; [Features](#features) says
-what is missing.
+through [joltc] and has a safe API for all of those. It also has constraints, soft bodies, contact
+events, saving and restoring a world, and stepping on your own job system. Its tests check that
+results match bit for bit with 1 and 4 worker threads and on a caller job system. Out-of-range
+values get a typed error before they reach Jolt. It builds without LLVM. Its shape and rigid-body
+API is not complete yet; [Features](#features) says what is missing.
 
 ## Documentation
 

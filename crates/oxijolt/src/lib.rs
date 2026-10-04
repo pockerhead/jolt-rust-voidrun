@@ -107,6 +107,8 @@
     clippy::undocumented_unsafe_blocks,
     clippy::missing_safety_doc
 )]
+// Examples, including the README and the guides, are code users copy: they must build clean.
+#![doc(test(attr(deny(warnings))))]
 
 mod body;
 mod character;

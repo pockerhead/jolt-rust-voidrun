@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut added = Vec::new();
     for _ in 0..60 {
-        world.step(1.0 / 60.0)?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
         for event in world.take_events().contacts {
             if let ContactEvent::Added { manifold, .. } = event {
                 added.push(manifold.pair.body2);
@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .linear_velocity(Vec3::new(2.0, 0.0, 0.0)),
     )?;
     for _ in 0..60 {
-        world.step(1.0 / 60.0)?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
     }
     // Without friction the block keeps sliding.
     assert!(world.body(sliding)?.linear_velocity().x > 1.5);

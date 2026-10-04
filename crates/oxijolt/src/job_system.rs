@@ -76,7 +76,7 @@ use crate::WorldError;
 ///     &BodySettings::new_dynamic().position(RVec3::new(0.0, 2.0, 0.0)),
 /// )?;
 /// for _ in 0..60 {
-///     world.step(1.0 / 60.0)?;
+///     assert!(world.step(1.0 / 60.0)?.is_complete());
 /// }
 /// assert!(world.body(falling)?.position().y < 2.0);
 /// # Ok(())

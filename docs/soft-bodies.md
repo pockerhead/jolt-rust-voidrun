@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     for _ in 0..60 {
-        world.step(1.0 / 60.0)?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
     }
     // The free edge hangs below the pinned one.
     let hanging = world.soft_body(id)?.vertices();
@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     soft.set_vertex_inverse_mass(0, 10.0)?;
     soft.set_vertex_inverse_mass(n - 1, 10.0)?;
     for _ in 0..30 {
-        world.step(1.0 / 60.0)?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
     }
     assert!(world.soft_body(id)?.vertices()[0].position.y < 3.0);
     Ok(())

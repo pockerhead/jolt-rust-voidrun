@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let falling =
         world.create_body(&cube, &BodySettings::new_dynamic().position(RVec3::new(0.0, 3.0, 0.0)))?;
     for _ in 0..60 {
-        world.step(1.0 / 60.0)?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
     }
     assert!(world.body(falling)?.position().y < 3.0);
     Ok(())
@@ -83,6 +83,7 @@ caller's job system again.
 Which threads ran the jobs is not part of Jolt's state, so results do not depend on the pool. The
 tests check this: the determinism scenes ([determinism.md](determinism.md)) run with a Rayon pool of
 4 threads and with an inline job system (one that calls `job.run()` inside `queue_job`) and must
-record what Jolt's pool with 1 worker records, and `tests/job_system.rs` compares a Rayon pool of 3
-threads and the inline job system with Jolt's pool on a pile of ragdolls. Side effects of the
-caller's own code in `queue_job` are the caller's to keep deterministic.
+record what Jolt's pool with 1 worker records. `tests/job_system.rs` also compares a Rayon pool of
+3 threads with Jolt's pool on stacks of cubes, and the inline job system on those stacks and on a
+pile of ragdolls. Side effects of the caller's own code in `queue_job` are the caller's to keep
+deterministic.

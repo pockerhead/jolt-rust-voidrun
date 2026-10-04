@@ -488,7 +488,7 @@ impl PhysicsWorld {
     ///
     /// world.vehicle_mut(car)?.set_driver_input(DriverInput { forward: 1.0, ..DriverInput::default() })?;
     /// for _ in 0..60 {
-    ///     world.step(1.0 / 60.0)?;
+    ///     assert!(world.step(1.0 / 60.0)?.is_complete());
     /// }
     /// let vehicle = world.vehicle(car)?;
     /// assert!(vehicle.wheels().iter().all(|wheel| wheel.contact.is_some()));
