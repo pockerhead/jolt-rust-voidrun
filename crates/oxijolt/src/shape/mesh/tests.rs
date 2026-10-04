@@ -1,5 +1,6 @@
 use super::*;
 use crate::material::shape_material;
+use crate::shape::geometry::{mul_vec, rotation};
 use crate::{CompoundChild, HeightFieldSettings, Quat, SubShapeId};
 
 /// A 1 m square in the y = 0 plane, facing up, as two triangles.
@@ -29,7 +30,7 @@ fn no_triangles<T>(result: Result<T, ShapeError>) -> bool {
 
 /// The input indices of the triangles `collidable_triangles` keeps.
 fn kept(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Vec<usize> {
-    collidable_triangles(vertices, triangles).0
+    collidable_triangles(vertices, triangles, MeshSettings::DEFAULT_MAX_CONVEX_EXTENT).0
 }
 
 #[test]
@@ -113,6 +114,15 @@ fn settings_out_of_range_are_refused() {
     for threshold in [-1.0, 1.0] {
         assert!(build(MeshSettings::default().active_edge_cos_threshold_angle(threshold)).is_ok());
     }
+    let largest = 2.0 * limits::MAX_SHAPE_EXTENT;
+    for extent in [f32::NAN, -0.0001, largest.next_up(), f32::INFINITY] {
+        assert!(invalid_settings(build(
+            MeshSettings::default().max_convex_extent(extent)
+        )));
+    }
+    for extent in [0.0, largest] {
+        assert!(build(MeshSettings::default().max_convex_extent(extent)).is_ok());
+    }
 }
 
 #[test]
@@ -191,12 +201,12 @@ fn meshes_without_usable_triangles_are_refused() {
     ];
     assert!(no_triangles(Shape::new_mesh(&collinear, &[[0, 1, 2]])));
 
-    // Two 0.2 mm by 10 cm slivers, one at the origin and one 1000 m out on every axis, where
-    // the rounding of its coordinates alone is wider than the sliver.
+    // Two 1 mm by 10 cm slivers, one at the origin and one 1000 m out on every axis, where
+    // rounding moves its corners by about as much as its width.
     let sliver = |at: f32| {
         [
             Vec3::new(at, at, at),
-            Vec3::new(at + 2.0e-4, at, at),
+            Vec3::new(at + 1.0e-3, at, at),
             Vec3::new(at, at + 0.1, at),
         ]
     };
@@ -206,8 +216,7 @@ fn meshes_without_usable_triangles_are_refused() {
     let (_, dropped) = Shape::new_mesh(&vertices, &[[0, 1, 2], [3, 4, 5]]).unwrap();
     assert_eq!(dropped.indices(), [1]);
 
-    // A 1000 m floor makes the x quantization step 0.5 mm, which collapses the near sliver's
-    // 0.2 mm edge.
+    // A 1000 m floor makes the x quantization step 0.5 mm, two steps across the near sliver.
     let mut with_floor = vertices.clone();
     with_floor.extend([
         Vec3::new(0.0, 0.0, 0.0),
@@ -323,7 +332,8 @@ fn slivers_that_collapse_under_quantization_are_dropped() {
 #[test]
 fn small_and_thin_triangles_are_dropped() {
     // Twice the area of a right triangle with legs `leg` is `leg^2`; the threshold is 1e-5 m²
-    // plus the rounding margin, which is tiny for a mesh this small near the origin.
+    // plus the rounding margin, here mostly the rounding of coordinates 750 m out in the space
+    // of the largest convex shape of the default settings.
     let triangle = |leg: f32| {
         [
             Vec3::new(0.0, 0.0, 0.0),
@@ -331,15 +341,15 @@ fn small_and_thin_triangles_are_dropped() {
             Vec3::new(leg, 0.0, 0.0),
         ]
     };
-    assert_eq!(kept(&triangle(0.0032), &[[0, 1, 2]]), [0]);
-    assert!(kept(&triangle(0.0031), &[[0, 1, 2]]).is_empty());
+    assert_eq!(kept(&triangle(0.0036), &[[0, 1, 2]]), [0]);
+    assert!(kept(&triangle(0.0035), &[[0, 1, 2]]).is_empty());
     assert!(no_triangles(Shape::new_mesh(
-        &triangle(0.0031),
+        &triangle(0.0035),
         &[[0, 1, 2]]
     )));
     // A 10 m sliver 1e-5 m wide has a cross product of 1e-4, above the floor, but each corner
-    // can move by about 5e-6 m across it (rounding of 10 m coordinates), which changes the
-    // cross product by up to 10 m times the width change: about 1.4e-4, doubled.
+    // can move by about 1e-4 m across it, which changes the cross product by up to 10 m times
+    // the width change.
     let sliver = [
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(10.0, 0.0, 0.0),
@@ -432,4 +442,99 @@ fn materials_follow_the_input_triangles_past_dropped_ones() {
     assert!(dropped.is_empty());
     assert_eq!(material_under(&mesh, 0.5, 0.002), Some(22));
     assert_eq!(material_under(&mesh, 1501.0, 1.0), Some(21));
+}
+
+/// A strip 1 m long and `width` wide at the origin, turned by the unit quaternion `turn`.
+fn turned_strip(width: f64, turn: [f64; 4]) -> Vec<Vec3> {
+    let turn = rotation(turn);
+    [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [width, 0.0, 0.5]]
+        .map(|corner| {
+            let [x, y, z] = mul_vec(&turn, corner);
+            Vec3::new(x as f32, y as f32, z as f32)
+        })
+        .to_vec()
+}
+
+/// Seeded unit quaternions, the identity first.
+fn turns(count: usize) -> Vec<[f64; 4]> {
+    let mut state = 0x1234_5678_u64;
+    let mut unit = move || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (state >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let tau = std::f64::consts::TAU;
+    let mut turns = vec![[0.0, 0.0, 0.0, 1.0]];
+    turns.extend((1..count).map(|_| {
+        let (u1, u2, u3) = (unit(), unit(), unit());
+        let (s1, s2) = ((1.0 - u1).sqrt(), u1.sqrt());
+        [
+            s1 * (tau * u2).sin(),
+            s1 * (tau * u2).cos(),
+            s2 * (tau * u3).sin(),
+            s2 * (tau * u3).cos(),
+        ]
+    }));
+    turns
+}
+
+#[test]
+fn the_default_convex_extent_keeps_millimetre_bevels() {
+    let keeps = |extent: f32, turn| {
+        !collidable_triangles(&turned_strip(1.0e-3, turn), &[[0, 1, 2]], extent)
+            .0
+            .is_empty()
+    };
+    let turns = turns(2000);
+    // Every orientation keeps the strip at the default; in the worst ones it goes at 800 m.
+    assert!(turns
+        .iter()
+        .all(|&turn| keeps(MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, turn)));
+    assert!(turns.iter().any(|&turn| !keeps(800.0, turn)));
+    // Along the axes it survives up to about 1380 m.
+    assert!(keeps(1350.0, turns[0]) && !keeps(1400.0, turns[0]));
+}
+
+#[test]
+fn slivers_too_thin_for_large_convex_shapes_are_dropped() {
+    // Jolt collides a triangle in the convex shape's space, 300 m from this sliver's corners for
+    // a box of half extent 300 m; the 14 um width rounds away there.
+    let sliver = |width: f32| {
+        [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(width, 0.0, 0.5),
+        ]
+    };
+    assert!(no_triangles(Shape::new_mesh(&sliver(1.4e-5), &[[0, 1, 2]])));
+    let largest = MeshSettings::default().max_convex_extent(2.0 * limits::MAX_SHAPE_EXTENT);
+    assert!(no_triangles(Shape::new_mesh_with_settings(
+        &sliver(2.0e-5),
+        &[[0, 1, 2]],
+        &largest
+    )));
+    // A smaller extent keeps thinner triangles.
+    let small = MeshSettings::default().max_convex_extent(2.0);
+    assert!(no_triangles(Shape::new_mesh(&sliver(1.0e-4), &[[0, 1, 2]])));
+    assert!(Shape::new_mesh_with_settings(&sliver(1.0e-4), &[[0, 1, 2]], &small).is_ok());
+    let thinnest = |extent: f32| {
+        let settings = MeshSettings::default().max_convex_extent(extent);
+        let (mut low, mut high) = (0.0f32, 0.01f32);
+        for _ in 0..40 {
+            let middle = 0.5 * (low + high);
+            if Shape::new_mesh_with_settings(&sliver(middle), &[[0, 1, 2]], &settings).is_ok() {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        high
+    };
+    let (default, largest) = (
+        thinnest(MeshSettings::DEFAULT_MAX_CONVEX_EXTENT),
+        thinnest(2.0 * limits::MAX_SHAPE_EXTENT),
+    );
+    assert!((5.0e-4..6.0e-4).contains(&default), "{default}");
+    assert!((2.8e-3..3.0e-3).contains(&largest), "{largest}");
 }

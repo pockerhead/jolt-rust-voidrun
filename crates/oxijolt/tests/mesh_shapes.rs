@@ -277,6 +277,109 @@ fn thin_strips_of_a_wide_level_mesh_carry_a_cube() {
     assert!(materials.iter().all(|&m| m == Some(STRIP)), "{materials:?}");
 }
 
+/// A sliver 1 m long along z and `width` wide along x at the mesh origin, front face up.
+fn sliver(width: f32) -> [Vec3; 3] {
+    [
+        Vec3::ZERO,
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(width, 0.0, 0.5),
+    ]
+}
+
+/// The narrowest sliver a mesh for convex shapes up to `extent` keeps, within 1 %.
+fn thinnest_kept_sliver(extent: f32) -> Shape {
+    let settings = MeshSettings::default().max_convex_extent(extent);
+    let build = |width| Shape::new_mesh_with_settings(&sliver(width), &[[0, 1, 2]], &settings);
+    let (mut dropped, mut kept) = (0.0f32, 0.01f32);
+    while kept > 1.01 * dropped {
+        let middle = 0.5 * (dropped + kept);
+        if build(middle).is_ok() {
+            kept = middle;
+        } else {
+            dropped = middle;
+        }
+    }
+    build(kept).unwrap().0
+}
+
+/// `v` turned by the unit quaternion `q`, in `f64`.
+fn turned(q: Quat, v: Vec3) -> [f64; 3] {
+    let [x, y, z, w]: [f32; 4] = q.into();
+    let (q, v, w) = (
+        [x, y, z].map(f64::from),
+        [v.x, v.y, v.z].map(f64::from),
+        f64::from(w),
+    );
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let t = cross(q, v).map(|c| 2.0 * c);
+    let u = cross(q, t);
+    [0, 1, 2].map(|i| v[i] + w * t[i] + u[i])
+}
+
+fn finite(v: Vec3) -> bool {
+    v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
+}
+
+/// A box of half extent `(half, 1, half)` turned by `turn`, placed so the sliver lies 0.1 m
+/// inside its bottom face near a far corner: in the box's space the sliver's coordinates are
+/// close to the extent.
+// `Real` is `f64` with the `double-precision` feature.
+#[allow(clippy::unnecessary_cast)]
+fn box_over_sliver(half: f32, turn: Quat) -> (Shape, RVec3) {
+    let boxed = Shape::new_box(Vec3::new(half, 1.0, half)).unwrap();
+    let in_box = turned(turn, Vec3::new(1.0 - half, -0.9, 1.0 - half));
+    let centre = [-in_box[0], -in_box[1], 0.5 - in_box[2]].map(|c| c as Real);
+    (boxed, RVec3::from(centre))
+}
+
+#[test]
+fn the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent() {
+    let turns = [
+        Quat::IDENTITY,
+        quat_about(Vec3::new(0.0, 1.0, 0.0), 0.6),
+        quat_about(Vec3::new(0.6, 0.8, 0.0), 2.0),
+    ];
+    // The two largest boxes are those that tripped Jolt's assertions on slivers the rule
+    // kept before it counted the convex shape's space.
+    for (extent, halves) in [
+        (MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, [300.0, 750.0]),
+        (limits::MAX_SHAPE_EXTENT, [1500.0, 2000.0]),
+    ] {
+        let mesh = thinnest_kept_sliver(extent);
+        let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+        add_static(&mut world, &mesh);
+        for half in halves {
+            for turn in turns {
+                let (boxed, centre) = box_over_sliver(half, turn);
+                let query = CollideShape::new(&boxed, centre, turn);
+                let hits = world.collide_shape(&query, &QueryFilter::new()).unwrap();
+                assert!(!hits.is_empty(), "{extent} m, box {half} m");
+                for hit in hits {
+                    assert!(finite(hit.normal) && hit.penetration_depth.is_finite());
+                }
+            }
+            // A heavy box resting on the sliver; the speculative contact distance, 0.02 m,
+            // counts toward the extent.
+            let (boxed, centre) = box_over_sliver(half - 0.02, Quat::IDENTITY);
+            let resting = RVec3::new(centre.x, centre.y + 0.09, centre.z);
+            let settings = BodySettings::new_dynamic().position(resting).mass(1.0e5);
+            let id = world.create_body(&boxed, &settings).unwrap();
+            for _ in 0..30 {
+                assert!(world.step(DT).unwrap().is_complete());
+            }
+            let body = world.body(id).unwrap();
+            assert!(finite(body.linear_velocity()) && finite(body.angular_velocity()));
+            world.remove_body(id).unwrap();
+        }
+    }
+}
+
 /// A kinematic flat mesh platform, 4 m wide, with a mass so a kinematic body may use it.
 fn add_platform(world: &mut PhysicsWorld, mesh: &Shape) -> BodyId {
     world

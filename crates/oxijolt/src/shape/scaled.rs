@@ -6,7 +6,7 @@ use oxijolt_sys::*;
 
 use super::geometry::{diagonal, mul, mul_vec, rotation, v3, M3, V3};
 use super::mesh::is_collidable;
-use super::{initialize, Shape, ShapeSettings};
+use super::{initialize, MeshSettings, Shape, ShapeSettings};
 use crate::{limits, ShapeError, Vec3};
 
 impl Shape {
@@ -21,9 +21,10 @@ impl Shape {
     /// shape; a mirrored mesh's front faces follow the mirrored winding.
     ///
     /// Meshes and heightfields inside the shape must stay collidable: each stored triangle,
-    /// scaled, must pass the rule [`Shape::new_mesh`] applies (without its quantization term,
-    /// the stored triangles are quantized already), so shrinking a mesh far below the size it
-    /// was built at, or flattening it, is refused ([`ShapeError::InvalidSettings`];
+    /// scaled, must pass the rule [`Shape::new_mesh`] applies with the default
+    /// [`MeshSettings::max_convex_extent`] (without its quantization term, the stored triangles
+    /// are quantized already), so shrinking a mesh far below the size it was built at, or
+    /// flattening it, is refused ([`ShapeError::InvalidSettings`];
     /// [docs/limits.md#scaled-shapes]). The check reads every stored triangle back from Jolt, so
     /// its cost grows with the triangle count.
     ///
@@ -89,8 +90,8 @@ impl Shape {
 type Placement = M3;
 
 /// Whether every stored triangle of the meshes and heightfields in `shape` stays collidable once
-/// scaled by `scale` ([`is_collidable`] with no quantization: the stored triangles are already
-/// quantized).
+/// scaled by `scale` ([`is_collidable`] with no quantization, the stored triangles are already
+/// quantized, against convex shapes up to [`MeshSettings::DEFAULT_MAX_CONVEX_EXTENT`]).
 fn triangles_stay_collidable(shape: &Shape, scale: Vec3) -> bool {
     let Some(leaves) = triangle_leaves(shape, scale) else {
         return false;
@@ -99,7 +100,9 @@ fn triangles_stay_collidable(shape: &Shape, scale: Vec3) -> bool {
         // SAFETY: `leaf` is a live mesh or heightfield part of `shape` (see `triangle_leaves`).
         unsafe { placed_triangles(leaf, &placement) }
             .into_iter()
-            .all(|corners| is_collidable(corners, [0.0; 3]))
+            .all(|corners| {
+                is_collidable(corners, [0.0; 3], MeshSettings::DEFAULT_MAX_CONVEX_EXTENT)
+            })
     })
 }
 

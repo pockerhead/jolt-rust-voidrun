@@ -75,15 +75,17 @@ are those of its referenced vertices, so the extent bound applies to the vertice
 
 Jolt stores the vertices quantized to 21 bits over the bounds of the triangles it keeps, with one
 step per axis (`TriangleCodecIndexed8BitPackSOA4Flags`), and, when it collides a triangle, scales it
-and transforms it into the other shape's space in `f32` (`CollideConvexVsTriangles::Collide`). Its
+and transforms it into the convex shape's space in `f32` (`CollideConvexVsTriangles::Collide`). Its
 collision then asserts when the triangle's cross product `(v1 - v0) × (v2 - v0)` is shorter than
 1e-6 (`IsNearZero` in `Geometry/EPAPenetrationDepth.h:113`; Jolt's comment there blames slivers).
 The constructor therefore drops a triangle, and reports it in `DroppedTriangles`, unless twice its
 area is at least `1e-5 + 2 · Δ`, where `Δ` bounds how much the cross product can shrink:
 
 - each corner can move by the quantization step on each axis (the bounds' side on that axis over
-  `2^21 - 1`) plus `4 · FLT_EPSILON` times the triangle's largest distance from the shape origin,
-  the `f32` rounding of the transform; an edge moves by twice that;
+  `2^21 - 1`), plus `4 · FLT_EPSILON` times the triangle's largest distance from the shape origin
+  (the `f32` rounding of the transform), plus `FLT_EPSILON` times the convex extent and the
+  triangle's longest edge (the rounding of the result in the convex shape's space, see
+  [Convex shapes against meshes](#convex-shapes-against-meshes)); an edge moves by twice that;
 - with edges `ab`, `ac` moved by `e1`, `e2`, the cross product's length is at least its component
   along the unmoved unit normal `n`, which changes by `e2 · (n × ab) + e1 · (ac × n) + n · (e1 ×
   e2)`. The first two terms are bounded per axis, the third by `|e1| |e2|`; Jolt's `f32` cross
@@ -91,22 +93,55 @@ area is at least `1e-5 + 2 · Δ`, where `Δ` bounds how much the cross product 
 
 Moves within the triangle's plane across an edge shrink it; moves along an edge or out of the plane
 do not, so a thin strip keeps its width wherever the quantization along its narrow direction is
-fine. A right triangle with legs of 3.2 mm near the origin is kept and one with legs of 3.1 mm
-dropped; a strip 10 m long near the origin must be about 0.03 mm wide. In a level mesh with one
-triangle 1500 m out along x, the x step is 0.7 mm and the z step 5 µm: a 1 m by 2 mm strip is kept
-when its 2 mm lie along z and dropped when they lie along x. Triangles that fail the rule without any
-quantization are left out of the bounds first; they are dropped either way, and a far degenerate
-triangle then does not coarsen the grid for the others.
+fine. With the default convex extent a right triangle with legs of 3.6 mm near the origin is kept
+and one with legs of 3.5 mm dropped, and a strip near the origin must be about 0.55 mm wide
+whatever its length. In a level mesh with one triangle 1500 m out along x, the x step is 0.7 mm and
+the z step 5 µm: a 1 m by 2 mm strip is kept when its 2 mm lie along z and dropped when they lie
+along x. Triangles that fail the rule without any quantization are left out of the bounds first;
+they are dropped either way, and a far degenerate triangle then does not coarsen the grid for the
+others.
 
 Every triangle that survives keeps the same rule under Jolt's actual bounds, which are those of the
 surviving triangles and so no larger, so Jolt's own clean-up only drops duplicates (keeping one
 copy). The seeded stress (`tests/shape_stress.rs`), which found `EPAPenetrationDepth.h:113` with
 sliver soups, includes level-like grids carrying strips 1 µm to 1 cm wide next to far triangles
-along x, along z or below, and drops its probes onto every such mesh. Under Jolt's asserts it passed
-at ten times its size for three more seeds (about 220 000 triangles of these meshes kept, 150 000
-dropped). With the margin set to 0 the
-stress fails on a collapsing sliver that Jolt refuses, and with the floor at 1e-9 as well it hits
-the assertion.
+along x, along z or below (a quarter of them at the origin, where the thinnest strips are kept),
+drops its probes onto every such mesh and overlaps it with a box as large as the default convex
+extent, the mesh near one of the box's bottom corners. Without the convex shape's term it hits the
+assertion at its normal size.
+
+## Convex shapes against meshes
+
+Jolt collides a triangle in the convex shape's centre-of-mass space
+(`CollideConvexVsTriangles.cpp:43-48`) and goes on only with triangles whose bounds overlap the
+convex shape's local bounds grown by the query's separation distance. There every coordinate is at
+most the convex extent `E` plus the triangle's longest edge, and the `f32` transform rounds it by
+up to half an ulp: a sliver 1 m long and 14 µm wide near the mesh origin keeps its width in its
+own space and loses it under a box of half extent 300 m, where coordinates near 300 have an ulp of
+31 µm. Half an ulp is at most `FLT_EPSILON / 2` of the coordinate, so each corner moves by at most
+`FLT_EPSILON / 2 · (E + longest edge)` on each of the convex shape's axes, and by at most `√3` times
+that, under `FLT_EPSILON · (E + longest edge)`, on each of the mesh's. The triangle rule counts
+that per corner, with `E` from `MeshSettings::max_convex_extent`: the largest absolute coordinate of a convex shape's local
+bounds (relative to its centre of mass, after scaling) plus the separation distance of a collide
+query. Bodies collide with Jolt's 0.02 m speculative contact distance, characters with their
+predictive contact distance; compound children count one by one. The sphere is collided in the
+mesh's space instead (`CollideSphereVsTriangles`), which the rule covers too. Shape casts keep the
+triangle in the mesh's space (`CastConvexVsTriangles`).
+
+The default `E = 750 m` is the largest round extent at which the rule keeps a strip 1 m long and
+1 mm wide near the mesh origin in any orientation: along the axes it is kept up to about 1380 m,
+turned the worst way up to 792 m. That is below `MAX_SHAPE_EXTENT`, so a convex shape whose bounds
+reach beyond 750 m from its centre (a box of half extent above 750 m) can meet a triangle the rule
+kept for 750 m and trip `EPAPenetrationDepth.h:113` in an asserts build, or get a distorted contact
+in a release one. A mesh that must collide with such shapes needs a larger `max_convex_extent`, up
+to `2 · MAX_SHAPE_EXTENT`, and keeps only thicker triangles: near the origin the thinnest strip
+kept is about 0.55 mm wide at 750 m, 1.4 mm at 2000 m and 2.9 mm at 4000 m. `Shape::scaled` checks the triangles of a mesh inside it for the default extent.
+
+In an asserts build the thinnest sliver the rule keeps (to 1 %) rests under boxes of half extent
+300 and 750 m with the default and 1500 and 2000 m with an extent of 2000 m, queried in three
+orientations and as a heavy body (`the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent`).
+With the convex term scaled by 0.25 that test still passes; at 0.1 Jolt finds no contact with the
+sliver, and at 0 it asserts.
 
 ## Scaled shapes
 
@@ -120,9 +155,10 @@ infinity through, so the constructor checks that the components are finite first
 What the scale can break is checked on the result: the scaled bounds against `MAX_SHAPE_EXTENT`,
 the scaled centre of mass (bounds are relative to it, and a compound's centre of mass moves with the
 scale) against the same bound, and every stored triangle of a mesh or heightfield inside the shape
-against the triangle rule of [Triangle meshes](#triangle-meshes) without its quantization term (the
-stored triangles are quantized already). The coordinates checked are the ones Jolt rounds: a mesh's
-own stored coordinates times the scale accumulated above it, turned by the rotations above it. Jolt
+against the triangle rule of [Triangle meshes](#triangle-meshes) for the default convex extent and
+without its quantization term (the stored triangles are quantized already). The coordinates
+checked are the ones Jolt rounds: a mesh's own stored coordinates times the scale accumulated above
+it, turned by the rotations above it. Jolt
 folds compound child positions, rotated-translated positions and centre-of-mass offsets into the
 transform it applies afterwards (`ScaledShape`, `RotatedTranslatedShape`, `OffsetCenterOfMassShape`
 and `CompoundShape` collision dispatch), so they move a triangle without changing its rounding: a

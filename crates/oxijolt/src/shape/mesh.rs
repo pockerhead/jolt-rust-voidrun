@@ -44,13 +44,15 @@ impl MeshBuildQuality {
 
 /// Settings of [`Shape::new_mesh_with_settings`] other than the geometry. The defaults are
 /// Jolt's (`MeshShapeSettings`): no materials, an active-edge threshold of 5 degrees, 8
-/// triangles per leaf, [`MeshBuildQuality::FavorRuntimePerformance`].
+/// triangles per leaf, [`MeshBuildQuality::FavorRuntimePerformance`]; and convex shapes up to
+/// [`MeshSettings::DEFAULT_MAX_CONVEX_EXTENT`].
 #[derive(Clone, Debug)]
 pub struct MeshSettings<'a> {
     materials: Option<(&'a [&'a PhysicsMaterial], &'a [u8])>,
     active_edge_cos_threshold_angle: f32,
     max_triangles_per_leaf: u32,
     build_quality: MeshBuildQuality,
+    max_convex_extent: f32,
 }
 
 impl Default for MeshSettings<'_> {
@@ -60,11 +62,20 @@ impl Default for MeshSettings<'_> {
             active_edge_cos_threshold_angle: 0.996195,
             max_triangles_per_leaf: 8,
             build_quality: MeshBuildQuality::default(),
+            max_convex_extent: Self::DEFAULT_MAX_CONVEX_EXTENT,
         }
     }
 }
 
 impl<'a> MeshSettings<'a> {
+    /// The default of [`max_convex_extent`](Self::max_convex_extent), metres: the largest
+    /// extent at which the triangle rule still keeps a strip 1 m long and 1 mm wide near the
+    /// mesh origin in any orientation, rounded down. It is below [`limits::MAX_SHAPE_EXTENT`];
+    /// see [docs/limits.md#convex-shapes-against-meshes].
+    ///
+    /// [docs/limits.md#convex-shapes-against-meshes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-shapes-against-meshes
+    pub const DEFAULT_MAX_CONVEX_EXTENT: f32 = 750.0;
+
     /// Gives triangle `i` the material `list[indices[i]]`. `list` holds 1 to 32 materials,
     /// `indices` one entry per triangle, each naming a material of the list. Without materials
     /// every triangle uses Jolt's default material. The shape holds its own reference to each
@@ -99,6 +110,22 @@ impl<'a> MeshSettings<'a> {
         self
     }
 
+    /// The size of the largest convex shape the mesh must collide with reliably, metres: the
+    /// largest absolute coordinate of the convex shape's local bounds (relative to its centre of
+    /// mass, after scaling) plus the separation distance of the collide query. Jolt collides a
+    /// triangle in the convex shape's space, so its rounding grows with this extent, and the
+    /// mesh drops the triangles too thin for it. In `0..=2 * limits::MAX_SHAPE_EXTENT`; default
+    /// [`Self::DEFAULT_MAX_CONVEX_EXTENT`]. A larger convex shape against a thin triangle can
+    /// trip Jolt's assertions in an asserts build and gets a distorted contact otherwise; see
+    /// [docs/limits.md#convex-shapes-against-meshes].
+    ///
+    /// [docs/limits.md#convex-shapes-against-meshes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-shapes-against-meshes
+    #[must_use]
+    pub fn max_convex_extent(mut self, metres: f32) -> Self {
+        self.max_convex_extent = metres;
+        self
+    }
+
     /// Checks everything but the geometry against `triangle_count`.
     fn validate(&self, triangle_count: usize) -> Result<(), ShapeError> {
         let invalid = |what| Err(ShapeError::InvalidSettings(what));
@@ -108,6 +135,9 @@ impl<'a> MeshSettings<'a> {
         }
         if !(1..=MAX_TRIANGLES_PER_LEAF).contains(&self.max_triangles_per_leaf) {
             return invalid("max_triangles_per_leaf must be between 1 and 8");
+        }
+        if !(0.0..=2.0 * limits::MAX_SHAPE_EXTENT).contains(&self.max_convex_extent) {
+            return invalid("max_convex_extent must be between 0 and 2 * limits::MAX_SHAPE_EXTENT");
         }
         if let Some((list, indices)) = self.materials {
             if !(1..=MAX_MESH_MATERIALS).contains(&list.len()) {
@@ -221,11 +251,12 @@ impl Shape {
     /// Triangles too small or too thin for Jolt to collide with reliably are dropped and
     /// reported in [`DroppedTriangles`]: twice a triangle's area must be at least 1e-5 m² plus
     /// twice the largest change Jolt's 21-bit vertex quantization and `f32` rounding can make
-    /// to it. That margin follows the triangle's own shape and distance from the shape origin
-    /// and the quantization step of the mesh's bounds on each axis
-    /// ([docs/limits.md#triangle-meshes]). Jolt itself keeps one copy of duplicate triangles
-    /// and reorders the rest, so sub-shape ids do not follow the input order. Closest-hit rays
-    /// hit back faces too.
+    /// to it. That margin follows the triangle's own shape and distance from the shape origin,
+    /// the quantization step of the mesh's bounds on each axis and the size of the convex shapes
+    /// it collides with ([`MeshSettings::max_convex_extent`]); with the defaults a strip near
+    /// the origin must be about 0.55 mm wide ([docs/limits.md#triangle-meshes]). Jolt itself
+    /// keeps one copy of duplicate triangles and reorders the rest, so sub-shape ids do not
+    /// follow the input order. Closest-hit rays hit back faces too.
     ///
     /// ```
     /// # use oxijolt::{Shape, Vec3};
@@ -264,7 +295,7 @@ impl Shape {
         validate_geometry(vertices, triangles)?;
         settings.validate(triangles.len())?;
         initialize()?;
-        let (kept, dropped) = collidable_triangles(vertices, triangles);
+        let (kept, dropped) = collidable_triangles(vertices, triangles, settings.max_convex_extent);
         if kept.is_empty() {
             return Err(ShapeError::Mesh(MeshError::NoTriangles));
         }
@@ -292,18 +323,19 @@ impl Shape {
 fn collidable_triangles(
     vertices: &[Vec3],
     triangles: &[[u32; 3]],
+    convex_extent: f32,
 ) -> (Vec<usize>, DroppedTriangles) {
     let corners = |triangle: &[u32; 3]| triangle.map(|index| v3(vertices[index as usize]));
     let candidates = triangles
         .iter()
         .map(corners)
-        .filter(|&corners| is_collidable(corners, [0.0; 3]));
+        .filter(|&corners| is_collidable(corners, [0.0; 3], convex_extent));
     let step = quantization_step(candidates);
     let mut kept = Vec::new();
     let mut dropped = DroppedTriangles::default();
     for (index, triangle) in triangles.iter().enumerate() {
         let corners = corners(triangle);
-        if is_collidable(corners, step) {
+        if is_collidable(corners, step, convex_extent) {
             kept.push(index);
         } else {
             dropped.push(index, corners);
@@ -326,23 +358,29 @@ fn quantization_step(triangles: impl Iterator<Item = [V3; 3]>) -> V3 {
     [0, 1, 2].map(|axis| ((high[axis] - low[axis]) / QUANTIZATION_STEPS).max(0.0))
 }
 
-/// How far Jolt's `f32` transform into another shape's space can move a vertex at `distance`
-/// metres from the origin of the coordinates it transforms.
-fn rounding_displacement(distance: f64) -> f64 {
-    4.0 * f64::from(f32::EPSILON) * distance
+/// How far Jolt's `f32` arithmetic can move a corner of a triangle on each axis when it collides
+/// the triangle with a convex shape (`CollideConvexVsTriangles::Collide`): the transform of the
+/// triangle's own coordinates, at most `distance` from their origin, and the rounding of the
+/// result in the convex shape's space. There every coordinate is at most `convex_extent` plus
+/// the triangle's `longest_edge`, because Jolt only goes on with triangles whose bounds overlap
+/// the convex shape's.
+fn rounding_displacement(distance: f64, convex_extent: f64, longest_edge: f64) -> f64 {
+    let epsilon = f64::from(f32::EPSILON);
+    4.0 * epsilon * distance + epsilon * (convex_extent + longest_edge)
 }
 
 /// Whether the triangle with `corners` keeps a cross product above [`MIN_TRIANGLE_CROSS`] under
-/// Jolt's rounding, with a factor [`CROSS_ERROR_MARGIN`] to spare.
+/// Jolt's rounding against convex shapes up to `convex_extent`
+/// ([`MeshSettings::max_convex_extent`]), with a factor [`CROSS_ERROR_MARGIN`] to spare.
 ///
 /// Each corner can move by up to `step[axis]` on each axis (the quantization of a mesh being
-/// built, zero for triangles Jolt has stored) plus [`rounding_displacement`] of the triangle's
-/// distance from the origin; an edge moves by the difference of two corner moves. With edges
-/// `ab`, `ac` moved by `e1`, `e2`, the cross product changes by `ab × e2 + e1 × ac + e1 × e2`. Its
-/// length is at least its component along the unit normal `n`, which changes by
-/// `e2 · (n × ab) + e1 · (ac × n) + n · (e1 × e2)`: moves within the triangle's plane across an
-/// edge shrink it, moves out of the plane do not. Jolt's `f32` cross product rounds it once more.
-pub(super) fn is_collidable(corners: [V3; 3], step: V3) -> bool {
+/// built, zero for triangles Jolt has stored) plus [`rounding_displacement`]; an edge moves by
+/// the difference of two corner moves. With edges `ab`, `ac` moved by `e1`, `e2`, the cross
+/// product changes by `ab × e2 + e1 × ac + e1 × e2`. Its length is at least its component along
+/// the unit normal `n`, which changes by `e2 · (n × ab) + e1 · (ac × n) + n · (e1 × e2)`: moves
+/// within the triangle's plane across an edge shrink it, moves out of the plane do not. Jolt's
+/// `f32` cross product rounds it once more.
+pub(super) fn is_collidable(corners: [V3; 3], step: V3, convex_extent: f32) -> bool {
     let [a, b, c] = corners;
     let (ab, ac) = (sub(b, a), sub(c, a));
     let normal = cross(ab, ac);
@@ -352,7 +390,10 @@ pub(super) fn is_collidable(corners: [V3; 3], step: V3) -> bool {
     }
     let unit = normal.map(|component| component / twice_area);
     let distance = corners.map(length).into_iter().fold(0.0, f64::max);
-    let rounding = rounding_displacement(distance);
+    let longest_edge = [length(ab), length(ac), length(sub(c, b))]
+        .into_iter()
+        .fold(0.0, f64::max);
+    let rounding = rounding_displacement(distance, f64::from(convex_extent), longest_edge);
     let edge_move = step.map(|axis_step| 2.0 * (axis_step + rounding));
     let change = reach(cross(unit, ab), edge_move)
         + reach(cross(ac, unit), edge_move)

@@ -184,6 +184,8 @@ struct Arena {
     world: PhysicsWorld,
     /// The dynamic shapes dropped onto static shapes under test.
     probes: Vec<Shape>,
+    /// A box as large as the convex shapes a mesh takes by default.
+    large_probe: Shape,
 }
 
 impl Arena {
@@ -212,7 +214,13 @@ impl Arena {
             )
             .unwrap(),
         ];
-        Self { world, probes }
+        let half = MeshSettings::DEFAULT_MAX_CONVEX_EXTENT;
+        let large_probe = Shape::new_box(Vec3::new(half, 1.0, half)).unwrap();
+        Self {
+            world,
+            probes,
+            large_probe,
+        }
     }
 
     /// Drops `shape` as a dynamic body with its lowest point 0.5 m above the floor, when the
@@ -275,8 +283,8 @@ impl Arena {
 
 impl Arena {
     /// Adds `shape` as a static body at the origin, drops a dynamic sphere, box, capsule and
-    /// hull onto it for `ticks` steps, then runs a down-ray and a sphere cast at its centroid;
-    /// every body and result must stay finite.
+    /// hull onto it for `ticks` steps, then runs a down-ray and a sphere cast at its centroid
+    /// and overlaps [`Arena::large_probe`] with it; every body and result must stay finite.
     fn drop_probes_on(&mut self, shape: &Shape, extent: Extent, ticks: usize, what: &str) {
         let ground = self
             .world
@@ -315,6 +323,25 @@ impl Arena {
             assert!(
                 hit.distance.is_finite() && hit.normal.y.is_finite(),
                 "{what}: {hit:?}"
+            );
+        }
+        // The centroid lies near a bottom corner of the large box, where Jolt's coordinates
+        // of the triangles in the box's space are largest.
+        let reach = real(MeshSettings::DEFAULT_MAX_CONVEX_EXTENT - 1.0);
+        let centre = RVec3::new(
+            real(c.x) + reach,
+            real(extent.max_y) + 0.9,
+            real(c.z) + reach,
+        );
+        let query = CollideShape::new(&self.large_probe, centre, Quat::IDENTITY);
+        for hit in self
+            .world
+            .collide_shape(&query, &QueryFilter::new())
+            .unwrap()
+        {
+            assert!(
+                hit.penetration_depth.is_finite() && hit.normal.x.is_finite(),
+                "{what}: large box {hit:?}"
             );
         }
         self.world.remove_body(ground).unwrap();
@@ -689,12 +716,16 @@ fn soup(rng: &mut Rng, kind: Soup) -> (Vec<Vec3>, Vec<[u32; 3]>) {
     (vertices, triangles)
 }
 
-/// A ground grid in metres, 1 m above the arena floor and up to 500 m from the origin, with
-/// strips 1 um to 1 cm wide lying on it where the probes land, and, in three cases of four, far
-/// triangles that stretch the mesh's bounds (and so its quantization step) along x, along z or
-/// down along y.
+/// A ground grid in metres, 1 m above the arena floor and up to 500 m from the origin (at the
+/// origin, where the rule keeps the thinnest strips, in one case of four), with strips 1 um to
+/// 1 cm wide lying on it where the probes land, and, in three cases of four, far triangles that
+/// stretch the mesh's bounds (and so its quantization step) along x, along z or down along y.
 fn thin_strips(rng: &mut Rng, vertices: &mut Vec<Vec3>, triangles: &mut Vec<[u32; 3]>) {
-    let centre = [rng.range(-500.0, 500.0), 1.0, rng.range(-500.0, 500.0)];
+    let centre = if rng.below(0, 4) == 0 {
+        [0.0, 1.0, 0.0]
+    } else {
+        [rng.range(-500.0, 500.0), 1.0, rng.range(-500.0, 500.0)]
+    };
     let at = |p: [f64; 3]| to_vec3([0, 1, 2].map(|i| centre[i] + p[i]));
     let side = rng.log_range(4.0, 400.0);
     let cells = rng.below(1, 9) as u32;
