@@ -11538,6 +11538,28 @@ unsafe extern "C" {
     ) -> *mut JPH_HeightFieldShapeSettings;
 }
 unsafe extern "C" {
+    pub fn JPH_MeshShapeSettings_Create3(
+        vertices: *const JPH_Vec3,
+        vertexCount: u32,
+        triangles: *const JPH_IndexedTriangle,
+        triangleCount: u32,
+        materials: *const *const JPH_PhysicsMaterial,
+        materialCount: u32,
+    ) -> *mut JPH_MeshShapeSettings;
+}
+unsafe extern "C" {
+    pub fn JPH_MeshShapeSettings_GetTriangleCount(
+        settings: *const JPH_MeshShapeSettings,
+    ) -> u32;
+}
+unsafe extern "C" {
+    pub fn JPH_ShapeSettings_CreateShapeWithError(
+        settings: *const JPH_ShapeSettings,
+        error: *mut ::std::os::raw::c_char,
+        errorCapacity: u32,
+    ) -> *mut JPH_Shape;
+}
+unsafe extern "C" {
     pub fn JPH_SubShapeIDPair_GetBody1ID(pair: *const JPH_SubShapeIDPair) -> JPH_BodyID;
 }
 unsafe extern "C" {

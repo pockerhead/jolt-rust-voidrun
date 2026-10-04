@@ -4,9 +4,9 @@
 //
 // Handles follow joltc's DEF_MAP_DECL: a JPH_PhysicsMaterial is a reinterpret_cast of the
 // JPH::PhysicsMaterial base (the class that carries the reference count), never of a derived
-// material; JPH_ConvexShapeSettings and JPH_HeightFieldShapeSettings are reinterpret_casts of
-// JPH::ConvexShapeSettings and JPH::HeightFieldShapeSettings, which joltc's typed settings
-// handles reach through single inheritance.
+// material; JPH_ConvexShapeSettings, JPH_HeightFieldShapeSettings and JPH_MeshShapeSettings are
+// reinterpret_casts of JPH::ConvexShapeSettings, JPH::HeightFieldShapeSettings and
+// JPH::MeshShapeSettings, which joltc's typed settings handles reach through single inheritance.
 
 #include <Jolt/Jolt.h>
 
@@ -14,6 +14,7 @@
 #include <Jolt/Physics/Collision/PhysicsMaterialSimple.h>
 #include <Jolt/Physics/Collision/Shape/ConvexShape.h>
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 
 #include "joltc_ext_internal.h"
 
@@ -86,4 +87,38 @@ JPH_HeightFieldShapeSettings* JPH_HeightFieldShapeSettings_Create2(const float* 
 	auto settings = new JPH::HeightFieldShapeSettings(samples, joltc_ext::ToVec3(*offset), joltc_ext::ToVec3(*scale), sampleCount, materialIndices, materialList);
 	settings->AddRef();
 	return reinterpret_cast<JPH_HeightFieldShapeSettings*>(settings);
+}
+
+JPH_MeshShapeSettings* JPH_MeshShapeSettings_Create3(const JPH_Vec3* vertices, uint32_t vertexCount, const JPH_IndexedTriangle* triangles, uint32_t triangleCount, const JPH_PhysicsMaterial* const* materials, uint32_t materialCount)
+{
+	JPH::VertexList joltVertices;
+	joltVertices.reserve(vertexCount);
+	for (uint32_t i = 0; i < vertexCount; ++i)
+	{
+		joltVertices.push_back(JPH::Float3(vertices[i].x, vertices[i].y, vertices[i].z));
+	}
+	JPH::IndexedTriangleList joltTriangles;
+	joltTriangles.reserve(triangleCount);
+	for (uint32_t i = 0; i < triangleCount; ++i)
+	{
+		const JPH_IndexedTriangle& triangle = triangles[i];
+		joltTriangles.push_back(JPH::IndexedTriangle(triangle.i1, triangle.i2, triangle.i3, triangle.materialIndex, triangle.userData));
+	}
+	JPH::PhysicsMaterialList materialList;
+	if (materials != nullptr && materialCount > 0)
+	{
+		materialList.reserve(materialCount);
+		for (uint32_t i = 0; i < materialCount; ++i)
+		{
+			materialList.push_back(joltc_ext::AsJoltMaterial(materials[i]));
+		}
+	}
+	auto settings = new JPH::MeshShapeSettings(std::move(joltVertices), std::move(joltTriangles), std::move(materialList));
+	settings->AddRef();
+	return reinterpret_cast<JPH_MeshShapeSettings*>(settings);
+}
+
+uint32_t JPH_MeshShapeSettings_GetTriangleCount(const JPH_MeshShapeSettings* settings)
+{
+	return static_cast<uint32_t>(reinterpret_cast<const JPH::MeshShapeSettings*>(settings)->mIndexedTriangles.size());
 }

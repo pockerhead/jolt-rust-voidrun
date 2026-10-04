@@ -283,6 +283,23 @@ JPH_CAPI void JPH_ConvexShapeSettings_SetMaterial(JPH_ConvexShapeSettings* setti
    materials is null. Each list entry keeps its own reference. Jolt refuses more than 256 materials and
    indices beyond the list when the shape is created. */
 JPH_CAPI JPH_HeightFieldShapeSettings* JPH_HeightFieldShapeSettings_Create2(const float* samples, const JPH_Vec3* offset, const JPH_Vec3* scale, uint32_t sampleCount, const uint8_t* materialIndices, const JPH_PhysicsMaterial* const* materials, uint32_t materialCount);
+/* Like JPH_MeshShapeSettings_Create2, with materials: each triangle's materialIndex addresses
+   materials[0..materialCount); without a list (materials null or materialCount 0) every materialIndex
+   must be 0. Returns settings holding one reference; each list entry keeps its own reference.
+   Preconditions, not checked: every vertex index is below vertexCount, and vertexCount and
+   triangleCount are at most INT32_MAX. Jolt's constructor removes degenerate and duplicate triangles
+   (MeshShapeSettings::Sanitize) and reads vertices[index] without a range check. */
+JPH_CAPI JPH_MeshShapeSettings* JPH_MeshShapeSettings_Create3(const JPH_Vec3* vertices, uint32_t vertexCount, const JPH_IndexedTriangle* triangles, uint32_t triangleCount, const JPH_PhysicsMaterial* const* materials, uint32_t materialCount);
+/* Number of triangles the settings hold, after the constructor removed degenerate and duplicate ones. */
+JPH_CAPI uint32_t JPH_MeshShapeSettings_GetTriangleCount(const JPH_MeshShapeSettings* settings);
+
+/* ShapeSettings */
+/* Runs the settings' Create once and returns the shape holding one reference for the caller, or null
+   when Jolt refused the settings. When error is not null and errorCapacity is not 0, error receives
+   Jolt's message on failure (at most errorCapacity - 1 bytes, always NUL-terminated) and "" on success.
+   The settings keep the cached result either way (Jolt behaviour), so a second call returns the same
+   shape with one more reference. Works for every joltc shape settings type. */
+JPH_CAPI JPH_Shape* JPH_ShapeSettings_CreateShapeWithError(const JPH_ShapeSettings* settings, char* error, uint32_t errorCapacity);
 
 /* SubShapeIDPair */
 /* pair is the JPH::SubShapeIDPair joltc passes to JPH_ContactListener_Procs::OnContactRemoved, read
