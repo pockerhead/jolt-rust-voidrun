@@ -430,6 +430,11 @@ impl ExtendedUpdateSettings {
     /// How far down the character looks for floor to stick to when it was supported before the
     /// update and is not after it, without moving up. Every component at most
     /// [`limits::MAX_SHAPE_EXTENT`] in absolute value. Default `(0, -0.5, 0)`.
+    ///
+    /// The [character study] measures where this holds a character on the floor, and where it
+    /// does not (over crests, after a contact refresh).
+    ///
+    /// [character study]: https://github.com/pockerhead/oxijolt/blob/main/docs/character-study.md
     #[must_use]
     pub fn stick_to_floor_step_down(mut self, value: Vec3) -> Self {
         self.stick_to_floor_step_down = value;
@@ -444,7 +449,10 @@ impl ExtendedUpdateSettings {
     /// too, so measure it. Jolt judges a step by the surface normal at the contact; on a box with
     /// sharp edges (convex radius 0) the contact sits on the top edge, where float rounding
     /// decides between the top face's normal and the side's, so walk stairs climbs such a step
-    /// unreliably.
+    /// unreliably. The [character study] measured step-up + 0.137 m for a capsule of radius 0.4
+    /// with padding 0.02 on rounded steps.
+    ///
+    /// [character study]: https://github.com/pockerhead/oxijolt/blob/main/docs/character-study.md
     #[must_use]
     pub fn walk_stairs_step_up(mut self, value: Vec3) -> Self {
         self.walk_stairs_step_up = value;

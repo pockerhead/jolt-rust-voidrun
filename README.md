@@ -140,6 +140,8 @@ API is not complete yet; [Features](#features) says what is missing.
   [determinism](docs/determinism.md), [building](docs/building.md).
 - [Limits](docs/limits.md) and [coverage](docs/coverage.md); [benchmarks](docs/benchmarks.md)
   against a game's budgets.
+- [Character study](docs/character-study.md): which character laws CharacterVirtual's settings
+  carry, and at what cost.
 - API docs: `cargo doc -p oxijolt --open`. Example: `cargo run -p oxijolt --example hello_world`.
 - [CHANGELOG](CHANGELOG.md).
 

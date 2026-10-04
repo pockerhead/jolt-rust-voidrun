@@ -1272,3 +1272,46 @@ fn a_restored_study_run_continues_bit_for_bit_after_a_detour() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// The study document.
+
+/// The table in `docs/character-study.md` names the pinned rows in order, describes each with
+/// `Config::describe` and shows the pinned cells. Costs are not compared.
+#[test]
+fn the_study_table_in_the_docs_matches_the_tests() {
+    let doc = include_str!("../../../docs/character-study.md");
+    let start = doc
+        .find("<!-- study-table:start -->")
+        .expect("table start marker");
+    let end = doc
+        .find("<!-- study-table:end -->")
+        .expect("table end marker");
+    let rows: Vec<Vec<&str>> = doc[start..end]
+        .lines()
+        .filter(|line| line.starts_with("| ") && !line.starts_with("| row "))
+        .map(|line| line.trim_matches('|').split(" | ").map(str::trim).collect())
+        .collect();
+    let pinned = Config::pinned();
+    let names: Vec<&str> = rows.iter().map(|row| row[0]).collect();
+    let expected: Vec<&str> = pinned.iter().map(|config| config.name).collect();
+    assert_eq!(names, expected, "rows of the study table");
+    for (row, config) in rows.iter().zip(&pinned) {
+        assert_eq!(row[1], config.describe(), "row {}: mechanisms", config.name);
+        let cells = study::expected::pinned(config.name);
+        for (column, cell) in Column::ALL.iter().zip(cells) {
+            let text = match cell {
+                study::expected::Cell::Held => "held".to_owned(),
+                study::expected::Cell::Variable => "variable".to_owned(),
+                study::expected::Cell::Broken(witness) => format!("broken (`{witness}`)"),
+            };
+            assert_eq!(
+                row[2 + column.index()],
+                text,
+                "row {} column {}",
+                config.name,
+                column.label()
+            );
+        }
+    }
+}

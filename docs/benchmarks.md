@@ -20,6 +20,11 @@ after `--` run only the cases whose names contain one of them, for example
 `-- step` runs both the near step and the steady step. A word that matches no case prints an empty
 table, without a warning.
 
+A second bench, `cargo bench -p oxijolt --bench character_study`, times the character
+configurations of the [character study](character-study.md) on the same planet workload as the near
+step, beside the reference near step; words after `--` keep the rows whose names contain them. Its
+method and results are in the study.
+
 ## Machine
 
 | | |

@@ -585,16 +585,38 @@ impl Config {
     pub fn describe(&self) -> String {
         let mut parts = Vec::new();
         let s = &self.settings;
-        let base = if s.supporting_plane && s.enhanced_internal_edge_removal {
-            "D.1 settings"
-        } else if !s.supporting_plane && !s.enhanced_internal_edge_removal {
-            "Jolt default settings"
-        } else {
-            "mixed settings"
-        };
-        parts.push(base.to_owned());
-        if s.max_slope_deg != 45.0 {
+        let d1 = SettingsSpec::SPEC_D1;
+        parts.push(
+            if s.supporting_plane {
+                "D.1 settings"
+            } else {
+                "Jolt default settings"
+            }
+            .to_owned(),
+        );
+        if s.supporting_plane && !s.enhanced_internal_edge_removal {
+            parts.push("edge removal off".to_owned());
+        }
+        if s.max_slope_deg != d1.max_slope_deg {
             parts.push(format!("max slope {}", s.max_slope_deg));
+        }
+        if s.padding != d1.padding {
+            parts.push(format!("padding {}", s.padding));
+        }
+        if s.predictive_contact_distance != d1.predictive_contact_distance {
+            parts.push(format!("predictive {}", s.predictive_contact_distance));
+        }
+        if s.collision_tolerance != d1.collision_tolerance {
+            parts.push(format!("tolerance {}", s.collision_tolerance));
+        }
+        if !s.back_face_collision {
+            parts.push("back faces ignored".to_owned());
+        }
+        if s.recovery_speed != d1.recovery_speed {
+            parts.push(format!("recovery speed {}", s.recovery_speed));
+        }
+        if s.inner_body {
+            parts.push("inner body".to_owned());
         }
         let e = &self.extended;
         if e.stick > 0.0 {
