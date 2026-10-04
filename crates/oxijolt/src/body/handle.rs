@@ -141,6 +141,20 @@ impl BodyRef<'_> {
         .unwrap_or(AllowedDofs::ALL)
     }
 
+    /// Whether the body has motion properties, so that it can be kinematic or dynamic: it was
+    /// created kinematic or dynamic, or static with
+    /// [`BodySettings::allow_dynamic_or_kinematic`] (Jolt `Body::CanBeKinematicOrDynamic`).
+    ///
+    /// [`BodySettings::allow_dynamic_or_kinematic`]: crate::BodySettings::allow_dynamic_or_kinematic
+    pub fn can_be_kinematic_or_dynamic(&self) -> bool {
+        with_read_locked_body(self.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for reading for the duration of the closure; the getter
+            // only reads it.
+            unsafe { JPH_Body_CanBeKinematicOrDynamic(body.as_ptr()) }
+        })
+        .unwrap_or(false)
+    }
+
     /// Whether the body is a sensor, as created ([`BodySettings::sensor`]).
     ///
     /// [`BodySettings::sensor`]: crate::BodySettings::sensor
@@ -193,7 +207,7 @@ impl BodyRef<'_> {
 /// ```
 pub struct BodyMut<'w> {
     pub(super) inner: BodyRef<'w>,
-    pub(super) _world: PhantomData<&'w mut PhysicsWorld>,
+    pub(super) world: &'w mut PhysicsWorld,
 }
 
 impl<'w> Deref for BodyMut<'w> {

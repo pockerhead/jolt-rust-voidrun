@@ -68,9 +68,12 @@ impl LeverState {
         let can_move = unsafe { JPH_Body_CanBeKinematicOrDynamic(body) };
         let inverse_mass = if can_move {
             // SAFETY: as above. A body that can move has motion properties, so the unchecked
-            // getter reads a live member.
+            // getters read a live member, also for a static body that may move, on which the
+            // checked getter asserts (Jolt's `FixedConstraint` reads it the same way).
             unsafe {
-                JPH_MotionProperties_GetInverseMassUnchecked(JPH_Body_GetMotionProperties(body))
+                JPH_MotionProperties_GetInverseMassUnchecked(JPH_Body_GetMotionPropertiesUnchecked(
+                    body,
+                ))
             }
         } else {
             0.0

@@ -21,6 +21,7 @@ mod kinematic;
 mod load;
 mod lock;
 mod poses;
+mod structure;
 
 pub(crate) use access::corners;
 pub use dofs::AllowedDofs;
@@ -178,6 +179,7 @@ pub struct BodySettings {
     pub(crate) allowed_dofs: AllowedDofs,
     pub(crate) sensor: bool,
     pub(crate) user_data: u64,
+    pub(crate) allow_dynamic_or_kinematic: bool,
 }
 
 impl Default for BodySettings {
@@ -203,6 +205,7 @@ impl Default for BodySettings {
             allowed_dofs: AllowedDofs::ALL,
             sensor: false,
             user_data: 0,
+            allow_dynamic_or_kinematic: false,
         }
     }
 }
@@ -277,7 +280,8 @@ impl BodySettings {
     }
 
     /// Initial linear velocity in m/s, finite and at most [`limits::MAX_LINEAR_VELOCITY`] long
-    /// (Jolt's own length, Jolt's default maximum). Default zero.
+    /// (Jolt's own length, Jolt's default maximum); zero for a static body that may move.
+    /// Default zero.
     #[must_use]
     pub fn linear_velocity(mut self, value: Vec3) -> Self {
         self.linear_velocity = value;
@@ -285,7 +289,8 @@ impl BodySettings {
     }
 
     /// Initial angular velocity in rad/s, finite and at most [`limits::MAX_ANGULAR_VELOCITY`]
-    /// long (Jolt's own length, Jolt's default maximum). Default zero.
+    /// long (Jolt's own length, Jolt's default maximum); zero for a static body that may move.
+    /// Default zero.
     #[must_use]
     pub fn angular_velocity(mut self, value: Vec3) -> Self {
         self.angular_velocity = value;
@@ -389,7 +394,8 @@ impl BodySettings {
     /// The degrees of freedom the body may move in, fixed for its life. Default
     /// [`AllowedDofs::ALL`].
     ///
-    /// The value must keep a translation axis, and a static body keeps every degree of
+    /// The value must keep a translation axis, and a static body that cannot move
+    /// ([`allow_dynamic_or_kinematic`](Self::allow_dynamic_or_kinematic)) keeps every degree of
     /// freedom; [`PhysicsWorld::create_body`] refuses anything else with
     /// [`BodyError::InvalidValue`]. See [`AllowedDofs`] for what a body with fewer degrees of
     /// freedom cannot do.
@@ -441,6 +447,33 @@ impl BodySettings {
         self
     }
 
+    /// Whether a static body may later be made kinematic or dynamic with
+    /// [`BodyMut::set_motion_type`], fixed for its life (Jolt
+    /// `BodyCreationSettings::mAllowDynamicOrKinematic`). Bodies created kinematic or dynamic can
+    /// always change their motion type. Default false.
+    ///
+    /// Jolt gives such a static body motion properties, so [`PhysicsWorld::create_body`] holds
+    /// it to the shape and inertia rules of a kinematic body and refuses non-zero initial
+    /// velocities. Its mass is checked when it is made dynamic. It keeps its object layer when
+    /// it starts to move: with [`CollisionLayers::default`] a body in
+    /// [`ObjectLayer::NON_MOVING`] would pass through other static bodies, so create it in a
+    /// moving layer, such as [`ObjectLayer::MOVING`].
+    ///
+    /// [`BodyMut::set_motion_type`]: crate::BodyMut::set_motion_type
+    /// [`PhysicsWorld::create_body`]: crate::PhysicsWorld::create_body
+    /// [`CollisionLayers::default`]: crate::CollisionLayers::default
+    #[must_use]
+    pub fn allow_dynamic_or_kinematic(mut self, value: bool) -> Self {
+        self.allow_dynamic_or_kinematic = value;
+        self
+    }
+
+    /// Whether Jolt gives the body motion properties (`BodyCreationSettings::HasMassProperties`):
+    /// it is not static, or it may become kinematic or dynamic.
+    pub(crate) fn can_move(&self) -> bool {
+        self.motion_type != MotionType::Static || self.allow_dynamic_or_kinematic
+    }
+
     fn validate(&self, object_layer_count: u32) -> Result<(), BodyError> {
         if self.object_layer.get() >= object_layer_count {
             return Err(BodyError::UnknownObjectLayer(self.object_layer));
@@ -488,6 +521,12 @@ impl BodySettings {
         }
         if self.sensor && self.motion_quality == MotionQuality::LinearCast {
             return invalid("a sensor uses MotionQuality::Discrete");
+        }
+        let still = self.linear_velocity == Vec3::ZERO && self.angular_velocity == Vec3::ZERO;
+        if self.motion_type == MotionType::Static && self.allow_dynamic_or_kinematic && !still {
+            // Jolt keeps them in the motion properties and would release them on the first
+            // motion type change.
+            return invalid("a static body that may move starts with zero velocities");
         }
         Ok(())
     }
@@ -614,6 +653,10 @@ impl CreationSettings {
             JPH_BodyCreationSettings_SetAllowedDOFs(ptr, settings.allowed_dofs.to_jph());
             JPH_BodyCreationSettings_SetIsSensor(ptr, settings.sensor);
             JPH_BodyCreationSettings_SetUserData(ptr, settings.user_data);
+            JPH_BodyCreationSettings_SetAllowDynamicOrKinematic(
+                ptr,
+                settings.allow_dynamic_or_kinematic,
+            );
         }
         if let Some(mass) = settings.mass {
             // Jolt ignores the inertia with `CalculateInertia` (`BodyCreationSettings.cpp`).

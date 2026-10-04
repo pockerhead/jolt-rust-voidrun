@@ -148,6 +148,10 @@ check it at its boundary.
 | `BodyMut::add_impulse_at_point` | both impulse rules with `L = (p - com) × J`; point within `MAX_POSITION`; `f32` cross product products | `body_controls.rs`: `point_impulses_are_bounded_by_the_angular_impulse_of_their_lever`, `angular_impulses_are_bounded_by_the_angular_velocity_change` |
 | `BodyMut::move_kinematic` | position within `MAX_POSITION`, unit rotation, step delta time; Jolt's implied velocities within `MAX_LINEAR_VELOCITY` and `MAX_ANGULAR_VELOCITY` | `body_controls.rs`: `kinematic_moves_are_bounded_by_the_velocities_they_imply` |
 | `PhysicsWorld::activate_bodies_in_box` | corners within `MAX_POSITION`, `min <= max` per axis | `body_controls.rs`: `activation_box_is_validated`, `box_activation_compares_in_caller_precision` |
+| `BodySettings::allowed_dofs` | a translation axis; all six on a static body that cannot move | `src/body/tests.rs`: `dofs_without_translation_are_refused`; `body_settings.rs`: `a_static_body_that_cannot_move_refuses_restricted_dofs` |
+| `BodySettings::sensor` | discrete motion quality; no static-only shape | `sensors.rs`: `sensor_rules_refuse_static_only_shapes_and_linear_cast` |
+| `BodySettings::allow_dynamic_or_kinematic` | zero initial velocities; the shape and inertia rules of a kinematic body | `body_structure.rs`: `a_movable_static_body_needs_zero_initial_velocities`, `allow_dynamic_or_kinematic_pays_the_moving_rules_at_creation` |
+| `BodyMut::set_motion_type` to dynamic | mass within `MIN_MASS..=MAX_MASS`; no static-only shape | `body_structure.rs`: `light_kinematic_body_cannot_become_dynamic`, `kinematic_mesh_body_cannot_become_dynamic` |
 | `BodyMut::reset_forces` | none | `reset_forces_ignores_static_and_kinematic_bodies` |
 | `CharacterSettings::mass` | `0..=MAX_MASS` | `character_settings_and_setters_are_bounded` |
 | `CharacterSettings::shape_offset` | `MAX_SHAPE_EXTENT` per axis | `character_settings_and_setters_are_bounded` |

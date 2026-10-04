@@ -8,49 +8,25 @@ use std::ptr::{null, NonNull};
 
 use oxijolt_sys::*;
 
+use super::structure::{check_shape_for, ShapeUse};
 use super::{
-    has_finite_inverse, mass_properties, with_locked_body, AllowedDofs, BodyId, BodyMut, BodyRef,
-    BodySettings, CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID,
-    KINEMATIC_MESH_MASS_RULE, MESH_DYNAMIC_RULE, SENSOR_SHAPE_RULE, STATIC_DOFS_RULE,
-    STATIC_SHAPE_RULE,
+    with_locked_body, AllowedDofs, BodyId, BodyMut, BodyRef, BodySettings, CreationSettings,
+    INVALID_BODY_ID, STATIC_DOFS_RULE,
 };
-use crate::limits::{is_in_frame, is_mass, MASS_RULE};
+use crate::limits::is_in_frame;
 use crate::owned::Owned;
 use crate::{BodyError, PhysicsWorld, RVec3, Real, Shape, Vec3};
-
-/// Whether a body that is not static may use `shape`, which Jolt allows only on static bodies
-/// (Jolt itself never checks this when creating a body).
-///
-/// A kinematic body may carry a shape whose static-only leaves are all meshes, given a mass.
-/// Jolt cannot collide a mesh with a mesh or a heightfield ("Unsupported shape pair" in
-/// `CollisionDispatch`), and such pairs stay out of reach: only kinematic bodies carry meshes,
-/// Jolt pairs a kinematic body with a static or kinematic one only with
-/// `mCollideKinematicVsNonDynamic`, which this crate does not expose, or with a sensor
-/// (`Body::sFindCollidingPairsCanCollide`), which may not use a static-only shape
-/// ([`SENSOR_SHAPE_RULE`]); query, character and ragdoll shapes refuse static-only shapes.
-/// Exposing that switch, or letting sensors take such shapes, must revisit this rule.
-fn validate_static_only_shape(shape: &Shape, settings: &BodySettings) -> Result<(), BodyError> {
-    if !shape.static_only_leaves_are_meshes() {
-        return Err(BodyError::InvalidValue(STATIC_SHAPE_RULE));
-    }
-    if settings.motion_type == MotionType::Dynamic {
-        return Err(BodyError::InvalidValue(MESH_DYNAMIC_RULE));
-    }
-    if settings.mass.is_none() {
-        return Err(BodyError::InvalidValue(KINEMATIC_MESH_MASS_RULE));
-    }
-    Ok(())
-}
 
 impl PhysicsWorld {
     /// Creates a body from `shape` and adds it to the world. The body keeps its own reference
     /// to the shape, so `shape` may be dropped afterwards.
     ///
     /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, when a sensor's
-    /// shape is one that only static bodies may use, and, for a dynamic or kinematic body, when:
+    /// shape is one that only static bodies may use, and, for a dynamic or kinematic body or a
+    /// static one that may move ([`BodySettings::allow_dynamic_or_kinematic`]), when:
     /// - the shape is one that only static bodies may use: a heightfield, or a compound or
     ///   decorated shape that contains one;
-    /// - the shape contains a mesh and the body is dynamic, or kinematic without
+    /// - the shape contains a mesh and the body is dynamic, or not dynamic without
     ///   [`BodySettings::mass`] (Jolt computes no mass for a mesh);
     /// - the mass or inertia (overridden, or computed from a tiny shape) has no finite inverse;
     /// - the inertia tensor is not diagonal (a rotated or offset compound child, an offset centre
@@ -70,26 +46,20 @@ impl PhysicsWorld {
         settings: &BodySettings,
     ) -> Result<BodyId, BodyError> {
         settings.validate(self.object_layer_count)?;
-        if settings.motion_type == MotionType::Static && settings.allowed_dofs != AllowedDofs::ALL {
+        if !settings.can_move() && settings.allowed_dofs != AllowedDofs::ALL {
             return Err(BodyError::InvalidValue(STATIC_DOFS_RULE));
         }
-        if settings.sensor && shape.must_be_static() {
-            return Err(BodyError::InvalidValue(SENSOR_SHAPE_RULE));
-        }
-        if settings.motion_type != MotionType::Static && shape.must_be_static() {
-            validate_static_only_shape(shape, settings)?;
-        }
-        // Jolt computes mass properties for every body that is not static
+        // Jolt computes mass properties for every body that can move
         // (`BodyCreationSettings::HasMassProperties`).
-        if settings.motion_type != MotionType::Static {
-            let properties = mass_properties(shape, settings.mass);
-            if !has_finite_inverse(&properties) {
-                return Err(BodyError::InvalidValue(INERTIA_RULE));
-            }
-            if settings.motion_type == MotionType::Dynamic && !is_mass(properties.mass) {
-                return Err(BodyError::InvalidValue(MASS_RULE));
-            }
-        }
+        check_shape_for(
+            shape,
+            ShapeUse {
+                motion_type: settings.motion_type,
+                can_move: settings.can_move(),
+                sensor: settings.sensor,
+                mass: settings.mass,
+            },
+        )?;
         let creation = CreationSettings::new(shape, settings)?;
         if !self.has_room_for_bodies(1) {
             return Err(BodyError::TooManyBodies);
@@ -150,7 +120,7 @@ impl PhysicsWorld {
                 id,
                 _world: PhantomData,
             },
-            _world: PhantomData,
+            world: self,
         })
     }
 
@@ -194,27 +164,29 @@ impl PhysicsWorld {
     }
 
     /// Refuses a body that a character, vehicle, ragdoll or constraint holds: removing it, or
-    /// changing its shape or motion type, would break what that owner relies on.
+    /// changing its shape or motion type, would break what that owner relies on. Every API that
+    /// destroys a body or changes its shape or motion type calls this.
     pub(crate) fn check_not_owned(&self, id: BodyId) -> Result<(), BodyError> {
         // The character's destructor destroys its inner body, and Jolt does not validate ids in
-        // `DestroyBody`: removing it here first would make that a double destroy. Any future
-        // API that destroys bodies needs the same check.
+        // `DestroyBody`: removing it here first would make that a double destroy. The character
+        // also moves the body as a kinematic body of its own shape.
         if self.is_inner_body(id) {
             return Err(BodyError::OwnedByCharacter(id));
         }
-        // A vehicle keeps a pointer to its chassis and dereferences it on every step. Any future
-        // API that destroys bodies or changes their motion type must consult the vehicle bodies
-        // the same way.
+        // A vehicle keeps a pointer to its chassis and dereferences it on every step, and its
+        // checks assume a dynamic chassis of the mass it was created with.
         if self.is_vehicle_body(id) {
             return Err(BodyError::UsedByVehicle(id));
         }
         // A ragdoll destroys its parts when it is released, and Jolt does not validate ids in
-        // `DestroyBody`, so removing a part here would make that a double destroy.
+        // `DestroyBody`, so removing a part here would make that a double destroy. Its joints
+        // were checked against the parts' shapes and masses.
         if self.is_ragdoll_body(id) {
             return Err(BodyError::OwnedByRagdoll(id));
         }
-        // A constraint keeps pointers to its bodies and dereferences them on every step. Any
-        // future API that destroys bodies must consult the constraint bodies the same way.
+        // A constraint keeps pointers to its bodies and dereferences them on every step, and
+        // its lever-arm, spring and dynamic-body checks used the bodies' motion types, masses
+        // and inertias at creation.
         if self.is_constraint_body(id) {
             return Err(BodyError::UsedByConstraint(id));
         }

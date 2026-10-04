@@ -310,23 +310,30 @@ fn ragdoll_parts_refuse_user_data() {
 #[test]
 fn changing_settings_after_creation_changes_no_body() {
     let mut world = world(GRAVITY, 1);
-    let mut settings = BodySettings::new_dynamic()
+    let mut settings = BodySettings::new_static()
         .sensor(true)
         .user_data(11)
-        .allowed_dofs(AllowedDofs::PLANE_2D);
+        .allowed_dofs(AllowedDofs::PLANE_2D)
+        .allow_dynamic_or_kinematic(true);
     let first = world.create_body(&cube_shape(), &settings).unwrap();
     settings = settings
         .sensor(false)
         .user_data(12)
         .allowed_dofs(AllowedDofs::ALL)
+        .allow_dynamic_or_kinematic(false)
         .position(RVec3::new(3.0, 0.0, 0.0));
     let second = world.create_body(&cube_shape(), &settings).unwrap();
     let config = |id| {
         let body = world.body(id).unwrap();
-        (body.is_sensor(), body.user_data(), body.allowed_dofs())
+        (
+            body.is_sensor(),
+            body.user_data(),
+            body.allowed_dofs(),
+            body.can_be_kinematic_or_dynamic(),
+        )
     };
-    assert_eq!(config(first), (true, 11, AllowedDofs::PLANE_2D));
-    assert_eq!(config(second), (false, 12, AllowedDofs::ALL));
+    assert_eq!(config(first), (true, 11, AllowedDofs::PLANE_2D, true));
+    assert_eq!(config(second), (false, 12, AllowedDofs::ALL, false));
 }
 
 #[test]
