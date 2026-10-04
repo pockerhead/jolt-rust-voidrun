@@ -11,7 +11,9 @@ use super::lever::check_spring;
 use super::SpringSettings;
 use crate::body::with_locked_bodies;
 use crate::owned::{JoltObject, Owned};
-use crate::{BodyError, BodyId, ConstraintError, MotionType, PhysicsWorld, RVec3, Vec3};
+use crate::{
+    AllowedDofs, BodyError, BodyId, ConstraintError, MotionType, PhysicsWorld, RVec3, Vec3,
+};
 
 /// The kinds of constraint a world can hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -360,8 +362,8 @@ impl PhysicsWorld {
     ///
     /// Frames given in [`ConstraintSpace::WorldSpace`] are world space at the time the
     /// constraint is created; Jolt turns them into each body's own frame then. Both bodies must
-    /// be bodies of this world, different, and neither the inner body of a character nor a part
-    /// of a ragdoll ([`ConstraintError::Body`]). Except for a gear, a rack and pinion and a
+    /// be bodies of this world, different, neither the inner body of a character nor a part of
+    /// a ragdoll, and created with all six degrees of freedom ([`ConstraintError::Body`]). Except for a gear, a rack and pinion and a
     /// pulley, one of them may be static or kinematic, which anchors the constraint to the world
     /// or to the kinematic body. Those three need two dynamic bodies
     /// ([`ConstraintError::NotDynamic`]): Jolt's solver parts for them read both bodies' motion
@@ -464,6 +466,14 @@ impl PhysicsWorld {
                 .is_soft_body()
             {
                 return Err(ConstraintError::Body(BodyError::SoftBody(body)));
+            }
+            // The lever-arm and spring checks below assume unmasked inverse mass and inertia.
+            let allowed_dofs = self
+                .body(body)
+                .map_err(ConstraintError::Body)?
+                .allowed_dofs();
+            if allowed_dofs != AllowedDofs::ALL {
+                return Err(ConstraintError::Body(BodyError::RestrictedDofs(body)));
             }
             if S::NEEDS_DYNAMIC_BODIES
                 && self

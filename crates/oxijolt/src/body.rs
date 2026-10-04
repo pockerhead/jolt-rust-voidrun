@@ -14,11 +14,13 @@ use crate::world::WorldTag;
 use crate::{BodyError, ObjectLayer, Quat, RVec3, Shape, Vec3};
 
 mod access;
+mod dofs;
 mod handle;
 mod load;
 mod lock;
 mod poses;
 
+pub use dofs::AllowedDofs;
 pub use handle::{BodyMut, BodyRef};
 pub(crate) use lock::{with_locked_bodies, with_locked_body, with_read_locked_body};
 pub use poses::BodyPose;
@@ -169,6 +171,7 @@ pub struct BodySettings {
     allow_sleeping: bool,
     activation: Activation,
     enhanced_internal_edge_removal: bool,
+    pub(crate) allowed_dofs: AllowedDofs,
 }
 
 impl Default for BodySettings {
@@ -191,6 +194,7 @@ impl Default for BodySettings {
             allow_sleeping: true,
             activation: Activation::Activate,
             enhanced_internal_edge_removal: false,
+            allowed_dofs: AllowedDofs::ALL,
         }
     }
 }
@@ -200,6 +204,15 @@ pub(crate) const RESTITUTION_RULE: &str = "restitution must be between 0 and 1";
 
 /// What a linear damping must satisfy ([`is_finite_non_negative`]).
 pub(crate) const LINEAR_DAMPING_RULE: &str = "linear damping must be finite and not negative";
+
+/// What [`BodySettings::allowed_dofs`] must satisfy (crate policy): without a translation axis
+/// Jolt gives the body a zero inverse mass, and its unit-sphere inertia fallback (`2.5 / mass`)
+/// is then zero as well, which Jolt asserts against.
+pub(crate) const DOFS_RULE: &str = "allowed DOFs must keep a translation axis";
+
+/// Why a static body keeps every degree of freedom: Jolt keeps them only in the motion
+/// properties a static body does not have.
+pub(crate) const STATIC_DOFS_RULE: &str = "a static body that cannot move keeps all DOFs";
 
 /// What Jolt asks of a shape that `Shape::MustBeStatic` reports.
 pub(crate) const STATIC_SHAPE_RULE: &str = "this shape can only be used by static bodies";
@@ -360,6 +373,21 @@ impl BodySettings {
         self
     }
 
+    /// The degrees of freedom the body may move in, fixed for its life. Default
+    /// [`AllowedDofs::ALL`].
+    ///
+    /// The value must keep a translation axis, and a static body keeps every degree of
+    /// freedom; [`PhysicsWorld::create_body`] refuses anything else with
+    /// [`BodyError::InvalidValue`]. See [`AllowedDofs`] for what a body with fewer degrees of
+    /// freedom cannot do.
+    ///
+    /// [`PhysicsWorld::create_body`]: crate::PhysicsWorld::create_body
+    #[must_use]
+    pub fn allowed_dofs(mut self, value: AllowedDofs) -> Self {
+        self.allowed_dofs = value;
+        self
+    }
+
     fn validate(&self, object_layer_count: u32) -> Result<(), BodyError> {
         if self.object_layer.get() >= object_layer_count {
             return Err(BodyError::UnknownObjectLayer(self.object_layer));
@@ -401,6 +429,9 @@ impl BodySettings {
             if !is_mass(mass) {
                 return invalid(limits::MASS_RULE);
             }
+        }
+        if !self.allowed_dofs.has_translation() {
+            return invalid(DOFS_RULE);
         }
         Ok(())
     }
@@ -524,6 +555,7 @@ impl CreationSettings {
                 ptr,
                 settings.enhanced_internal_edge_removal,
             );
+            JPH_BodyCreationSettings_SetAllowedDOFs(ptr, settings.allowed_dofs.to_jph());
         }
         if let Some(mass) = settings.mass {
             // Jolt ignores the inertia with `CalculateInertia` (`BodyCreationSettings.cpp`).

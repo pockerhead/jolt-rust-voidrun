@@ -350,6 +350,9 @@ pub enum BodyError {
     SoftBody(BodyId),
     /// The operation needs a soft body and the body is a rigid body.
     NotSoftBody(BodyId),
+    /// The operation needs a body with all six degrees of freedom and the body was created with
+    /// fewer ([`BodySettings::allowed_dofs`](crate::BodySettings::allowed_dofs)).
+    RestrictedDofs(BodyId),
 }
 
 impl fmt::Display for BodyError {
@@ -383,6 +386,9 @@ impl fmt::Display for BodyError {
                 )
             }
             Self::NotSoftBody(id) => write!(f, "body {id:?} is not a soft body"),
+            Self::RestrictedDofs(id) => {
+                write!(f, "body {id:?} does not have all six degrees of freedom")
+            }
         }
     }
 }

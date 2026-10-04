@@ -14,8 +14,8 @@ use crate::limits::{self, MASS_RULE};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
 use crate::{
-    BodyError, BodySettings, HingeConstraintSettings, MotionType, ObjectLayer, Quat, RVec3,
-    RagdollError, Real, Shape, SixDofConstraintSettings, SpringSettings,
+    AllowedDofs, BodyError, BodySettings, HingeConstraintSettings, MotionType, ObjectLayer, Quat,
+    RVec3, RagdollError, Real, Shape, SixDofConstraintSettings, SpringSettings,
     SwingTwistConstraintSettings, Vec3,
 };
 
@@ -434,6 +434,9 @@ fn validate_parts(skeleton: &Skeleton, parts: &[RagdollPart<'_>]) -> Result<(), 
         })?;
         if part.body.motion_type == MotionType::Static {
             return invalid(PART_MOTION_RULE);
+        }
+        if part.body.allowed_dofs != AllowedDofs::ALL {
+            return invalid("ragdoll parts keep all six degrees of freedom");
         }
         // SAFETY: the shape is live for the call; the getter only reads it.
         if unsafe { JPH_Shape_MustBeStatic(part.shape.as_ptr()) } {

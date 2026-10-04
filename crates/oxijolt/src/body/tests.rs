@@ -301,3 +301,43 @@ fn diagonal_inertia_must_be_positive_unless_near_zero() {
     // All zero: Jolt uses the inertia of a unit sphere.
     assert!(has_finite_inverse(&diagonal_inertia([0.0, 0.0, 0.0])));
 }
+
+#[test]
+fn allowed_dofs_match_jolts_flags() {
+    for (ours, jolt) in [
+        (AllowedDofs::ALL, JPH_AllowedDOFs_All),
+        (AllowedDofs::TRANSLATION_X, JPH_AllowedDOFs_TranslationX),
+        (AllowedDofs::TRANSLATION_Y, JPH_AllowedDOFs_TranslationY),
+        (AllowedDofs::TRANSLATION_Z, JPH_AllowedDOFs_TranslationZ),
+        (AllowedDofs::ROTATION_X, JPH_AllowedDOFs_RotationX),
+        (AllowedDofs::ROTATION_Y, JPH_AllowedDOFs_RotationY),
+        (AllowedDofs::ROTATION_Z, JPH_AllowedDOFs_RotationZ),
+        (AllowedDofs::PLANE_2D, JPH_AllowedDOFs_Plane2D),
+    ] {
+        assert_eq!(ours.to_jph(), jolt);
+        assert_eq!(AllowedDofs::from_jph(jolt), ours);
+    }
+    let plane = AllowedDofs::TRANSLATION_X | AllowedDofs::TRANSLATION_Y | AllowedDofs::ROTATION_Z;
+    assert_eq!(plane, AllowedDofs::PLANE_2D);
+    assert!(AllowedDofs::ALL.contains(plane));
+    assert!(!plane.contains(AllowedDofs::TRANSLATION_Z));
+    assert_eq!(AllowedDofs::default(), AllowedDofs::ALL);
+}
+
+#[test]
+fn dofs_without_translation_are_refused() {
+    let rotation_only = AllowedDofs::ROTATION_X | AllowedDofs::ROTATION_Y | AllowedDofs::ROTATION_Z;
+    let settings = BodySettings::new_dynamic().allowed_dofs(rotation_only);
+    assert_eq!(
+        settings.validate_values(),
+        Err(BodyError::InvalidValue(DOFS_RULE))
+    );
+    for keeps_one in [
+        AllowedDofs::TRANSLATION_X,
+        AllowedDofs::TRANSLATION_Y | AllowedDofs::ROTATION_Y,
+        AllowedDofs::TRANSLATION_Z | rotation_only,
+    ] {
+        let settings = BodySettings::new_dynamic().allowed_dofs(keeps_one);
+        assert_eq!(settings.validate_values(), Ok(()));
+    }
+}

@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 use oxijolt_sys::*;
 
 use super::load::{length, point_torque, read_load, require, soft_body_force, sum, Load};
-use super::{with_locked_body, with_read_locked_body, Activation, BodyId, MotionType};
+use super::{with_locked_body, with_read_locked_body, Activation, AllowedDofs, BodyId, MotionType};
 use crate::limits::{
     self, is_angular_velocity, is_in_frame, is_linear_velocity, ANGULAR_VELOCITY_RULE,
     LINEAR_VELOCITY_RULE, POSITION_RULE,
@@ -120,6 +120,27 @@ impl BodyRef<'_> {
         (inverse_mass != 0.0).then(|| 1.0 / inverse_mass)
     }
 
+    /// The degrees of freedom the body may move in, as created
+    /// ([`BodySettings::allowed_dofs`](crate::BodySettings::allowed_dofs)). A body without
+    /// motion properties, a static body that cannot move, reports [`AllowedDofs::ALL`].
+    pub fn allowed_dofs(&self) -> AllowedDofs {
+        with_read_locked_body(self.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for reading for the duration of the closure. A body that
+            // can be kinematic or dynamic has motion properties, so the unchecked getter reads a
+            // live member, without the assertion of the checked getter on static bodies; the
+            // getters only read.
+            unsafe {
+                JPH_Body_CanBeKinematicOrDynamic(body.as_ptr()).then(|| {
+                    AllowedDofs::from_jph(JPH_MotionProperties_GetAllowedDOFs(
+                        JPH_Body_GetMotionPropertiesUnchecked(body.as_ptr()),
+                    ))
+                })
+            }
+        })
+        .flatten()
+        .unwrap_or(AllowedDofs::ALL)
+    }
+
     /// Whether the body is a soft body ([`PhysicsWorld::create_soft_body`]).
     pub fn is_soft_body(&self) -> bool {
         with_read_locked_body(self.body_lock_interface, self.id, |body| {
@@ -136,6 +157,21 @@ impl BodyRef<'_> {
 /// Dereferences to [`BodyRef`] for reads. Setters validate their input before it reaches
 /// Jolt. Units: metres, m/s, rad/s, newtons and newton-metres. Static bodies ignore velocity
 /// and force writes. Not `Send` or `Sync`.
+///
+/// The view borrows the whole world, so it ends before the world steps:
+///
+/// ```compile_fail,E0499
+/// use oxijolt::*;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut world = PhysicsWorld::new(WorldSettings::default())?;
+/// let ball = world.create_body(&Shape::new_sphere(0.5)?, &BodySettings::new_dynamic())?;
+/// let mut body = world.body_mut(ball)?;
+/// let _ = world.step(1.0 / 60.0)?;
+/// body.add_force(Vec3::new(0.0, 10.0, 0.0))?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BodyMut<'w> {
     pub(super) inner: BodyRef<'w>,
     pub(super) _world: PhantomData<&'w mut PhysicsWorld>,

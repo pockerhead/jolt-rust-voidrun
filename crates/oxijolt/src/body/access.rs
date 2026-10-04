@@ -9,9 +9,9 @@ use std::ptr::{null, NonNull};
 use oxijolt_sys::*;
 
 use super::{
-    has_finite_inverse, mass_properties, with_locked_body, BodyId, BodyMut, BodyRef, BodySettings,
-    CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID, KINEMATIC_MESH_MASS_RULE,
-    MESH_DYNAMIC_RULE, STATIC_SHAPE_RULE,
+    has_finite_inverse, mass_properties, with_locked_body, AllowedDofs, BodyId, BodyMut, BodyRef,
+    BodySettings, CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID,
+    KINEMATIC_MESH_MASS_RULE, MESH_DYNAMIC_RULE, STATIC_DOFS_RULE, STATIC_SHAPE_RULE,
 };
 use crate::limits::{is_mass, MASS_RULE};
 use crate::owned::Owned;
@@ -68,6 +68,9 @@ impl PhysicsWorld {
         settings: &BodySettings,
     ) -> Result<BodyId, BodyError> {
         settings.validate(self.object_layer_count)?;
+        if settings.motion_type == MotionType::Static && settings.allowed_dofs != AllowedDofs::ALL {
+            return Err(BodyError::InvalidValue(STATIC_DOFS_RULE));
+        }
         if settings.motion_type != MotionType::Static && shape.must_be_static() {
             validate_static_only_shape(shape, settings)?;
         }
@@ -164,6 +167,29 @@ impl PhysicsWorld {
     /// [`remove_constraint`](Self::remove_constraint).
     pub fn remove_body(&mut self, id: BodyId) -> Result<(), BodyError> {
         self.check(id)?;
+        self.check_not_owned(id)?;
+        let mut bounds = JPH_AABox {
+            min: Vec3::ZERO.to_jph(),
+            max: Vec3::ZERO.to_jph(),
+        };
+        with_locked_body(self.body_lock_interface, id, |body| {
+            // SAFETY: `body` is locked for writing for the duration of the closure; `bounds` is
+            // a live local.
+            unsafe { JPH_Body_GetWorldSpaceBounds(body.as_ptr(), &mut bounds) };
+        })
+        .ok_or(BodyError::NotFound(id))?;
+        self.note_structure_change();
+        // SAFETY: `check` just confirmed the id names a body in this world, and `&mut self`
+        // keeps anyone else from removing it in between, so the body is removed exactly once
+        // (Jolt does not validate ids in `DestroyBody`). This thread holds no body lock.
+        unsafe { JPH_BodyInterface_RemoveAndDestroyBody(self.body_interface.as_ptr(), id.raw) };
+        self.wake_bodies_overlapping(&bounds);
+        Ok(())
+    }
+
+    /// Refuses a body that a character, vehicle, ragdoll or constraint holds: removing it, or
+    /// changing its shape or motion type, would break what that owner relies on.
+    pub(crate) fn check_not_owned(&self, id: BodyId) -> Result<(), BodyError> {
         // The character's destructor destroys its inner body, and Jolt does not validate ids in
         // `DestroyBody`: removing it here first would make that a double destroy. Any future
         // API that destroys bodies needs the same check.
@@ -186,22 +212,6 @@ impl PhysicsWorld {
         if self.is_constraint_body(id) {
             return Err(BodyError::UsedByConstraint(id));
         }
-        let mut bounds = JPH_AABox {
-            min: Vec3::ZERO.to_jph(),
-            max: Vec3::ZERO.to_jph(),
-        };
-        with_locked_body(self.body_lock_interface, id, |body| {
-            // SAFETY: `body` is locked for writing for the duration of the closure; `bounds` is
-            // a live local.
-            unsafe { JPH_Body_GetWorldSpaceBounds(body.as_ptr(), &mut bounds) };
-        })
-        .ok_or(BodyError::NotFound(id))?;
-        self.note_structure_change();
-        // SAFETY: `check` just confirmed the id names a body in this world, and `&mut self`
-        // keeps anyone else from removing it in between, so the body is removed exactly once
-        // (Jolt does not validate ids in `DestroyBody`). This thread holds no body lock.
-        unsafe { JPH_BodyInterface_RemoveAndDestroyBody(self.body_interface.as_ptr(), id.raw) };
-        self.wake_bodies_overlapping(&bounds);
         Ok(())
     }
 

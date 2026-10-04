@@ -27,7 +27,9 @@ use crate::limits;
 use crate::math::is_unit;
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
-use crate::{BodyError, BodyId, MotionType, PhysicsWorld, RVec3, SubShapeId, Vec3, VehicleError};
+use crate::{
+    AllowedDofs, BodyError, BodyId, MotionType, PhysicsWorld, RVec3, SubShapeId, Vec3, VehicleError,
+};
 
 pub use settings::{
     SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings,
@@ -453,7 +455,8 @@ impl PhysicsWorld {
     ///
     /// Fails with [`VehicleError::InvalidValue`] when a setting is out of range (see the setters
     /// of [`VehicleSettings`] and the types it holds), with [`VehicleError::Body`] when `body`
-    /// is not in this world, is the inner body of a character, a ragdoll part or a soft body, with
+    /// is not in this world, is the inner body of a character, a ragdoll part or a soft body, or
+    /// has fewer than six degrees of freedom, with
     /// [`VehicleError::NotDynamic`], with [`VehicleError::AlreadyHasVehicle`] when the body
     /// carries a vehicle already, and with [`VehicleError::TooManyVehicles`] when the world has
     /// run out of ids. Nothing is created on failure.
@@ -517,6 +520,10 @@ impl PhysicsWorld {
         }
         if self.body(body).map_err(VehicleError::Body)?.motion_type() != MotionType::Dynamic {
             return Err(VehicleError::NotDynamic(body));
+        }
+        // The wheel and gravity bounds assume an unmasked chassis.
+        if self.body(body).map_err(VehicleError::Body)?.allowed_dofs() != AllowedDofs::ALL {
+            return Err(VehicleError::Body(BodyError::RestrictedDofs(body)));
         }
         // One vehicle per chassis: two vehicles would write the same body's force accumulator
         // from different step listener jobs.

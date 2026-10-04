@@ -66,7 +66,8 @@
 //! math types included.
 
 pub use crate::{
-    Activation, BodyId, BodyMut, BodyPose, BodyRef, BodySettings, MotionQuality, MotionType,
+    Activation, AllowedDofs, BodyId, BodyMut, BodyPose, BodyRef, BodySettings, MotionQuality,
+    MotionType,
 };
 pub use crate::{ActivationEvent, ContactEvent, ContactListener, EventSettings, WorldEvents};
 pub use crate::{AnyConstraintId, ConstraintId};
