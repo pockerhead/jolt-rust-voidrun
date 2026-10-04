@@ -2,7 +2,7 @@ use super::*;
 use crate::body::mass_properties;
 use crate::material::shape_material;
 use crate::shape::geometry::{cross, length, sub};
-use crate::{CompoundChild, HeightFieldSettings, PhysicsMaterial, Quat, SubShapeId};
+use crate::{CompoundChild, HeightFieldSettings, MeshSettings, PhysicsMaterial, Quat, SubShapeId};
 
 fn unit_box() -> Shape {
     Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap()
@@ -24,6 +24,17 @@ fn bounds(shape: &Shape) -> [[f32; 3]; 2] {
 
 fn invalid_settings(result: Result<Shape, ShapeError>) -> bool {
     matches!(result, Err(ShapeError::InvalidSettings(_)))
+}
+
+/// Whether `Shape::scaled` refused thin triangles, checked for the default convex extent.
+fn thin_triangles(result: Result<Shape, ShapeError>) -> bool {
+    matches!(
+        result,
+        Err(ShapeError::ThinTriangles(ThinTrianglesError {
+            max_convex_extent: MeshSettings::DEFAULT_MAX_CONVEX_EXTENT,
+            ..
+        }))
+    )
 }
 
 fn invalid_dimensions(result: Result<Shape, ShapeError>) -> bool {
@@ -194,7 +205,7 @@ fn scaled_meshes_stay_kinematic_and_collidable() {
     assert!(Shape::scaled(&mesh, Vec3::new(1.0, -1.0, 1.0)).is_ok());
     // Twice the area of a 1 m triangle scaled by s is s^2: 1e-4 at s = 0.01, 1e-6 at s = 0.001.
     assert!(Shape::scaled(&mesh, Vec3::new(0.01, 1.0, 0.01)).is_ok());
-    assert!(invalid_settings(Shape::scaled(
+    assert!(thin_triangles(Shape::scaled(
         &mesh,
         Vec3::new(0.001, 1.0, 0.001)
     )));
@@ -205,7 +216,7 @@ fn scaled_meshes_stay_kinematic_and_collidable() {
     ])
     .unwrap();
     let offset = Shape::new_offset_center_of_mass(&compound, Vec3::new(0.2, 0.0, 0.0)).unwrap();
-    assert!(invalid_settings(Shape::scaled(
+    assert!(thin_triangles(Shape::scaled(
         &offset,
         Vec3::new(0.001, 0.001, 0.001)
     )));
@@ -213,7 +224,7 @@ fn scaled_meshes_stay_kinematic_and_collidable() {
     let field = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
     let scaled_field = Shape::scaled(&field, Vec3::new(2.0, 1.0, 2.0)).unwrap();
     assert!(!scaled_field.static_only_leaves_are_meshes());
-    assert!(invalid_settings(Shape::scaled(
+    assert!(thin_triangles(Shape::scaled(
         &field,
         Vec3::new(0.001, 1.0, 0.001)
     )));
@@ -364,7 +375,7 @@ fn flattening_follows_the_meshs_own_coordinates() {
     let moved = rotated_translated(&far, to_origin, Quat::IDENTITY);
     for shape in [&far, &offset, &cancelled, &in_compound, &moved] {
         assert!(Shape::scaled(shape, Vec3::new(1.0, 1.0, 0.006)).is_ok());
-        assert!(invalid_settings(Shape::scaled(
+        assert!(thin_triangles(Shape::scaled(
             shape,
             Vec3::new(1.0, 1.0, 0.001)
         )));
@@ -376,9 +387,66 @@ fn flattening_follows_the_meshs_own_coordinates() {
         child(&far, to_origin, quarter_turn()),
     ])
     .unwrap();
-    assert!(invalid_settings(Shape::scaled(
+    assert!(thin_triangles(Shape::scaled(
         &turned,
         Vec3::new(0.001, 1.0, 1.0)
     )));
     assert!(Shape::scaled(&turned, Vec3::new(1.0, 1.0, 0.001)).is_ok());
+}
+
+#[test]
+fn scaled_meshes_are_checked_for_the_extent_they_were_built_for() {
+    // A sliver 1 m by 20 um, kept for convex shapes up to 1 m and refused for the default.
+    let sliver = |width: f32| {
+        [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(width, 0.0, 0.5),
+        ]
+    };
+    let small = MeshSettings::default().max_convex_extent(1.0);
+    let (mesh, dropped) =
+        Shape::new_mesh_with_settings(&sliver(2.0e-5), &[[0, 1, 2]], &small).unwrap();
+    assert!(dropped.is_empty());
+    for scale in [1.0, 2.0] {
+        assert!(Shape::scaled(&mesh, Vec3::new(scale, scale, scale)).is_ok());
+    }
+    let shrunk = Vec3::new(0.2, 0.2, 0.2);
+    assert_eq!(
+        Shape::scaled(&mesh, shrunk).err(),
+        Some(ShapeError::ThinTriangles(ThinTrianglesError {
+            scale: shrunk,
+            max_convex_extent: 1.0
+        }))
+    );
+    // A strip 2.5 mm wide kept for 4000 m is checked for 4000 m: halved across its width it is
+    // refused, although the default extent would keep it.
+    let large = MeshSettings::default().max_convex_extent(4000.0);
+    let (mesh, dropped) =
+        Shape::new_mesh_with_settings(&sliver(2.5e-3), &[[0, 1, 2]], &large).unwrap();
+    assert!(dropped.is_empty());
+    let (thinned, _) = Shape::new_mesh(&sliver(1.25e-3), &[[0, 1, 2]]).unwrap();
+    assert!(Shape::scaled(&thinned, Vec3::new(1.0, 1.0, 1.0)).is_ok());
+    let halved = Vec3::new(0.5, 1.0, 1.0);
+    assert_eq!(
+        Shape::scaled(&mesh, halved).err(),
+        Some(ShapeError::ThinTriangles(ThinTrianglesError {
+            scale: halved,
+            max_convex_extent: 4000.0
+        }))
+    );
+    // Inside a compound each mesh keeps its own extent.
+    let compound = Shape::new_compound(&[
+        child(&unit_box(), Vec3::ZERO, Quat::IDENTITY),
+        child(&mesh, Vec3::new(3.0, 0.0, 0.0), Quat::IDENTITY),
+    ])
+    .unwrap();
+    assert!(Shape::scaled(&compound, Vec3::new(2.0, 2.0, 2.0)).is_ok());
+    assert!(matches!(
+        Shape::scaled(&compound, Vec3::new(0.5, 0.5, 0.5)),
+        Err(ShapeError::ThinTriangles(ThinTrianglesError {
+            max_convex_extent: 4000.0,
+            ..
+        }))
+    ));
 }

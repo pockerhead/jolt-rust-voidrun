@@ -309,7 +309,37 @@ impl Shape {
             return Err(ShapeError::Mesh(MeshError::NoTriangles));
         }
         let shape = jolt_settings.create()?.within_extent_bounds()?;
+        shape.record_convex_extent(settings.max_convex_extent);
         Ok((shape, dropped))
+    }
+
+    /// Keeps `extent` in the new mesh's Jolt user data (`Shape::mUserData`), with
+    /// [`CONVEX_EXTENT_TAG`] in the high half and the bits of `extent` in the low half, so that
+    /// [`Shape::scaled`] checks the mesh against the extent it was built for. The safe API does not
+    /// expose a shape's user data otherwise.
+    fn record_convex_extent(&self, extent: f32) {
+        let data = CONVEX_EXTENT_TAG | u64::from(extent.to_bits());
+        // SAFETY: the mesh is live and was just created by the caller, which has not handed it
+        // out, so nothing reads it while the user data changes.
+        unsafe { JPH_Shape_SetUserData(self.0.as_ptr(), data) };
+    }
+}
+
+/// Marks the user data of a mesh built by [`Shape::new_mesh_with_settings`].
+const CONVEX_EXTENT_TAG: u64 = 1 << 32;
+
+/// The [`MeshSettings::max_convex_extent`] the mesh or heightfield `leaf` was built for; the
+/// default for heightfields and for meshes built outside [`Shape::new_mesh_with_settings`].
+///
+/// # Safety
+/// `leaf` is a live shape.
+pub(super) unsafe fn convex_extent_of(leaf: *const JPH_Shape) -> f32 {
+    // SAFETY: `leaf` is live (contract); the getter only reads it.
+    let data = unsafe { JPH_Shape_GetUserData(leaf) };
+    if data >> 32 == CONVEX_EXTENT_TAG >> 32 {
+        f32::from_bits(data as u32)
+    } else {
+        MeshSettings::DEFAULT_MAX_CONVEX_EXTENT
     }
 }
 

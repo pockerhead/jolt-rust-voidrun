@@ -9,7 +9,7 @@
 
 use std::fmt;
 
-use crate::{AnyConstraintId, BodyId, CharacterId, ObjectLayer, RagdollId, VehicleId};
+use crate::{AnyConstraintId, BodyId, CharacterId, ObjectLayer, RagdollId, Vec3, VehicleId};
 
 /// Why a [`PhysicsWorld`](crate::PhysicsWorld) could not be created or changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +52,8 @@ pub enum ShapeError {
     ConvexHull(HullError),
     /// A triangle mesh has nothing Jolt can build.
     Mesh(MeshError),
+    /// A scale leaves mesh or heightfield triangles too thin to collide with.
+    ThinTriangles(ThinTrianglesError),
     /// Jolt refused the shape settings; the payload is Jolt's message.
     Rejected(JoltMessage),
     /// joltc returned null.
@@ -66,6 +68,7 @@ impl fmt::Display for ShapeError {
             Self::InvalidSettings(what) => write!(f, "invalid shape setting: {what}"),
             Self::ConvexHull(error) => write!(f, "invalid convex hull: {error}"),
             Self::Mesh(error) => write!(f, "invalid triangle mesh: {error}"),
+            Self::ThinTriangles(error) => write!(f, "invalid scale: {error}"),
             Self::Rejected(message) => write!(f, "Jolt rejected the shape settings: {message}"),
             Self::AllocationFailed => f.write_str("could not create the shape"),
         }
@@ -120,6 +123,49 @@ impl fmt::Display for MeshError {
 }
 
 impl std::error::Error for MeshError {}
+
+/// Why [`Shape::scaled`](crate::Shape::scaled) refused a scale: a stored triangle of a mesh or
+/// heightfield inside the shape, scaled, would be too thin for Jolt to collide with convex shapes
+/// up to `max_convex_extent`.
+#[derive(Clone, Copy, Debug)]
+pub struct ThinTrianglesError {
+    /// The scale that was refused.
+    pub scale: Vec3,
+    /// The [`MeshSettings::max_convex_extent`](crate::MeshSettings::max_convex_extent) the mesh
+    /// was built with, or its default for a heightfield, metres.
+    pub max_convex_extent: f32,
+}
+
+/// Equal when every value has the same bits, so that the error is `Eq`.
+impl PartialEq for ThinTrianglesError {
+    fn eq(&self, other: &Self) -> bool {
+        let bits = |error: &Self| {
+            [
+                error.scale.x,
+                error.scale.y,
+                error.scale.z,
+                error.max_convex_extent,
+            ]
+            .map(f32::to_bits)
+        };
+        bits(self) == bits(other)
+    }
+}
+
+impl Eq for ThinTrianglesError {}
+
+impl fmt::Display for ThinTrianglesError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Vec3 { x, y, z } = self.scale;
+        write!(
+            f,
+            "scale ({x}, {y}, {z}) leaves mesh or heightfield triangles too thin for convex shapes up to {} m",
+            self.max_convex_extent
+        )
+    }
+}
+
+impl std::error::Error for ThinTrianglesError {}
 
 /// Jolt's diagnostic text for a refused shape, at most [`JoltMessage::CAPACITY`] bytes.
 ///

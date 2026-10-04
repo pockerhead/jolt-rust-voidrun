@@ -184,8 +184,10 @@ infinity through, so the constructor checks that the components are finite first
 What the scale can break is checked on the result: the scaled bounds against `MAX_SHAPE_EXTENT`,
 the scaled centre of mass (bounds are relative to it, and a compound's centre of mass moves with the
 scale) against the same bound, and every stored triangle of a mesh or heightfield inside the shape
-against the triangle rule of [Triangle meshes](#triangle-meshes) for the default convex extent and
-without its quantization term (the stored triangles are quantized already). The coordinates
+against the triangle rule of [Triangle meshes](#triangle-meshes), for the convex extent the mesh was
+built with (the default for a heightfield) and without its quantization term (the stored triangles
+are quantized already). A refusal is `ShapeError::ThinTriangles`, which names the scale and the
+extent. The coordinates
 checked are the ones Jolt rounds: a mesh's own stored coordinates times the scale accumulated above
 it, turned by the rotations above it. Jolt
 folds compound child positions, rotated-translated positions and centre-of-mass offsets into the

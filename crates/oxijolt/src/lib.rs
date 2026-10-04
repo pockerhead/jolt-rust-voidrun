@@ -191,8 +191,8 @@ pub use constraint::{
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
     BodyError, CharacterError, ConstraintError, ContactSettingsError, HullError, MeshError,
-    QueryError, RagdollError, ShapeError, SoftBodyError, StateError, StepError, VehicleError,
-    WorldError,
+    QueryError, RagdollError, ShapeError, SoftBodyError, StateError, StepError, ThinTrianglesError,
+    VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};

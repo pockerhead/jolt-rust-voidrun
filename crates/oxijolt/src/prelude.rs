@@ -72,8 +72,8 @@ pub use crate::{ActivationEvent, ContactEvent, ContactListener, EventSettings, W
 pub use crate::{AnyConstraintId, ConstraintId};
 pub use crate::{
     BodyError, CharacterError, ConstraintError, ContactSettingsError, HullError, MeshError,
-    QueryError, RagdollError, ShapeError, SoftBodyError, StateError, StepError, VehicleError,
-    WorldError,
+    QueryError, RagdollError, ShapeError, SoftBodyError, StateError, StepError, ThinTrianglesError,
+    VehicleError, WorldError,
 };
 pub use crate::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use crate::{CharacterId, CharacterSettings, ExtendedUpdateSettings};

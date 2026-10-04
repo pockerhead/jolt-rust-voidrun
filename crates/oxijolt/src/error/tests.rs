@@ -123,6 +123,25 @@ fn shape_error_variants_display_their_payload() {
 }
 
 #[test]
+fn thin_triangles_name_the_scale_and_the_extent() {
+    let error = ThinTrianglesError {
+        scale: Vec3::new(0.2, 1.0, 0.5),
+        max_convex_extent: 1100.0,
+    };
+    assert_eq!(
+        ShapeError::ThinTriangles(error).to_string(),
+        "invalid scale: scale (0.2, 1, 0.5) leaves mesh or heightfield triangles too thin for \
+         convex shapes up to 1100 m"
+    );
+    assert_eq!(error, error);
+    let other = ThinTrianglesError {
+        max_convex_extent: 1.0,
+        ..error
+    };
+    assert_ne!(error, other);
+}
+
+#[test]
 fn jolt_message_reads_up_to_the_nul() {
     assert_eq!(JoltMessage::from_c_buffer(b"\0rest").as_str(), "");
     assert_eq!(JoltMessage::from_c_buffer(b"").as_str(), "");
