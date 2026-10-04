@@ -23,28 +23,16 @@ exclude = [
 [features]
 default = []
 
-# Enable Jolt's debug assertions
+# Builds Jolt with its assertions (`USE_ASSERTS`).
 asserts = []
 
-# Changes all world coordinates to use f64 instead of 32 coordinates.
+# Jolt's `DOUBLE_PRECISION`: world positions are f64 (`JPH_DOUBLE_PRECISION`).
 double-precision = []
 
-# Pins JoltPhysics' floating-point flags to the cross-platform-deterministic
-# settings JPH gates on its `CROSS_PLATFORM_DETERMINISTIC` CMake variable
-# (see `vendor/JoltPhysics/Build/CMakeLists.txt` + `Jolt/Jolt.cmake`):
-# - MSVC: `/fp:fast` (default) → `/fp:precise`
-# - Clang ≥14: `+ -ffp-contract=off` (so mul+add doesn't fold into FMA inside
-#   `JPH_PRECISE_MATH_OFF` blocks)
-# - x86: `USE_FMADD AND NOT CROSS_PLATFORM_DETERMINISTIC` flips FMADD off
-#
-# Required for cross-platform-deterministic builds (P2P-deterministic netcode,
-# rollback-replayable simulation). Without this feature, the C++ build picks
-# the platform default — most acutely problematic on Windows MSVC where
-# `/fp:fast` is the default, producing non-deterministic floating point even
-# at the same git SHA on the same machine when toolchain settings differ.
-#
-# Default-off; ~10% perf cost (FMA disabled, more conservative FP rules).
-# Mirrors the `enhanced-determinism` cargo feature shape on rapier3d.
+# Jolt's `CROSS_PLATFORM_DETERMINISTIC` (defines `JPH_CROSS_PLATFORM_DETERMINISTIC`), Jolt's mode
+# for identical results across platforms and compilers. Jolt then compiles without FMA
+# instructions and with strict floating-point flags (MSVC `/fp:precise` instead of `/fp:fast`,
+# `-ffp-contract=off` on GCC and Clang), which costs speed.
 cross-platform-deterministic = []
 
 # Compiles Jolt's debug renderer (`JPH_DEBUG_RENDERER`) into the native libraries and binds joltc's

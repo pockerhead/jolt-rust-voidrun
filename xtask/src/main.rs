@@ -17,6 +17,10 @@ mod bindgen_options;
 #[allow(dead_code)]
 #[path = "../../crates/oxijolt-sys/build/targets.rs"]
 mod targets;
+// build.rs passes these options to CMake; its tests run here.
+#[cfg(test)]
+#[path = "../../crates/oxijolt-sys/build/cmake_options.rs"]
+mod cmake_options;
 
 /// The bindgen version in `Cargo.toml`, recorded as provenance.
 const BINDGEN_VERSION: &str = "0.73.2";
