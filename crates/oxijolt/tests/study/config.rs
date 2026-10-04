@@ -222,7 +222,8 @@ pub struct FloorRemedy {
     /// Refresh the contacts after the move, so that the snap's gate reads the ground state at the
     /// new position instead of the one the move's sweep left (crests).
     pub refresh_before_snap: bool,
-    /// The snap also accepts a steep hit on a structure, as rule 7 does (ledge edges).
+    /// The snap also accepts a steep structure hit that faces up and that the capsule moved down
+    /// to reach (ledge edges below it, not a wall beside it).
     pub snap_on_structure_edges: bool,
 }
 
@@ -441,7 +442,7 @@ impl Config {
     }
 
     /// `d2-noq4` with both law 2 remedies of the Q5 snap: a contact refresh before its gate
-    /// (crests) and steep structure hits accepted (ledge edges).
+    /// (crests) and steep structure hits below the capsule accepted (ledge edges).
     pub fn d2_noq4_floor() -> Self {
         Self {
             name: "d2-noq4-floor",

@@ -11,7 +11,7 @@ use oxijolt::*;
 
 use super::frame::{Frame, UpPolicy};
 use super::geometry::{Block, Field, Surface};
-use crate::common::math::{add, rvec3, scale, vec3, V3};
+use crate::common::math::{add, rotate, rvec3, scale, sub, vec3, V3};
 use crate::common::walker::{
     capsule, chunk_pose, fixture_world, flat_terrain, up_at, Layers, CENTRE_UP, R, RADIUS,
     REST_HEIGHT,
@@ -20,6 +20,9 @@ use crate::common::{quat_about, Groups};
 
 /// Samples per side of every study heightfield except the continuous seam field.
 pub const SAMPLES: usize = 33;
+
+/// The drop of the high ledge beside a wall, metres.
+pub const HIGH_LEDGE_DROP: f64 = 2.0;
 
 /// When not 0, the bits per sample of every study heightfield built from now on (the survey's
 /// precision runs); the walker fixtures' planet chunks keep 16.
@@ -105,6 +108,13 @@ pub enum SceneKey {
     RadialSeam,
     /// A flat chunk and a sharp wall of half (0.1, 1, 2) centred at x = 0.45.
     RadialWall,
+    /// A sharp platform over `-4 <= x <= 0` whose edge at x = 0 drops [`HIGH_LEDGE_DROP`] to flat
+    /// terrain, and a sharp wall along x whose face passes z = `face_mm` at the height of a body
+    /// origin resting on the platform, leaning back by `lean_decideg` tenths of a degree (its face
+    /// then looks up; negative: an overhang).
+    HighLedgeBesideWall { face_mm: u16, lean_decideg: i16 },
+    /// As `HighLedgeBesideWall` on the anchor chunk of the planet.
+    RadialHighLedgeBesideWall { face_mm: u16, lean_decideg: i16 },
 }
 
 impl SceneKey {
@@ -125,6 +135,7 @@ impl SceneKey {
                 | Self::RadialStep { .. }
                 | Self::RadialSeam
                 | Self::RadialWall
+                | Self::RadialHighLedgeBesideWall { .. }
         )
     }
 }
@@ -346,7 +357,40 @@ impl Builder {
                 self.planet_chunk(0.0);
                 self.block([0.45, 1.0, 0.0], [0.1, 1.0, 2.0], 0.0, 0.0);
             }
+            SceneKey::HighLedgeBesideWall {
+                face_mm,
+                lean_decideg,
+            } => {
+                self.flat();
+                self.high_ledge_beside_wall(face_mm, lean_decideg);
+            }
+            SceneKey::RadialHighLedgeBesideWall {
+                face_mm,
+                lean_decideg,
+            } => {
+                self.planet_chunk(0.0);
+                self.high_ledge_beside_wall(face_mm, lean_decideg);
+            }
         }
+    }
+
+    /// The platform and the wall of [`SceneKey::HighLedgeBesideWall`] over ground at height 0.
+    /// The wall turns about x around its face point at the resting origin's height, which
+    /// turns its face normal from -z to `(0, sin lean, -cos lean)`.
+    fn high_ledge_beside_wall(&mut self, face_mm: u16, lean_decideg: i16) {
+        let top = HIGH_LEDGE_DROP;
+        self.block([-2.0, top - 1.5, 0.0], [2.0, 1.5, 2.0], 0.0, 0.0);
+        let face = [
+            0.0,
+            top + f64::from(REST_HEIGHT),
+            f64::from(face_mm) / 1000.0,
+        ];
+        let half = [4.0, 0.5 * top + 1.5, 0.1];
+        let upright_centre = [0.0, 0.5 * top + 0.5, face[2] + half[2]];
+        let lean = (f64::from(lean_decideg) / 10.0).to_radians() as f32;
+        let turn = quat_about(Vec3::new(1.0, 0.0, 0.0), lean);
+        let centre = add(face, rotate(turn, sub(upright_centre, face)));
+        self.turned_block(centre, half, turn, 0.0);
     }
 
     fn flat(&mut self) {
@@ -491,8 +535,13 @@ impl Builder {
     /// A static chunk compound holding one box of half extents `half` at local `centre`,
     /// turned by `tilt_z` radians about local z, with the structure group.
     fn block(&mut self, centre: V3, half: V3, tilt_z: f32, convex_radius: f64) {
-        let shape = Shape::new_box_with_convex_radius(vec3(half), convex_radius as f32).unwrap();
         let tilt = quat_about(Vec3::new(0.0, 0.0, 1.0), tilt_z);
+        self.turned_block(centre, half, tilt, convex_radius);
+    }
+
+    /// As [`block`](Self::block), turned by `tilt`.
+    fn turned_block(&mut self, centre: V3, half: V3, tilt: Quat, convex_radius: f64) {
+        let shape = Shape::new_box_with_convex_radius(vec3(half), convex_radius as f32).unwrap();
         let chunk = Shape::new_compound(&[CompoundChild {
             shape: &shape,
             position: vec3(centre),

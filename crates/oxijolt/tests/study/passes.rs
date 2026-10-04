@@ -100,8 +100,9 @@ pub struct Snap {
 
 /// Q5, the floor snap: the capsule cast along -up by `SNAP` with target distance `p`; a
 /// walkable, not dynamic hit gives the distance to move down. With `structure_edges`, a steep
-/// hit on a structure is accepted too (rule 7's exclusion applied to the snap; a study remedy,
-/// not the game's pass).
+/// hit on a structure is accepted too when the capsule moved down to reach it (fraction above
+/// 0) and its normal faces up: a ledge edge below the capsule, not a wall the padded capsule
+/// already touches (a study remedy, not the game's pass).
 pub fn snap(
     world: &PhysicsWorld,
     filter: &QueryFilter<'_>,
@@ -124,8 +125,9 @@ pub fn snap(
     let structure = hit
         .compound_child
         .is_some_and(|child| child.user_data == Groups::STRUCTURE);
+    let edge_below = structure && hit.fraction > 0.0 && dot(normal, up) > 0.0;
     let dynamic = world.body(hit.body).unwrap().motion_type() == MotionType::Dynamic;
-    ((walkable || (structure_edges && structure)) && !dynamic).then_some(Snap {
+    ((walkable || (structure_edges && edge_below)) && !dynamic).then_some(Snap {
         distance: f64::from(hit.distance),
         normal,
     })
