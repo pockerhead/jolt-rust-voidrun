@@ -214,7 +214,8 @@ impl JointKind {
 /// damping, gravity factor, initial velocities and sleeping; its position and rotation are the
 /// part's bind pose in world space, and the joint frames are given in that same pose. Its
 /// activation is ignored: [`PhysicsWorld::create_ragdoll`](crate::PhysicsWorld::create_ragdoll)
-/// takes one for the whole ragdoll.
+/// takes one for the whole ragdoll. A part may be a sensor; it keeps all six degrees of freedom
+/// and takes no user data, which Jolt sets to the ragdoll's (0).
 #[derive(Clone)]
 pub struct RagdollPart<'a> {
     /// The part's collision shape. The settings keep their own reference.
@@ -437,6 +438,10 @@ fn validate_parts(skeleton: &Skeleton, parts: &[RagdollPart<'_>]) -> Result<(), 
         }
         if part.body.allowed_dofs != AllowedDofs::ALL {
             return invalid("ragdoll parts keep all six degrees of freedom");
+        }
+        // Jolt's `Ragdoll` overwrites every part's user data with its own (`Ragdoll.cpp:428`).
+        if part.body.user_data != 0 {
+            return invalid("ragdoll parts take no user data: Jolt gives every part the ragdoll's");
         }
         // SAFETY: the shape is live for the call; the getter only reads it.
         if unsafe { JPH_Shape_MustBeStatic(part.shape.as_ptr()) } {

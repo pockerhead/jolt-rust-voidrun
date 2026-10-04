@@ -173,6 +173,7 @@ pub struct BodySettings {
     enhanced_internal_edge_removal: bool,
     pub(crate) allowed_dofs: AllowedDofs,
     pub(crate) sensor: bool,
+    pub(crate) user_data: u64,
 }
 
 impl Default for BodySettings {
@@ -197,6 +198,7 @@ impl Default for BodySettings {
             enhanced_internal_edge_removal: false,
             allowed_dofs: AllowedDofs::ALL,
             sensor: false,
+            user_data: 0,
         }
     }
 }
@@ -423,6 +425,17 @@ impl BodySettings {
         self
     }
 
+    /// The caller's value for this body, for example the key of its entity in an ECS, fixed for
+    /// its life and read back with [`BodyRef::user_data`]. Jolt's saved states do not hold it,
+    /// and since it never changes a restore never changes it. Default 0.
+    ///
+    /// [`BodyRef::user_data`]: crate::BodyRef::user_data
+    #[must_use]
+    pub fn user_data(mut self, value: u64) -> Self {
+        self.user_data = value;
+        self
+    }
+
     fn validate(&self, object_layer_count: u32) -> Result<(), BodyError> {
         if self.object_layer.get() >= object_layer_count {
             return Err(BodyError::UnknownObjectLayer(self.object_layer));
@@ -595,6 +608,7 @@ impl CreationSettings {
             );
             JPH_BodyCreationSettings_SetAllowedDOFs(ptr, settings.allowed_dofs.to_jph());
             JPH_BodyCreationSettings_SetIsSensor(ptr, settings.sensor);
+            JPH_BodyCreationSettings_SetUserData(ptr, settings.user_data);
         }
         if let Some(mass) = settings.mass {
             // Jolt ignores the inertia with `CalculateInertia` (`BodyCreationSettings.cpp`).

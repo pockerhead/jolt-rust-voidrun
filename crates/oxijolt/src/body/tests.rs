@@ -64,6 +64,7 @@ fn default_settings_match_jolt() {
             ours.allowed_dofs
         );
         assert_eq!(JPH_BodyCreationSettings_GetIsSensor(ptr), ours.sensor);
+        assert_eq!(JPH_BodyCreationSettings_GetUserData(ptr), ours.user_data);
         assert!(ours.mass.is_none());
         // The one documented difference: Jolt's default layer is 0.
         assert_eq!(JPH_BodyCreationSettings_GetObjectLayer(ptr), 0);

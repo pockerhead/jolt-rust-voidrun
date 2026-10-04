@@ -149,6 +149,17 @@ impl BodyRef<'_> {
         unsafe { JPH_BodyInterface_IsSensor(self.interface(), self.id.raw) }
     }
 
+    /// The caller's value given at creation ([`BodySettings::user_data`]). A character's inner
+    /// body carries the character's
+    /// [`CharacterSettings::user_data`](crate::CharacterSettings::user_data), and a ragdoll part
+    /// carries 0.
+    ///
+    /// [`BodySettings::user_data`]: crate::BodySettings::user_data
+    pub fn user_data(&self) -> u64 {
+        // SAFETY: as in `position`.
+        unsafe { JPH_BodyInterface_GetUserData(self.interface(), self.id.raw) }
+    }
+
     /// Whether the body is a soft body ([`PhysicsWorld::create_soft_body`]).
     pub fn is_soft_body(&self) -> bool {
         with_read_locked_body(self.body_lock_interface, self.id, |body| {

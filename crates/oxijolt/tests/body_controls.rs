@@ -665,3 +665,99 @@ fn a_soft_body_reports_a_sensor() {
     // The cloth fell through the sensor.
     assert!(world.body(cloth).unwrap().position().y < -1.0);
 }
+
+#[test]
+fn user_data_round_trips() {
+    let mut world = world(GRAVITY, 1);
+    let floor = add_floor(&mut world);
+    let keys = [0, 7, u64::MAX];
+    let bodies: Vec<BodyId> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, &key)| {
+            let settings = BodySettings::new_dynamic()
+                .position(RVec3::new(2.0 * i as Real, 2.0, 0.0))
+                .user_data(key);
+            world.create_body(&cube_shape(), &settings).unwrap()
+        })
+        .collect();
+    let read = |world: &PhysicsWorld| -> Vec<u64> {
+        bodies
+            .iter()
+            .map(|&id| world.body(id).unwrap().user_data())
+            .collect()
+    };
+    assert_eq!(read(&world), keys);
+    let saved = world.save_state();
+    step(&mut world, 30);
+    assert_eq!(read(&world), keys);
+    world.restore_state(&saved).unwrap();
+    assert_eq!(read(&world), keys);
+    let mut all = vec![floor];
+    all.extend(&bodies);
+    world
+        .rebase(
+            &all,
+            quat_about(Vec3::new(0.0, 1.0, 0.0), 0.5),
+            RVec3::new(3.0, 0.0, 0.0),
+        )
+        .unwrap();
+    assert_eq!(read(&world), keys);
+
+    let capsule = Shape::new_capsule(0.5, 0.3).unwrap();
+    let character = world
+        .create_character(
+            &CharacterSettings::new(&capsule)
+                .user_data(42)
+                .inner_body(Some(InnerBody {
+                    shape: &capsule,
+                    object_layer: ObjectLayer::MOVING,
+                })),
+            RVec3::new(-5.0, 1.0, 0.0),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    let inner = world.character(character).unwrap().inner_body().unwrap();
+    assert_eq!(world.body(inner).unwrap().user_data(), 42);
+}
+
+#[test]
+fn ragdoll_parts_refuse_user_data() {
+    let (mut world, layers) = ragdoll_world(1);
+    let shapes = part_shapes();
+    let mut parts = humanoid_parts(&shapes, layers.ragdoll);
+    parts[2].body = parts[2].body.clone().user_data(5);
+    assert!(matches!(
+        RagdollSettings::new(&skeleton(), &parts),
+        Err(RagdollError::InvalidValue(_))
+    ));
+    let settings = common::ragdoll::humanoid_settings(layers.ragdoll);
+    let ragdoll = world
+        .create_ragdoll(&settings, None, Activation::Activate)
+        .unwrap();
+    for &part in world.ragdoll(ragdoll).unwrap().body_ids() {
+        assert_eq!(world.body(part).unwrap().user_data(), 0);
+    }
+}
+
+#[test]
+fn changing_settings_after_creation_changes_no_body() {
+    let mut world = world(GRAVITY, 1);
+    let mut settings = BodySettings::new_dynamic()
+        .sensor(true)
+        .user_data(11)
+        .allowed_dofs(AllowedDofs::PLANE_2D);
+    let first = world.create_body(&cube_shape(), &settings).unwrap();
+    settings = settings
+        .sensor(false)
+        .user_data(12)
+        .allowed_dofs(AllowedDofs::ALL)
+        .position(RVec3::new(3.0, 0.0, 0.0));
+    let second = world.create_body(&cube_shape(), &settings).unwrap();
+    let config = |id| {
+        let body = world.body(id).unwrap();
+        (body.is_sensor(), body.user_data(), body.allowed_dofs())
+    };
+    assert_eq!(config(first), (true, 11, AllowedDofs::PLANE_2D));
+    assert_eq!(config(second), (false, 12, AllowedDofs::ALL));
+}
