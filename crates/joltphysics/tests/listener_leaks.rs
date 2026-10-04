@@ -14,7 +14,8 @@
 //! warm-up of the second phase, and the heap still commits or releases a step of about 2 MB now
 //! and then afterwards. Neither is a leak (`docs/events.md` has the measurements), so each phase
 //! measures seven consecutive blocks of rounds and holds the median block to the budget: a leak
-//! grows every block, a heap step only one. The file holds exactly one test, so its binary runs
+//! grows every block, a heap step only one. A leak that grows three or fewer of the seven blocks
+//! passes the median. The file holds exactly one test, so its binary runs
 //! alone and no parallel test disturbs the counter. The first phase was checked against builds
 //! that never released a material or never destroyed the native contact listener, the second
 //! against one whose dropped world forgot its listeners; each exceeded the budget.

@@ -147,7 +147,8 @@ nine runs, each time inside one block of 1 000 rounds while every other block st
 ±210 kB, and another run released 1.8 MB in one block. So each phase measures seven consecutive
 blocks of 1 000 rounds (the world phase after 4 000 warm-up rounds, the replacement phase after
 500) and allows the median block 100 bytes per round (100 kB). A leak grows every block, a heap
-step only one. Against this gate, materials that were never released gave a median of 370 kB per block,
+step only one. The median also passes a leak that grows only three or fewer of the seven blocks:
+bursts of 400 kB every 2 000 rounds or 1.5 MB every 3 000 rounds pass. Against this gate, materials that were never released gave a median of 370 kB per block,
 native contact listeners that were never destroyed 780 kB, and a dropped world that forgot its
 listeners 1.26 MB; each failed it. A leak of one small native object per world (a forgotten
 `JPH_ContactListener` alone: about 33 bytes per round) stays below what the block noise lets this
