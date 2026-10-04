@@ -5,6 +5,8 @@
 //! [`Frame`]; their up is the frame's. Radial scenes sit at the anchor of the walker fixtures'
 //! planet (radius 99) and use radial up.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use oxijolt::*;
 
 use super::frame::{Frame, UpPolicy};
@@ -18,6 +20,10 @@ use crate::common::{quat_about, Groups};
 
 /// Samples per side of every study heightfield except the continuous seam field.
 pub const SAMPLES: usize = 33;
+
+/// When not 0, the bits per sample of every study heightfield built from now on (the survey's
+/// precision runs); the walker fixtures' planet chunks keep 16.
+pub static FIELD_BITS_OVERRIDE: AtomicU32 = AtomicU32::new(0);
 
 /// The heights of a seam scene, rising along +x.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -357,6 +363,10 @@ impl Builder {
                 heights.push(height(centre[0] + x, centre[2] + z));
             }
         }
+        let bits = match FIELD_BITS_OVERRIDE.load(Ordering::Relaxed) {
+            0 => bits,
+            forced => forced,
+        };
         let offset = [-half, 0.0, -half];
         let settings = HeightFieldSettings::default()
             .offset(vec3(offset))

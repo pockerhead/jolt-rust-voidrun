@@ -213,6 +213,20 @@ pub const PINNED: &[(&str, [Cell; 9])] = &[
             Broken("radial/1/spiral45.5/x2/still"),
         ],
     ),
+    (
+        "recommended",
+        [
+            Broken("1/ridge50/apex/still"),
+            Broken("2/ledge0.15-rounded/v1.6"),
+            Held,
+            Held,
+            Held,
+            Held,
+            Held,
+            Broken("6/descent44.5/diagonal/v3.5"),
+            Broken("radial/1/spiral45.5/x2/still"),
+        ],
+    ),
 ];
 
 /// The pinned cells of row `name`.

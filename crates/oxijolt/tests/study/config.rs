@@ -425,6 +425,15 @@ impl Config {
         }
     }
 
+    /// The recommended configuration: the row with the most held law columns and, among those,
+    /// the lowest median cost per move on the planet walk (see the study doc). It is `d2-noq4`.
+    pub fn recommended() -> Self {
+        Self {
+            name: "recommended",
+            ..Self::d2_noq4()
+        }
+    }
+
     /// The rows the law tests pin, in table order.
     pub fn pinned() -> Vec<Self> {
         vec![
@@ -442,6 +451,7 @@ impl Config {
             Self::d2_stairs(),
             Self::d2_noground(),
             Self::max_slope_50(),
+            Self::recommended(),
         ]
     }
 

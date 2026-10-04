@@ -5,7 +5,9 @@
 //! The survey that produced the table is `survey` (ignored); run it with
 //! `cargo test -p oxijolt --test character_study survey -- --ignored --nocapture`.
 //! `STUDY_ROWS`, `STUDY_COLUMNS` (comma-separated names or labels) and `STUDY_PERTURBATIONS`
-//! (1..=5) narrow it; `STUDY_TRACE=<case id>` prints that case's ticks for each row.
+//! (1..=5) narrow it; `STUDY_TRACE=<case id>` prints that case's ticks for each row;
+//! `STUDY_BITS=8` builds the study heightfields with 8 bits per sample; `STUDY_GRID=1` prints
+//! the 1 mm step-height grid of each row.
 
 mod common;
 mod study;
@@ -707,6 +709,12 @@ fn survey() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(PERTURBATIONS.len());
     let trace = std::env::var("STUDY_TRACE").ok();
+    if let Some(bits) = std::env::var("STUDY_BITS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        study::scenes::FIELD_BITS_OVERRIDE.store(bits, std::sync::atomic::Ordering::Relaxed);
+    }
     let mut scenes = Scenes::default();
     let all: Vec<(Column, Vec<Case>)> = columns
         .iter()
@@ -922,6 +930,7 @@ fn radial_acceptance() {
         "d2-noq4",
         "d2-still",
         "d2-stairs",
+        "recommended",
     ]
     .into_iter()
     .map(Config::named)
