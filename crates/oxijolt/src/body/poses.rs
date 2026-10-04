@@ -43,7 +43,7 @@ impl PhysicsWorld {
     /// use oxijolt::prelude::math::*;
     /// use oxijolt::prelude::*;
     ///
-    /// # fn main() -> oxijolt::Result<()> {
+    /// # fn main() -> oxijolt::error::Result<()> {
     /// let mut world = PhysicsWorld::new(WorldSettings::default())?;
     /// let ball = world.create_body(
     ///     &Shape::new_sphere(0.5)?,

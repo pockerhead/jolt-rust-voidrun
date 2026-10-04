@@ -6,7 +6,7 @@
 //! use oxijolt::prelude::math::*;
 //! use oxijolt::prelude::*;
 //!
-//! # fn main() -> oxijolt::Result<()> {
+//! # fn main() -> oxijolt::error::Result<()> {
 //! let mut world = PhysicsWorld::new(WorldSettings::default())?;
 //! let ball = world.create_body(
 //!     &Shape::new_sphere(0.5)?,
@@ -57,9 +57,13 @@
 //! `pose.position.into()` gives a `glam::Vec3` in single precision; with `double-precision` it
 //! gives a `glam::DVec3`.
 //!
-//! [`Error`](crate::Error) and [`Result`](crate::Result) are written by path
-//! (`oxijolt::Result`). The crate root, `use oxijolt::*`, still brings in everything, the math
-//! types and `Error` and `Result` included.
+//! `active_body_poses` returns the bodies awake when it is called; a body that fell asleep at
+//! the end of the step is not among them. [`PhysicsWorld::active_body_poses`] says how a game
+//! syncs such bodies.
+//!
+//! [`Error`](crate::error::Error) and [`Result`](crate::error::Result) are written by path
+//! (`oxijolt::error::Result`). The crate root, `use oxijolt::*`, brings in everything else, the
+//! math types included.
 
 pub use crate::{
     Activation, BodyId, BodyMut, BodyPose, BodyRef, BodySettings, MotionQuality, MotionType,

@@ -227,10 +227,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   (`cargo bench -p oxijolt --bench character_study`).
 - `PhysicsWorld::active_body_poses` and `active_body_poses_into` return a `BodyPose` (id, position,
   rotation) for every awake body, sorted by `BodyId` and read under one multi-body read lock.
-- `oxijolt::Error` wraps every area error with a `From` impl, and `oxijolt::Result<T>` is
-  `Result<T, oxijolt::Error>`, so `?` works across areas. Existing signatures are unchanged.
+- `oxijolt::error::Error` wraps every area error with a `From` impl, and
+  `oxijolt::error::Result<T>` is `Result<T, oxijolt::error::Error>`, so `?` works across areas.
+  Both live only in the now public `error` module, so `use oxijolt::*` gains no `Error` or
+  `Result`. Existing signatures are unchanged.
 - `oxijolt::prelude` holds the commonly used types without the math types, `Error` or `Result`, so
   it can be glob-imported next to `bevy::prelude::*`; the math types are in `oxijolt::prelude::math`.
-  `Error` and `Result` are new crate-root names: `use oxijolt::*` next to another glob that exports
-  `Result` (Bevy's prelude) makes a bare `Result` ambiguous. Switch to `oxijolt::prelude`, or import
-  the name explicitly.

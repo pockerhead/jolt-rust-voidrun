@@ -50,7 +50,7 @@ fn the_prelude_leaves_math_and_result_to_the_engine_prelude() -> Result {
 }
 
 #[test]
-fn the_math_types_come_from_the_prelude_math_module() -> oxijolt::Result<()> {
+fn the_math_types_come_from_the_prelude_math_module() -> oxijolt::error::Result<()> {
     use oxijolt::prelude::math::{RVec3, Vec3};
 
     let mut world = PhysicsWorld::new(WorldSettings::default().gravity(Vec3::ZERO))?;

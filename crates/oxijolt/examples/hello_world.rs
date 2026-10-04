@@ -5,7 +5,7 @@
 use oxijolt::prelude::math::*;
 use oxijolt::prelude::*;
 
-fn main() -> oxijolt::Result<()> {
+fn main() -> oxijolt::error::Result<()> {
     let mut world = PhysicsWorld::new(WorldSettings::default())?;
 
     // A static floor whose top face is at y = 0.

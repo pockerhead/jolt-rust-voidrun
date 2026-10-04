@@ -1,6 +1,11 @@
 //! Error types. Every value Jolt only checks with debug assertions is validated before it
 //! reaches Jolt and reported through these; magnitudes follow [`crate::limits`], which says
 //! which assertion paths are derived and which are covered by tests.
+//!
+//! Each area has its own error, also exported at the crate root. [`Error`] wraps any of them and
+//! [`Result`] defaults to it; both are named by this module's path (`oxijolt::error::Result`, as
+//! `std::io::Result`), so `use oxijolt::*` does not bring in an `Error` or `Result` that would
+//! clash with another glob import.
 
 use std::fmt;
 
@@ -452,7 +457,7 @@ impl std::error::Error for StateError {}
 /// ```
 /// use oxijolt::prelude::*;
 ///
-/// fn drop_ball(world: &mut PhysicsWorld) -> oxijolt::Result<BodyId> {
+/// fn drop_ball(world: &mut PhysicsWorld) -> oxijolt::error::Result<BodyId> {
 ///     let shape = Shape::new_sphere(0.5)?; // ShapeError
 ///     let ball = world.create_body(&shape, &BodySettings::new_dynamic())?; // BodyError
 ///     let report = world.step(1.0 / 60.0)?; // StepError
@@ -460,13 +465,13 @@ impl std::error::Error for StateError {}
 ///     Ok(ball)
 /// }
 ///
-/// # fn main() -> oxijolt::Result<()> {
+/// # fn main() -> oxijolt::error::Result<()> {
 /// let mut world = PhysicsWorld::new(WorldSettings::default())?; // WorldError
 /// drop_ball(&mut world)?;
-/// let error: oxijolt::Error = world.step(0.0).unwrap_err().into();
+/// let error: oxijolt::error::Error = world.step(0.0).unwrap_err().into();
 /// assert!(matches!(
 ///     error,
-///     oxijolt::Error::Step(StepError::InvalidDeltaTime)
+///     oxijolt::error::Error::Step(StepError::InvalidDeltaTime)
 /// ));
 /// # Ok(())
 /// # }
@@ -500,8 +505,8 @@ pub enum Error {
     State(StateError),
 }
 
-/// `Result<T>` is `Result<T, oxijolt::Error>`; the second parameter keeps `Result<T, E>` working
-/// in code that glob-imports the crate root.
+/// `Result<T>` is `Result<T, oxijolt::error::Error>`; the second parameter keeps `Result<T, E>`
+/// working in code that glob-imports this module.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl From<WorldError> for Error {

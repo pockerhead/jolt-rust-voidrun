@@ -61,16 +61,24 @@ limit to raise.
 Gravity is per world (`WorldSettings::gravity`, `set_gravity`). A game with radial gravity sets it
 to zero and adds a force to each body before the step (`BodyMut::add_force`).
 
-After a step, a game copies the poses of the bodies that moved into its own entities.
+After a step, a game copies body poses into its own entities.
 `PhysicsWorld::active_body_poses_into` fills a buffer with the id, position and rotation of every
-awake body, in ascending `BodyId` order, under one lock; sleeping and static bodies are absent, as
-their poses did not change. The poses are copies, so the world is free again once the call returns.
+body that is awake when it is called, in ascending `BodyId` order, under one lock; sleeping and
+static bodies are absent. The poses are copies, so the world is free again once the call returns.
+
+The awake set is not the set of bodies that moved. A body that falls asleep at the end of a step
+still moved in that step and is absent from the readout after it; with
+`EventSettings::body_activation` on, its `ActivationEvent::Deactivated` from `take_events` says to
+read it once more with `world.body(id)`. A pose written to a sleeping body
+(`Activation::DontActivate`), `rebase` and `restore_state` move bodies that stay asleep, and
+`restore_state` changes the awake set without events: after those, sync every body the game
+tracks.
 
 ```rust
 use oxijolt::prelude::math::*;
 use oxijolt::prelude::*;
 
-fn main() -> oxijolt::Result<()> {
+fn main() -> oxijolt::error::Result<()> {
     let mut world = PhysicsWorld::new(WorldSettings::default())?;
     let ball = Shape::new_sphere(0.5)?;
     let mut balls = Vec::new();
@@ -230,7 +238,7 @@ use oxijolt::prelude::*;
 const STRUCTURE: u32 = 1;
 const FEATURE: u32 = 2;
 
-fn main() -> oxijolt::Result<()> {
+fn main() -> oxijolt::error::Result<()> {
     // Layers: static terrain and chunks, moving items. Items collide with everything.
     let mut layers = CollisionLayers::new(2);
     let fixed = BroadPhaseLayer::new(0);
