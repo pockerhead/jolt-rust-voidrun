@@ -285,13 +285,22 @@ and body 2's velocity (for racks and pulleys also its impulse) by the ratio
 from `f32` overflow. A ratio of 1e4 already turns a pinion ten thousand radians per metre of its
 rack; tests step both bounds on the lightest and heaviest bodies.
 
-Gears get a tighter range, `1..=MAX_GEAR_RATIO`, measured rather than derived. Jolt 5.6 applies a
-gear's impulse to body 2 without the ratio (`GearConstraintPart::ApplyVelocityStep`), so each
-solver iteration keeps up to `1 − 1/ratio` of the velocity error `ω1 + ratio · ω2`, the worst case
-being a body 1 much heavier than body 2. With Jolt's 10 velocity iterations per step the gear then
-needs more steps to restore the relation the larger the ratio. `MAX_GEAR_RATIO` is the largest
+Gears get a tighter range, `1..=MAX_GEAR_RATIO`, because of a defect in Jolt's gear solver
+(Jolt 5.6, unchanged on Jolt's master as of 2026-09-28): `GearConstraintPart::ApplyVelocityStep`
+and `SolvePositionConstraint` apply the impulse to body 2 as `λ · I2⁻¹ · b`, without the ratio of
+the Jacobian `[a, r·b]`, while the effective mass `1 / (A + r²·B)` includes it squared (`A`, `B`
+the inverse inertias about the two axes). Each solver iteration therefore keeps
+`1 − (A + r·B) / (A + r²·B)` of the velocity error `ω1 + r · ω2`:
+- below 1 it approaches `1 − 1/r` for a light body 2, which is negative: below 1/2, and for every
+  negative ratio, its magnitude exceeds 1 and the error grows until the bodies' velocities are not
+  finite;
+- from 1 up it is in `[0, 1)` but approaches `1 − 1/r` for a heavy body 1, so with Jolt's 10
+  velocity iterations per step the gear needs more steps to restore the relation the larger the
+  ratio.
+
+The upper bound is measured. `MAX_GEAR_RATIO` is the largest
 round ratio that, after a disturbance, brings the error back to within 2 % of its initial value
-within 10 steps for any mass distribution: measured worst 1.6 % at ratio 10, 6.5 % at 20, 60 % at
+within 10 steps for the mass distributions measured: worst 1.6 % at ratio 10, 6.5 % at 20, 60 % at
 100, and at 1e4 91 % still after 60 steps. The first step after a disturbance leaves up to
 `(1 − 1/ratio)^10`, 35 % at ratio 10. `gear_keeps_its_velocity_relation_at_the_largest_ratio`
 tests it at the bound.

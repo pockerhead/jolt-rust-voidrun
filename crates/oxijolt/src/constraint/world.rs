@@ -364,17 +364,14 @@ impl PhysicsWorld {
     /// body of a character nor a part of a ragdoll ([`ConstraintError::Body`]). Except for a
     /// gear, a rack and pinion and a pulley, one of them may be static or kinematic, which
     /// anchors the constraint to the world or to the kinematic body. Those three need two
-    /// dynamic bodies ([`ConstraintError::NotDynamic`]): Jolt's solver parts for them read both
-    /// bodies' motion properties without checking that a body has any, which a static body does
-    /// not, and would push a kinematic body. A pulley's fixed points already anchor its rope.
-    /// The public API cannot change a body's motion type afterwards; only ragdoll parts, which
-    /// are refused here, can change it. Jolt still lets the two bodies collide with each other
-    /// where their shapes touch. While the constraint exists,
+    /// dynamic bodies ([`ConstraintError::NotDynamic`]), because Jolt's solver parts for them
+    /// cannot handle a static or kinematic body; a pulley's fixed points already anchor its
+    /// rope. Jolt still lets the two bodies collide with each other where their shapes touch. While the constraint exists,
     /// [`remove_body`](Self::remove_body) refuses its bodies ([`BodyError::UsedByConstraint`]).
     ///
     /// Each point where the constraint holds a dynamic body must have a lever-arm ratio of at
     /// most [`limits::MAX_LEVER_ARM_RATIO`], its distance from the body's centre of mass
-    /// measured against the body's size (see there). The check uses the bodies' poses now and
+    /// measured against the body's size. The check uses the bodies' poses now and
     /// covers every point of a path and, for an automatic point, the point Jolt picks: between
     /// the centres of mass, weighted by inverse mass towards the lighter body.
     ///
@@ -384,9 +381,8 @@ impl PhysicsWorld {
     /// Frequency-mode springs ([`SpringSettings::FrequencyAndDamping`]) become a stiffness and
     /// damping that grow with the bodies' effective mass, so they are checked against an upper
     /// bound of it, taken from the dynamic bodies' mass and inertia now: `max(mass, largest
-    /// principal moment)` of each. The public API cannot change a body's mass or shape
-    /// afterwards, and only ragdoll parts, which are refused here, can turn kinematic or
-    /// static bodies dynamic, so the bound stays valid for the constraint's life.
+    /// principal moment)` of each. The API changes neither of those for the constraint's
+    /// bodies afterwards, so the bound holds for the constraint's life.
     ///
     /// Fails with [`ConstraintError::InvalidValue`] when a setting or a lever-arm ratio is out of
     /// range, with [`ConstraintError::NotDynamic`] as above, with

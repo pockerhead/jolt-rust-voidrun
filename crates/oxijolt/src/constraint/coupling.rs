@@ -89,19 +89,10 @@ unsafe fn check_reference(
 /// ([`ConstraintError::NotDynamic`](crate::ConstraintError::NotDynamic)).
 ///
 /// The ratio is between 1 and [`limits::MAX_GEAR_RATIO`] (10): body 2 is the gear that turns
-/// slower. Both bounds come from a defect in Jolt's gear solver (Jolt 5.6, unchanged on Jolt's
-/// master as of 2026-09-28): `GearConstraintPart::ApplyVelocityStep` and
-/// `SolvePositionConstraint` apply the impulse to body 2 as `λ · I2⁻¹ · b`, without the ratio
-/// of the Jacobian `[a, r·b]`, while the effective mass `1 / (A + r²·B)` includes it squared
-/// (`A`, `B` the inverse inertias about the two axes). Each solver iteration therefore keeps
-/// `1 − (A + r·B) / (A + r²·B)` of the velocity error `ω1 + r · ω2`:
-/// - below 1 it approaches `1 − 1/r` for a light body 2, which is negative: below 1/2, and for
-///   every negative ratio, its magnitude exceeds 1 and the error grows until the bodies'
-///   velocities are not finite;
-/// - from 1 up it is in `[0, 1)` but approaches `1 − 1/r` for a heavy body 1, so the gear
-///   needs more steps to restore the relation the larger the ratio. At ratio 10 the first step
-///   after a disturbance keeps up to 35 % of the error and ten steps bring it within 2 %; see
-///   [`limits::MAX_GEAR_RATIO`] for the measurements behind the bound.
+/// slower. Both bounds come from Jolt's gear solver, which applies the impulse to body 2 without
+/// the ratio: below 1 the velocity error can grow without bound, and above the upper bound the
+/// gear needs ever more steps to restore its relation after a disturbance
+/// ([docs/limits.md#coupling-ratios]).
 ///
 /// Swap the bodies for a gear that speeds up, chain gears for a larger reduction, and turn one
 /// axis around for gears that turn the same way. Because of the same missing factor, the torque
@@ -115,6 +106,8 @@ unsafe fn check_reference(
 /// wrapped (a limitation of Jolt's `GearConstraint`).
 ///
 /// The default is Jolt's: both axes +X, world space, ratio 1.
+///
+/// [docs/limits.md#coupling-ratios]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#coupling-ratios
 #[derive(Clone, Debug, PartialEq)]
 pub struct GearConstraintSettings {
     space: ConstraintSpace,
