@@ -332,7 +332,7 @@ fn slivers_that_collapse_under_quantization_are_dropped() {
 #[test]
 fn small_and_thin_triangles_are_dropped() {
     // Twice the area of a right triangle with legs `leg` is `leg^2`; the threshold is 1e-5 m²
-    // plus the rounding margin, here mostly the rounding of coordinates 750 m out in the space
+    // plus the rounding margin, here mostly the rounding of coordinates 1100 m out in the space
     // of the largest convex shape of the default settings.
     let triangle = |leg: f32| {
         [
@@ -341,10 +341,10 @@ fn small_and_thin_triangles_are_dropped() {
             Vec3::new(leg, 0.0, 0.0),
         ]
     };
-    assert_eq!(kept(&triangle(0.0036), &[[0, 1, 2]]), [0]);
-    assert!(kept(&triangle(0.0035), &[[0, 1, 2]]).is_empty());
+    assert_eq!(kept(&triangle(0.0038), &[[0, 1, 2]]), [0]);
+    assert!(kept(&triangle(0.0037), &[[0, 1, 2]]).is_empty());
     assert!(no_triangles(Shape::new_mesh(
-        &triangle(0.0035),
+        &triangle(0.0037),
         &[[0, 1, 2]]
     )));
     // A 10 m sliver 1e-5 m wide has a cross product of 1e-4, above the floor, but each corner
@@ -444,16 +444,24 @@ fn materials_follow_the_input_triangles_past_dropped_ones() {
     assert_eq!(material_under(&mesh, 1501.0, 1.0), Some(21));
 }
 
-/// A strip 1 m long and `width` wide at the origin, turned by the unit quaternion `turn`.
+/// A strip 1 m long and `width` wide at the origin as two triangles, turned by the unit
+/// quaternion `turn`.
 fn turned_strip(width: f64, turn: [f64; 4]) -> Vec<Vec3> {
     let turn = rotation(turn);
-    [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [width, 0.0, 0.5]]
-        .map(|corner| {
-            let [x, y, z] = mul_vec(&turn, corner);
-            Vec3::new(x as f32, y as f32, z as f32)
-        })
-        .to_vec()
+    [
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [width, 0.0, 1.0],
+        [width, 0.0, 0.0],
+    ]
+    .map(|corner| {
+        let [x, y, z] = mul_vec(&turn, corner);
+        Vec3::new(x as f32, y as f32, z as f32)
+    })
+    .to_vec()
 }
+
+const STRIP: [[u32; 3]; 2] = [[0, 1, 2], [0, 2, 3]];
 
 /// Seeded unit quaternions, the identity first.
 fn turns(count: usize) -> Vec<[f64; 4]> {
@@ -482,18 +490,44 @@ fn turns(count: usize) -> Vec<[f64; 4]> {
 #[test]
 fn the_default_convex_extent_keeps_millimetre_bevels() {
     let keeps = |extent: f32, turn| {
-        !collidable_triangles(&turned_strip(1.0e-3, turn), &[[0, 1, 2]], extent)
-            .0
+        collidable_triangles(&turned_strip(1.0e-3, turn), &STRIP, extent)
+            .1
             .is_empty()
     };
     let turns = turns(2000);
-    // Every orientation keeps the strip at the default; in the worst ones it goes at 800 m.
+    // Every orientation keeps the strip at the default; in the worst ones it goes at 1200 m.
     assert!(turns
         .iter()
         .all(|&turn| keeps(MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, turn)));
-    assert!(turns.iter().any(|&turn| !keeps(800.0, turn)));
-    // Along the axes it survives up to about 1380 m.
-    assert!(keeps(1350.0, turns[0]) && !keeps(1400.0, turns[0]));
+    assert!(turns.iter().any(|&turn| !keeps(1200.0, turn)));
+    // Along the axes it survives up to about 2050 m.
+    assert!(keeps(2000.0, turns[0]) && !keeps(2100.0, turns[0]));
+}
+
+#[test]
+fn the_rule_does_not_depend_on_the_corner_order() {
+    // Strips 1 m long and 0.5 to 1 mm wide, split along either diagonal, at the default
+    // extent near the thinnest they keep: each triangle gets the same verdict from each corner.
+    let mut verdicts = 0;
+    for turn in turns(200) {
+        for width in [5.0e-4, 5.4e-4, 6.0e-4, 9.3e-4, 1.0e-3] {
+            let strip = turned_strip(width, turn);
+            for [i, j, k] in [[0, 1, 2], [0, 2, 3], [0, 1, 3], [1, 2, 3]] {
+                let corners = [i, j, k].map(|index| v3(strip[index]));
+                let keep = |[a, b, c]: [V3; 3]| {
+                    is_collidable([a, b, c], [0.0; 3], MeshSettings::DEFAULT_MAX_CONVEX_EXTENT)
+                };
+                let [a, b, c] = corners;
+                let first = keep([a, b, c]);
+                assert_eq!(keep([b, c, a]), first, "{width} {turn:?}");
+                assert_eq!(keep([c, a, b]), first, "{width} {turn:?}");
+                assert_eq!(keep([a, c, b]), first, "{width} {turn:?}");
+                verdicts += usize::from(first);
+            }
+        }
+    }
+    // Both verdicts occur.
+    assert!(verdicts > 0 && verdicts < 200 * 5 * 4, "{verdicts}");
 }
 
 #[test]
@@ -535,6 +569,6 @@ fn slivers_too_thin_for_large_convex_shapes_are_dropped() {
         thinnest(MeshSettings::DEFAULT_MAX_CONVEX_EXTENT),
         thinnest(2.0 * limits::MAX_SHAPE_EXTENT),
     );
-    assert!((5.0e-4..6.0e-4).contains(&default), "{default}");
-    assert!((2.8e-3..3.0e-3).contains(&largest), "{largest}");
+    assert!((5.3e-4..5.5e-4).contains(&default), "{default}");
+    assert!((1.9e-3..2.0e-3).contains(&largest), "{largest}");
 }

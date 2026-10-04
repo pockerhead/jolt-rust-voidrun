@@ -112,16 +112,19 @@ area is at least `1e-5 + 2 · Δ`, where `Δ` bounds how much the cross product 
   (the `f32` rounding of the transform), plus `FLT_EPSILON` times the convex extent and the
   triangle's longest edge (the rounding of the result in the convex shape's space, see
   [Convex shapes against meshes](#convex-shapes-against-meshes)); an edge moves by twice that;
-- with edges `ab`, `ac` moved by `e1`, `e2`, the cross product's length is at least its component
-  along the unmoved unit normal `n`, which changes by `e2 · (n × ab) + e1 · (ac × n) + n · (e1 ×
-  e2)`. The first two terms are bounded per axis, the third by `|e1| |e2|`; Jolt's `f32` cross
-  product adds `2 · FLT_EPSILON · |ab| |ac|`.
+- with edges `ab`, `ac` from one corner moved by `e1`, `e2`, the cross product's length is at
+  least its component along the unmoved unit normal `n`, which changes by `e2 · (n × ab) + e1 ·
+  (ac × n) + n · (e1 × e2)`. The first two terms are bounded per axis, the third by `|e1| |e2|`.
+  The cross product is the same from every corner, so the smallest of the three corners' bounds
+  holds, and the rule does not depend on the order of a triangle's corners. Jolt's `f32` cross
+  product adds `2 · FLT_EPSILON · |ab| |ac|` for the corner where that is largest.
 
 Moves within the triangle's plane across an edge shrink it; moves along an edge or out of the plane
 do not, so a thin strip keeps its width wherever the quantization along its narrow direction is
-fine. With the default convex extent a right triangle with legs of 3.6 mm near the origin is kept
-and one with legs of 3.5 mm dropped, and a strip near the origin must be about 0.55 mm wide
-whatever its length. In a level mesh with one triangle 1500 m out along x, the x step is 0.7 mm and
+fine. With the default convex extent a right triangle with legs of 3.8 mm near the origin is kept
+and one with legs of 3.7 mm dropped. A strip 1 m long near the origin, made of two triangles split
+along either diagonal, is kept from 0.54 mm wide along the axes and from 0.93 mm in the worst of
+2000 seeded orientations; a single triangle with its apex at mid-length needs the same. In a level mesh with one triangle 1500 m out along x, the x step is 0.7 mm and
 the z step 5 µm: a 1 m by 2 mm strip is kept when its 2 mm lie along z and dropped when they lie
 along x. Triangles that fail the rule without any quantization are left out of the bounds first;
 they are dropped either way, and a far degenerate triangle then does not coarsen the grid for the

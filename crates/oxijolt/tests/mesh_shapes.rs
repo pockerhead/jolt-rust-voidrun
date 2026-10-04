@@ -348,7 +348,7 @@ fn the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent() {
     // The two largest boxes are those that tripped Jolt's assertions on slivers the rule
     // kept before it counted the convex shape's space.
     for (extent, halves) in [
-        (MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, [300.0, 750.0]),
+        (MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, [300.0, 1100.0]),
         (limits::MAX_SHAPE_EXTENT, [1500.0, 2000.0]),
     ] {
         let mesh = thinnest_kept_sliver(extent);

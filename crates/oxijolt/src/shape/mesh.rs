@@ -69,12 +69,12 @@ impl Default for MeshSettings<'_> {
 
 impl<'a> MeshSettings<'a> {
     /// The default of [`max_convex_extent`](Self::max_convex_extent), metres: the largest
-    /// extent at which the triangle rule still keeps a strip 1 m long and 1 mm wide near the
-    /// mesh origin in any orientation, rounded down. It is below [`limits::MAX_SHAPE_EXTENT`];
-    /// see [docs/limits.md#convex-shapes-against-meshes].
+    /// extent at which the triangle rule still keeps a strip 1 m long and 1 mm wide, made of two
+    /// triangles, near the mesh origin in any orientation, rounded down. It is below
+    /// [`limits::MAX_SHAPE_EXTENT`]; see [docs/limits.md#convex-shapes-against-meshes].
     ///
     /// [docs/limits.md#convex-shapes-against-meshes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-shapes-against-meshes
-    pub const DEFAULT_MAX_CONVEX_EXTENT: f32 = 750.0;
+    pub const DEFAULT_MAX_CONVEX_EXTENT: f32 = 1100.0;
 
     /// Gives triangle `i` the material `list[indices[i]]`. `list` holds 1 to 32 materials,
     /// `indices` one entry per triangle, each naming a material of the list. Without materials
@@ -254,7 +254,8 @@ impl Shape {
     /// to it. That margin follows the triangle's own shape and distance from the shape origin,
     /// the quantization step of the mesh's bounds on each axis and the size of the convex shapes
     /// it collides with ([`MeshSettings::max_convex_extent`]); with the defaults a strip near
-    /// the origin must be about 0.55 mm wide ([docs/limits.md#triangle-meshes]). Jolt itself
+    /// the origin is kept from about 0.54 mm wide along the axes and from 0.93 mm in any
+    /// orientation ([docs/limits.md#triangle-meshes]). Jolt itself
     /// keeps one copy of duplicate triangles and reorders the rest, so sub-shape ids do not
     /// follow the input order. Closest-hit rays hit back faces too.
     ///
@@ -375,30 +376,45 @@ fn rounding_displacement(distance: f64, convex_extent: f64, longest_edge: f64) -
 ///
 /// Each corner can move by up to `step[axis]` on each axis (the quantization of a mesh being
 /// built, zero for triangles Jolt has stored) plus [`rounding_displacement`]; an edge moves by
-/// the difference of two corner moves. With edges `ab`, `ac` moved by `e1`, `e2`, the cross
-/// product changes by `ab × e2 + e1 × ac + e1 × e2`. Its length is at least its component along
-/// the unit normal `n`, which changes by `e2 · (n × ab) + e1 · (ac × n) + n · (e1 × e2)`: moves
-/// within the triangle's plane across an edge shrink it, moves out of the plane do not. Jolt's
-/// `f32` cross product rounds it once more.
+/// the difference of two corner moves. With edges `ab`, `ac` from one corner moved by `e1`,
+/// `e2`, the cross product changes by `ab × e2 + e1 × ac + e1 × e2`. Its length is at least its
+/// component along the unit normal `n`, which changes by `e2 · (n × ab) + e1 · (ac × n) + n ·
+/// (e1 × e2)`: moves within the triangle's plane across an edge shrink it, moves out of the
+/// plane do not. The cross product is the same from every corner, so the smallest of the three
+/// corners' bounds holds, and the rule does not depend on the order of the corners. Jolt's `f32`
+/// cross product, from whichever corner it starts, rounds it once more.
 pub(super) fn is_collidable(corners: [V3; 3], step: V3, convex_extent: f32) -> bool {
     let [a, b, c] = corners;
-    let (ab, ac) = (sub(b, a), sub(c, a));
-    let normal = cross(ab, ac);
+    let normal = cross(sub(b, a), sub(c, a));
     let twice_area = length(normal);
     if twice_area < MIN_TRIANGLE_CROSS {
         return false;
     }
     let unit = normal.map(|component| component / twice_area);
     let distance = corners.map(length).into_iter().fold(0.0, f64::max);
-    let longest_edge = [length(ab), length(ac), length(sub(c, b))]
-        .into_iter()
+    // The two edges leaving each corner, in the order that gives the same normal.
+    let edge_pairs = [
+        (sub(b, a), sub(c, a)),
+        (sub(c, b), sub(a, b)),
+        (sub(a, c), sub(b, c)),
+    ];
+    let longest_edge = edge_pairs
+        .iter()
+        .map(|&(edge, _)| length(edge))
         .fold(0.0, f64::max);
     let rounding = rounding_displacement(distance, f64::from(convex_extent), longest_edge);
     let edge_move = step.map(|axis_step| 2.0 * (axis_step + rounding));
-    let change = reach(cross(unit, ab), edge_move)
-        + reach(cross(ac, unit), edge_move)
-        + length_sq(edge_move)
-        + 2.0 * f64::from(f32::EPSILON) * length(ab) * length(ac);
+    let shrink = edge_pairs
+        .iter()
+        .map(|&(first, second)| {
+            reach(cross(unit, first), edge_move) + reach(cross(second, unit), edge_move)
+        })
+        .fold(f64::INFINITY, f64::min);
+    let cross_rounding = edge_pairs
+        .iter()
+        .map(|&(first, second)| 2.0 * f64::from(f32::EPSILON) * length(first) * length(second))
+        .fold(0.0, f64::max);
+    let change = shrink + length_sq(edge_move) + cross_rounding;
     twice_area >= MIN_TRIANGLE_CROSS + CROSS_ERROR_MARGIN * change
 }
 
