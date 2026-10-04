@@ -317,10 +317,8 @@ impl<'a> CharacterSettings<'a> {
         if !self.hit_reduction_cos_max_angle.is_finite() {
             return invalid("hit reduction cos max angle must be finite");
         }
-        if !(is_finite_non_negative(self.penetration_recovery_speed)
-            && self.penetration_recovery_speed <= 1.0)
-        {
-            return invalid("penetration recovery speed must be between 0 and 1");
+        if !is_recovery_speed(self.penetration_recovery_speed) {
+            return invalid(RECOVERY_SPEED_RULE);
         }
         // SAFETY: the shape is live for the call; the getter only reads it.
         if unsafe { JPH_Shape_GetType(self.shape.as_ptr()) } != JPH_ShapeType_Convex {
@@ -381,6 +379,14 @@ impl<'a> CharacterSettings<'a> {
 
 /// What a character's up must satisfy ([`is_unit`]).
 pub(super) const UP_RULE: &str = "up must be a finite unit vector";
+
+/// What a penetration recovery speed must satisfy ([`is_recovery_speed`]).
+pub(super) const RECOVERY_SPEED_RULE: &str = "penetration recovery speed must be between 0 and 1";
+
+/// Whether `value` is a penetration recovery speed: finite and in `[0, 1]`.
+pub(super) fn is_recovery_speed(value: f32) -> bool {
+    is_finite_non_negative(value) && value <= 1.0
+}
 
 /// Whether `v` is finite and of unit length within Jolt's `Vec3::IsNormalized` tolerance
 /// (`|length² − 1| <= 1e-5`).
