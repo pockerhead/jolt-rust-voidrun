@@ -226,12 +226,13 @@ impl PhysicsWorld {
     /// character's own inner body is never hit. Characters that collide with characters also
     /// hit each other, whatever the filter says.
     ///
-    /// `delta_time` must be finite, at least [`MIN_DELTA_TIME`](Self::MIN_DELTA_TIME) and at
-    /// most [`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME), `gravity` finite and at most
-    /// [`limits::MAX_ACCELERATION`] long, the character's mass times the length of `gravity`
-    /// times `delta_time` at most [`limits::MAX_WEIGHT_IMPULSE`], the settings valid and the
-    /// filter's layers in this world; otherwise nothing happens and
-    /// [`CharacterError::InvalidValue`] is returned.
+    /// Returns [`CharacterError::InvalidValue`] and changes nothing when:
+    /// - `delta_time` is not finite or outside
+    ///   [`MIN_DELTA_TIME`](Self::MIN_DELTA_TIME)`..=`[`MAX_DELTA_TIME`](Self::MAX_DELTA_TIME);
+    /// - `gravity` is not finite or longer than [`limits::MAX_ACCELERATION`];
+    /// - the character's mass times the length of `gravity` times `delta_time` exceeds
+    ///   [`limits::MAX_WEIGHT_IMPULSE`];
+    /// - `settings` are invalid, or a layer of `filter` is not in this world.
     ///
     /// # Panics
     /// A panic in a filter callback is caught inside the update (the callback then rejects) and

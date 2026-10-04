@@ -137,10 +137,8 @@ pub const MAX_WEIGHT_IMPULSE: f32 = 1.0e9;
 /// [docs/limits.md#coupling-ratios]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#coupling-ratios
 pub const MAX_RATIO: f32 = 1.0e4;
 
-/// Largest gear ratio; the smallest is 1 (see
-/// [`GearConstraintSettings`](crate::GearConstraintSettings)). The larger the ratio, the more steps
-/// Jolt's gear needs to restore its velocity relation after a disturbance; at this bound it is
-/// measured back within 2 % of the initial error after 10 steps.
+/// Largest gear ratio; gear ratios are within `1..=MAX_GEAR_RATIO`
+/// (see [`GearConstraintSettings`](crate::GearConstraintSettings)).
 ///
 /// See [docs/limits.md#coupling-ratios].
 ///

@@ -127,15 +127,12 @@ impl SoftBodySettings {
     /// `0..=`[`limits::MAX_SOFT_BODY_PRESSURE`]; 0 applies no pressure. Jolt pushes the faces
     /// outwards with it divided by the enclosed volume. Default 0.
     ///
-    /// Above 0, [`PhysicsWorld::create_soft_body`] also needs faces wound counter-clockwise
-    /// seen from outside that enclose a volume large enough for the pressure (an open mesh
-    /// passes when the signed volume Jolt computes about the body origin does): the pressure
-    /// force Jolt computes for a vertex at the start geometry may give a vertex of
-    /// [`limits::MIN_MASS`] at most [`limits::MAX_ACCELERATION`] (see
-    /// [docs/limits.md#soft-body-pressure]). Jolt computes the volume in `f32` from
-    /// the vertex positions about the body origin, so the vertices of a pressurised body
-    /// belong around that origin: far from it the rounding of that volume can exceed the
-    /// volume itself, and the body is refused.
+    /// Above 0, [`PhysicsWorld::create_soft_body`] also requires faces wound counter-clockwise
+    /// seen from outside that enclose, about the body origin, a volume large enough that the
+    /// pressure at the start geometry gives a vertex of [`limits::MIN_MASS`] at most
+    /// [`limits::MAX_ACCELERATION`]. An open mesh passes when its signed volume does. Keep the
+    /// vertices of a pressurised body around its origin: far from it the body is refused
+    /// ([docs/limits.md#soft-body-pressure]).
     ///
     /// [`PhysicsWorld::create_soft_body`]: crate::PhysicsWorld::create_soft_body
     ///

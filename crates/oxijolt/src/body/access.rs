@@ -20,18 +20,20 @@ impl PhysicsWorld {
     /// Creates a body from `shape` and adds it to the world. The body keeps its own reference
     /// to the shape, so `shape` may be dropped afterwards.
     ///
-    /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, when a dynamic or
-    /// kinematic body uses a shape that only static bodies may use (a heightfield, or a
-    /// compound that contains one), when a dynamic or kinematic body's mass or inertia
-    /// (overridden, or computed from a tiny shape) has no finite inverse, when its inertia
-    /// tensor is not diagonal (a rotated or offset compound child, an offset centre of mass) and
-    /// too badly conditioned for Jolt to decompose, such as a slender shape in a rotated child
-    /// (see the rigid body inertia rule in [`limits`]), and when a dynamic body's mass
-    /// (overridden or computed) is outside [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`].
-    /// Kinematic bodies are exempt from the mass range: Jolt gives them infinite mass in the
-    /// solver.
+    /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, and, for a dynamic
+    /// or kinematic body, when:
+    /// - the shape is one that only static bodies may use (a heightfield, or a compound that
+    ///   contains one);
+    /// - the mass or inertia (overridden, or computed from a tiny shape) has no finite inverse;
+    /// - the inertia tensor is not diagonal (a rotated or offset compound child, an offset centre
+    ///   of mass) and too badly conditioned for Jolt to decompose, such as a slender shape in a
+    ///   rotated child ([docs/limits.md#rigid-body-inertia]).
     ///
-    /// [`limits`]: crate::limits
+    /// A dynamic body's mass (overridden or computed) must also be within
+    /// [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`]. Kinematic bodies are exempt from this
+    /// range: Jolt gives them infinite mass in the solver.
+    ///
+    /// [docs/limits.md#rigid-body-inertia]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#rigid-body-inertia
     /// [`limits::MIN_MASS`]: crate::limits::MIN_MASS
     /// [`limits::MAX_MASS`]: crate::limits::MAX_MASS
     pub fn create_body(

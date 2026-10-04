@@ -12,12 +12,16 @@ use crate::{ObjectLayer, Vec3, VehicleError};
 /// How the wheels find the ground (Jolt's `VehicleCollisionTester` kinds). Each wheel casts
 /// along its suspension from its attachment point at the start of every step.
 ///
-/// The wheels see the bodies whose object layer collides with the tester's `object_layer` in
-/// the world's [`CollisionLayers`](crate::CollisionLayers), never their own chassis, never
-/// sensors and never soft bodies: Jolt's `VehicleConstraint` solves the body under a wheel as a
-/// rigid body, so a wheel passes through a soft body to the ground below it. Jolt's testers apply no per-sub-shape filter, so compound children cannot be
-/// excluded by group; give the wheels a dedicated object layer that collides with exactly the
-/// layers they should drive on.
+/// The wheels hit the bodies whose object layer collides with the tester's `object_layer` in
+/// the world's [`CollisionLayers`](crate::CollisionLayers). They never hit their own chassis,
+/// sensors or soft bodies.
+///
+/// Soft bodies are skipped because Jolt's `VehicleConstraint` solves the body under a wheel as a
+/// rigid body; a wheel passes through a soft body to the ground below it.
+///
+/// Jolt's testers apply no per-sub-shape filter, so compound children cannot be excluded by
+/// group. Give the wheels a dedicated object layer that collides with exactly the layers they
+/// should drive on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum VehicleCollisionTester {
     /// A ray from the attachment point, `suspension_max_length + radius` long. Cheapest; misses

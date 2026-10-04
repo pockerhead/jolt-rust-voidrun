@@ -236,19 +236,22 @@ impl SoftBodySharedSettingsBuilder {
 
     /// Checks everything and builds the settings; nothing is allocated when a check fails.
     ///
-    /// Fails with [`SoftBodyError::InvalidValue`] when there is no vertex; when a vertex
-    /// position is beyond [`limits::MAX_SHAPE_EXTENT`], a velocity beyond
-    /// [`limits::MAX_LINEAR_VELOCITY`] or an inverse mass neither 0 nor the inverse of a mass
-    /// within [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`]; when the masses of the movable
-    /// vertices add up to more than [`limits::MAX_MASS`] (Jolt gives the body their sum as its
-    /// mass); when a face names a vertex that does not exist, names one vertex twice, has an
-    /// edge shorter than [`limits::MIN_SOFT_BODY_EDGE_LENGTH`] or no area; with
-    /// [`SoftBodyBendType::Distance`], when the vertices opposite a shared edge are closer than
-    /// that length (the bend edge between them would have no length); when the
-    /// attributes are out of range or, per vertex, not one per vertex; and when an explicit
-    /// constraint names a vertex that does not exist or one vertex twice, has a compliance out
-    /// of range, an edge (or a bend's shared edge) shorter than
-    /// [`limits::MIN_SOFT_BODY_EDGE_LENGTH`], or a tetrahedron without volume.
+    /// Fails with [`SoftBodyError::InvalidValue`] when:
+    /// - there is no vertex;
+    /// - a vertex position is beyond [`limits::MAX_SHAPE_EXTENT`], a velocity beyond
+    ///   [`limits::MAX_LINEAR_VELOCITY`], or an inverse mass neither 0 nor the inverse of a mass
+    ///   within [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`];
+    /// - the masses of the movable vertices add up to more than [`limits::MAX_MASS`] (Jolt gives
+    ///   the body their sum as its mass);
+    /// - a face names a vertex that does not exist or one vertex twice, has no area, or has an
+    ///   edge shorter than [`limits::MIN_SOFT_BODY_EDGE_LENGTH`];
+    /// - with [`SoftBodyBendType::Distance`], the vertices opposite a shared edge are closer than
+    ///   that length (the bend edge between them would have no length);
+    /// - an attribute is out of range, or a per-vertex attribute does not have one value per
+    ///   vertex;
+    /// - an explicit constraint names a vertex that does not exist or one vertex twice, has a
+    ///   compliance out of range or an edge (or a bend's shared edge) shorter than
+    ///   [`limits::MIN_SOFT_BODY_EDGE_LENGTH`], or is a tetrahedron without volume.
     pub fn build(self) -> Result<SoftBodySharedSettings, SoftBodyError> {
         if !ensure_initialized() {
             return Err(SoftBodyError::InitFailed);

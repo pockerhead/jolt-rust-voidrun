@@ -68,34 +68,54 @@ cannot release a force beyond the bound either.
 
 ## Soft body pressure
 
-Before each solver sub-step of `dt` seconds Jolt computes the
-six-volume `V = Σ (x1 × x2) · x3` over the faces in `f32`, from the vertex positions about
-the body origin, and when `V > 0` adds `w · pressure · dt / V · ((x2 - x1) × (x3 - x1))` to
-the velocity of each vertex of every face (`SoftBodyMotionProperties.cpp:107-118,291-322`);
-nothing bounds `1 / V`. `PhysicsWorld::create_soft_body` accepts a pressure only when
-`pressure · A <= MAX_ACCELERATION / MAX_VERTEX_INVERSE_MASS · V_low`, where `V_low` is a lower bound of
-the six-volume Jolt computes before the first step and `A` the largest sum, over the faces
-of one vertex, of an upper bound of `|x2 - x1| · |x3 - x1|` in Jolt's arithmetic. So the
-faces must enclose a positive volume, wound counter-clockwise seen from outside, and no
-vertex, whatever its inverse mass (at most `MAX_VERTEX_INVERSE_MASS`, also after
-`SoftBodyMut::set_vertex_inverse_mass`),
-gains more than `MAX_ACCELERATION · dt` per sub-step from the pressure at the start
-geometry; the pressure coefficient and impulses stay finite, so a kinematic vertex gets
-`0 · finite`, not `0 · ∞`. `V_low` does not replay Jolt's `f32` operations, whose order
-and rounding depend on the build (SSE4.1 `dpps`, fused multiply-adds, the rotation Jolt
-bakes into the vertices); it is the six-volume in `f64` minus a bound of everything those
-operations can change, with `u = 2^-24` and `|p|` a vertex's distance from the body
-origin: a rotation within Jolt's normalization tolerance scales the six-volume by
-`1 ± 4e-5` and distances by at most `1 + 2e-5`, and its rounding moves a position by at
-most `15 u |p|`; one face's term `(x1 × x2) · x3` is off by at most
-`64 u |p1| |p2| |p3|`; each addition of the running sum rounds by at most `u` times the
-partial sum, which grows the error by at most `(1 - u)^-N` for `N` faces; underflow adds
-at most `1e-36` per face. An edge in `A` is bounded by
-`1.0001 · (|e| + 15 u (|pa| + |pb|))`. A tetrahedron with three 1 m edges at a right
-corner takes a pressure of up to about 9e4; the ball of radius 0.5 m in
-`pressure_at_the_bound_steps_finitely` takes `MAX_SOFT_BODY_PRESSURE`.
+### What Jolt computes
 
-`MAX_SOFT_BODY_PRESSURE` is measured: Jolt applies `pressure · dt / (6 · volume)` times each
+Before each solver sub-step of `dt` seconds Jolt computes the six-volume
+`V = Σ (x1 × x2) · x3` over the faces in `f32`, from the vertex positions about the body origin.
+When `V > 0` it adds `w · pressure · dt / V · ((x2 - x1) × (x3 - x1))` to the velocity of each
+vertex of every face, `w` the vertex's inverse mass (`SoftBodyMotionProperties.cpp:107-118,291-322`).
+Nothing bounds `1 / V`.
+
+### Acceptance rule
+
+`PhysicsWorld::create_soft_body` accepts a pressure only when
+
+    pressure · A <= MAX_ACCELERATION / MAX_VERTEX_INVERSE_MASS · V_low
+
+- `V_low` is a lower bound of the six-volume Jolt computes before the first step (below).
+- `A` is the largest sum, over the faces of one vertex, of an upper bound of
+  `|x2 - x1| · |x3 - x1|` in Jolt's arithmetic. An edge `e` between positions `pa` and `pb` is
+  bounded by `1.0001 · (|e| + 15 u (|pa| + |pb|))`, with `u = 2^-24` and `|pa|`, `|pb|` the
+  distances from the body origin.
+
+So the faces must enclose a positive volume, wound counter-clockwise seen from outside. No
+vertex, whatever its inverse mass (at most `MAX_VERTEX_INVERSE_MASS`, also after
+`SoftBodyMut::set_vertex_inverse_mass`), gains more than `MAX_ACCELERATION · dt` per sub-step
+from the pressure at the start geometry. The pressure coefficient and impulses stay finite, so a
+kinematic vertex gets `0 · finite`, not `0 · ∞`.
+
+### The volume's lower bound
+
+`V_low` does not replay Jolt's `f32` operations: their order and rounding depend on the build
+(SSE4.1 `dpps`, fused multiply-adds, the rotation Jolt bakes into the vertices). It is the
+six-volume in `f64` minus a bound of everything those operations can change. With `u = 2^-24`
+and `|p|` a vertex's distance from the body origin:
+- a rotation within Jolt's normalization tolerance scales the six-volume by `1 ± 4e-5` and
+  distances by at most `1 + 2e-5`, and its rounding moves a position by at most `15 u |p|`;
+- one face's term `(x1 × x2) · x3` is off by at most `64 u |p1| |p2| |p3|`;
+- each addition of the running sum rounds by at most `u` times the partial sum, which grows the
+  error by at most `(1 - u)^-N` for `N` faces;
+- underflow adds at most `1e-36` per face.
+
+The error grows with `|p|³`, so far from the body origin it can exceed the volume itself and the
+body is refused.
+
+### Measurements
+
+A tetrahedron with three 1 m edges at a right corner takes a pressure of up to about 9e4; the
+ball of radius 0.5 m in `pressure_at_the_bound_steps_finitely` takes `MAX_SOFT_BODY_PRESSURE`.
+
+`MAX_SOFT_BODY_PRESSURE` itself is measured: Jolt applies `pressure · dt / (6 · volume)` times each
 face's area as an impulse (`SoftBodyMotionProperties.cpp:290-312`), and a closed ball of 1 m with
 vertex masses at `MIN_MASS` and at the total-mass bound, at this pressure, stepped 600 times on a
 floor in the `asserts` build, stays finite (`pressure_at_the_bound_steps_finitely`).
