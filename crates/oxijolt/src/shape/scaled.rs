@@ -235,8 +235,10 @@ unsafe fn stored_triangles_collidable(shape: *const JPH_Shape, placement: &Place
         });
     let displacement = rounding_displacement(largest);
     placed
-        .chunks_exact(3)
-        .all(|corners| is_collidable([corners[0], corners[1], corners[2]], displacement))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .all(|&corners| is_collidable(corners, displacement))
 }
 
 #[cfg(test)]
