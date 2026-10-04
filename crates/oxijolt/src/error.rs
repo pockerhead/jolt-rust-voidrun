@@ -450,7 +450,7 @@ impl std::error::Error for StateError {}
 /// `BodyError`.
 ///
 /// ```
-/// use oxijolt::{BodyId, BodySettings, PhysicsWorld, Shape, StepError, WorldSettings};
+/// use oxijolt::prelude::*;
 ///
 /// fn drop_ball(world: &mut PhysicsWorld) -> oxijolt::Result<BodyId> {
 ///     let shape = Shape::new_sphere(0.5)?; // ShapeError

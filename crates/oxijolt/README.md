@@ -15,6 +15,9 @@ A world's state can be saved and restored, and the world moved to a floating ori
 on Jolt's thread pool or on the caller's. The repository's README says what is not bound yet, and
 its `docs/` directory has the guides.
 
+`use oxijolt::prelude::*` brings in the commonly used types; the math types are in
+`oxijolt::prelude::math`.
+
 ## Features
 - `double-precision`: world positions in `f64`; forwards to `oxijolt-sys/double-precision`.
 - `cross-platform-deterministic`: forwards to `oxijolt-sys/cross-platform-deterministic`.

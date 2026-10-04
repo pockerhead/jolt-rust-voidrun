@@ -7,9 +7,10 @@
 //! and [`BodySettings`] and named by a [`BodyId`]; one shape may serve many bodies in many worlds.
 //!
 //! ```
-//! use oxijolt::*;
+//! use oxijolt::prelude::math::*;
+//! use oxijolt::prelude::*;
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # fn main() -> oxijolt::Result<()> {
 //! let mut world = PhysicsWorld::new(WorldSettings::default())?;
 //!
 //! let floor_shape = Shape::new_box(Vec3::new(100.0, 1.0, 100.0))?;
@@ -157,6 +158,7 @@ mod math;
 #[cfg(feature = "mint")]
 mod mint_interop;
 mod owned;
+pub mod prelude;
 mod query;
 mod ragdoll;
 mod shape;

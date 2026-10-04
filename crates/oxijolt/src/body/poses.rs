@@ -40,9 +40,10 @@ impl PhysicsWorld {
     /// allocation, use [`active_body_poses_into`](Self::active_body_poses_into).
     ///
     /// ```
-    /// use oxijolt::{BodySettings, PhysicsWorld, RVec3, Shape, WorldSettings};
+    /// use oxijolt::prelude::math::*;
+    /// use oxijolt::prelude::*;
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # fn main() -> oxijolt::Result<()> {
     /// let mut world = PhysicsWorld::new(WorldSettings::default())?;
     /// let ball = world.create_body(
     ///     &Shape::new_sphere(0.5)?,
