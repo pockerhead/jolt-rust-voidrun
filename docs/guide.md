@@ -585,7 +585,8 @@ factor, initial velocity) at the part's bind pose in world space, and the joint 
   when a falling ragdoll hits the ground the contacts win and joints pass their limits for a few
   dozen ticks before the constraints pull them mostly back. These are measurements, not bounds:
   in the repository's drop test (a 12-part humanoid dropped with its pelvis 1.5 m above the
-  terrain) the worst overshoot is 0.29 rad and 0.0037 rad remain at rest. Over a sweep of 126
+  terrain) the worst overshoot is 0.29 rad and 0.0037 rad remain at rest; the test's bounds,
+  0.40 rad during the fall and 0.01 rad at rest, hold for that drop only. Over a sweep of 126
   drops of that humanoid (from 1 to 2.5 m, with raw and stabilized masses) the overshoot reached
   0.48 rad, the joints were up to 0.15 rad outside their limits when the ragdoll came to rest,
   and hinges bent about their fixed axes by up to 0.57 rad on impact. Check joint limits at rest,
