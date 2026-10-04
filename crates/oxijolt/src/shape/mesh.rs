@@ -216,7 +216,8 @@ impl Shape {
         }
         let jolt_settings = mesh_settings(vertices, triangles, &kept, settings)?;
         let mesh: *mut JPH_MeshShapeSettings = jolt_settings.as_ptr();
-        // Jolt's own clean-up has run; after `collidable_triangles` it can only drop duplicates.
+        // Jolt's own clean-up has run. After `collidable_triangles` it can only drop duplicates,
+        // which leaves a copy; the count is Jolt's own verdict on what is left.
         // SAFETY: the settings are live, owned by the guard and were created as mesh settings.
         if unsafe { JPH_MeshShapeSettings_GetTriangleCount(mesh) } == 0 {
             return Err(ShapeError::Mesh(MeshError::NoTriangles));

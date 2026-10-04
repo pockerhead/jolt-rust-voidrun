@@ -570,3 +570,93 @@ fn a_cloth_is_drawn_as_the_edges_of_its_faces() {
     assert_eq!(drawn.len(), 3 * cloth.faces.len());
     assert_inside(&drawn, [0.0, 0.0, 0.0], [0.75, 0.0, 0.75], "cloth");
 }
+
+/// A two-triangle mesh: the unit square at y = 0 with corners (0, 0) and (1, 1) in x and z.
+fn square_mesh() -> Shape {
+    let vertices = [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(1.0, 0.0, 1.0),
+        Vec3::new(1.0, 0.0, 0.0),
+    ];
+    Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 2, 3]]).unwrap()
+}
+
+/// Line count Jolt's debug renderer gives a two-triangle mesh: measured once and pinned.
+const SQUARE_MESH_LINES: usize = 6;
+
+#[test]
+fn new_shapes_are_drawn_within_their_bounds() {
+    let mut world = world(Vec3::ZERO, 1);
+    let add = |world: &mut PhysicsWorld, shape: &Shape, settings: BodySettings| {
+        world.create_body(shape, &settings).unwrap()
+    };
+    let mesh = add(
+        &mut world,
+        &square_mesh(),
+        BodySettings::new_static().position(RVec3::new(10.0, 0.0, 0.0)),
+    );
+    let points = common::meshes::irregular_points();
+    let hull = add(
+        &mut world,
+        &Shape::new_convex_hull(&points, 0.05).unwrap(),
+        BodySettings::new_dynamic().position(RVec3::new(0.0, 3.0, 0.0)),
+    );
+    let scaled_box = Shape::scaled(&cube_shape(), Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    let scaled = add(
+        &mut world,
+        &scaled_box,
+        BodySettings::new_static().position(RVec3::new(-5.0, 1.0, 0.0)),
+    );
+    let tapered = add(
+        &mut world,
+        &Shape::new_tapered_capsule(0.4, 0.15, 0.3).unwrap(),
+        BodySettings::new_static().position(RVec3::new(0.0, 1.0, 6.0)),
+    );
+    let lines = lines_near(&world, 30.0, usize::MAX, &QueryFilter::new());
+    let mesh_lines = lines_of(&lines, mesh, None);
+    assert_eq!(mesh_lines.len(), SQUARE_MESH_LINES);
+    assert_inside(&mesh_lines, [10.5, 0.0, 0.5], [0.5, 0.0, 0.5], "mesh");
+    assert_inside(
+        &lines_of(&lines, hull, None),
+        [0.0, 3.0, 0.0],
+        [0.6, 0.65, 0.6],
+        "hull",
+    );
+    assert_inside(
+        &lines_of(&lines, scaled, None),
+        [-5.0, 1.0, 0.0],
+        [0.5, 1.0, 1.5],
+        "scaled box",
+    );
+    assert_inside(
+        &lines_of(&lines, tapered, None),
+        [0.0, 1.0, 6.0],
+        [0.3, 0.75, 0.3],
+        "tapered capsule",
+    );
+    let again = lines_near(&world, 30.0, usize::MAX, &QueryFilter::new());
+    assert_eq!(fingerprint(&lines), fingerprint(&again));
+}
+
+#[test]
+fn a_mesh_can_be_drawn_again_after_its_shape_is_freed() {
+    let mut world = world(Vec3::ZERO, 1);
+    let shape = square_mesh();
+    let id = world
+        .create_body(&shape, &BodySettings::new_static())
+        .unwrap();
+    // The first draw builds the shape's debug geometry, which lives as long as the shape.
+    let first = lines_near(&world, 10.0, usize::MAX, &QueryFilter::new());
+    assert_eq!(first.lines().len(), SQUARE_MESH_LINES);
+    world.remove_body(id).unwrap();
+    drop(shape);
+    assert!(lines_near(&world, 10.0, usize::MAX, &QueryFilter::new())
+        .lines()
+        .is_empty());
+    let id = world
+        .create_body(&square_mesh(), &BodySettings::new_static())
+        .unwrap();
+    let again = lines_near(&world, 10.0, usize::MAX, &QueryFilter::new());
+    assert_eq!(lines_of(&again, id, None).len(), SQUARE_MESH_LINES);
+}

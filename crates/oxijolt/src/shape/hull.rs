@@ -96,7 +96,8 @@ impl Shape {
 
     /// Whether this is a convex hull Jolt built from points in one plane: Jolt's coplanar case
     /// yields exactly two back-to-back faces (`ConvexHullBuilder::Initialize`), while a hull
-    /// with volume has at least four.
+    /// with volume has at least four. The slab rule of [`InitialSimplex::classify`] refuses such
+    /// clouds first with a wide margin; this reads Jolt's own verdict on what it built.
     fn is_flat_hull(&self) -> bool {
         if self.sub_type() != JPH_ShapeSubType_ConvexHull {
             return false;
