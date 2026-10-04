@@ -55,42 +55,38 @@ With Bevy, `use oxijolt::prelude::*` next to `bevy::prelude::*`; see `oxijolt::p
 oxijolt = { git = "https://github.com/pockerhead/oxijolt" }
 ```
 
-## Features
+## Roadmap
 
-- Rigid bodies: static, kinematic and dynamic; box, sphere, cylinder, capsule, heightfield and
-  compound shapes; physics materials with user data; forces, sleeping, continuous collision.
-- Scene queries: ray casts, shape casts and collide-shape, filtered by layer, compound child
-  group and body.
-- A character controller (Jolt's `CharacterVirtual`) with stair walking, floor sticking and an up
-  direction that can change every update, for walking on a planet.
-- Wheeled vehicles with suspension, engine, automatic transmission, differentials and anti-roll
-  bars.
-- Ragdolls from a skeleton, posed, motor-driven or kinematic, with settle detection.
-- Twelve kinds of constraints with motors, springs and limits: fixed, point, distance, hinge,
-  slider, cone, swing-twist, six-DOF, gear, rack and pinion, pulley and path
-  ([guide](docs/constraints.md)).
-- Soft bodies: cloth, pressurised and volume-preserving bodies, with vertex readout and pinning
-  ([guide](docs/soft-bodies.md)).
-- Contact, activation and soft body contact events in an order that does not depend on the
-  thread count, and a contact listener that changes friction, restitution, mass scales or surface
-  velocity per contact ([guide](docs/events.md)).
-- Saving and restoring a world's state for rollback and replays ([guide](docs/state.md)).
-- A floating origin (`PhysicsWorld::rebase`) and optional `f64` world positions.
-- Jolt's jobs on Jolt's thread pool or on your own, such as Rayon ([guide](docs/job-system.md)).
-- Debug wireframes as line data (feature `debug-renderer`); nothing is drawn.
+The full list of what works today, with links to the guides, is in
+[docs/features.md](docs/features.md).
 
-Not in the safe API yet:
-
-- mesh, convex hull, scaled and tapered shapes;
-- impulses on rigid bodies;
-- moving a kinematic body to a target;
-- activating or deactivating a body on demand;
-- sensor bodies;
-- changing a body's shape or motion type after creation.
-
-The raw layer, `oxijolt-sys`, has the joltc functions for all of them.
-[docs/coverage.md](docs/coverage.md) lists every bound feature with the tests that check it, and
-the rest of what is not bound yet.
+- [x] Rigid bodies: box, sphere, cylinder, capsule, heightfield and compound shapes, materials
+- [x] Scene queries: ray casts, shape casts, collide-shape, with filters
+- [x] Character controller (`CharacterVirtual`)
+- [x] Wheeled vehicles
+- [x] Ragdolls
+- [x] Twelve kinds of constraints with motors, springs and limits
+- [x] Soft bodies
+- [x] Contact, activation and soft body contact events; contact listener
+- [x] Saving and restoring world state
+- [x] Floating origin and optional `f64` positions
+- [x] Jolt's jobs on your own thread pool
+- [x] Debug wireframes as line data
+- [x] Same results for any worker thread count
+- [x] Builds without LLVM; Windows and Linux in CI; prebuilt libraries in releases
+- [x] `glam` and `mint` conversions
+- [x] One-call pose readout, a crate-wide error type, a prelude
+- [ ] Convex hull, triangle mesh, scaled and tapered shapes
+- [ ] Body controls: impulses, kinematic moves, activation, sensors, user data, changing shape
+      and motion type
+- [ ] First release on crates.io and docs.rs
+- [ ] Tracked vehicles and motorcycles
+- [ ] Playground: an example with a window that shows every feature, and GIFs for this README
+- [ ] Comparison with Rapier and Avian
+- [ ] Bevy integration crate
+- [ ] macOS in CI and in releases
+- [ ] Rollback helpers: reusable state buffer, filtered restore
+- [ ] Same results across operating systems, checked in CI
 
 ## Status
 
@@ -132,7 +128,7 @@ through [joltc] and has a safe API for all of those. It also has constraints, so
 events, saving and restoring a world, and stepping on your own job system. Its tests check that
 results match bit for bit with 1 and 4 worker threads and on a caller job system. Out-of-range
 values get a typed error before they reach Jolt. It builds without LLVM. Its shape and rigid-body
-API is not complete yet; [Features](#features) says what is missing.
+API is not complete yet; the [roadmap](#roadmap) says what is missing.
 
 ## Documentation
 
