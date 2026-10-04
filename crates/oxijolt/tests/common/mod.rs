@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 pub mod constraint_kinds;
+pub mod controls;
 pub mod determinism;
 pub mod events;
 pub mod jobs;
