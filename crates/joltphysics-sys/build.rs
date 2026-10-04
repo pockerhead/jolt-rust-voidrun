@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
 
+#[path = "build/bindgen_options.rs"]
+mod bindgen_options;
+
 /// joltc commit of the `vendor/joltc` submodule. Must match the gitlink; CI checks this.
 const JOLTC_COMMIT: &str = "886e088675bae3a086f8318c7803f8ee962c2f2c";
 /// Jolt Physics commit of the `vendor/JoltPhysics` submodule. Must match the gitlink; CI checks this.
@@ -28,31 +31,6 @@ const JOLT_VERSION: &str = "5.6.0";
 const JOLTC_EXT_REVISION: &str = "11";
 /// Name of the manifest file in an install prefix.
 const MANIFEST_FILE: &str = "joltphysics-sys-manifest.txt";
-
-/// joltc functions left out of the bindings.
-///
-/// They `reinterpret_cast` a `JPH_Mat4*` (4-aligned) to a `JPH::Mat44*`
-/// (16-aligned), which is undefined behaviour for most caller-provided arrays.
-/// They stay unbound: ragdoll poses go through per-body transforms instead.
-const EXCLUDED_FUNCTIONS: &[&str] = &[
-    "JPH_RagdollSettings_DisableParentChildCollisions",
-    "JPH_Ragdoll_SetPose2",
-    "JPH_Ragdoll_GetPose2",
-    "JPH_SkeletonMapper_Initialize",
-    "JPH_SkeletonMapper_LockAllTranslations",
-    "JPH_SkeletonMapper_LockTranslations",
-    "JPH_SkeletonMapper_Map",
-    "JPH_SkeletonMapper_MapReverse",
-];
-
-/// joltc functions that joltc.cpp defines only under `JPH_DEBUG_RENDERER`; left out of the
-/// bindings without the `debug-renderer` feature, so no Rust code can reference a missing symbol.
-const DEBUG_RENDERER_FUNCTIONS: &[&str] = &[
-    "JPH_Shape_Draw",
-    "JPH_PhysicsSystem_Draw.*",
-    "JPH_BodyDrawFilter_.*",
-    "JPH_DebugRenderer_.*",
-];
 
 /// Everything about the target and the crate features that shapes the native build.
 struct NativeConfig {
@@ -497,32 +475,18 @@ fn generate_bindings(header: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
     let include_dir = header
         .parent()
         .context("joltc_ext.h has no parent directory")?;
-    let mut builder = bindgen::Builder::default()
-        .header(header.display().to_string())
-        .clang_arg(format!("-I{}", include_dir.display()))
-        .allowlist_item("JPH_.*")
-        .allowlist_item("JobSystemThreadPoolConfig")
-        .default_enum_style(bindgen::EnumVariation::Consts)
-        .prepend_enum_name(false)
-        // The explicit rerun rules cover the header's sources; the header the
-        // CMake path binds lives in OUT_DIR, whose timestamps we do not control.
-        .parse_callbacks(Box::new(
-            bindgen::CargoCallbacks::new().rerun_on_header_files(false),
-        ));
-
-    // The header's only ABI switch. JPH_DEBUG_RENDERER does not change the header; it only
-    // decides which functions joltc defines, which DEBUG_RENDERER_FUNCTIONS handles.
-    if cfg.double_precision {
-        builder = builder.clang_arg("-DJPH_DOUBLE_PRECISION");
-    }
-    for function in EXCLUDED_FUNCTIONS {
-        builder = builder.blocklist_function(function);
-    }
-    if !cfg.debug_renderer {
-        for function in DEBUG_RENDERER_FUNCTIONS {
-            builder = builder.blocklist_function(function);
-        }
-    }
+    // The explicit rerun rules cover the header's sources; the header the
+    // CMake path binds lives in OUT_DIR, whose timestamps we do not control.
+    let builder = bindgen_options::builder(
+        header,
+        include_dir,
+        &cfg.target,
+        cfg.double_precision,
+        cfg.debug_renderer,
+    )
+    .parse_callbacks(Box::new(
+        bindgen::CargoCallbacks::new().rerun_on_header_files(false),
+    ));
 
     let bindings = builder
         .generate()
