@@ -4,6 +4,7 @@ use std::ptr::null;
 
 use oxijolt_sys::*;
 
+use super::geometry::{cross, length_sq, sub, v3, V3};
 use super::{initialize, Shape, ShapeSettings};
 use crate::{limits, MeshError, PhysicsMaterial, ShapeError, Vec3};
 
@@ -235,10 +236,7 @@ impl Shape {
 ///
 /// [docs/limits.md#triangle-meshes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#triangle-meshes
 fn collidable_triangles(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Vec<usize> {
-    let corner = |index: u32| {
-        let v = vertices[index as usize];
-        [v.x, v.y, v.z].map(f64::from)
-    };
+    let corner = |index: u32| v3(vertices[index as usize]);
     let mut low = [f64::INFINITY; 3];
     let mut high = [f64::NEG_INFINITY; 3];
     for &index in triangles.iter().flatten() {
@@ -254,39 +252,31 @@ fn collidable_triangles(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Vec<usize>
     let largest = (0..3)
         .map(|axis| low[axis].abs().max(high[axis].abs()))
         .fold(0.0, f64::max);
-    let displacement = step + 4.0 * f64::from(f32::EPSILON) * largest;
+    let displacement = step + rounding_displacement(largest);
     triangles
         .iter()
         .enumerate()
-        .filter(|(_, triangle)| {
-            let [a, b, c] = triangle.map(corner);
-            let (ab, ac, bc) = (sub(b, a), sub(c, a), sub(c, b));
-            let longest = [ab, ac, bc]
-                .map(|edge| dot(edge, edge).sqrt())
-                .into_iter()
-                .fold(0.0, f64::max);
-            let normal = cross(ab, ac);
-            dot(normal, normal).sqrt()
-                >= MIN_TRIANGLE_CROSS + CROSS_ROUNDING_FACTOR * displacement * longest
-        })
+        .filter(|(_, triangle)| is_collidable(triangle.map(corner), displacement))
         .map(|(index, _)| index)
         .collect()
 }
 
-fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+/// How far Jolt's `f32` transform into another shape's space can move a vertex of a shape
+/// whose largest absolute coordinate is `largest`, metres.
+pub(super) fn rounding_displacement(largest: f64) -> f64 {
+    4.0 * f64::from(f32::EPSILON) * largest
 }
 
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
+/// Whether a triangle with `corners` keeps a cross product above [`MIN_TRIANGLE_CROSS`] when each
+/// corner moves by up to `displacement` metres, with a factor [`CROSS_ROUNDING_FACTOR`] of margin.
+pub(super) fn is_collidable([a, b, c]: [V3; 3], displacement: f64) -> bool {
+    let (ab, ac, bc) = (sub(b, a), sub(c, a), sub(c, b));
+    let longest = [ab, ac, bc]
+        .map(|edge| length_sq(edge).sqrt())
+        .into_iter()
+        .fold(0.0, f64::max);
+    length_sq(cross(ab, ac)).sqrt()
+        >= MIN_TRIANGLE_CROSS + CROSS_ROUNDING_FACTOR * displacement * longest
 }
 
 /// Jolt mesh settings holding the validated geometry, of the triangles `kept`, and `settings`.

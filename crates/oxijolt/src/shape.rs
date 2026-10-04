@@ -11,8 +11,10 @@ use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
 
 mod create;
+mod geometry;
 mod hull;
 mod mesh;
+mod scaled;
 mod static_only;
 
 use crate::{Quat, ShapeError, Vec3};

@@ -13,6 +13,9 @@ use std::process::Command;
 use common::*;
 use oxijolt::*;
 
+#[path = "shape_stress/scaled.rs"]
+mod scaled;
+
 const CHILD: &str = "shape_stress_child";
 
 #[test]
@@ -54,6 +57,7 @@ fn shape_stress_child() {
     let mut arena = Arena::new();
     hull_family(&mut arena);
     mesh_family(&mut arena);
+    scaled::scaled_family(&mut arena);
 }
 
 /// Announces a case on stderr before it runs, so a crash can be traced to it.
@@ -209,8 +213,9 @@ impl Arena {
     }
 
     /// Drops `shape` as a dynamic body with its lowest point 0.5 m above the floor, when the
-    /// world accepts it as dynamic, and steps `ticks` times; the body must stay finite.
-    fn drop_dynamic(&mut self, shape: &Shape, extent: Extent, ticks: usize, what: &str) {
+    /// world accepts it as dynamic, and steps `ticks` times; the body must stay finite. Returns
+    /// whether the world accepted the shape as dynamic.
+    fn drop_dynamic(&mut self, shape: &Shape, extent: Extent, ticks: usize, what: &str) -> bool {
         let position = RVec3::new(
             -real(extent.centroid.x),
             real(0.5 - extent.min_y),
@@ -218,13 +223,14 @@ impl Arena {
         );
         let settings = BodySettings::new_dynamic().position(position);
         let Ok(id) = self.world.create_body(shape, &settings) else {
-            return;
+            return false;
         };
         for _ in 0..ticks {
             assert!(self.world.step(DT).unwrap().is_complete());
         }
         assert_finite_body(&self.world, id, what);
         self.world.remove_body(id).unwrap();
+        true
     }
 
     /// Adds `shape` as a static body at the origin and runs a down-ray and a capsule overlap

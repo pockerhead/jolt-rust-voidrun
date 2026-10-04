@@ -2,6 +2,7 @@
 
 use oxijolt_sys::*;
 
+use super::geometry::{cross, dot, length_sq, sub, v3};
 use super::{initialize, validate_convex_radius, Shape, ShapeSettings};
 use crate::{limits, HullError, PhysicsMaterial, ShapeError, Vec3};
 
@@ -144,10 +145,7 @@ struct InitialSimplex {
 
 impl InitialSimplex {
     fn of(points: &[Vec3]) -> Self {
-        let points: Vec<[f64; 3]> = points
-            .iter()
-            .map(|point| [point.x, point.y, point.z].map(f64::from))
-            .collect();
+        let points: Vec<[f64; 3]> = points.iter().map(|&point| v3(point)).collect();
         let first = farthest(&points, None, length_sq);
         let second = farthest(&points, Some(first), |p| length_sq(sub(p, points[first])));
         let (a, b) = (points[first], points[second]);
@@ -211,26 +209,6 @@ fn farthest(points: &[[f64; 3]], skip: Option<usize>, measure: impl Fn([f64; 3])
         }
     }
     best.0
-}
-
-fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn length_sq(a: [f64; 3]) -> f64 {
-    dot(a, a)
 }
 
 #[cfg(test)]
