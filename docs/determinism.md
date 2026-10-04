@@ -86,6 +86,9 @@ Other gates of the same kind:
   listener simulates bit for bit like the same scene with nothing installed.
 - `tests/state.rs` replays a rollback in two processes with 1 and 4 workers
   (`rollback_replay_is_identical_across_processes`).
+- `tests/body_poses.rs` compares `PhysicsWorld::active_body_poses`, which returns the awake bodies
+  in ascending `BodyId` order, for 1 and 4 workers and for caller job systems while a grid of
+  cubes wakes and falls asleep again.
 - `crates/oxijolt-sys/tests/determinism.rs` checks the raw layer with 1 and 4 workers.
 
 CI runs all of them in each of its configurations (default, `cross-platform-deterministic`,
