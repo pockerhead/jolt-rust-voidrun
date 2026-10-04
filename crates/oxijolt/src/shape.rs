@@ -16,6 +16,7 @@ mod hull;
 mod mesh;
 mod scaled;
 mod static_only;
+mod tapered;
 
 use crate::{Quat, ShapeError, Vec3};
 pub use mesh::{MeshBuildQuality, MeshSettings};

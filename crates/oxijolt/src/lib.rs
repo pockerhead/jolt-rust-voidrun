@@ -33,8 +33,9 @@
 //! ```
 //!
 //! # What a world holds
-//! - Rigid bodies of box, sphere, cylinder, capsule, convex hull, triangle mesh, heightfield and
-//!   compound [`Shape`]s, with [`PhysicsMaterial`]s that carry the caller's user data.
+//! - Rigid bodies of box, sphere, cylinder, capsule, tapered capsule and cylinder, convex hull,
+//!   triangle mesh, heightfield, compound and scaled [`Shape`]s, with [`PhysicsMaterial`]s that
+//!   carry the caller's user data.
 //! - Scene queries on `&PhysicsWorld`: [`PhysicsWorld::cast_ray`], [`PhysicsWorld::cast_shape`]
 //!   and [`PhysicsWorld::collide_shape`], filtered by [`QueryFilter`].
 //! - Virtual characters: [`PhysicsWorld::create_character`].

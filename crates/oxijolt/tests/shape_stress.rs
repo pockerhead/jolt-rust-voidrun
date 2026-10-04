@@ -15,6 +15,8 @@ use oxijolt::*;
 
 #[path = "shape_stress/scaled.rs"]
 mod scaled;
+#[path = "shape_stress/tapered.rs"]
+mod tapered;
 
 const CHILD: &str = "shape_stress_child";
 
@@ -58,6 +60,7 @@ fn shape_stress_child() {
     hull_family(&mut arena);
     mesh_family(&mut arena);
     scaled::scaled_family(&mut arena);
+    tapered::tapered_family(&mut arena);
 }
 
 /// Announces a case on stderr before it runs, so a crash can be traced to it.
