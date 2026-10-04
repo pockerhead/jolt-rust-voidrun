@@ -38,7 +38,7 @@ impl BodyRef<'_> {
         self.id
     }
 
-    fn interface(&self) -> *mut JPH_BodyInterface {
+    pub(super) fn interface(&self) -> *mut JPH_BodyInterface {
         self.body_interface.as_ptr()
     }
 
@@ -382,7 +382,7 @@ impl BodyMut<'_> {
     }
 
     /// Fails with [`BodyError::SoftBody`] when the body is a soft body.
-    fn reject_soft_body(&self) -> Result<(), BodyError> {
+    pub(super) fn reject_soft_body(&self) -> Result<(), BodyError> {
         if self.is_soft_body() {
             Err(BodyError::SoftBody(self.id))
         } else {

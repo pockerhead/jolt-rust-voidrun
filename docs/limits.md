@@ -285,6 +285,29 @@ about 5e14 N, so Jolt's `f32` sums (`Body.h:183,191`) and `mInvMass * F`
 `f32` and every product `lever_i · force_j` at most 1e37, so Jolt's cross product
 (`Body.inl:127-131`) stays finite even when its two products cancel.
 
+## Impulses
+
+Jolt applies an impulse at once: `AddImpulse` sets the velocity to `v + J · invM`, and
+`AddAngularImpulse` to `w + I⁻¹(R) · L`, through `SetLinearVelocityClamped` and
+`SetAngularVelocityClamped` (`Body.inl:133-151`), which mask the locked axes, assert only that the
+squared speed is finite and clamp it to the body's maximum (`MotionProperties.inl:23-39`). The body
+interface applies them to dynamic bodies only and wakes them (`BodyInterface.cpp:764-808`), so
+nothing accumulates: each impulse starts from a velocity within the bounds.
+
+`BodyMut::add_impulse` accepts `|J| · invM <= MAX_VELOCITY_CHANGE`, twice `MAX_LINEAR_VELOCITY`, so
+that one impulse can reverse a body at full speed; the speed after it is below 1500 m/s before the
+clamp, and its square is finite. `add_angular_impulse` accepts `|L|` times the largest principal
+inverse inertia up to `MAX_ANGULAR_VELOCITY_CHANGE`, twice `MAX_ANGULAR_VELOCITY`, a bound on the
+masked `|I⁻¹(R) · L|` for any rotation. `add_impulse_at_point` applies both rules, with the angular
+impulse `(p - com) × J` that Jolt computes in `f32`; the lever and the products of that cross
+product follow the rule of [force and torque accumulation](#force-and-torque-accumulation).
+
+Jolt's angular path multiplies `Rᵀ · L` before the inverse inertia, so `|L|` itself must stay finite
+in `f32`. The largest accepted angular impulse belongs to the body with the smallest largest inverse
+inertia: a cube of 2000 m half extent and `MAX_MASS` has a moment of about 2.7e12 kg·m², so `|L|` up
+to about 2.5e14 N·m·s, far below the `f32` range. A body without rotational degrees of freedom has a
+zero inverse inertia, and Jolt masks the whole angular impulse before it multiplies.
+
 ## Soft body forces
 
 Jolt adds a soft body's accumulated force to every vertex as `F · w / N · dt`

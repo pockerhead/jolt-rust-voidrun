@@ -143,6 +143,9 @@ check it at its boundary.
 | `BodyMut::set_linear_velocity`, `set_angular_velocity` | `MAX_LINEAR_VELOCITY`, `MAX_ANGULAR_VELOCITY` | `body_setters_are_bounded_and_rejection_changes_nothing` |
 | `BodyMut::add_force` | accumulated `|F| / m <=` `MAX_ACCELERATION` | `forces_are_bounded_by_the_acceleration_they_give` |
 | `BodyMut::add_torque`, `add_force_at_point` | accumulated torque within `MAX_ANGULAR_ACCELERATION`; point within `MAX_POSITION`; `f32` torque products | `torques_are_bounded_by_the_angular_acceleration_they_give`, `point_torque_rejects_overflowing_products_even_when_they_cancel` |
+| `BodyMut::add_impulse` | finite; on a dynamic body `|J| / m <=` `MAX_VELOCITY_CHANGE` | `body_controls.rs`: `impulses_are_bounded_by_the_velocity_change_they_give` |
+| `BodyMut::add_angular_impulse` | finite; on a dynamic body `|L|` times the largest principal inverse inertia `<=` `MAX_ANGULAR_VELOCITY_CHANGE` | `body_controls.rs`: `angular_impulses_are_bounded_by_the_angular_velocity_change` |
+| `BodyMut::add_impulse_at_point` | both impulse rules with `L = (p - com) × J`; point within `MAX_POSITION`; `f32` cross product products | `body_controls.rs`: `point_impulses_are_bounded_by_the_angular_impulse_of_their_lever`, `angular_impulses_are_bounded_by_the_angular_velocity_change` |
 | `BodyMut::reset_forces` | none | `reset_forces_ignores_static_and_kinematic_bodies` |
 | `CharacterSettings::mass` | `0..=MAX_MASS` | `character_settings_and_setters_are_bounded` |
 | `CharacterSettings::shape_offset` | `MAX_SHAPE_EXTENT` per axis | `character_settings_and_setters_are_bounded` |
