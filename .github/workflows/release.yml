@@ -17,7 +17,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  NATIVE_MANIFEST: joltphysics-sys-manifest.txt
+  NATIVE_MANIFEST: oxijolt-sys-manifest.txt
 
 jobs:
   version:
@@ -89,10 +89,10 @@ jobs:
 
       - name: Check pinned commits
         run: |
-          joltc=$(git rev-parse HEAD:crates/joltphysics-sys/vendor/joltc)
-          jolt=$(git rev-parse HEAD:crates/joltphysics-sys/vendor/JoltPhysics)
-          grep -q "\"$joltc\"" crates/joltphysics-sys/build.rs || { echo "build.rs JOLTC_COMMIT differs from the gitlink $joltc"; exit 1; }
-          grep -q "\"$jolt\"" crates/joltphysics-sys/build.rs || { echo "build.rs JOLT_COMMIT differs from the gitlink $jolt"; exit 1; }
+          joltc=$(git rev-parse HEAD:crates/oxijolt-sys/vendor/joltc)
+          jolt=$(git rev-parse HEAD:crates/oxijolt-sys/vendor/JoltPhysics)
+          grep -q "\"$joltc\"" crates/oxijolt-sys/build.rs || { echo "build.rs JOLTC_COMMIT differs from the gitlink $joltc"; exit 1; }
+          grep -q "\"$jolt\"" crates/oxijolt-sys/build.rs || { echo "build.rs JOLT_COMMIT differs from the gitlink $jolt"; exit 1; }
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -122,12 +122,12 @@ jobs:
           stage="$RUNNER_TEMP/stage/$ARCHIVE"
           mkdir -p "$stage/licenses"
           cp -r "$PREFIX/lib" "$PREFIX/include" "$PREFIX/$NATIVE_MANIFEST" "$stage/"
-          for file in LICENSE-MIT LICENSE-APACHE crates/joltphysics-sys/vendor/joltc/LICENSE crates/joltphysics-sys/vendor/JoltPhysics/LICENSE; do
+          for file in LICENSE-MIT LICENSE-APACHE crates/oxijolt-sys/vendor/joltc/LICENSE crates/oxijolt-sys/vendor/JoltPhysics/LICENSE; do
             [ -f "$file" ] || { echo "missing licence file $file"; exit 1; }
           done
           cp LICENSE-MIT LICENSE-APACHE "$stage/"
-          cp crates/joltphysics-sys/vendor/joltc/LICENSE "$stage/licenses/joltc-LICENSE"
-          cp crates/joltphysics-sys/vendor/JoltPhysics/LICENSE "$stage/licenses/JoltPhysics-LICENSE"
+          cp crates/oxijolt-sys/vendor/joltc/LICENSE "$stage/licenses/joltc-LICENSE"
+          cp crates/oxijolt-sys/vendor/JoltPhysics/LICENSE "$stage/licenses/JoltPhysics-LICENSE"
 
           # The CPU features Jolt was compiled for, from its CMake options.
           cache="$PREFIX/build/CMakeCache.txt"

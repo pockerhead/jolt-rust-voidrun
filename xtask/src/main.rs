@@ -1,6 +1,6 @@
 //! Repository maintenance tasks.
 //!
-//! `cargo xtask bindings` regenerates the committed raw bindings of `joltphysics-sys` for every
+//! `cargo xtask bindings` regenerates the committed raw bindings of `oxijolt-sys` for every
 //! ABI family and configuration, and their fingerprint record. `cargo xtask bindings --check`
 //! regenerates them in memory and fails when the committed files differ, writing the fresh set
 //! to `--out <dir>` (default `target/xtask-bindings`).
@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
 
-#[path = "../../crates/joltphysics-sys/build/bindgen_options.rs"]
+#[path = "../../crates/oxijolt-sys/build/bindgen_options.rs"]
 mod bindgen_options;
 // The target check runs in build.rs; here only the tests call it.
 #[allow(dead_code)]
-#[path = "../../crates/joltphysics-sys/build/targets.rs"]
+#[path = "../../crates/oxijolt-sys/build/targets.rs"]
 mod targets;
 
 /// The bindgen version in `Cargo.toml`, recorded as provenance.
@@ -52,7 +52,7 @@ fn bindings(args: &[String]) -> anyhow::Result<()> {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .context("xtask has no parent directory")?;
-    let crate_dir = repo.join("crates").join("joltphysics-sys");
+    let crate_dir = repo.join("crates").join("oxijolt-sys");
     refuse_ambient_clang_args()?;
 
     let outputs = generate_all(&crate_dir)?;
@@ -412,7 +412,7 @@ mod tests {
         let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("crates")
-            .join("joltphysics-sys");
+            .join("oxijolt-sys");
         for family in FAMILIES {
             for (dp, dr) in [(false, false), (false, true), (true, false), (true, true)] {
                 let path = crate_dir.join(bindings_file(family.name, dp, dr));

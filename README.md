@@ -5,8 +5,8 @@
   </picture>
 </p>
 
-# joltphysics
-[![CI](https://github.com/pockerhead/jolt-rust-voidrun/actions/workflows/ci.yml/badge.svg)](https://github.com/pockerhead/jolt-rust-voidrun/actions/workflows/ci.yml)
+# oxijolt
+[![CI](https://github.com/pockerhead/oxijolt/actions/workflows/ci.yml/badge.svg)](https://github.com/pockerhead/oxijolt/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Jolt Physics 5.6.0](https://img.shields.io/badge/Jolt%20Physics-5.6.0-orange.svg)](https://github.com/jrouwe/JoltPhysics/releases/tag/v5.6.0)
 
@@ -23,14 +23,15 @@ tested in CI.
 The repository started as a fork of jolt-rust. Of its code only the workspace layout, the licences
 and a few `build.rs` details (the Android NDK cross toolchain, the switch behind the
 `cross-platform-deterministic` feature) are left. The crates were renamed (`joltc-sys` became
-`joltphysics-sys`, `rolt` became `joltphysics`), the raw layer sits on a different C wrapper
-([joltc] instead of JoltC) and the safe API was written from scratch. What carries over is the
-design: a raw crate and a safe crate, Jolt built by CMake from cargo, and JoltC's soundness rules.
+`oxijolt-sys`, `rolt` became `oxijolt`; before the first release they were briefly `joltphysics-sys`
+and `joltphysics`), the raw layer sits on a different C wrapper ([joltc] instead of JoltC) and the
+safe API was written from scratch. What carries over is the design: a raw crate and a safe crate,
+Jolt built by CMake from cargo, and JoltC's soundness rules.
 [LINEAGE.md](LINEAGE.md) credits the projects this work builds on.
 
 ## Crates
 
-### `joltphysics-sys`: raw bindings
+### `oxijolt-sys`: raw bindings
 `bindgen` output over joltc's `joltc.h` and this repository's extension `native/joltc_ext/joltc_ext.h`,
 with joltc's `JPH_*` names. joltc and Jolt are pinned submodules, compiled unmodified; the extension
 adds a few functions in joltc's naming (character state save and restore, character updates with
@@ -47,25 +48,25 @@ Features:
   [Determinism](#determinism)).
 - `debug-renderer`: compile Jolt's debug renderer and bind joltc's drawing functions.
 
-### `joltphysics`: safe API
+### `oxijolt`: safe API
 A `PhysicsWorld` owns a Jolt physics system with its collision layers, job system and temp
 allocator. Changing a world takes `&mut`, reading it (body state, queries) takes `&`, and worlds
 are `Send` and `Sync`. Inputs Jolt only checks with debug assertions are validated and reported as
 typed errors.
 
 Features: `double-precision`, `cross-platform-deterministic` and `debug-renderer` forward to
-`joltphysics-sys`; `debug-renderer` also enables `PhysicsWorld::debug_lines`.
+`oxijolt-sys`; `debug-renderer` also enables `PhysicsWorld::debug_lines`.
 
 Start with the [guide](docs/guide.md) (a terrain, a chunk compound, an item, queries and a rebase;
 a character walking on a planet; a car on terrain and a ragdoll in a second world; all run as
-tests), the crate docs (`cargo doc -p joltphysics --open`) and the `hello_world` example
-(`cargo run -p joltphysics --example hello_world`).
+tests), the crate docs (`cargo doc -p oxijolt --open`) and the `hello_world` example
+(`cargo run -p oxijolt --example hello_world`).
 Timings against the game's budgets are in [docs/benchmarks.md](docs/benchmarks.md)
-(`cargo bench -p joltphysics --bench budgets`).
+(`cargo bench -p oxijolt --bench budgets`).
 
 ## What is bound and tested
-Tests are in `crates/joltphysics/tests/` unless a path says otherwise; `src/...` names a unit test
-in `crates/joltphysics/src/`.
+Tests are in `crates/oxijolt/tests/` unless a path says otherwise; `src/...` names a unit test
+in `crates/oxijolt/src/`.
 
 | Feature | Safe API | Tests |
 |---|---|---|
@@ -94,8 +95,8 @@ in `crates/joltphysics/src/`.
 | Queries without a step, broad-phase optimisation | `PhysicsWorld::optimize_broad_phase` | `queries.rs`: `queries_see_created_moved_and_removed_bodies_without_a_step`, `optimize_broad_phase_keeps_query_results` |
 | Queries from many threads | queries on `&PhysicsWorld` | `queries.rs`: `filtered_queries_run_in_parallel`; `world.rs`: `rays_are_cast_from_many_threads` |
 | Floating origin | `PhysicsWorld::rebase` | `rebase.rs`: `vehicle_drives_across_a_rotating_rebase`, `resting_item_stays_across_a_rebase`, `sleeping_body_stays_asleep_across_a_rebase`, `drift_rebase_equals_the_scene_built_in_the_new_frame`, `rays_answer_the_same_across_a_rebase`, `invalid_rebase_changes_nothing`; `ragdoll.rs`: `rebase_moves_a_settled_ragdoll_rigidly` |
-| Same results with 1 and 4 worker threads, for the scenes the tests run | `WorldSettings::worker_threads` | `determinism.rs`: `stacks_digest_is_identical_across_thread_counts`, `chunk_digest_is_identical_across_thread_counts`, `walker_digest_is_identical_across_thread_counts`, `vehicle_digest_is_identical_across_thread_counts`, `fleet_digest_is_identical_across_thread_counts`, `fleet_digest_detects_a_changed_input`, `ragdoll_pile_digest_is_identical_across_thread_counts`, `permuted_insertion_order_fails_the_gate`; `vehicle.rs`: `drive_a_route_twice_gives_identical_bits`; `crates/joltphysics-sys/tests/determinism.rs`: `digest_is_identical_across_thread_counts` |
-| Debug wireframe as line data (`debug-renderer`) | `PhysicsWorld::debug_lines`, `DebugLines`, `DebugLineSettings` | `debug_lines.rs`: `near_colliders_present_far_absent_terrain_present`, `line_cap_gives_exactly_the_cap_and_truncated`, `hidden_groups_vanish`, `compound_child_pose_applies_child_rotation_before_body_rotation`; `debug_lines_leaks.rs`; `crates/joltphysics-sys/tests/debug_renderer_bindings.rs` |
+| Same results with 1 and 4 worker threads, for the scenes the tests run | `WorldSettings::worker_threads` | `determinism.rs`: `stacks_digest_is_identical_across_thread_counts`, `chunk_digest_is_identical_across_thread_counts`, `walker_digest_is_identical_across_thread_counts`, `vehicle_digest_is_identical_across_thread_counts`, `fleet_digest_is_identical_across_thread_counts`, `fleet_digest_detects_a_changed_input`, `ragdoll_pile_digest_is_identical_across_thread_counts`, `permuted_insertion_order_fails_the_gate`; `vehicle.rs`: `drive_a_route_twice_gives_identical_bits`; `crates/oxijolt-sys/tests/determinism.rs`: `digest_is_identical_across_thread_counts` |
+| Debug wireframe as line data (`debug-renderer`) | `PhysicsWorld::debug_lines`, `DebugLines`, `DebugLineSettings` | `debug_lines.rs`: `near_colliders_present_far_absent_terrain_present`, `line_cap_gives_exactly_the_cap_and_truncated`, `hidden_groups_vanish`, `compound_child_pose_applies_child_rotation_before_body_rotation`; `debug_lines_leaks.rs`; `crates/oxijolt-sys/tests/debug_renderer_bindings.rs` |
 | Leak gate for per-call joltc objects (Windows; bounded memory growth, catches only leaks above its threshold) | queries, rebase | `leaks.rs`: `per_call_joltc_objects_do_not_leak` |
 | Character settings with Jolt's defaults, validation | `PhysicsWorld::create_character`, `CharacterSettings`, `CharacterError` | `character.rs`: `invalid_settings_and_poses_are_rejected_without_side_effects`; `src/character.rs`: `default_settings_match_jolt` |
 | Character ids per world, removal | `CharacterId`, `character_ids`, `remove_character` | `character.rs`: `ids_count_from_one_are_never_reused_and_belong_to_their_world`, `removing_a_character_mid_run_leaves_the_others_sound` |
@@ -105,7 +106,7 @@ in `crates/joltphysics/src/`.
 | Character contacts: body, layer, compound child group, contact normal; filters | `CharacterRef::active_contacts`, `CharacterContact`, `contact_compound_child`, `contact_object_layer`, `QueryFilter` | `character.rs`: `a_character_lands_on_a_floor_and_reports_it`, `compound_children_report_their_group_and_filters_select_them` |
 | Inner body | `CharacterSettings::inner_body`, `InnerBody`, `is_inner_body`, `BodyError::OwnedByCharacter` | `character.rs`: `an_inner_body_is_a_body_of_the_world_owned_by_its_character`, `dropping_a_world_with_characters_releases_them` |
 | Collisions between characters | `CharacterSettings::collide_with_characters` | `character.rs`: `characters_that_collide_with_characters_keep_apart`, `removing_a_character_mid_run_leaves_the_others_sound` |
-| Character save and restore, chained replay | `CharacterRef::save_state`, `CharacterMut::restore_state`, `CharacterState` | `character.rs`: `a_chained_replay_of_one_character_is_bit_exact`, `a_chained_replay_of_colliding_characters_is_bit_exact`, `a_restored_state_saves_the_same_bytes`, `a_restored_state_moves_the_inner_body_with_the_character`; `crates/joltphysics-sys/tests/character_smoke.rs`: `character_lands_and_its_restored_state_continues_bit_for_bit` |
+| Character save and restore, chained replay | `CharacterRef::save_state`, `CharacterMut::restore_state`, `CharacterState` | `character.rs`: `a_chained_replay_of_one_character_is_bit_exact`, `a_chained_replay_of_colliding_characters_is_bit_exact`, `a_restored_state_saves_the_same_bytes`, `a_restored_state_moves_the_inner_body_with_the_character`; `crates/oxijolt-sys/tests/character_smoke.rs`: `character_lands_and_its_restored_state_continues_bit_for_bit` |
 | Characters across a rebase | `PhysicsWorld::rebase`, `refresh_character_contacts` | `character.rs`: `a_character_crosses_a_rebase_with_the_world` |
 | The game's near step on a radial planet (reference controller in test support, `tests/common/walker.rs`) | built on the rows above | `walker.rs`: `step_law_climbs_up_to_045_but_not_05`, `a_step_under_a_low_ceiling_is_not_taken`, `the_autostep_never_climbs_a_dynamic_body_in_the_filter`, `slope_law_climbs_30_degrees_and_slides_back_from_60`, `steep_slopes_always_bring_the_walker_down`, `a_buried_walker_is_put_back_on_the_terrain`, `an_overlapping_wall_pushes_the_walker_out`, `a_jump_reaches_the_ballistic_apex_and_lands`, `rising_into_a_ceiling_resets_vel_up`, `chained_near_step_replay_is_bit_exact` and the other tests in the file |
 | Leak gate for characters (Windows) | create, update, save and restore, remove | `character_leaks.rs`: `characters_do_not_leak` |
@@ -116,7 +117,7 @@ in `crates/joltphysics/src/`.
 | Caller-applied gravity, sleep | `VehicleMut::set_gravity`, `VehicleRef::gravity`, `world_up` | `vehicle.rs`: `gravity_override_replaces_world_gravity`, `gravity_whose_force_overflows_is_rejected`, `sleeping_chassis_gets_no_override_force`, `never_sleeping_chassis_stays_awake` |
 | A car drives a route over heightfield terrain | built on the rows above (route and controller in `tests/common/vehicle.rs`) | `vehicle.rs`: `drive_a_route_over_terrain` (four waypoints, never tipped past 60°, two wheels down on 95 % of the ticks), `drive_a_route_twice_gives_identical_bits` |
 | Leak gate for vehicles (Windows) | create, drive, read, replace the tester, remove | `vehicle_leaks.rs`: `vehicles_do_not_leak` |
-| Constraint settings for ragdoll joints, validation | `SwingTwistConstraintSettings`, `HingeConstraintSettings`, `SixDofConstraintSettings`, `MotorSettings`, `SpringSettings`, `SwingType`, `ConstraintSpace` | `src/constraint.rs`: `swing_twist_defaults_are_jolts`, `hinge_defaults_are_jolts`, `six_dof_defaults_are_jolts`, `fixed_and_free_map_to_jolts_sentinels`, `frames_are_validated`, `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated`, `motors_and_springs_are_validated`; `crates/joltphysics-sys/tests/ragdoll_smoke.rs`: `ragdoll_parts_and_constraints_reach_jolt`. Frames in `ConstraintSpace::LocalToBodyCom` are not tested |
+| Constraint settings for ragdoll joints, validation | `SwingTwistConstraintSettings`, `HingeConstraintSettings`, `SixDofConstraintSettings`, `MotorSettings`, `SpringSettings`, `SwingType`, `ConstraintSpace` | `src/constraint.rs`: `swing_twist_defaults_are_jolts`, `hinge_defaults_are_jolts`, `six_dof_defaults_are_jolts`, `fixed_and_free_map_to_jolts_sentinels`, `frames_are_validated`, `swing_twist_limits_are_validated`, `hinge_limits_are_validated`, `six_dof_limits_are_validated`, `motors_and_springs_are_validated`; `crates/oxijolt-sys/tests/ragdoll_smoke.rs`: `ragdoll_parts_and_constraints_reach_jolt`. Frames in `ConstraintSpace::LocalToBodyCom` are not tested |
 | Skeleton, ragdoll settings, stabilized masses | `Skeleton`, `SkeletonJoint`, `RagdollSettings::new`, `new_stabilized`, `RagdollPart`, `RagdollJoint` | `src/ragdoll/settings.rs`: `skeletons_are_validated`, `ragdoll_settings_are_validated`, `heightfield_parts_are_rejected`, `stabilized_settings_build`; `ragdoll.rs`: `plain_settings_keep_the_masses_and_stabilized_ones_the_total`, `one_settings_value_serves_two_worlds` |
 | Ragdoll creation, ids, removal | `PhysicsWorld::create_ragdoll`, `remove_ragdoll`, `RagdollId`, `ragdoll_ids`, `ragdoll_of_body`, `RagdollError`, `BodyError::OwnedByRagdoll` | `ragdoll.rs`: `ragdoll_parts_and_ids_are_guarded` (including a world too small for the parts), `removing_a_ragdoll_drops_what_rests_on_it`, `dropping_a_world_with_ragdolls_is_clean`; `src/ragdoll/mod.rs`: `a_created_chain_reports_its_parts_and_joints` |
 | No collisions between a ragdoll's own parts | `RagdollSettings` | `ragdoll.rs`: `two_ragdolls_collide_with_each_other_but_not_with_themselves`, `the_same_parts_as_plain_bodies_collide` (the control), `humanoid_settles_on_a_heightfield_in_a_second_world` (every part pair on every tick while the ragdoll is awake) |
@@ -125,14 +126,14 @@ in `crates/joltphysics/src/`.
 | Settle detection | `SettleDetector`, `RagdollRef::is_calm` | `src/ragdoll/settle.rs`: `calm_updates_in_a_row_settle`, `default_is_the_rest_rule`, `invalid_limits_are_rejected`; `ragdoll.rs`: `humanoid_settles_on_a_heightfield_in_a_second_world` |
 | A 12-capsule humanoid settles on a heightfield in a second world (fixture in `tests/common/ragdoll.rs`) | built on the rows above | `ragdoll.rs`: `humanoid_settles_on_a_heightfield_in_a_second_world` (caller-applied gravity, the main world stepping on another thread, settled within 600 ticks (measured: tick 141), joints within 0.01 rad of their limits at rest), `humanoid_joints_overshoot_their_limits_only_boundedly_during_the_drop` (below 0.40 rad on every tick of that drop), `an_environment_ray_passes_through_a_resting_part` |
 | Leak gate for ragdolls (Windows) | settings, create, drive, read, remove | `ragdoll_leaks.rs`: `ragdolls_do_not_leak` |
-| Raw bindings | `joltphysics-sys` | `crates/joltphysics-sys/tests/smoke_test.rs`: `box_falls_onto_static_box`; `crates/joltphysics-sys/tests/character_smoke.rs` (the extension's character functions): `character_lands_and_its_restored_state_continues_bit_for_bit`, `copying_no_bytes_accepts_a_null_buffer`; `crates/joltphysics-sys/tests/vehicle_smoke.rs`: `vehicle_constraint_steps_and_tears_down`; `crates/joltphysics-sys/tests/ragdoll_smoke.rs`: `ragdoll_parts_and_constraints_reach_jolt`; layout checks at compile time in `crates/joltphysics-sys/src/layout.rs` |
-| Guide examples (a world; a walking character; a car and a ragdoll) | [docs/guide.md](docs/guide.md) | doctests of `Guide` in `crates/joltphysics/src/lib.rs` (`cargo test -p joltphysics --doc`) |
+| Raw bindings | `oxijolt-sys` | `crates/oxijolt-sys/tests/smoke_test.rs`: `box_falls_onto_static_box`; `crates/oxijolt-sys/tests/character_smoke.rs` (the extension's character functions): `character_lands_and_its_restored_state_continues_bit_for_bit`, `copying_no_bytes_accepts_a_null_buffer`; `crates/oxijolt-sys/tests/vehicle_smoke.rs`: `vehicle_constraint_steps_and_tears_down`; `crates/oxijolt-sys/tests/ragdoll_smoke.rs`: `ragdoll_parts_and_constraints_reach_jolt`; layout checks at compile time in `crates/oxijolt-sys/src/layout.rs` |
+| Guide examples (a world; a walking character; a car and a ragdoll) | [docs/guide.md](docs/guide.md) | doctests of `Guide` in `crates/oxijolt/src/lib.rs` (`cargo test -p oxijolt --doc`) |
 
 CI runs the test suite in four configurations: default, `cross-platform-deterministic`,
 `double-precision` and `debug-renderer`. The tests behind the `debug-renderer` feature run only in
 the last one.
 
-Not in the safe API yet (joltc exposes them, so `joltphysics-sys` has them): mesh and convex hull
+Not in the safe API yet (joltc exposes them, so `oxijolt-sys` has them): mesh and convex hull
 shapes, constraints between arbitrary bodies (the swing-twist, hinge and six-DOF settings serve
 only as ragdoll joints) and the other constraint kinds, tracked vehicles, motorcycles and the
 manual transmission, the skeleton mapper, soft bodies, Jolt's rigid-body `Character`, and
@@ -175,7 +176,7 @@ in neither layer yet; only a character's state can be saved.
   are checked against the values Jolt asserts on or divides by, and the coefficients Jolt forms
   from them are checked at the time step bound that is their worst case. What a step computes
   from the vehicle's state afterwards is not bounded: a huge but finite gravity or velocity can
-  still overflow inside the step, where Jolt clamps it (with `joltphysics-sys/asserts` its
+  still overflow inside the step, where Jolt clamps it (with `oxijolt-sys/asserts` its
   assertion fires instead). A gravity override whose force (gravity times the chassis mass)
   would overflow is refused, also when a rotating rebase would produce it. Wheel contacts are
   those of the last step, found at the chassis pose before that step moved it. A wheel whose cast
@@ -201,9 +202,9 @@ in neither layer yet; only a character's state can be saved.
 - **Debug lines.** No level of detail: one capsule draws 6528 lines and one cylinder 768 at any
   distance, and each call builds a new Jolt debug renderer. Calls are serialized process-wide. A
   character is drawn only through its inner body.
-- **Global state.** `joltphysics` calls `JPH_Init` once per process and never `JPH_Shutdown`. It
+- **Global state.** `oxijolt` calls `JPH_Init` once per process and never `JPH_Shutdown`. It
   installs joltc's filter procs (and with `debug-renderer` its debug renderer procs) once and owns
-  them; code that also uses `joltphysics-sys` directly must leave them alone.
+  them; code that also uses `oxijolt-sys` directly must leave them alone.
 - **Platforms.** CI builds and tests Windows MSVC only. The build script has code for other hosts
   and for Android cross builds, but nothing checks them.
 
@@ -241,7 +242,7 @@ Order caveats: narrow-phase query hits (`collide_shape` and friends) come in an 
 them by body id and sub-shape id when order matters. Code that drives the world must not feed hash-map
 iteration order, time or thread identity into its calls.
 
-How it is checked: `cargo test -p joltphysics --test determinism` runs each scene in two child
+How it is checked: `cargo test -p oxijolt --test determinism` runs each scene in two child
 processes, with 1 and with 4 workers, records ticks 0 to 1000 of a chunk, terrain and item scene and
 requires them to match byte for byte; the same bodies created in another order must fail the gate.
 A walker scene runs the game's reference controller for 600 ticks and is compared the same way, and
@@ -256,7 +257,7 @@ Requirements: a C++ toolchain (MSVC on Windows), CMake 3.20 or newer, and LLVM/l
 git submodule update --init         # joltc and Jolt
 cargo build                         # builds joltc + Jolt through CMake (always Release), generates bindings
 cargo test --workspace              # everything, headless
-cargo test -p joltphysics --features debug-renderer   # with the debug wireframe
+cargo test -p oxijolt --features debug-renderer   # with the debug wireframe
 ```
 
 The first build compiles joltc and Jolt with CMake, always in Release. Later builds of the same target and profile reuse it; a change to the native sources, the pinned
@@ -271,16 +272,16 @@ install prefix:
 <prefix>/lib/          joltc (or joltc_double) and Jolt static libraries
 <prefix>/include/joltc.h
 <prefix>/include/joltc_ext.h
-<prefix>/joltphysics-sys-manifest.txt
+<prefix>/oxijolt-sys-manifest.txt
 ```
 
-A normal build leaves such a prefix in `target/<profile>/build/joltphysics-sys-*/out/joltc`. A prefix is tied to
+A normal build leaves such a prefix in `target/<profile>/build/oxijolt-sys-*/out/joltc`. A prefix is tied to
 the target, the C runtime, the crate features and the pinned joltc and Jolt commits. The build script
 checks all of them against the manifest and refuses a prefix built for another configuration. CI
 links every build after the first through such a prefix.
 
 ## Submodules
-joltc and Jolt Physics are Git submodules under `crates/joltphysics-sys/vendor`, pinned to exact commits:
+joltc and Jolt Physics are Git submodules under `crates/oxijolt-sys/vendor`, pinned to exact commits:
 
 ```bash
 git submodule update --init
