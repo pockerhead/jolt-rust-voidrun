@@ -11,6 +11,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   `JOLTC_LIB_DIR` and the features are unchanged. Existing checkouts run
   `git submodule sync && git submodule update --init` once.
 - Project rules (`AGENTS.md`) and lineage (`LINEAGE.md`) for the fork.
+- The build script's Android NDK setup and `cross-platform-deterministic` switch were rewritten with
+  the same CMake options; no code from jolt-rust remains, and `LICENSE-MIT` now carries this
+  project's copyright line.
 - The raw layer moved from JoltC to [joltc](https://github.com/amerkoleci/joltc) over Jolt Physics 5.6.0:
   `oxijolt-sys` now exposes joltc's `JPH_*` API. joltc and Jolt are pinned submodules under
   `crates/oxijolt-sys/vendor`, and the native build no longer fetches anything from the network.

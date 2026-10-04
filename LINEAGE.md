@@ -9,13 +9,8 @@ original authors.
 | C wrapper | [joltc](https://github.com/amerkoleci/joltc) | Amer Koleci and contributors (the C layer of JoltPhysicsSharp, also used by LÖVR) | MIT | `crates/oxijolt-sys/vendor/joltc` (submodule, pinned commit), unmodified; input of `crates/oxijolt-sys`. Functions this repository adds to joltc, in joltc's naming, live in `crates/oxijolt-sys/native/joltc_ext/` and are compiled into the same archive |
 
 The project began as a fork of
-[SecondHalfGames/jolt-rust](https://github.com/SecondHalfGames/jolt-rust); the raw and safe layers
-were written anew on joltc.
-
-## What is left of jolt-rust as code
-The workspace layout, the licence files (`LICENSE-MIT`, `LICENSE-APACHE`) and two parts of
-`crates/oxijolt-sys/build.rs`: the Android NDK cross toolchain and the CMake switch behind the
-`cross-platform-deterministic` feature.
+[SecondHalfGames/jolt-rust](https://github.com/SecondHalfGames/jolt-rust). No code from it remains:
+the raw and safe layers and the build script were written anew on joltc.
 
 ## What this repository adds
 - `oxijolt-sys`: bindings over joltc's `joltc.h` and the extension's `joltc_ext.h`, committed per
