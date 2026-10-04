@@ -107,7 +107,8 @@ fn shape_error_variants_display_their_payload() {
     );
     assert_eq!(
         ShapeError::ConvexHull(HullError::Coplanar).to_string(),
-        "invalid convex hull: the points lie on or close to a plane"
+        "invalid convex hull: the points lie on or close to a plane; thicken the cloud or centre \
+         it on the shape origin"
     );
     assert_eq!(
         ShapeError::Mesh(MeshError::NoTriangles).to_string(),

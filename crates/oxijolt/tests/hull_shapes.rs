@@ -150,3 +150,73 @@ fn queries_hit_a_static_hull_from_above() {
     assert!((hits[0].penetration_depth - 0.1).abs() < 1.0e-3, "{hits:?}");
     assert!(hits[0].normal.y > 0.99, "{hits:?}");
 }
+
+/// Clouds on which Jolt's hull builder asserts in a build with the `asserts` feature
+/// (docs/limits.md#convex-hulls): flat cones with a dense rim a few coplanar distances off its
+/// plane, at the origin or recentred from far out, and a densely sampled noisy box 1.8 km out.
+/// They pass the hull rules.
+const BUILDER_ASSERT_CLOUDS: [(&str, &str); 6] = [
+    (
+        "flat_cone_1",
+        include_str!("fixtures/hulls/flat_cone_1.txt"),
+    ),
+    (
+        "flat_cone_2",
+        include_str!("fixtures/hulls/flat_cone_2.txt"),
+    ),
+    (
+        "flat_cone_3",
+        include_str!("fixtures/hulls/flat_cone_3.txt"),
+    ),
+    (
+        "recentred_cone_1",
+        include_str!("fixtures/hulls/recentred_cone_1.txt"),
+    ),
+    (
+        "recentred_cone_2",
+        include_str!("fixtures/hulls/recentred_cone_2.txt"),
+    ),
+    (
+        "far_noisy_box",
+        include_str!("fixtures/hulls/far_noisy_box.txt"),
+    ),
+];
+
+/// Points of a fixture: one point per line, three numbers each.
+fn fixture_points(text: &str) -> Vec<Vec3> {
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let c: Vec<f32> = line
+                .split_whitespace()
+                .map(|value| value.parse().unwrap())
+                .collect();
+            Vec3::new(c[0], c[1], c[2])
+        })
+        .collect()
+}
+
+#[test]
+fn clouds_the_hull_builder_asserts_on_are_refused_or_built_without_asserts() {
+    // With asserts Jolt aborts the process on these clouds: a documented limit of that feature.
+    if oxijolt_sys::ASSERTS_ENABLED {
+        return;
+    }
+    for (name, text) in BUILDER_ASSERT_CLOUDS {
+        let hull = match Shape::new_convex_hull(&fixture_points(text), 0.0) {
+            Err(ShapeError::Rejected(_)) => continue,
+            Ok(hull) => hull,
+            Err(error) => panic!("{name}: {error}"),
+        };
+        // Whatever Jolt builds is a usable shape.
+        let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+        add_floor(&mut world);
+        let settings = BodySettings::new_static().position(RVec3::new(0.0, 100.0, 0.0));
+        world.create_body(&hull, &settings).unwrap();
+        let ray = RayCast::new(RVec3::new(0.0, 300.0, 0.0), Vec3::new(0.0, -400.0, 0.0));
+        assert!(
+            world.cast_ray(ray, &QueryFilter::new()).unwrap().is_some(),
+            "{name}"
+        );
+    }
+}

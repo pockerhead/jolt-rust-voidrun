@@ -20,11 +20,12 @@ const HULL_TOLERANCE: f64 = 1.0e-3;
 const MIN_NEEDLE_LEVER: f64 = 0.25;
 /// Smallest distance of the farthest point from the initial triangle's plane, in Jolt's coplanar
 /// distances, of a cloud Jolt's hull builder is given. Jolt itself treats up to 6 as flat
-/// (`cCoplanarSlopFactor`); measured: clouds with noisy faces asserted up to 1948, so the bound
-/// keeps a factor of about 3; see [docs/limits.md#convex-hulls].
+/// (`cCoplanarSlopFactor`); measured: thin slabs asserted up to 10.9 and a small sphere of
+/// points far from the origin at 60, so the bound keeps a factor of about 3. Clouds with many
+/// nearly coplanar faces can trip the builder above it; see [docs/limits.md#convex-hulls].
 ///
 /// [docs/limits.md#convex-hulls]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-hulls
-const MIN_SLAB_THICKNESS: f64 = 6000.0;
+const MIN_SLAB_THICKNESS: f64 = 200.0;
 
 impl Shape {
     /// The convex hull of `points` (shape space, metres) with a convex radius in metres.
@@ -40,6 +41,12 @@ impl Shape {
     /// mesh, a capsule or a thin box instead. Whatever else Jolt's hull builder refuses comes
     /// back as [`ShapeError::Rejected`].
     ///
+    /// With the `asserts` feature Jolt's hull builder can abort the process on rare clouds with
+    /// many nearly coplanar faces: densely sampled faces a few coplanar distances off their
+    /// planes, dense flat cones and domes. Without it Jolt refuses them
+    /// ([`ShapeError::Rejected`]) or builds a hull; see
+    /// [docs/limits.md#clouds-the-hull-builder-asserts-on].
+    ///
     /// Jolt keeps at most 256 vertices of the hull and drops the points inside it. It shrinks the
     /// hull by the convex radius and inflates it again, reducing the radius where the hull is too
     /// small for it; contacts and shape casts use at most 0.05 m of it, ray casts see the hull
@@ -48,6 +55,7 @@ impl Shape {
     /// [`limits::MAX_SHAPE_EXTENT`]. See [docs/limits.md#convex-hulls].
     ///
     /// [docs/limits.md#convex-hulls]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-hulls
+    /// [docs/limits.md#clouds-the-hull-builder-asserts-on]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#clouds-the-hull-builder-asserts-on
     pub fn new_convex_hull(points: &[Vec3], convex_radius: f32) -> Result<Self, ShapeError> {
         Self::convex_hull(points, convex_radius, None)
     }

@@ -92,7 +92,9 @@ impl fmt::Display for HullError {
         f.write_str(match self {
             Self::TooFewPoints => "a convex hull needs at least 4 points",
             Self::Degenerate => "the points lie on or close to a line",
-            Self::Coplanar => "the points lie on or close to a plane",
+            Self::Coplanar => {
+                "the points lie on or close to a plane; thicken the cloud or centre it on the shape origin"
+            }
         })
     }
 }

@@ -366,6 +366,13 @@ fn assert_finite_body(world: &PhysicsWorld, id: BodyId, what: &str) {
 }
 
 /// The kinds of point clouds the hull family draws from.
+///
+/// The stress runs with the `asserts` feature too, so it leaves out the clouds on which Jolt's
+/// hull builder asserts although they pass the hull rules, a documented limit of that feature
+/// (docs/limits.md#convex-hulls): faces sampled densely and moved a few coplanar distances off
+/// their planes, and dense flat cones and domes. The clouds here are sparse: at most 300 points
+/// spread through a volume or a slab or over a sphere, and at most 40 on a cap.
+/// `hull_shapes.rs` covers the limit's clouds without asserts.
 #[derive(Clone, Copy, Debug)]
 enum Cloud {
     /// Fewer than four points.
