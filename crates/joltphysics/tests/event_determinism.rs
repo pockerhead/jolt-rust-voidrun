@@ -5,15 +5,16 @@
 //! The scene drops 64 cubes of two materials on a two-box compound floor and a heightfield of
 //! two materials, drapes a cloth over a sphere, throws a rod with continuous collision detection
 //! onto the floor every 40 ticks, and removes one cube and creates another halfway. A pure
-//! contact listener sets the friction by material and halves the other body's inverse mass for
-//! the cloth's contacts with even-indexed bodies.
+//! contact listener sets the friction by material, halves the other body's inverse mass for
+//! the cloth's contacts with even-indexed bodies, and gives every fourth body's contacts a
+//! settings value kept from a contact with a short lever, which their longer levers reject.
 //!
 //! Each run happens in its own child process (this test binary, running the ignored
 //! `event_determinism_child` test); see `common::determinism`.
 
 mod common;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use common::determinism::*;
 use common::jobs::{self, JobChoice};
@@ -26,8 +27,11 @@ const TICKS: usize = 240;
 const MATERIAL_A: u64 = 1;
 const MATERIAL_B: u64 = 2;
 
-/// Friction by material, and a softer push from the cloth on even-indexed bodies.
-struct Policy;
+/// Friction by material, a softer push from the cloth on even-indexed bodies, and `kept` for
+/// the contacts of bodies 2 whose index is 1 modulo 4.
+struct Policy {
+    kept: ContactSettings,
+}
 
 impl ContactListener for Policy {
     fn contact_added(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
@@ -35,6 +39,10 @@ impl ContactListener for Policy {
     }
 
     fn contact_persisted(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
+        if manifold.pair.body2.index() % 4 == 1 {
+            *settings = self.kept;
+            return;
+        }
         let friction = if manifold.materials.contains(&Some(MATERIAL_B)) {
             0.8
         } else if manifold.materials.contains(&Some(MATERIAL_A)) {
@@ -58,6 +66,45 @@ impl ContactListener for Policy {
     }
 }
 
+/// Settings read from a cube resting right above a floor's centre of mass, with the largest
+/// angular surface velocity that lever allows: too fast for a contact farther from body 1's
+/// centre of mass.
+fn short_lever_settings() -> ContactSettings {
+    struct Keep(Mutex<Option<ContactSettings>>);
+    impl ContactListener for Keep {
+        fn contact_added(&self, _: &ContactManifold, settings: &mut ContactSettings) {
+            let mut kept = self.0.lock().unwrap();
+            if kept.is_none() {
+                let mut spin = limits::MAX_ANGULAR_VELOCITY;
+                while settings
+                    .set_relative_angular_surface_velocity(Vec3::new(0.0, spin, 0.0))
+                    .is_err()
+                {
+                    spin *= 0.9;
+                }
+                *kept = Some(*settings);
+            }
+        }
+    }
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let keep = Arc::new(Keep(Mutex::default()));
+    world.set_contact_listener(Some(keep.clone()));
+    let floor = Shape::new_box(Vec3::new(10.0, 0.5, 10.0)).unwrap();
+    let cube = Shape::new_box(Vec3::new(0.25, 0.25, 0.25)).unwrap();
+    let at = |y| RVec3::new(0.0, y, 0.0);
+    world
+        .create_body(&floor, &BodySettings::new_static().position(at(-0.5)))
+        .unwrap();
+    world
+        .create_body(&cube, &BodySettings::new_dynamic().position(at(0.26)))
+        .unwrap();
+    for _ in 0..10 {
+        assert!(world.step(DT).unwrap().is_complete());
+    }
+    let kept = *keep.0.lock().unwrap();
+    kept.expect("the cube should touch the floor")
+}
+
 /// A listener that changes nothing.
 struct NoOp;
 
@@ -74,7 +121,8 @@ fn configure(world: &mut PhysicsWorld, variant: &str) {
     match variant {
         "events" => {
             world.set_event_settings(every_event);
-            world.set_contact_listener(Some(Arc::new(Policy)));
+            let kept = short_lever_settings();
+            world.set_contact_listener(Some(Arc::new(Policy { kept })));
         }
         "observed" => {
             world.set_event_settings(every_event);
@@ -251,6 +299,7 @@ fn run_events(threads: u32, variant: &str) -> Digest {
 
     let mut digest = Digest::new();
     let mut repeated_pair = false;
+    let mut rejections = 0;
     for tick in 0..TICKS {
         if tick % 40 == 10 {
             fire(&mut world, rod);
@@ -270,6 +319,7 @@ fn run_events(threads: u32, variant: &str) -> Digest {
         assert!(report.is_complete(), "tick {tick}: {report:?}");
         let events = world.take_events();
         repeated_pair |= has_repeated_pair(&events.contacts);
+        rejections += events.rejected_contact_settings.len();
         let record = digest.push();
         record_events(&events, &mut record.shape);
         for &id in &ids {
@@ -285,6 +335,12 @@ fn run_events(threads: u32, variant: &str) -> Digest {
         assert!(
             repeated_pair,
             "the rod should touch the floor in one step both discretely and continuously"
+        );
+    }
+    if variant == "events" {
+        assert!(
+            rejections > 0,
+            "the kept settings should be rejected somewhere"
         );
     }
     digest

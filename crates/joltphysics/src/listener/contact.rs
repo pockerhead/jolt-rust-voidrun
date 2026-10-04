@@ -214,7 +214,8 @@ impl ContactSettings {
     }
 
     /// Sets the factor on body 1's inverse mass, 0 or [`limits::MIN_CONTACT_SCALE`]`..=1`: 0
-    /// makes body 1 immovable for this contact.
+    /// makes body 1 immovable for this contact. When no dynamic body of the contact keeps a
+    /// factor above 0, Jolt drops the contact and the bodies pass through each other.
     pub fn set_inv_mass_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
             limits::is_contact_scale(value),

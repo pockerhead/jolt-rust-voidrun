@@ -531,7 +531,8 @@ pub const MAX_MASS: f32 = 1.0e6;
 /// Smallest positive factor a contact may put on a body's inverse mass or inverse inertia
 /// ([`ContactSettings`](crate::ContactSettings), [`SoftBodyContactSettings`](crate::SoftBodyContactSettings)):
 /// 1e-9, the ratio [`MIN_MASS`]` / `[`MAX_MASS`]. At this factor a body of [`MIN_MASS`] weighs as
-/// much as one of [`MAX_MASS`] in the contact; a factor of exactly 0 makes the body immovable.
+/// much as one of [`MAX_MASS`] in the contact; a factor of exactly 0 makes the body immovable,
+/// and a contact whose dynamic bodies all have 0 is dropped.
 ///
 /// Derived from [`MIN_MASS`] and [`MAX_MASS`] (written as the literal `1e-9`, which `f32`
 /// division of the two would round one step above); `docs/limits.md` ("Inverse mass and

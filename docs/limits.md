@@ -34,7 +34,9 @@ were derived for. The API therefore accepts at most 1: a contact can make a body
 immovable, never lighter. This is a policy of this API, not a Jolt limit.
 
 Jolt treats only an exact 0 as immovable (`ContactConstraintManager.cpp:917-918`,
-`SoftBodyMotionProperties.cpp:167-169`). Any other factor goes into the inverse effective mass,
+`SoftBodyMotionProperties.cpp:167-169`). When no dynamic body of a rigid contact keeps a
+factor above 0 (a dynamic body with 0 against a static or kinematic one, or two dynamic bodies
+with 0 each), Jolt creates no contact constraint and the bodies pass through each other. Any other factor goes into the inverse effective mass,
 so a tiny one makes the body enormously heavy: with a 1 kg cube landing at 8 m/s, a factor of
 1e-36 on its inverse mass and inertia overflows the contact impulse, the cube's position is NaN
 three steps later, and an asserts build stops on `MotionProperties.h:233`. A cloth landing on a
