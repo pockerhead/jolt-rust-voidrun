@@ -177,18 +177,44 @@ fn cmake_path(path: &Path) -> String {
 
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-env-changed=JOLTC_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-changed=build.rs");
 
     let cfg = NativeConfig::from_env()?;
-    let prefix = match env::var_os("JOLTC_LIB_DIR") {
-        Some(dir) => use_prebuilt(PathBuf::from(dir), &cfg)?,
-        None => build_with_cmake(&cfg)?,
+    let prefix = if env::var_os("DOCS_RS").is_some() {
+        headers_only_prefix()?
+    } else {
+        let prefix = match env::var_os("JOLTC_LIB_DIR") {
+            Some(dir) => use_prebuilt(PathBuf::from(dir), &cfg)?,
+            None => build_with_cmake(&cfg)?,
+        };
+        link(&prefix, &cfg);
+        prefix
     };
 
-    link(&prefix, &cfg);
     let bindings = select_bindings(&prefix, &cfg)?;
     println!("cargo:rustc-env=JOLTC_BINDINGS={}", bindings.display());
     Ok(())
+}
+
+/// A prefix with only `include/joltc.h` and `include/joltc_ext.h`, copied from the package.
+///
+/// docs.rs runs rustdoc offline under a time limit, and rustdoc links nothing, so the
+/// bindings are all it needs: Jolt is not built there.
+fn headers_only_prefix() -> anyhow::Result<PathBuf> {
+    let crate_dir = manifest_dir()?;
+    let prefix =
+        PathBuf::from(env::var_os("OUT_DIR").context("OUT_DIR is not set")?).join("headers");
+    let include = prefix.join("include");
+    fs::create_dir_all(&include).with_context(|| format!("cannot create {}", include.display()))?;
+    for (source, name) in [
+        ("vendor/joltc/include/joltc.h", "joltc.h"),
+        ("native/joltc_ext/joltc_ext.h", "joltc_ext.h"),
+    ] {
+        fs::copy(crate_dir.join(source), include.join(name))
+            .with_context(|| format!("cannot copy {source}"))?;
+    }
+    Ok(prefix)
 }
 
 /// Builds the native prefix from the submodules with CMake and returns its path.
