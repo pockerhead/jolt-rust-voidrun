@@ -1,0 +1,7 @@
+format=1
+joltc.h=96902d5f9aba0835
+joltc_ext.h=fe19637ee9e35154
+build/bindgen_options.rs=9f82c199e39c4c07
+build/targets.rs=8a64d35fdfd85cb4
+bindgen=0.73.2
+libclang=clang version 12.0.0
