@@ -6,6 +6,8 @@
 </p>
 
 # oxijolt — Rust bindings for Jolt Physics
+[![crates.io](https://img.shields.io/crates/v/oxijolt.svg)](https://crates.io/crates/oxijolt)
+[![docs.rs](https://img.shields.io/docsrs/oxijolt)](https://docs.rs/oxijolt)
 [![CI](https://github.com/pockerhead/oxijolt/actions/workflows/ci.yml/badge.svg)](https://github.com/pockerhead/oxijolt/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Jolt Physics 5.6.0](https://img.shields.io/badge/Jolt%20Physics-5.6.0-orange.svg)](https://github.com/jrouwe/JoltPhysics/releases/tag/v5.6.0)
@@ -52,7 +54,7 @@ With Bevy, `use oxijolt::prelude::*` next to `bevy::prelude::*`; see `oxijolt::p
 
 ```toml
 [dependencies]
-oxijolt = { git = "https://github.com/pockerhead/oxijolt" }
+oxijolt = "0.4"
 ```
 
 ## Roadmap
@@ -79,7 +81,7 @@ The full list of what works today, with links to the guides, is in
 - [x] Convex hull, triangle mesh, scaled and tapered shapes
 - [ ] Body controls: impulses, kinematic moves, activation, sensors, user data, changing shape
       and motion type
-- [ ] First release on crates.io and docs.rs
+- [x] First release on crates.io and docs.rs
 - [ ] Tracked vehicles and motorcycles
 - [ ] Playground: an example with a window that shows every feature, and GIFs for this README
 - [ ] Comparison with Rapier and Avian
@@ -90,7 +92,7 @@ The full list of what works today, with links to the guides, is in
 
 ## Status
 
-- Version 0.4.0, not released and not on crates.io yet. The API changes between versions.
+- Version 0.4.0 on [crates.io](https://crates.io/crates/oxijolt). The API changes between versions.
 - CI builds and tests Windows (MSVC) and Linux (GCC) on x86_64, each in five configurations:
   default, `cross-platform-deterministic`, `double-precision`, `debug-renderer` and `asserts`.
   The bindings are committed for 64-bit Windows, Linux, macOS and Android targets; only the two
