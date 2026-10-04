@@ -11,7 +11,8 @@ use oxijolt_sys::*;
 use super::{
     has_finite_inverse, mass_properties, with_locked_body, AllowedDofs, BodyId, BodyMut, BodyRef,
     BodySettings, CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID,
-    KINEMATIC_MESH_MASS_RULE, MESH_DYNAMIC_RULE, STATIC_DOFS_RULE, STATIC_SHAPE_RULE,
+    KINEMATIC_MESH_MASS_RULE, MESH_DYNAMIC_RULE, SENSOR_SHAPE_RULE, STATIC_DOFS_RULE,
+    STATIC_SHAPE_RULE,
 };
 use crate::limits::{is_mass, MASS_RULE};
 use crate::owned::Owned;
@@ -24,9 +25,10 @@ use crate::{BodyError, PhysicsWorld, Shape, Vec3};
 /// Jolt cannot collide a mesh with a mesh or a heightfield ("Unsupported shape pair" in
 /// `CollisionDispatch`), and such pairs stay out of reach: only kinematic bodies carry meshes,
 /// Jolt pairs a kinematic body with a static or kinematic one only with
-/// `mCollideKinematicVsNonDynamic` or a sensor (`Body::sFindCollidingPairsCanCollide`), which
-/// this crate does not expose, and query, character and ragdoll shapes refuse static-only
-/// shapes. Exposing either switch must revisit this rule.
+/// `mCollideKinematicVsNonDynamic`, which this crate does not expose, or with a sensor
+/// (`Body::sFindCollidingPairsCanCollide`), which may not use a static-only shape
+/// ([`SENSOR_SHAPE_RULE`]); query, character and ragdoll shapes refuse static-only shapes.
+/// Exposing that switch, or letting sensors take such shapes, must revisit this rule.
 fn validate_static_only_shape(shape: &Shape, settings: &BodySettings) -> Result<(), BodyError> {
     if !shape.static_only_leaves_are_meshes() {
         return Err(BodyError::InvalidValue(STATIC_SHAPE_RULE));
@@ -44,8 +46,8 @@ impl PhysicsWorld {
     /// Creates a body from `shape` and adds it to the world. The body keeps its own reference
     /// to the shape, so `shape` may be dropped afterwards.
     ///
-    /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, and, for a dynamic
-    /// or kinematic body, when:
+    /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, when a sensor's
+    /// shape is one that only static bodies may use, and, for a dynamic or kinematic body, when:
     /// - the shape is one that only static bodies may use: a heightfield, or a compound or
     ///   decorated shape that contains one;
     /// - the shape contains a mesh and the body is dynamic, or kinematic without
@@ -70,6 +72,9 @@ impl PhysicsWorld {
         settings.validate(self.object_layer_count)?;
         if settings.motion_type == MotionType::Static && settings.allowed_dofs != AllowedDofs::ALL {
             return Err(BodyError::InvalidValue(STATIC_DOFS_RULE));
+        }
+        if settings.sensor && shape.must_be_static() {
+            return Err(BodyError::InvalidValue(SENSOR_SHAPE_RULE));
         }
         if settings.motion_type != MotionType::Static && shape.must_be_static() {
             validate_static_only_shape(shape, settings)?;

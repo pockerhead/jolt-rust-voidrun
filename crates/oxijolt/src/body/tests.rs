@@ -59,6 +59,11 @@ fn default_settings_match_jolt() {
             JPH_BodyCreationSettings_GetAngularDamping(ptr),
             ours.angular_damping
         );
+        assert_eq!(
+            AllowedDofs::from_jph(JPH_BodyCreationSettings_GetAllowedDOFs(ptr)),
+            ours.allowed_dofs
+        );
+        assert_eq!(JPH_BodyCreationSettings_GetIsSensor(ptr), ours.sensor);
         assert!(ours.mass.is_none());
         // The one documented difference: Jolt's default layer is 0.
         assert_eq!(JPH_BodyCreationSettings_GetObjectLayer(ptr), 0);

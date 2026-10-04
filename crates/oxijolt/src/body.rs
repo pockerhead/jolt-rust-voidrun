@@ -172,6 +172,7 @@ pub struct BodySettings {
     activation: Activation,
     enhanced_internal_edge_removal: bool,
     pub(crate) allowed_dofs: AllowedDofs,
+    pub(crate) sensor: bool,
 }
 
 impl Default for BodySettings {
@@ -195,6 +196,7 @@ impl Default for BodySettings {
             activation: Activation::Activate,
             enhanced_internal_edge_removal: false,
             allowed_dofs: AllowedDofs::ALL,
+            sensor: false,
         }
     }
 }
@@ -213,6 +215,11 @@ pub(crate) const DOFS_RULE: &str = "allowed DOFs must keep a translation axis";
 /// Why a static body keeps every degree of freedom: Jolt keeps them only in the motion
 /// properties a static body does not have.
 pub(crate) const STATIC_DOFS_RULE: &str = "a static body that cannot move keeps all DOFs";
+
+/// Why a sensor may not use a shape that `Shape::MustBeStatic` reports: a kinematic body,
+/// which may carry a mesh, pairs with a sensor, and Jolt cannot collide a mesh with a mesh or a
+/// heightfield.
+pub(crate) const SENSOR_SHAPE_RULE: &str = "a sensor cannot use a shape for static bodies only";
 
 /// What Jolt asks of a shape that `Shape::MustBeStatic` reports.
 pub(crate) const STATIC_SHAPE_RULE: &str = "this shape can only be used by static bodies";
@@ -388,6 +395,34 @@ impl BodySettings {
         self
     }
 
+    /// Whether the body is a sensor, fixed for its life: it detects other bodies without a
+    /// collision response. Default false. [docs/events.md#sensors] has the details.
+    ///
+    /// A sensor's contacts arrive as [`ContactEvent`]s whose
+    /// [`ContactSettings::is_sensor`] is true. A static sensor detects only awake bodies and
+    /// loses a contact when the body falls asleep; an awake kinematic or dynamic sensor also
+    /// detects sleeping bodies, and never falls asleep itself. A kinematic body is detected by
+    /// static and kinematic sensors; a kinematic sensor does not detect static bodies.
+    ///
+    /// A character is never blocked by a sensor but lists it among its contacts
+    /// ([`CharacterContact::is_sensor`]); vehicle wheels ignore sensors; soft bodies report them
+    /// in [`SoftBodyContacts::sensors`].
+    ///
+    /// [`PhysicsWorld::create_body`] refuses a sensor with [`MotionQuality::LinearCast`] (Jolt
+    /// supports only discrete sensors) and a sensor whose shape only static bodies may use.
+    ///
+    /// [docs/events.md#sensors]: https://github.com/pockerhead/oxijolt/blob/main/docs/events.md#sensors
+    /// [`ContactEvent`]: crate::ContactEvent
+    /// [`ContactSettings::is_sensor`]: crate::ContactSettings::is_sensor
+    /// [`CharacterContact::is_sensor`]: crate::CharacterContact::is_sensor
+    /// [`SoftBodyContacts::sensors`]: crate::SoftBodyContacts::sensors
+    /// [`PhysicsWorld::create_body`]: crate::PhysicsWorld::create_body
+    #[must_use]
+    pub fn sensor(mut self, value: bool) -> Self {
+        self.sensor = value;
+        self
+    }
+
     fn validate(&self, object_layer_count: u32) -> Result<(), BodyError> {
         if self.object_layer.get() >= object_layer_count {
             return Err(BodyError::UnknownObjectLayer(self.object_layer));
@@ -432,6 +467,9 @@ impl BodySettings {
         }
         if !self.allowed_dofs.has_translation() {
             return invalid(DOFS_RULE);
+        }
+        if self.sensor && self.motion_quality == MotionQuality::LinearCast {
+            return invalid("a sensor uses MotionQuality::Discrete");
         }
         Ok(())
     }
@@ -556,6 +594,7 @@ impl CreationSettings {
                 settings.enhanced_internal_edge_removal,
             );
             JPH_BodyCreationSettings_SetAllowedDOFs(ptr, settings.allowed_dofs.to_jph());
+            JPH_BodyCreationSettings_SetIsSensor(ptr, settings.sensor);
         }
         if let Some(mass) = settings.mass {
             // Jolt ignores the inertia with `CalculateInertia` (`BodyCreationSettings.cpp`).

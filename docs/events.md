@@ -52,8 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `SoftBodyValidation` reports a soft body whose bounding box overlaps a rigid body;
   `SoftBodyContacts` lists the vertices that touched a body in the step and the sensors the soft
   body overlaps. Jolt clears a soft body's vertex contacts at the end of each step, so these events
-  are the only way to see them. The safe API cannot make a body a sensor yet; sensors come only
-  from `oxijolt-sys`.
+  are the only way to see them. [Sensors](#sensors) describes sensor bodies.
 
 ## Materials
 
@@ -63,6 +62,40 @@ Shapes made with `Shape::new_box_with_material` and its siblings, or a heightfie
 side (`ContactManifold::materials`). Friction and restitution stay on the bodies. There is no call
 that looks up the material of an arbitrary sub-shape id: Jolt decodes such ids without range checks,
 so materials are read only for the ids a contact reports.
+
+## Sensors
+
+A body created with `BodySettings::sensor(true)` detects other bodies without a collision response:
+Jolt reports its contacts as ordinary `ContactEvent`s whose `ContactSettings::is_sensor()` is true,
+and a `ContactListener` cannot turn such a contact into an ordinary one
+(`ContactSettingsError::SensorBody`). A sensor stays a sensor for its life (`BodyRef::is_sensor`).
+
+Which pairs Jolt tests (`Body::sFindCollidingPairsCanCollide`, `Body.inl:30-44`, and
+`Docs/Architecture.md`, "Sensors"):
+- a dynamic body pairs with any sensor;
+- a kinematic body pairs with static and kinematic sensors; a kinematic sensor does not pair with a
+  static body that is not a sensor;
+- Jolt tests a pair only when one of its bodies is awake (`PhysicsSystem.cpp:1052-1053`). A static
+  sensor therefore detects awake bodies only and loses the contact (a `Removed` event) when the body
+  falls asleep. An awake kinematic or dynamic sensor also detects sleeping bodies; a sensor never
+  falls asleep on its own (`Body::UpdateSleepStateInternal`, `Body.cpp:146-148`), but one
+  deactivated by hand detects nothing until it is woken.
+
+Other parts of Jolt treat sensors their own way:
+- Continuous collision detection: a sensor cannot use `MotionQuality::LinearCast`
+  (`create_body` refuses it), and the casts of other bodies skip sensors (`PhysicsSystem.cpp:1657`,
+  `:1996`), so a fast body may pass a thin sensor between two steps.
+- Characters: a `CharacterVirtual` is never blocked by a sensor but lists it among its contacts
+  (`CharacterContact::is_sensor`, `CharacterVirtual.cpp:367`, `:761`). A character's inner body is an
+  ordinary kinematic body and triggers sensors like one.
+- Vehicles: the wheel collision testers ignore sensors (`VehicleCollisionTester.cpp:56`, `:170`,
+  `:290`).
+- Soft bodies: a soft body that overlaps a sensor lists it in `SoftBodyContacts::sensors` instead of
+  colliding with it (`SoftBodyMotionProperties.cpp:152-192`).
+
+A sensor may not use a shape that only static bodies may use (a mesh, a heightfield, or a compound
+or decorated shape that contains one): a kinematic body, which may carry a mesh, pairs with a
+sensor, and Jolt cannot collide a mesh with a mesh or a heightfield.
 
 ## Changing contacts: `ContactListener`
 

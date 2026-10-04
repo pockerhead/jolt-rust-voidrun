@@ -141,6 +141,14 @@ impl BodyRef<'_> {
         .unwrap_or(AllowedDofs::ALL)
     }
 
+    /// Whether the body is a sensor, as created ([`BodySettings::sensor`]).
+    ///
+    /// [`BodySettings::sensor`]: crate::BodySettings::sensor
+    pub fn is_sensor(&self) -> bool {
+        // SAFETY: as in `position`.
+        unsafe { JPH_BodyInterface_IsSensor(self.interface(), self.id.raw) }
+    }
+
     /// Whether the body is a soft body ([`PhysicsWorld::create_soft_body`]).
     pub fn is_soft_body(&self) -> bool {
         with_read_locked_body(self.body_lock_interface, self.id, |body| {
