@@ -60,7 +60,9 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { os: windows-2025, target: x86_64-pc-windows-msvc }
+          # MSVC links only objects from its own toolset or an older one: Visual Studio 2022 keeps
+          # the archives usable with 2022 and 2026.
+          - { os: windows-2022, target: x86_64-pc-windows-msvc }
           - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
         features:
           - ""
@@ -133,7 +135,7 @@ jobs:
           grep -q '^USE_AVX2:BOOL=ON$' <<< "$cpu" || { echo "unexpected CPU options:"; echo "$cpu"; exit 1; }
           fma=no
           grep -q '^USE_FMADD:BOOL=ON$' <<< "$cpu" && grep -q '^CROSS_PLATFORM_DETERMINISTIC:BOOL=OFF$' <<< "$cpu" && fma=yes
-          compiler=$(grep -hE 'set\(CMAKE_CXX_COMPILER_(ID|VERSION) ' "$PREFIX"/build/CMakeFiles/*/CMakeCXXCompiler.cmake | tr '\n' ' ')
+          compiler=$(sed -nE 's/^set\(CMAKE_CXX_COMPILER_(ID|VERSION) "(.*)"\)$/\2/p' "$PREFIX"/build/CMakeFiles/*/CMakeCXXCompiler.cmake | tr '\n' ' ')
           {
             echo "source: $GITHUB_REPOSITORY@$GITHUB_SHA"
             echo "runner image: $ImageOS $ImageVersion"
@@ -236,7 +238,8 @@ jobs:
           and refuses a mismatch. Each `.sha256` file holds the archive's checksum.
 
           - Targets: `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`.
-          - Windows: dynamic MSVC runtime (`/MD`); not usable with `crt-static`.
+          - Windows: built with Visual Studio 2022 and the dynamic MSVC runtime (`/MD`). Link with that
+            MSVC toolset or a newer one (the version is in `PROVENANCE.txt`); not usable with `crt-static`.
           - Linux: built with GCC 13 on Ubuntu 24.04 (glibc 2.39); needs a compatible libstdc++ at run time.
           - Jolt assertions are off.
           - CPU: AVX2, BMI1, LZCNT, POPCNT and F16C; builds without `cross-platform-deterministic` also use FMA.
