@@ -123,6 +123,8 @@ fn settings_out_of_range_are_refused() {
     for extent in [0.0, largest] {
         assert!(build(MeshSettings::default().max_convex_extent(extent)).is_ok());
     }
+    let negative_zero = MeshSettings::default().max_convex_extent(-0.0);
+    assert_eq!(negative_zero.max_convex_extent.to_bits(), 0.0f32.to_bits());
 }
 
 #[test]

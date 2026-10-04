@@ -128,6 +128,7 @@ impl std::error::Error for MeshError {}
 /// heightfield inside the shape, scaled, would be too thin for Jolt to collide with convex shapes
 /// up to `max_convex_extent`.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct ThinTrianglesError {
     /// The scale that was refused.
     pub scale: Vec3,
@@ -159,7 +160,7 @@ impl fmt::Display for ThinTrianglesError {
         let Vec3 { x, y, z } = self.scale;
         write!(
             f,
-            "scale ({x}, {y}, {z}) leaves mesh or heightfield triangles too thin for convex shapes up to {} m",
+            "mesh or heightfield triangles scaled by ({x}, {y}, {z}) are too thin for convex shapes up to {} m",
             self.max_convex_extent
         )
     }

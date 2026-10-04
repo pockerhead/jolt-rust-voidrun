@@ -130,7 +130,7 @@ fn thin_triangles_name_the_scale_and_the_extent() {
     };
     assert_eq!(
         ShapeError::ThinTriangles(error).to_string(),
-        "invalid scale: scale (0.2, 1, 0.5) leaves mesh or heightfield triangles too thin for \
+        "invalid scale: mesh or heightfield triangles scaled by (0.2, 1, 0.5) are too thin for \
          convex shapes up to 1100 m"
     );
     assert_eq!(error, error);

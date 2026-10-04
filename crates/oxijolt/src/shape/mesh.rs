@@ -122,7 +122,8 @@ impl<'a> MeshSettings<'a> {
     /// [docs/limits.md#convex-shapes-against-meshes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-shapes-against-meshes
     #[must_use]
     pub fn max_convex_extent(mut self, metres: f32) -> Self {
-        self.max_convex_extent = metres;
+        // -0.0 is in range; keep it as 0.0 so that errors name it as 0 m.
+        self.max_convex_extent = if metres == 0.0 { 0.0 } else { metres };
         self
     }
 
