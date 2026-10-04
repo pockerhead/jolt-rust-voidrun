@@ -16,15 +16,6 @@ use common::memory::private_bytes;
 use common::*;
 use oxijolt::*;
 
-fn child(shape: &Shape, position: Vec3, user_data: u32) -> CompoundChild<'_> {
-    CompoundChild {
-        shape,
-        position,
-        rotation: Quat::IDENTITY,
-        user_data,
-    }
-}
-
 const WARM_UP_ROUNDS: usize = 20_000;
 const MEASURED_ROUNDS: usize = 100_000;
 const MAX_GROWTH: usize = 4 * 1024 * 1024;

@@ -120,15 +120,6 @@ fn frames() -> [(&'static str, Frame, RVec3); 2] {
     ]
 }
 
-fn child(shape: &Shape, position: Vec3, user_data: u32) -> CompoundChild<'_> {
-    CompoundChild {
-        shape,
-        position,
-        rotation: Quat::IDENTITY,
-        user_data,
-    }
-}
-
 const ALL: QueryFilter<'static> = QueryFilter::new();
 const ITEM_MASS: f32 = 1.2;
 const GRAVITY: f32 = 9.8;

@@ -91,25 +91,11 @@ fn vehicle_round(world: &mut PhysicsWorld, layers: &CarLayers, shape: &Shape, ro
 /// # Safety
 /// Jolt is initialised, and no other thread creates or destroys a physics system meanwhile.
 unsafe fn raw_system_with_body() -> (*mut JPH_PhysicsSystem, JPH_BodyID) {
-    // SAFETY: Jolt is initialised and system creation is not concurrent (function contract).
-    // The three layer tables are consistent and handed to the system, which owns them. The
-    // shape and creation settings hold one reference each, released after the body took its own.
+    // SAFETY: Jolt is initialised and system creation is not concurrent (function contract),
+    // as `raw_system` requires. The shape and creation settings hold one reference each,
+    // released after the body took its own.
     unsafe {
-        let pair_filter = JPH_ObjectLayerPairFilterTable_Create(1);
-        let broad_phase = JPH_BroadPhaseLayerInterfaceTable_Create(1, 1);
-        JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(broad_phase, 0, 0);
-        let object_vs_broad_phase =
-            JPH_ObjectVsBroadPhaseLayerFilterTable_Create(broad_phase, 1, pair_filter, 1);
-        let settings = JPH_PhysicsSystemSettings {
-            maxBodies: 16,
-            maxBodyPairs: 16,
-            maxContactConstraints: 16,
-            broadPhaseLayerInterface: broad_phase,
-            objectLayerPairFilter: pair_filter,
-            objectVsBroadPhaseLayerFilter: object_vs_broad_phase,
-            ..std::mem::zeroed()
-        };
-        let system = JPH_PhysicsSystem_Create(&settings);
+        let system = raw_system();
         let half_extent = JPH_Vec3 {
             x: 0.9,
             y: 0.3,

@@ -5,10 +5,6 @@ mod common;
 use common::*;
 use oxijolt::*;
 
-fn cube_shape() -> Shape {
-    Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap()
-}
-
 fn bits3(v: Vec3) -> [u32; 3] {
     <[f32; 3]>::from(v).map(f32::to_bits)
 }
