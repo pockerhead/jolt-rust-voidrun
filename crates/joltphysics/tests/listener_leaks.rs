@@ -10,13 +10,15 @@
 //!
 //! It measures the private bytes of the process, because the native listeners, materials and
 //! worlds are allocated by C++, which a Rust global allocator does not see. A new world per
-//! round grows the counter by about 2 MB over its first few thousand rounds and then not at all
-//! (the heap settling, not a leak; `docs/events.md` has the measurements), hence the long
-//! warm-up of the second phase. The file holds exactly one test, so its binary runs alone and no
-//! parallel test disturbs the counter. The first phase was checked against builds that never
-//! released a material (about 450 bytes per round) or never destroyed the native contact
-//! listener (about 840 bytes per round), the second against one whose dropped world forgot its
-//! listeners (about 1 200 bytes per round); each exceeded the budget.
+//! round grows the counter by about 2 MB over its first few thousand rounds, hence the long
+//! warm-up of the second phase, and the heap still commits or releases a step of about 2 MB now
+//! and then afterwards. Neither is a leak (`docs/events.md` has the measurements), so each phase
+//! measures seven consecutive blocks of rounds and holds the median block to the budget: a leak
+//! grows every block, a heap step only one. A leak that grows three or fewer of the seven blocks
+//! passes the median. The file holds exactly one test, so its binary runs
+//! alone and no parallel test disturbs the counter. The first phase was checked against builds
+//! that never released a material or never destroyed the native contact listener, the second
+//! against one whose dropped world forgot its listeners; each exceeded the budget.
 #![cfg(windows)]
 
 mod common;
@@ -29,11 +31,12 @@ use common::*;
 use joltphysics::*;
 
 const WARM_UP_ROUNDS: usize = 500;
-const MEASURED_ROUNDS: usize = 6_000;
 const WORLD_WARM_UP_ROUNDS: usize = 4_000;
-const WORLD_MEASURED_ROUNDS: usize = 6_000;
+/// Measured blocks per phase; the median of an odd count is one block's growth.
+const BLOCKS: usize = 7;
+const BLOCK_ROUNDS: usize = 1_000;
 /// Bytes per measured round.
-const MAX_GROWTH_PER_ROUND: usize = 100;
+const MAX_GROWTH_PER_ROUND: i64 = 100;
 
 fn every_kind() -> EventSettings {
     EventSettings::default()
@@ -116,20 +119,24 @@ fn world_round(round: usize) {
     step(&mut world, 1);
 }
 
-/// Private bytes grown over `measured` rounds after `warm_up` rounds, within the budget.
-fn assert_rounds_do_not_leak(
-    phase: &str,
-    warm_up: usize,
-    measured: usize,
-    mut round: impl FnMut(usize),
-) {
+/// Runs `warm_up` rounds, then [`BLOCKS`] blocks of [`BLOCK_ROUNDS`] rounds, and checks that the
+/// private bytes of the median block grew within the budget.
+fn assert_rounds_do_not_leak(phase: &str, warm_up: usize, mut round: impl FnMut(usize)) {
     (0..warm_up).for_each(&mut round);
-    let before = private_bytes();
-    (warm_up..warm_up + measured).for_each(&mut round);
-    let growth = private_bytes().saturating_sub(before);
+    let mut growths = Vec::with_capacity(BLOCKS);
+    for block in 0..BLOCKS {
+        let first = warm_up + block * BLOCK_ROUNDS;
+        let before = private_bytes() as i64;
+        (first..first + BLOCK_ROUNDS).for_each(&mut round);
+        growths.push(private_bytes() as i64 - before);
+    }
+    println!("{phase}: private bytes grown per block: {growths:?}");
+    let mut sorted = growths.clone();
+    sorted.sort_unstable();
+    let median = sorted[BLOCKS / 2];
     assert!(
-        growth < MAX_GROWTH_PER_ROUND * measured,
-        "{phase}: private bytes grew by {growth} over {measured} rounds"
+        median < MAX_GROWTH_PER_ROUND * BLOCK_ROUNDS as i64,
+        "{phase}: the median block grew by {median} bytes (blocks: {growths:?})"
     );
 }
 
@@ -137,14 +144,9 @@ fn assert_rounds_do_not_leak(
 fn listeners_materials_and_worlds_do_not_leak() {
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
     add_ground(&mut world);
-    assert_rounds_do_not_leak("replacement", WARM_UP_ROUNDS, MEASURED_ROUNDS, |round| {
+    assert_rounds_do_not_leak("replacement", WARM_UP_ROUNDS, |round| {
         replacement_round(&mut world, round)
     });
     drop(world);
-    assert_rounds_do_not_leak(
-        "world lifecycle",
-        WORLD_WARM_UP_ROUNDS,
-        WORLD_MEASURED_ROUNDS,
-        world_round,
-    );
+    assert_rounds_do_not_leak("world lifecycle", WORLD_WARM_UP_ROUNDS, world_round);
 }

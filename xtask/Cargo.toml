@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+description = "Repository maintenance tasks: `cargo xtask bindings` regenerates the committed raw bindings"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Pinned: the committed bindings are this version's output.
+bindgen = "=0.73.2"
+anyhow = "1"

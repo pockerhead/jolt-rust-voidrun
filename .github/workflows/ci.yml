@@ -6,14 +6,16 @@ on:
 
 jobs:
   test:
-    name: Windows MSVC (${{ matrix.features || 'default' }})
-    runs-on: windows-latest
+    name: ${{ matrix.os }} (${{ matrix.features || 'default' }})
+    runs-on: ${{ matrix.os }}
     # A backstop in case a runner attaches a debugger to a failed assertion's fail-fast.
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
+        os: [windows-latest, ubuntu-latest]
         features: ["", "cross-platform-deterministic", "double-precision", "debug-renderer", "asserts"]
+        # These entries add feature_args to the rows of both operating systems.
         # The debug renderer is a feature of the safe crate (it forwards to joltphysics-sys);
         # enabling only the sys feature would leave the debug module and its tests unbuilt.
         include:
@@ -30,6 +32,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUSTDOCFLAGS: -D warnings
+      NATIVE_MANIFEST: joltphysics-sys-manifest.txt
       FEATURE_ARGS: ${{ matrix.feature_args || (matrix.features && format('--features joltphysics-sys/{0}', matrix.features)) || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +45,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.features || 'default' }}
+          key: ${{ matrix.os }}-${{ matrix.features || 'default' }}
 
       # The native cache key and the build.rs manifest both rely on these
       # constants matching the submodule gitlinks.
@@ -61,7 +64,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/joltc-prefix
-          key: joltc-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.joltc }}-${{ steps.pins.outputs.jolt }}-${{ matrix.features || 'default' }}-${{ hashFiles('crates/joltphysics-sys/native/**', 'crates/joltphysics-sys/build.rs') }}
+          key: joltc-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.joltc }}-${{ steps.pins.outputs.jolt }}-${{ matrix.features || 'default' }}-${{ hashFiles('crates/joltphysics-sys/native/**', 'crates/joltphysics-sys/build.rs', 'crates/joltphysics-sys/build/**') }}
 
       - name: Build native library
         if: steps.native.outputs.cache-hit != 'true'
@@ -71,7 +74,7 @@ jobs:
           dirs=(target/debug/build/joltphysics-sys-*/out/joltc)
           [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
           mkdir -p "$RUNNER_TEMP/joltc-prefix"
-          cp -r "${dirs[0]}/lib" "${dirs[0]}/include" "${dirs[0]}/joltphysics-sys-manifest.txt" "$RUNNER_TEMP/joltc-prefix/"
+          cp -r "${dirs[0]}/lib" "${dirs[0]}/include" "${dirs[0]}/$NATIVE_MANIFEST" "$RUNNER_TEMP/joltc-prefix/"
 
       # Every later step links the cached prefix, so each run also exercises
       # the JOLTC_LIB_DIR validation. A manifest mismatch means the cache key
@@ -82,16 +85,59 @@ jobs:
       # Without the feature, neither Jolt nor joltc may contain the debug renderer.
       - name: Debug renderer compiled only with its feature
         run: |
-          present=no
-          if grep -q -a JPH_DebugRenderer_Create "$JOLTC_LIB_DIR"/lib/joltc*.lib && grep -q -a DrawGeometry@DebugRendererSimple "$JOLTC_LIB_DIR"/lib/Jolt.lib; then present=yes; fi
+          joltc=no
+          jolt=no
+          if [ "$RUNNER_OS" = Windows ]; then
+            grep -q -a JPH_DebugRenderer_Create "$JOLTC_LIB_DIR"/lib/joltc*.lib && joltc=yes
+            grep -q -a DrawGeometry@DebugRendererSimple "$JOLTC_LIB_DIR"/lib/Jolt.lib && jolt=yes
+          else
+            nm --defined-only "$JOLTC_LIB_DIR"/lib/libjoltc*.a > "$RUNNER_TEMP/joltc.nm"
+            nm -C --defined-only "$JOLTC_LIB_DIR"/lib/libJolt.a > "$RUNNER_TEMP/jolt.nm"
+            grep -q ' T JPH_DebugRenderer_Create$' "$RUNNER_TEMP/joltc.nm" && joltc=yes
+            grep -q 'DebugRendererSimple::DrawGeometry' "$RUNNER_TEMP/jolt.nm" && jolt=yes
+          fi
           expected=no; [ "${{ matrix.features }}" = debug-renderer ] && expected=yes
-          [ "$present" = "$expected" ] || { echo "debug renderer present=$present expected=$expected"; exit 1; }
+          [ "$joltc" = "$expected" ] && [ "$jolt" = "$expected" ] || { echo "debug renderer joltc=$joltc jolt=$jolt expected=$expected"; exit 1; }
 
       - run: cargo build --workspace --all-targets $FEATURE_ARGS
       - run: cargo test --workspace $FEATURE_ARGS
       - run: cargo run -p joltphysics --example hello_world $FEATURE_ARGS
       - run: cargo clippy --workspace --all-targets $FEATURE_ARGS -- -D warnings
       - run: cargo doc --workspace --no-deps $FEATURE_ARGS
+      # The build-time generator still works against the same native library.
+      - name: Generate the bindings at build time
+        if: matrix.features == '' || matrix.features == 'double-precision' || matrix.features == 'debug-renderer'
+        run: cargo check -p joltphysics-sys --features "joltphysics-sys/bindgen${{ matrix.features && format(',joltphysics-sys/{0}', matrix.features) || '' }}"
+
+  # The committed bindings must equal the generator's output with the pinned LLVM 18.
+  bindings:
+    name: Committed bindings
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Use LLVM 18
+        run: |
+          ls /usr/lib/llvm-18/lib/libclang.so*
+          clang-18 --version | grep -q 'version 18\.' || { clang-18 --version; exit 1; }
+          echo "LIBCLANG_PATH=/usr/lib/llvm-18/lib" >> "$GITHUB_ENV"
+          echo "CLANG_PATH=/usr/bin/clang-18" >> "$GITHUB_ENV"
+      - run: cargo xtask bindings --check --out "$RUNNER_TEMP/bindings"
+      - run: cargo test --locked -p xtask
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings
+          path: ${{ runner.temp }}/bindings
+          if-no-files-found: ignore
 
   fmt:
     name: Formatting

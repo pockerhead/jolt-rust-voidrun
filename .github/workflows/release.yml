@@ -1,0 +1,257 @@
+name: Release
+
+# Prebuilt native libraries for JOLTC_LIB_DIR: one archive per target and feature subset.
+# A manual run, or a branch push that changes this file, builds and checks the archives as
+# workflow artifacts; pushing a `v<version>` tag also attaches them to the GitHub release of
+# that tag. Path filters do not apply to tag pushes.
+
+on:
+  push:
+    tags: ['v*']
+    branches: ['**']
+    paths: ['.github/workflows/release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NATIVE_MANIFEST: joltphysics-sys-manifest.txt
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    outputs:
+      name: ${{ steps.meta.outputs.name }}
+      safe: ${{ steps.meta.outputs.safe }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The crate that links joltc, the crate built on it, and the version without build metadata.
+      - id: meta
+        shell: bash
+        run: |
+          cargo metadata --no-deps --format-version 1 > "$RUNNER_TEMP/metadata.json"
+          sys=$(jq -r '[.packages[] | select(.links == "joltc" and any(.targets[]; .kind == ["lib"]))]
+            | if length == 1 then .[0] | "\(.name) \(.version)" else error("expected one package linking joltc") end' "$RUNNER_TEMP/metadata.json")
+          name=${sys% *}
+          version=${sys#* }
+          version=${version%%+*}
+          safe=$(jq -r --arg sys "$name" '[.packages[] | select(any(.dependencies[]; .name == $sys and .kind == null))]
+            | if length == 1 then .[0].name else error("expected one package depending on \($sys)") end' "$RUNNER_TEMP/metadata.json")
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the crate version $version"
+            exit 1
+          fi
+          echo "$name $version (safe crate $safe)"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "safe=$safe" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.platform.target }} (${{ matrix.features || 'default' }})
+    needs: version
+    runs-on: ${{ matrix.platform.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # MSVC links only objects from its own toolset or an older one: Visual Studio 2022 keeps
+          # the archives usable with 2022 and 2026.
+          - { os: windows-2022, target: x86_64-pc-windows-msvc }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
+        features:
+          - ""
+          - double-precision
+          - cross-platform-deterministic
+          - debug-renderer
+          - double-precision,cross-platform-deterministic
+          - double-precision,debug-renderer
+          - cross-platform-deterministic,debug-renderer
+          - double-precision,cross-platform-deterministic,debug-renderer
+    defaults:
+      run:
+        shell: bash
+    env:
+      CRATE: ${{ needs.version.outputs.name }}
+      SAFE_CRATE: ${{ needs.version.outputs.safe }}
+      VERSION: ${{ needs.version.outputs.version }}
+      RUST_TARGET: ${{ matrix.platform.target }}
+      FEATURES: ${{ matrix.features }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Check pinned commits
+        run: |
+          joltc=$(git rev-parse HEAD:crates/joltphysics-sys/vendor/joltc)
+          jolt=$(git rev-parse HEAD:crates/joltphysics-sys/vendor/JoltPhysics)
+          grep -q "\"$joltc\"" crates/joltphysics-sys/build.rs || { echo "build.rs JOLTC_COMMIT differs from the gitlink $joltc"; exit 1; }
+          grep -q "\"$jolt\"" crates/joltphysics-sys/build.rs || { echo "build.rs JOLT_COMMIT differs from the gitlink $jolt"; exit 1; }
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Pin the Linux compiler
+        if: runner.os == 'Linux'
+        run: |
+          gcc-13 --version
+          ldd --version
+          echo "CC=gcc-13" >> "$GITHUB_ENV"
+          echo "CXX=g++-13" >> "$GITHUB_ENV"
+
+      # A fresh target directory without a cache, so exactly one native prefix exists.
+      - name: Build the native library
+        run: |
+          CARGO_TARGET_DIR="$RUNNER_TEMP/t" cargo build --locked -p "$CRATE" --release --target "$RUST_TARGET" --features "$FEATURES"
+          shopt -s nullglob
+          dirs=("$RUNNER_TEMP/t/$RUST_TARGET/release/build/$CRATE"-*/out/joltc)
+          [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
+          echo "PREFIX=${dirs[0]}" >> "$GITHUB_ENV"
+          tag=${FEATURES:-default}
+          echo "ARCHIVE=$CRATE-$VERSION-$RUST_TARGET-${tag//,/+}" >> "$GITHUB_ENV"
+
+      - name: Stage the archive
+        run: |
+          stage="$RUNNER_TEMP/stage/$ARCHIVE"
+          mkdir -p "$stage/licenses"
+          cp -r "$PREFIX/lib" "$PREFIX/include" "$PREFIX/$NATIVE_MANIFEST" "$stage/"
+          for file in LICENSE-MIT LICENSE-APACHE crates/joltphysics-sys/vendor/joltc/LICENSE crates/joltphysics-sys/vendor/JoltPhysics/LICENSE; do
+            [ -f "$file" ] || { echo "missing licence file $file"; exit 1; }
+          done
+          cp LICENSE-MIT LICENSE-APACHE "$stage/"
+          cp crates/joltphysics-sys/vendor/joltc/LICENSE "$stage/licenses/joltc-LICENSE"
+          cp crates/joltphysics-sys/vendor/JoltPhysics/LICENSE "$stage/licenses/JoltPhysics-LICENSE"
+
+          # The CPU features Jolt was compiled for, from its CMake options.
+          cache="$PREFIX/build/CMakeCache.txt"
+          cpu=$(grep -E '^(USE_(SSE4_1|SSE4_2|AVX|AVX2|AVX512|LZCNT|TZCNT|F16C|FMADD)|CROSS_PLATFORM_DETERMINISTIC):BOOL=' "$cache")
+          grep -q '^USE_AVX2:BOOL=ON$' <<< "$cpu" || { echo "unexpected CPU options:"; echo "$cpu"; exit 1; }
+          fma=no
+          grep -q '^USE_FMADD:BOOL=ON$' <<< "$cpu" && grep -q '^CROSS_PLATFORM_DETERMINISTIC:BOOL=OFF$' <<< "$cpu" && fma=yes
+          compiler=$(sed -nE 's/^set\(CMAKE_CXX_COMPILER_(ID|VERSION) "(.*)"\)$/\2/p' "$PREFIX"/build/CMakeFiles/*/CMakeCXXCompiler.cmake | tr '\n' ' ')
+          {
+            echo "source: $GITHUB_REPOSITORY@$GITHUB_SHA"
+            echo "runner image: $ImageOS $ImageVersion"
+            echo "compiler: $compiler"
+            echo "cargo target: $RUST_TARGET"
+            echo "features: ${FEATURES:-none}"
+            grep -E '^(joltc_commit|jolt_commit|jolt_version|joltc_ext|crt)=' "$PREFIX/$NATIVE_MANIFEST"
+            echo "Jolt asserts: OFF"
+            echo "CPU options:"
+            echo "$cpu"
+            echo "FMA instructions used: $fma"
+          } > "$stage/PROVENANCE.txt"
+          cat "$stage/PROVENANCE.txt"
+
+      - name: Pack
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          # Relative paths: GNU tar would read a Windows drive letter as a remote host.
+          cd "$RUNNER_TEMP/stage"
+          tar -czf "../dist/$ARCHIVE.tar.gz" "$ARCHIVE"
+          cd ../dist
+          sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
+          cat "$ARCHIVE.tar.gz.sha256"
+
+      # Builds against the unpacked archive the way a user would, and fails if CMake runs.
+      - name: Smoke test the unpacked archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/u"
+          cd "$RUNNER_TEMP/u"
+          tar -xzf "../dist/$ARCHIVE.tar.gz"
+          cd "$GITHUB_WORKSPACE"
+          export JOLTC_LIB_DIR="$RUNNER_TEMP/u/$ARCHIVE"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/s"
+          log="$RUNNER_TEMP/smoke.log"
+          cargo test --locked -p "$CRATE" --target "$RUST_TARGET" --features "$FEATURES" --test smoke_test -vv > "$log" 2>&1 || { tail -50 "$log"; exit 1; }
+          if [[ ",$FEATURES," == *,debug-renderer,* ]]; then
+            safe_features=$(echo "$FEATURES" | sed "s/[^,][^,]*/$SAFE_CRATE\/&/g")
+            cargo test --locked -p "$SAFE_CRATE" --target "$RUST_TARGET" --features "$safe_features" --test debug_lines -vv >> "$log" 2>&1 || { tail -50 "$log"; exit 1; }
+          fi
+          grep "test result" "$log"
+          cmake_runs=$(grep -c "Build files have been written" "$log" || true)
+          [ "$cmake_runs" -eq 0 ] || { echo "the smoke build ran CMake $cmake_runs times"; exit 1; }
+
+      # A release prefix must be refused for a configuration it was not built for.
+      - name: Mismatched configuration is refused
+        if: matrix.features == ''
+        run: |
+          cp -r "$RUNNER_TEMP/u/$ARCHIVE" "$RUNNER_TEMP/m"
+          sed -i 's/^double_precision=OFF$/double_precision=ON/' "$RUNNER_TEMP/m/$NATIVE_MANIFEST"
+          grep -q '^double_precision=ON$' "$RUNNER_TEMP/m/$NATIVE_MANIFEST"
+          log="$RUNNER_TEMP/mismatch.log"
+          if JOLTC_LIB_DIR="$RUNNER_TEMP/m" CARGO_TARGET_DIR="$RUNNER_TEMP/s" cargo check --locked -p "$CRATE" --target "$RUST_TARGET" > "$log" 2>&1; then
+            echo "the mismatched prefix was accepted"
+            exit 1
+          fi
+          grep "built for a different configuration" "$log"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: |
+            ${{ runner.temp }}/dist/${{ env.ARCHIVE }}.tar.gz
+            ${{ runner.temp }}/dist/${{ env.ARCHIVE }}.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify the archives
+        working-directory: dist
+        run: |
+          shopt -s nullglob
+          archives=(*.tar.gz)
+          sums=(*.tar.gz.sha256)
+          [ ${#archives[@]} -eq 16 ] && [ ${#sums[@]} -eq 16 ] || { echo "expected 16 archives and 16 checksums, found ${#archives[@]} and ${#sums[@]}"; exit 1; }
+          sha256sum -c "${sums[@]}"
+
+      - name: Write the release notes
+        run: |
+          cat > notes.md <<'EOF'
+          Prebuilt joltc and Jolt Physics static libraries for `JOLTC_LIB_DIR`, one archive per target and
+          feature subset (`default`, or the enabled features joined by `+`). Unpack an archive and point
+          `JOLTC_LIB_DIR` at its directory; the build script checks its manifest against the crate features
+          and refuses a mismatch. Each `.sha256` file holds the archive's checksum.
+
+          - Targets: `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`.
+          - Windows: built with Visual Studio 2022 and the dynamic MSVC runtime (`/MD`). Link with that
+            MSVC toolset or a newer one (the version is in `PROVENANCE.txt`); not usable with `crt-static`.
+          - Linux: built with GCC 13 on Ubuntu 24.04 (glibc 2.39); needs a compatible libstdc++ at run time.
+          - Jolt assertions are off.
+          - CPU: AVX2, BMI1, LZCNT, POPCNT and F16C; builds without `cross-platform-deterministic` also use FMA.
+            `PROVENANCE.txt` in each archive lists the options used.
+
+          Other targets and configurations (for example `asserts`) build from source.
+          EOF
+
+      - name: Attach to the release
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.tar.gz.sha256 --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md dist/*.tar.gz dist/*.tar.gz.sha256
+          fi
