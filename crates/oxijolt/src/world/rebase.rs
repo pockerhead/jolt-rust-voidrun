@@ -113,7 +113,8 @@ impl PhysicsWorld {
     ///
     /// Every body origin `p` becomes `rotation * p + translation` (metres), every body rotation
     /// `q` becomes `rotation * q`, linear and angular velocities `v` become `rotation * v`
-    /// (m/s, rad/s), and so does the world's gravity.
+    /// (m/s, rad/s), and so does the world's gravity. Characters, vehicle gravity overrides and
+    /// collision testers, and pulleys move along; [docs/guide.md#floating-origin] says how.
     ///
     /// `bodies_in_key_order` must name every body of the world exactly once, in the caller's
     /// stable key order, which is the order the poses are written in; otherwise
@@ -121,53 +122,17 @@ impl PhysicsWorld {
     /// returned. `rotation` must be a finite unit quaternion and `translation` finite with every
     /// component at most `2 *` [`limits::MAX_POSITION`] in absolute value, and no new pose or
     /// velocity may overflow; otherwise [`BodyError::InvalidValue`] is returned. The new positions
-    /// are only checked to be finite, not to lie within [`limits::MAX_POSITION`]: a rebase
-    /// re-expresses the world's state, and a body the simulation carried out of the frame must not
-    /// block it. Every check runs before the first write, so an error leaves the world unchanged.
+    /// are only checked to be finite. Every check runs before the first write, so an error leaves
+    /// the world unchanged.
     ///
     /// No body is woken or put to sleep. An identity `rotation` leaves rotations, velocities
     /// and gravity untouched, bit for bit; an identity rotation with a zero translation changes
-    /// nothing. Awake bodies restart Jolt's sleep timer, as for every pose change, so they may
-    /// fall asleep later than without the rebase.
+    /// nothing.
     ///
-    /// Forces and torques added since the last step are not rotated: rebase between steps,
-    /// before adding the tick's forces. Queries see the new poses at once;
-    /// [`optimize_broad_phase`](Self::optimize_broad_phase) afterwards is optional and only
-    /// makes queries faster until the next step. Jolt caches contacts relative to the bodies,
-    /// so bodies at rest keep their contacts on the next step.
-    ///
-    /// Characters move with the world, in id order after the bodies: position and rotation as
-    /// for bodies, up and linear velocity as vectors. The list must still name their inner
-    /// bodies, which are bodies of the world. The contacts and ground a character cached in its
-    /// last update stay in the old frame. A translation needs nothing more, because the next
-    /// update reads only cached normals and velocities; after a rotation call
+    /// Rebase between steps, before adding the tick's forces: forces and torques added since the
+    /// last step are not rotated. After a rotation, call
     /// [`refresh_character_contacts`](Self::refresh_character_contacts) for every character
     /// before its next update.
-    ///
-    /// Vehicles move with their chassis, which the list names as bodies. A rotation also
-    /// rotates each vehicle's gravity override and the world-space up of a ray or sphere
-    /// collision tester, in id order after the characters; a translation changes neither. The
-    /// wheel contacts a vehicle reports stay in the old frame until the next step tests the
-    /// wheels again, and the world up of the pitch and roll limit follows the rotated gravity on
-    /// that step.
-    ///
-    /// Ragdoll parts are bodies of the world, which the list names. Joint frames and motor
-    /// targets are relative to the bodies, so they need no change.
-    ///
-    /// Soft bodies are bodies of the world too, which the list names. Their vertices are stored
-    /// relative to the body, so they move with it: a rotation turns the vertices and their
-    /// velocities with the body and leaves the body's rotation non-identity from then on, which
-    /// [`BodyMut::add_force`](crate::BodyMut::add_force) takes into account.
-    ///
-    /// Constraint frames are relative to the bodies and need no change, except pulleys, whose
-    /// fixed points are world points: a rebase recreates each pulley in the new frame, in id
-    /// order after the vehicles. That keeps its id, enabled state, ratio and lengths, drops its
-    /// warm start and its cached rope directions (Jolt starts them at -Y, which matters only
-    /// for a rope segment of zero length), and changes Jolt's constraint order (the new pulley
-    /// goes to the end, the last constraint takes the old one's place). The same calls give the
-    /// same order. A translation alone recreates pulleys too. A taut rope can go slack for one
-    /// step after a rebase, so a hanging pair can drift by a few millimetres; the drift then
-    /// decays ([docs/guide.md#floating-origin]).
     ///
     /// [docs/guide.md#floating-origin]: https://github.com/pockerhead/oxijolt/blob/main/docs/guide.md#floating-origin
     pub fn rebase(

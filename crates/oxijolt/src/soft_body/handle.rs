@@ -21,7 +21,7 @@ impl PhysicsWorld {
     /// Creates a soft body from `shared` and adds it to the world. The body keeps its own
     /// reference to the shared settings, so they may be dropped afterwards.
     ///
-    /// The body is an ordinary body of the world (see [Soft bodies](crate#soft-bodies)): it has
+    /// The body is an ordinary body of the world (see [docs/soft-bodies.md]): it has
     /// a [`BodyId`], is removed with [`remove_body`](Self::remove_body) and read with
     /// [`body`](Self::body); [`soft_body`](Self::soft_body) and
     /// [`soft_body_mut`](Self::soft_body_mut) give access to its vertices. With
@@ -85,6 +85,7 @@ impl PhysicsWorld {
     /// ```
     ///
     /// [docs/limits.md#soft-body-inertia]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#soft-body-inertia
+    /// [docs/soft-bodies.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/soft-bodies.md
     pub fn create_soft_body(
         &mut self,
         shared: &SoftBodySharedSettings,
