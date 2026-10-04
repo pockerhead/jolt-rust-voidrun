@@ -6,6 +6,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/pockerhead/oxijolt"
 edition = "2021"
 links = "joltc"
+keywords = ["physics", "jolt", "ffi", "gamedev"]
+categories = ["external-ffi-bindings", "game-development", "simulation"]
 
 exclude = [
     "vendor/JoltPhysics/Assets",
@@ -19,6 +21,10 @@ exclude = [
     "vendor/joltc/samples",
     "vendor/joltc/tests",
 ]
+
+[package.metadata.docs.rs]
+features = ["debug-renderer"]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [features]
 default = []
