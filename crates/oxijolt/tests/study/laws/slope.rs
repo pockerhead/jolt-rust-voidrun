@@ -182,9 +182,9 @@ pub fn judge(scene: &Scene, check: Check, run: &Run) -> Outcome {
     }
 }
 
-/// The steep predicates on interior-steep ticks: never grounded; walking uphill never rises;
-/// standing still the downhill step is positive from tick 30 and does not shrink over spec
-/// G.4 #20's window (ticks 30 to 40).
+/// The steep predicates on all-steep ticks (every support element steep terrain): never
+/// grounded; walking uphill never rises; standing still the downhill step is positive from tick
+/// 30 and does not shrink over spec G.4 #20's window (ticks 30 to 40).
 fn steep(
     scene: &Scene,
     run: &Run,
@@ -193,10 +193,10 @@ fn steep(
     plane: bool,
 ) -> Outcome {
     let steep: Vec<bool> = (0..run.reports.len())
-        .map(|t| grounds[t].interior_steep(run.reports[t].up))
+        .map(|t| grounds[t].all_steep_terrain(run.reports[t].up))
         .collect();
     if steep.iter().filter(|&&s| s).count() < WITNESS_TICKS {
-        return missing_witness(run, "30 ticks on interior steep faces");
+        return missing_witness(run, "30 ticks with only steep faces near");
     }
     let mut last_step: Option<f64> = None;
     for (t, report) in run.reports.iter().enumerate() {

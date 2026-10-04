@@ -45,18 +45,95 @@ fn tilted(case: &Case) -> Option<Case> {
     })
 }
 
-/// spec-d2 gives the same cells on laws 1, 2 and 4 in a tilted frame (over the cases whose
-/// scene can be tilted). Jolt is equivariant under a change of frame only up to `f32` rounding,
-/// so paths are compared, once mapped back, within 1 mm on walkable ground and 1 cm sliding down
-/// steep faces, and at most one case in twenty may leave that band (measured: 2 of 241, both
-/// 1.6 m/s runs over a 44.5 degree crest that part by 0.2-0.3 m; one 7 m/s crest descent fails
-/// law 2 here and passes tilted). Divergent cases and flipped verdicts are printed.
+/// Most verdicts a row may flip between the frames.
+const MAX_FLIPPED_VERDICTS: usize = 2;
+
+/// How a row's tilted runs compare with its untilted ones.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Tilt {
+    compared: usize,
+    /// Cases whose paths, once mapped back, part by more than the tolerance at some tick.
+    diverged: usize,
+    /// Cases that pass in one frame and fail in the other.
+    flipped: usize,
+}
+
+impl Tilt {
+    /// Counts one case: whether both frames gave the same verdict, and how far apart its paths
+    /// came against the path tolerance, metres. A flipped case counts against both limits.
+    fn record(&mut self, same_verdict: bool, apart: f64, tolerance: f64) {
+        self.compared += 1;
+        self.diverged += usize::from(apart > tolerance);
+        self.flipped += usize::from(!same_verdict);
+    }
+
+    /// At most one path in twenty outside the tolerance and at most
+    /// [`MAX_FLIPPED_VERDICTS`] flipped verdicts.
+    fn check(&self) -> Result<(), String> {
+        if self.diverged * 20 > self.compared {
+            return Err(format!(
+                "{} of {} paths diverged",
+                self.diverged, self.compared
+            ));
+        }
+        if self.flipped > MAX_FLIPPED_VERDICTS {
+            return Err(format!("{} verdicts flipped", self.flipped));
+        }
+        Ok(())
+    }
+}
+
+/// The tilt accounting counts a flipped verdict and its divergent path, so neither escapes the
+/// limits.
 #[test]
-fn the_spec_d2_row_gives_the_same_cells_in_a_tilted_frame() {
+fn tilt_accounting_counts_flipped_and_divergent_cases() {
+    let mut tilt = Tilt::default();
+    for _ in 0..19 {
+        tilt.record(true, 0.0, 1e-3);
+    }
+    tilt.record(false, 0.3, 1e-3);
+    assert_eq!(
+        tilt,
+        Tilt {
+            compared: 20,
+            diverged: 1,
+            flipped: 1,
+        }
+    );
+    assert_eq!(tilt.check(), Ok(()));
+    tilt.record(false, 0.3, 1e-3);
+    assert!(tilt.check().is_err(), "2 of 21 paths diverged");
+    let flips = Tilt {
+        compared: 1000,
+        diverged: 0,
+        flipped: MAX_FLIPPED_VERDICTS + 1,
+    };
+    assert!(flips.check().is_err(), "too many flipped verdicts");
+}
+
+/// spec-d2 and the recommended row give the same cells on laws 1, 2 and 4 in a tilted frame
+/// (over the cases whose scene can be tilted). Jolt is equivariant under a change of frame only
+/// up to `f32` rounding, so paths are compared, once mapped back, within 1 mm on walkable ground
+/// and 1 cm sliding down steep faces, whatever the verdicts; at most one case in twenty may leave
+/// that band and at most [`MAX_FLIPPED_VERDICTS`] verdicts may flip. Divergent cases and flipped
+/// verdicts are printed.
+#[test]
+fn the_study_rows_give_the_same_cells_in_a_tilted_frame() {
+    for config in [Config::spec_d2(), Config::recommended()] {
+        let tilt = tilted_comparison(&config);
+        println!("{}: {tilt:?}", config.name);
+        assert!(tilt.compared > 100, "{}: {tilt:?}", config.name);
+        if let Err(error) = tilt.check() {
+            panic!("{}: {error}", config.name);
+        }
+    }
+}
+
+/// Plays `config` on laws 1, 2 and 4 in both frames, asserts equal cells and counts the cases.
+fn tilted_comparison(config: &Config) -> Tilt {
     let mut scenes = Scenes::default();
-    let config = Config::spec_d2();
     let frame = Frame::tilted();
-    let (mut compared, mut diverged) = (0, 0);
+    let mut tilt = Tilt::default();
     for column in [Column::Slope, Column::Floor, Column::Hops] {
         let (mut flat_results, mut turned_results) = (Vec::new(), Vec::new());
         for case in matrix::cases(&mut scenes, column) {
@@ -66,36 +143,39 @@ fn the_spec_d2_row_gives_the_same_cells_in_a_tilted_frame() {
             if case.report_only {
                 continue;
             }
-            let flat = play(scenes.get(case.scene), &config, &case, case.start, false);
+            let flat = play(scenes.get(case.scene), config, &case, case.start, false);
             let turned_run = play(
                 scenes.get(turned.scene),
-                &config,
+                config,
                 &turned,
                 turned.start,
                 false,
             );
             let verdict = judge(&mut scenes, &case, &flat, None);
             let turned_verdict = judge(&mut scenes, &turned, &turned_run, None);
-            if verdict.is_pass() == turned_verdict.is_pass() {
-                let steep = matches!(
-                    case.check,
-                    Check::Slope(study::laws::slope::Check::Steep { .. })
-                        | Check::Slope(study::laws::slope::Check::SteepRidge)
-                );
-                let tolerance = if steep { 1e-2 } else { 1e-3 };
-                let worst = flat
-                    .reports
-                    .iter()
-                    .zip(&turned_run.reports)
-                    .map(|(a, b)| norm(sub(frame.to_local_point(b.end), a.end)))
-                    .fold(0.0, f64::max);
-                if worst > tolerance {
-                    println!("{}: paths {worst} m apart", case.id);
-                    diverged += 1;
-                }
-            } else {
-                println!("{}: {verdict:?} here, {turned_verdict:?} tilted", case.id);
+            let steep = matches!(
+                case.check,
+                Check::Slope(study::laws::slope::Check::Steep { .. })
+                    | Check::Slope(study::laws::slope::Check::SteepRidge)
+            );
+            let tolerance = if steep { 1e-2 } else { 1e-3 };
+            let apart = flat
+                .reports
+                .iter()
+                .zip(&turned_run.reports)
+                .map(|(a, b)| norm(sub(frame.to_local_point(b.end), a.end)))
+                .fold(0.0, f64::max);
+            let same_verdict = verdict.is_pass() == turned_verdict.is_pass();
+            if apart > tolerance {
+                println!("{} {}: paths {apart} m apart", config.name, case.id);
             }
+            if !same_verdict {
+                println!(
+                    "{} {}: {verdict:?} here, {turned_verdict:?} tilted",
+                    config.name, case.id
+                );
+            }
+            tilt.record(same_verdict, apart, tolerance);
             flat_results.push(matrix::CaseOutcomes {
                 id: case.id.clone(),
                 outcomes: vec![verdict],
@@ -104,21 +184,16 @@ fn the_spec_d2_row_gives_the_same_cells_in_a_tilted_frame() {
                 id: case.id.clone(),
                 outcomes: vec![turned_verdict],
             });
-            compared += 1;
         }
         assert_eq!(
             matrix::cell(&flat_results),
             matrix::cell(&turned_results),
-            "column {}",
+            "{} column {}",
+            config.name,
             column.label()
         );
     }
-    assert!(compared > 100, "{compared} cases compared");
-    println!("{diverged} of {compared} paths diverged beyond the tolerance");
-    assert!(
-        diverged * 20 <= compared,
-        "{diverged} of {compared} paths diverged"
-    );
+    tilt
 }
 
 /// Appends the bits of a tick report to `out`, for exact comparisons.
@@ -239,24 +314,30 @@ fn study_runs_match_across_processes_and_worker_counts() {
     }
 }
 
-/// spec-d2 down the radial crest: the character state and the caller's carry saved at tick 40,
-/// a detour of 20 ticks (other input, a teleport, recovery speed 0.3), a restore, and ticks 40
-/// to 80 replay the original run bit for bit.
+/// spec-d2 and the recommended row down the radial crest: the character state and the caller's
+/// carry saved at tick 40, a detour of 20 ticks (other input, a teleport, recovery speed 0.3), a
+/// restore, and ticks 40 to 80 replay the original run bit for bit.
 #[test]
 fn a_restored_study_run_continues_bit_for_bit_after_a_detour() {
+    for config in [Config::spec_d2(), Config::recommended()] {
+        restored_run_continues(&config);
+    }
+}
+
+/// The detour test for `config`, in a scene of its own.
+fn restored_run_continues(config: &Config) {
     let mut scenes = Scenes::default();
     let case = matrix::cases(&mut scenes, Column::Radial)
         .into_iter()
         .find(|case| case.id == "radial/2+4/crest44.5/descent/v1.6")
         .unwrap();
-    let config = Config::spec_d2();
     let scene = scenes.get(case.scene);
     let walker = config.create_character(scene, case.start);
     let mut carry = case.carry;
     let mut original = Vec::new();
     let mut saved = None;
     let step = |scene: &mut Scene, carry: &mut Carry, desired: V3| {
-        let report = tick(scene, &walker, &config, carry, desired, None);
+        let report = tick(scene, &walker, config, carry, desired, None);
         scene.place_actor(report.end, common::walker::from_y_to(report.up));
         let mut bits = Vec::new();
         report_bits(&report, &mut bits);
@@ -305,7 +386,8 @@ fn a_restored_study_run_continues_bit_for_bit_after_a_detour() {
         let desired = case.input.desired(scene, t, origin);
         assert!(
             step(scene, &mut carry, desired) == *expected,
-            "tick {t} differs after the restore"
+            "{}: tick {t} differs after the restore",
+            config.name
         );
     }
 }

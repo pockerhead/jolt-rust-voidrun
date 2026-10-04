@@ -8,8 +8,10 @@
 //!   character's whole move: from the up and pose setters through the velocity output,
 //!   including the contact readout, the row's passes and the caller's bookkeeping. The actor
 //!   capsule sync, scene building and character creation are outside the timer.
-//! - W2, the law suite: every case of the study's law columns from its unperturbed start, one
-//!   sample per tick, also per law.
+//! - W2, the law suite: every case of the study's law columns from the start the law gates
+//!   judge (the unperturbed start, put back at rest for the row's padding), one sample per
+//!   tick, also per law. Each timed run is judged afterwards and must give the outcome the
+//!   untimed evaluation gives.
 //! - W3, physics calls: W1 again (one repetition), timing only the physics calls of each move
 //!   (refreshes, updates, the passes' queries, the contact readout and the autostep), summed per
 //!   move.
@@ -48,7 +50,10 @@ use report::{micros, print_machine};
 use study::config::Config;
 use study::controller::{start_physics_timer, take_physics_time, tick, TickReport};
 use study::expected::{pinned, Cell, PINNED};
-use study::laws::{Case, Column, Input, Scenes};
+use study::laws::{
+    evaluate, judge, perturbed_start, reference_run, Case, Column, Input, Run, Scenes,
+    PERTURBATIONS,
+};
 use study::matrix;
 use study::scenes::{add_actor, Scene};
 
@@ -288,7 +293,8 @@ fn update_only_walk() -> Result<Walk, Box<dyn Error>> {
     Ok(walk)
 }
 
-/// W2: every law case from its unperturbed start, one sample per tick, per column.
+/// W2: every law case from the start the law gates judge, one sample per tick, per column. The
+/// timed run is then judged (untimed) and must give the same outcome as `evaluate`.
 fn law_suite(
     scenes: &mut Scenes,
     columns: &[(Column, Vec<Case>)],
@@ -299,9 +305,13 @@ fn law_suite(
         .map(|(column, cases)| {
             let mut samples = Samples::default();
             for case in cases.iter().filter(|case| !case.report_only) {
+                let padding = row.settings.padding;
                 let scene = scenes.get(case.scene);
-                let walker = row.create_character(scene, case.start);
+                let start = perturbed_start(scene, case, PERTURBATIONS[0], padding);
+                let walker = row.create_character(scene, start);
+                let startup = scene.world.character(walker.id).unwrap().ground_state();
                 let mut carry = case.carry;
+                let mut reports = Vec::with_capacity(case.ticks);
                 for t in 0..case.ticks {
                     if let Input::Teleport { at, to, .. } = case.input {
                         if t == at {
@@ -310,26 +320,33 @@ fn law_suite(
                                 .world
                                 .character_mut(walker.id)
                                 .unwrap()
-                                .set_position(study::config::position_for(
-                                    to,
-                                    up,
-                                    row.settings.padding,
-                                ))
+                                .set_position(study::config::position_for(to, up, padding))
                                 .unwrap();
                         }
                     }
-                    let here =
-                        study::controller::origin_of(&scene.world, &walker, row.settings.padding);
+                    let here = study::controller::origin_of(&scene.world, &walker, padding);
                     let desired = black_box(case.input.desired(scene, t, here));
-                    let start = Instant::now();
+                    let timer = Instant::now();
                     let report = tick(scene, &walker, row, &mut carry, desired, None);
-                    samples.0.push(micros(start));
+                    samples.0.push(micros(timer));
                     scene.place_actor(black_box(report.end), from_y_to(report.up));
+                    reports.push(report);
                 }
                 scene.world.remove_character(walker.id).unwrap();
                 if row.settings.inner_body {
                     scene.world.optimize_broad_phase();
                 }
+                let run = Run {
+                    start,
+                    padding,
+                    startup,
+                    reports,
+                    traces: Vec::new(),
+                };
+                let reference = reference_run(scenes, row, case, start);
+                let timed = judge(scenes, case, &run, reference.as_ref());
+                let evaluated = evaluate(scenes, row, case, PERTURBATIONS[0]);
+                assert_eq!(timed, evaluated, "{} {}: the timed run", row.name, case.id);
             }
             (*column, samples)
         })

@@ -363,7 +363,14 @@ pub fn evaluate(scenes: &mut Scenes, config: &Config, case: &Case, offset: [f64;
     let scene = scenes.get(case.scene);
     let start = perturbed_start(scene, case, offset, config.settings.padding);
     let run = play(scene, config, case, start, false);
-    let reference = case.reference.map(|reference| {
+    let reference = reference_run(scenes, config, case, start);
+    judge(scenes, case, &run, reference.as_ref())
+}
+
+/// The reference run of `case` (if it has one) for a run from `start`: the reference's start
+/// moved by the same offset.
+pub fn reference_run(scenes: &mut Scenes, config: &Config, case: &Case, start: V3) -> Option<Run> {
+    case.reference.map(|reference| {
         let other = scenes.get(reference.scene);
         let shifted = add(reference.start, sub(start, case.start));
         let mirrored = Case {
@@ -371,8 +378,7 @@ pub fn evaluate(scenes: &mut Scenes, config: &Config, case: &Case, offset: [f64;
             ..case.clone()
         };
         play(other, config, &mirrored, shifted, false)
-    });
-    judge(scenes, case, &run, reference.as_ref())
+    })
 }
 
 /// The predicate of `case` on `run`.
@@ -417,8 +423,9 @@ impl Ground {
         }
     }
 
-    /// Every element of the support set is steep terrain.
-    pub fn interior_steep(&self, up: V3) -> bool {
+    /// Every element of the support set is steep terrain (an edge between steep faces, such as a
+    /// steep ridge's apex, included).
+    pub fn all_steep_terrain(&self, up: V3) -> bool {
         !self.support.is_empty()
             && self
                 .support
