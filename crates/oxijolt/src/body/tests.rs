@@ -1,0 +1,275 @@
+use super::access::bounds_overlap;
+use super::load::point_torque;
+use super::*;
+use crate::world::ensure_initialized;
+use crate::PhysicsWorld;
+use crate::Real;
+
+#[test]
+fn inertia_rule_texts_are_single_spaced() {
+    for text in [INERTIA_RULE, crate::character::INNER_BODY_INERTIA_RULE] {
+        assert!(!text.contains("  "), "{text}");
+    }
+}
+
+#[test]
+fn default_settings_match_jolt() {
+    assert!(ensure_initialized());
+    // SAFETY: Jolt is initialised, and the handle takes over the new settings.
+    let jolt =
+        CreationSettings(unsafe { Owned::from_raw(JPH_BodyCreationSettings_Create()) }.unwrap());
+    let ours = BodySettings::default();
+    let ptr = jolt.0.as_ptr();
+    // SAFETY: `ptr` is the live settings object owned by `jolt`; getters only read it.
+    unsafe {
+        assert_eq!(JPH_BodyCreationSettings_GetFriction(ptr), ours.friction);
+        assert_eq!(
+            JPH_BodyCreationSettings_GetRestitution(ptr),
+            ours.restitution
+        );
+        assert_eq!(
+            JPH_BodyCreationSettings_GetGravityFactor(ptr),
+            ours.gravity_factor
+        );
+        assert_eq!(
+            JPH_BodyCreationSettings_GetAllowSleeping(ptr),
+            ours.allow_sleeping
+        );
+        assert_eq!(
+            JPH_BodyCreationSettings_GetMotionQuality(ptr),
+            ours.motion_quality.to_jph()
+        );
+        assert_eq!(
+            MotionType::from_jph(JPH_BodyCreationSettings_GetMotionType(ptr)),
+            ours.motion_type
+        );
+        assert_eq!(
+            JPH_BodyCreationSettings_GetOverrideMassProperties(ptr),
+            JPH_OverrideMassProperties_CalculateMassAndInertia
+        );
+        assert_eq!(
+            JPH_BodyCreationSettings_GetEnhancedInternalEdgeRemoval(ptr),
+            ours.enhanced_internal_edge_removal
+        );
+        assert_eq!(
+            JPH_BodyCreationSettings_GetLinearDamping(ptr),
+            ours.linear_damping
+        );
+        assert_eq!(
+            JPH_BodyCreationSettings_GetAngularDamping(ptr),
+            ours.angular_damping
+        );
+        assert!(ours.mass.is_none());
+        // The one documented difference: Jolt's default layer is 0.
+        assert_eq!(JPH_BodyCreationSettings_GetObjectLayer(ptr), 0);
+    }
+    assert_eq!(ours.object_layer, ObjectLayer::MOVING);
+}
+
+#[test]
+fn velocity_limits_are_jolts_default_maxima() {
+    assert!(ensure_initialized());
+    let shape = Shape::new_sphere(0.5).unwrap();
+    let creation = CreationSettings::new(&shape, &BodySettings::default()).unwrap();
+    // SAFETY: the settings are live and owned by `creation`; the getters only read them.
+    let (linear, angular) = unsafe {
+        (
+            JPH_BodyCreationSettings_GetMaxLinearVelocity(creation.as_ptr()),
+            JPH_BodyCreationSettings_GetMaxAngularVelocity(creation.as_ptr()),
+        )
+    };
+    assert_eq!(linear.to_bits(), limits::MAX_LINEAR_VELOCITY.to_bits());
+    assert_eq!(angular.to_bits(), limits::MAX_ANGULAR_VELOCITY.to_bits());
+}
+
+#[test]
+fn point_torque_rejects_overflowing_products_even_when_they_cancel() {
+    let center = RVec3::ZERO;
+    let torque = point_torque(Vec3::new(0.0, 2.0, 0.0), RVec3::new(3.0, 0.0, 0.0), center);
+    assert_eq!(torque, Ok([0.0, 0.0, 6.0]));
+    // Lever and force are parallel: the cross product is zero in f64, but Jolt's f32
+    // products `lever_x * force_y` and `lever_y * force_x` are infinite.
+    let parallel = point_torque(
+        Vec3::new(1.0e20, 1.0e20, 0.0),
+        RVec3::new(1.0e20, 1.0e20, 0.0),
+        center,
+    );
+    assert!(matches!(parallel, Err(BodyError::InvalidValue(_))));
+    let far = RVec3::new(Real::MAX, 0.0, 0.0);
+    let lever_overflows = point_torque(
+        Vec3::new(0.0, 1.0, 0.0),
+        far,
+        RVec3::new(-Real::MAX, 0.0, 0.0),
+    );
+    assert!(matches!(lever_overflows, Err(BodyError::InvalidValue(_))));
+}
+
+#[test]
+fn enhanced_internal_edge_removal_reaches_the_body() {
+    let mut world = PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+    let shape = Shape::new_sphere(0.5).unwrap();
+    for value in [true, false] {
+        let id = world
+            .create_body(
+                &shape,
+                &BodySettings::new_dynamic().enhanced_internal_edge_removal(value),
+            )
+            .unwrap();
+        let stored = with_locked_body(world.body_lock_interface, id, |body| {
+            // SAFETY: `body` is locked for the duration of the closure; the getter only
+            // reads it.
+            unsafe { JPH_Body_GetEnhancedInternalEdgeRemoval(body.as_ptr()) }
+        });
+        assert_eq!(stored, Some(value));
+    }
+}
+
+#[test]
+fn damping_reaches_the_body() {
+    let mut world = PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+    let shape = Shape::new_sphere(0.5).unwrap();
+    let settings = BodySettings::new_dynamic()
+        .linear_damping(0.3)
+        .angular_damping(0.7);
+    let id = world.create_body(&shape, &settings).unwrap();
+    let stored = with_read_locked_body(world.body_lock_interface, id, |body| {
+        // SAFETY: `body` is locked for the duration of the closure and dynamic, so it has
+        // motion properties; the getters only read.
+        unsafe {
+            let motion = JPH_Body_GetMotionProperties(body.as_ptr());
+            (
+                JPH_MotionProperties_GetLinearDamping(motion),
+                JPH_MotionProperties_GetAngularDamping(motion),
+            )
+        }
+    });
+    assert_eq!(stored, Some((0.3, 0.7)));
+}
+
+#[test]
+fn invalid_damping_is_rejected() {
+    let mut world = PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+    let shape = Shape::new_sphere(0.5).unwrap();
+    for value in [-0.1, f32::NAN, f32::INFINITY] {
+        for settings in [
+            BodySettings::new_dynamic().linear_damping(value),
+            BodySettings::new_dynamic().angular_damping(value),
+        ] {
+            assert!(matches!(
+                world.create_body(&shape, &settings),
+                Err(BodyError::InvalidValue(_))
+            ));
+        }
+    }
+    assert_eq!(world.body_count(), 0);
+}
+
+#[test]
+fn mass_is_reported_for_dynamic_bodies_only() {
+    let mut world = PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+    let shape = Shape::new_sphere(0.5).unwrap();
+    let dynamic = world
+        .create_body(&shape, &BodySettings::new_dynamic().mass(12.5))
+        .unwrap();
+    let mass = world.body(dynamic).unwrap().mass().unwrap();
+    assert!((mass - 12.5).abs() <= 12.5 * 1.0e-6, "{mass}");
+    for settings in [BodySettings::new_static(), BodySettings::new_kinematic()] {
+        let id = world.create_body(&shape, &settings).unwrap();
+        assert_eq!(world.body(id).unwrap().mass(), None);
+    }
+}
+
+/// Mass 1 with the inertia `R * diag(moments) * R^T`, `R` a rotation of 30 degrees about Z.
+fn rotated_inertia(moments: [f32; 3]) -> JPH_MassProperties {
+    let (sin, cos) = 30.0_f32.to_radians().sin_cos();
+    let rotation = [[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]];
+    let mut properties = JPH_MassProperties {
+        mass: 1.0,
+        ..ZERO_MASS_PROPERTIES
+    };
+    for (column, out) in properties.inertia.column.iter_mut().take(3).enumerate() {
+        let entry = |row: usize| -> f32 {
+            (0..3)
+                .map(|k| rotation[row][k] * moments[k] * rotation[column][k])
+                .sum()
+        };
+        *out = JPH_Vec4 {
+            x: entry(0),
+            y: entry(1),
+            z: entry(2),
+            w: 0.0,
+        };
+    }
+    properties
+}
+
+#[test]
+fn rotated_inertia_is_accepted() {
+    let properties = rotated_inertia([1.0, 2.0, 3.0]);
+    assert_ne!(
+        properties.inertia.column[0].y, 0.0,
+        "the tensor is not diagonal"
+    );
+    assert!(has_finite_inverse(&properties));
+}
+
+#[test]
+fn non_finite_inertia_is_rejected() {
+    let mut properties = rotated_inertia([1.0, 2.0, 3.0]);
+    properties.inertia.column[1].x = f32::NAN;
+    assert!(!has_finite_inverse(&properties));
+}
+
+#[test]
+fn ill_conditioned_rotated_inertia_is_rejected() {
+    assert!(!has_finite_inverse(&rotated_inertia([1.0, 1.0e-9, 1.0])));
+}
+
+fn aabox(min: [f32; 3], max: [f32; 3]) -> JPH_AABox {
+    JPH_AABox {
+        min: Vec3::from(min).to_jph(),
+        max: Vec3::from(max).to_jph(),
+    }
+}
+
+#[test]
+fn bounds_overlap_counts_touching_and_containment() {
+    let unit = aabox([0.0; 3], [1.0; 3]);
+    assert!(bounds_overlap(&unit, &aabox([0.5; 3], [2.0; 3])));
+    assert!(bounds_overlap(
+        &unit,
+        &aabox([1.0, 0.0, 0.0], [2.0, 1.0, 1.0])
+    ));
+    assert!(bounds_overlap(&unit, &aabox([0.25; 3], [0.75; 3])));
+    assert!(bounds_overlap(&aabox([0.25; 3], [0.75; 3]), &unit));
+}
+
+#[test]
+fn bounds_separated_on_any_axis_do_not_overlap() {
+    let unit = aabox([0.0; 3], [1.0; 3]);
+    for axis in 0..3 {
+        let mut min = [0.0; 3];
+        let mut max = [1.0; 3];
+        min[axis] = 1.5;
+        max[axis] = 2.5;
+        let apart = aabox(min, max);
+        assert!(!bounds_overlap(&unit, &apart), "axis {axis}");
+        assert!(!bounds_overlap(&apart, &unit), "axis {axis}");
+    }
+}
+
+#[test]
+fn tiny_rotated_inertia_uses_the_unit_sphere() {
+    assert!(has_finite_inverse(&rotated_inertia([
+        1.0e-7, 2.0e-7, 3.0e-7
+    ])));
+}
+
+#[test]
+fn tiny_ill_conditioned_rotated_inertia_is_rejected() {
+    // Jolt decomposes it before it falls back to the unit sphere, and that decomposition
+    // asserts like a large one.
+    let properties = rotated_inertia([1.0e-7, 1.0e-12, 1.0e-7]);
+    assert_ne!(properties.inertia.column[0].y, 0.0);
+    assert!(!has_finite_inverse(&properties));
+}
