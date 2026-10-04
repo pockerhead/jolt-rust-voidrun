@@ -513,7 +513,13 @@ fn select_bindings(prefix: &Path, cfg: &NativeConfig) -> anyhow::Result<PathBuf>
     let include = prefix.join("include");
     let policy = targets::POLICY_SOURCES
         .iter()
-        .map(|source| Ok((*source, read(&crate_dir.join(source))?)))
+        .map(|source| {
+            // Without the `bindgen` feature rustc never reads `bindgen_options.rs`, so
+            // cargo would not rerun this script when it changes.
+            let path = crate_dir.join(source);
+            println!("cargo:rerun-if-changed={}", path.display());
+            Ok((*source, read(&path)?))
+        })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let policy: Vec<(&str, &[u8])> = policy
         .iter()
