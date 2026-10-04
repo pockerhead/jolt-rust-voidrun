@@ -2,9 +2,9 @@
 //!
 //! Jolt checks most magnitudes only with debug assertions (the `asserts` feature) and otherwise
 //! computes with whatever it is given, so a finite but huge input can overflow Jolt's `f32`
-//! arithmetic inside a step. The setters and constructors that take a magnitude check it against
-//! the constants of this module before it reaches Jolt, and refuse a value outside its bound
-//! with the error of the call.
+//! arithmetic inside a step. An input with a magnitude bound is checked against the constants of
+//! this module before it reaches Jolt, and a value outside the bound is refused with the error of
+//! the call. Other inputs only have to be finite, non-negative or ordered.
 //!
 //! # Frame and units
 //! Positions are in metres in the world frame, which must keep every component of a caller-given

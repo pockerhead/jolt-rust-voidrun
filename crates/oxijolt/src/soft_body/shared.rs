@@ -494,7 +494,7 @@ impl SoftBodySharedSettingsBuilder {
                         // With distance bends, Jolt keeps these two vertices apart.
                         require(
                             is_edge_length(self.position(first), self.position(second)),
-                            "vertices opposite a shared edge must be \
+                            "vertices opposite a shared edge must be at least \
                              limits::MIN_SOFT_BODY_EDGE_LENGTH apart",
                         )?;
                     }
