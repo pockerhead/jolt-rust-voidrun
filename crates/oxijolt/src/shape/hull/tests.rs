@@ -153,3 +153,55 @@ fn hull_carries_its_material() {
     let found = unsafe { shape_material(hull.as_ptr(), SubShapeId::new(u32::MAX)) };
     assert_eq!(found, Some(33));
 }
+
+fn simplex(width: f64, thickness: f64, coplanar_distance: f64) -> InitialSimplex {
+    InitialSimplex {
+        area_sq: 1.0,
+        length: 10.0,
+        width,
+        thickness,
+        coplanar_distance,
+    }
+}
+
+#[test]
+fn needle_rule_compares_the_rounding_lever_with_the_tolerance() {
+    // Near the origin the tolerance is Jolt's 1 mm: the bound on the width is
+    // 0.25 * length * coplanar / 1e-3.
+    let coplanar = 1.0e-6;
+    let bound = MIN_NEEDLE_LEVER * 10.0 * coplanar / HULL_TOLERANCE;
+    assert!(simplex(bound, 1.0, coplanar).classify().is_ok());
+    assert_eq!(
+        simplex(bound * 0.999, 1.0, coplanar).classify(),
+        Err(ShapeError::ConvexHull(HullError::Degenerate))
+    );
+    // Far out the coplanar distance exceeds the tolerance and the bound is a pure ratio.
+    let coplanar = 2.0e-3;
+    assert!(simplex(2.5, 1.0, coplanar).classify().is_ok());
+    assert!(simplex(2.49, 1.0, coplanar).classify().is_err());
+}
+
+#[test]
+fn slab_rule_counts_coplanar_distances() {
+    let coplanar = 1.0e-6;
+    assert!(simplex(1.0, 200.0 * coplanar, coplanar).classify().is_ok());
+    assert_eq!(
+        simplex(1.0, 199.0 * coplanar, coplanar).classify(),
+        Err(ShapeError::ConvexHull(HullError::Coplanar))
+    );
+}
+
+#[test]
+fn thin_slabs_near_the_origin_build_down_to_a_fraction_of_a_millimetre() {
+    // A 2 m plank: 200 coplanar distances are about 0.14 mm.
+    let plank = |thickness: f32| cube_with(Vec3::new(1.0, thickness / 2.0, 1.0));
+    assert!(Shape::new_convex_hull(&plank(2.0e-4), 0.0).is_ok());
+    assert_eq!(hull_error(&plank(1.0e-4)), Some(HullError::Coplanar));
+}
+
+fn cube_with(half: Vec3) -> Vec<Vec3> {
+    cube(1.0)
+        .into_iter()
+        .map(|p| Vec3::new(p.x * half.x, p.y * half.y, p.z * half.z))
+        .collect()
+}

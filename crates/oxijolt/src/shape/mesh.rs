@@ -11,6 +11,13 @@ use crate::{limits, MeshError, PhysicsMaterial, ShapeError, Vec3};
 const MAX_MESH_MATERIALS: usize = 32;
 /// Most triangles Jolt stores per leaf of a mesh's tree (`MeshShape::MaxTrianglesPerLeaf`).
 const MAX_TRIANGLES_PER_LEAF: u32 = 8;
+/// Smallest `|(v1 - v0) x (v2 - v0)|` (twice the area, m²) of a triangle given to Jolt: ten
+/// times the cross product below which Jolt's collision detection asserts on a triangle
+/// (`EPAPenetrationDepth::GetPenetrationDepthStepGJK`, `IsNearZero` at 1e-12 squared).
+const MIN_TRIANGLE_CROSS: f64 = 1.0e-5;
+/// How many vertex displacements times the longest edge a triangle's cross product must keep
+/// above [`MIN_TRIANGLE_CROSS`]; see [`collidable_triangles`].
+const CROSS_ROUNDING_FACTOR: f64 = 8.0;
 
 /// How Jolt builds a mesh's bounding volume tree (Jolt `MeshShapeSettings::EBuildQuality`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -168,9 +175,12 @@ impl Shape {
     /// `vertices` each).
     ///
     /// A triangle's front face is the side from which its vertices run counter-clockwise.
-    /// Jolt drops degenerate triangles (also those that become degenerate when Jolt quantizes
-    /// vertices to 21 bits over the mesh's bounds) and duplicates, and reorders the rest, so
-    /// sub-shape ids do not follow the input order. Closest-hit rays hit back faces too.
+    /// Triangles too small or too thin for Jolt to collide with reliably are dropped: twice
+    /// their area must be at least 1e-5 m² plus a margin for Jolt's 21-bit vertex quantization
+    /// and `f32` rounding, which grows with the mesh's size and distance from the shape origin
+    /// ([docs/limits.md#triangle-meshes]). Jolt itself drops degenerate triangles (also those
+    /// that become degenerate under its quantization) and duplicates, and reorders the rest,
+    /// so sub-shape ids do not follow the input order. Closest-hit rays hit back faces too.
     ///
     /// Meshes have no volume. They suit static bodies, and kinematic bodies with an explicit
     /// [`BodySettings::mass`](crate::BodySettings::mass);
@@ -182,7 +192,8 @@ impl Shape {
     ///   either, an index beyond `vertices`, or a setting out of range (see [`MeshSettings`]);
     /// - [`ShapeError::InvalidDimensions`]: a vertex (referenced or not) that is not finite or
     ///   has a component beyond [`limits::MAX_SHAPE_EXTENT`] in absolute value;
-    /// - [`ShapeError::Mesh`]: no triangle is left after Jolt's clean-up;
+    /// - [`ShapeError::Mesh`]: no triangle is left after dropping small, thin, degenerate and
+    ///   duplicate ones;
     /// - [`ShapeError::Rejected`]: anything else Jolt refuses.
     ///
     /// Building cost grows with the triangle count; see [docs/benchmarks.md] and
@@ -198,56 +209,106 @@ impl Shape {
         validate_geometry(vertices, triangles)?;
         settings.validate(triangles.len())?;
         initialize()?;
-        let jolt_settings = mesh_settings(vertices, triangles, settings)?;
-        if sanitize(&jolt_settings) == 0 {
+        let kept = collidable_triangles(vertices, triangles);
+        if kept.is_empty() {
+            return Err(ShapeError::Mesh(MeshError::NoTriangles));
+        }
+        let jolt_settings = mesh_settings(vertices, triangles, &kept, settings)?;
+        let mesh: *mut JPH_MeshShapeSettings = jolt_settings.as_ptr();
+        // Jolt's own clean-up has run; after `collidable_triangles` it can only drop duplicates.
+        // SAFETY: the settings are live, owned by the guard and were created as mesh settings.
+        if unsafe { JPH_MeshShapeSettings_GetTriangleCount(mesh) } == 0 {
             return Err(ShapeError::Mesh(MeshError::NoTriangles));
         }
         jolt_settings.create()?.within_extent_bounds()
     }
 }
 
-/// Runs Jolt's clean-up of mesh `settings` until it drops no more triangles and returns the
-/// triangle count left.
+/// The indices of the triangles Jolt can collide with reliably, in input order.
 ///
-/// One pass (`MeshShapeSettings::Sanitize`, which Jolt's constructor runs) quantizes vertices
-/// over the bounds of all triangles it starts with. Dropping triangles can shrink those bounds
-/// and shift the quantization grid, so a sliver that survived one pass can collapse on the
-/// next, and Jolt's shape constructor, which checks with the final bounds, would refuse it.
-fn sanitize(settings: &ShapeSettings) -> u32 {
-    let mesh: *mut JPH_MeshShapeSettings = settings.as_ptr();
-    // SAFETY: the settings are live, owned by `settings` and were created as mesh settings.
-    let mut count = unsafe { JPH_MeshShapeSettings_GetTriangleCount(mesh) };
-    loop {
-        // SAFETY: as above; the settings have not created a shape yet, and every vertex index
-        // is in range (checked before the settings were created).
-        let left = unsafe {
-            JPH_MeshShapeSettings_Sanitize(mesh);
-            JPH_MeshShapeSettings_GetTriangleCount(mesh)
-        };
-        if left == count {
-            return left;
+/// Jolt stores vertices quantized to 21 bits over the mesh's bounds and transforms them into
+/// the other shape's space in `f32` when it collides, so each vertex can move by about one
+/// quantization step plus a few `f32` roundings of the largest coordinate. A triangle whose
+/// cross product could shrink below Jolt's collision threshold under such moves is dropped like
+/// a degenerate one: it is too small or too thin to collide with. See
+/// [docs/limits.md#triangle-meshes].
+///
+/// [docs/limits.md#triangle-meshes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#triangle-meshes
+fn collidable_triangles(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Vec<usize> {
+    let corner = |index: u32| {
+        let v = vertices[index as usize];
+        [v.x, v.y, v.z].map(f64::from)
+    };
+    let mut low = [f64::INFINITY; 3];
+    let mut high = [f64::NEG_INFINITY; 3];
+    for &index in triangles.iter().flatten() {
+        let v = corner(index);
+        for axis in 0..3 {
+            low[axis] = low[axis].min(v[axis]);
+            high[axis] = high[axis].max(v[axis]);
         }
-        count = left;
     }
+    let step = (0..3)
+        .map(|axis| (high[axis] - low[axis]) / f64::from((1u32 << 21) - 1))
+        .fold(0.0, f64::max);
+    let largest = (0..3)
+        .map(|axis| low[axis].abs().max(high[axis].abs()))
+        .fold(0.0, f64::max);
+    let displacement = step + 4.0 * f64::from(f32::EPSILON) * largest;
+    triangles
+        .iter()
+        .enumerate()
+        .filter(|(_, triangle)| {
+            let [a, b, c] = triangle.map(corner);
+            let (ab, ac, bc) = (sub(b, a), sub(c, a), sub(c, b));
+            let longest = [ab, ac, bc]
+                .map(|edge| dot(edge, edge).sqrt())
+                .into_iter()
+                .fold(0.0, f64::max);
+            let normal = cross(ab, ac);
+            dot(normal, normal).sqrt()
+                >= MIN_TRIANGLE_CROSS + CROSS_ROUNDING_FACTOR * displacement * longest
+        })
+        .map(|(index, _)| index)
+        .collect()
 }
 
-/// Jolt mesh settings holding the validated geometry and `settings`.
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// Jolt mesh settings holding the validated geometry, of the triangles `kept`, and `settings`.
 fn mesh_settings(
     vertices: &[Vec3],
     triangles: &[[u32; 3]],
+    kept: &[usize],
     settings: &MeshSettings<'_>,
 ) -> Result<ShapeSettings, ShapeError> {
     let jolt_vertices: Vec<JPH_Vec3> = vertices.iter().map(|vertex| vertex.to_jph()).collect();
     let material_indices = settings.materials.map(|(_, indices)| indices);
-    let jolt_triangles: Vec<JPH_IndexedTriangle> = triangles
+    let jolt_triangles: Vec<JPH_IndexedTriangle> = kept
         .iter()
-        .enumerate()
-        .map(|(i, &[i1, i2, i3])| JPH_IndexedTriangle {
-            i1,
-            i2,
-            i3,
-            materialIndex: material_indices.map_or(0, |indices| u32::from(indices[i])),
-            userData: 0,
+        .map(|&i| {
+            let [i1, i2, i3] = triangles[i];
+            JPH_IndexedTriangle {
+                i1,
+                i2,
+                i3,
+                materialIndex: material_indices.map_or(0, |indices| u32::from(indices[i])),
+                userData: 0,
+            }
         })
         .collect();
     let list: Vec<*const JPH_PhysicsMaterial> = settings

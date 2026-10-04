@@ -43,8 +43,8 @@ fn thin_box_hull_is_a_dynamic_body() {
 }
 
 /// A needle hull along a direction rotated 30 degrees about two axes, `length` long and
-/// 0.002 m thick.
-fn needle(length: f32) -> Shape {
+/// `thickness` thick.
+fn needle(length: f32, thickness: f32) -> Shape {
     let rotation = quat_about(Vec3::new(0.0, 0.0, 1.0), 30f32.to_radians());
     let tilt = quat_about(Vec3::new(1.0, 0.0, 0.0), 30f32.to_radians());
     let rotate = |v: Vec3| {
@@ -64,7 +64,7 @@ fn needle(length: f32) -> Shape {
         };
         apply(tilt, apply(rotation, v))
     };
-    let points: Vec<Vec3> = box_corners(Vec3::new(length / 2.0, 0.001, 0.001))
+    let points: Vec<Vec3> = box_corners(Vec3::new(length / 2.0, thickness / 2.0, thickness / 2.0))
         .into_iter()
         .map(rotate)
         .collect();
@@ -72,8 +72,24 @@ fn needle(length: f32) -> Shape {
 }
 
 #[test]
+fn needles_too_thin_for_the_hull_builder_are_degenerate() {
+    // 20 m by 2 mm near the origin: rounding tilts faces across the width by more than Jolt's
+    // hull tolerance over the length.
+    let rotate = |p: Vec3| Vec3::new(0.8 * p.x - 0.6 * p.y, 0.6 * p.x + 0.8 * p.y, p.z);
+    let points: Vec<Vec3> = box_corners(Vec3::new(10.0, 0.001, 0.001))
+        .into_iter()
+        .map(rotate)
+        .collect();
+    assert!(matches!(
+        Shape::new_convex_hull(&points, 0.0),
+        Err(ShapeError::ConvexHull(HullError::Degenerate))
+    ));
+}
+
+#[test]
 fn rotated_needle_hull_is_refused_as_dynamic_and_accepted_as_static() {
-    let shape = needle(20.0);
+    // 2 m by 1 cm: thick enough for Jolt's hull builder, too slender for a dynamic inertia.
+    let shape = needle(2.0, 0.01);
     let mut world = world(Vec3::ZERO, 1);
     match world.create_body(&shape, &BodySettings::new_dynamic()) {
         Err(BodyError::InvalidValue(rule)) => assert!(rule.contains("inertia"), "{rule}"),

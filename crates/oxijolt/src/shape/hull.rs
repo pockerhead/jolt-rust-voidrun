@@ -8,18 +8,34 @@ use crate::{limits, HullError, PhysicsMaterial, ShapeError, Vec3};
 /// Jolt's `ConvexHullBuilder::cMinTriangleAreaSq`: the squared length of the cross product of two
 /// triangle edges below which Jolt finds no initial triangle for a hull.
 const MIN_TRIANGLE_AREA_SQ: f64 = 1.0e-12;
+/// Jolt's `ConvexHullShapeSettings::mHullTolerance` default, metres: how far points may lie
+/// outside the hull Jolt builds.
+const HULL_TOLERANCE: f64 = 1.0e-3;
+/// Smallest `width * tolerance / (length * coplanar distance)` of a cloud Jolt's hull builder is
+/// given; see [docs/limits.md#convex-hulls]. Measured: 0.052 is the largest value at which the
+/// builder still asserted, so the bound keeps a factor of about 5.
+///
+/// [docs/limits.md#convex-hulls]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-hulls
+const MIN_NEEDLE_LEVER: f64 = 0.25;
+/// Smallest distance of the farthest point from the initial triangle's plane, in Jolt's coplanar
+/// distances, of a cloud Jolt's hull builder is given. Jolt itself treats up to 6 as flat
+/// (`cCoplanarSlopFactor`); measured: thin slabs asserted up to 10.9 and a small sphere of
+/// points far from the origin at 60, so the bound keeps a factor of about 3.
+const MIN_SLAB_THICKNESS: f64 = 200.0;
 
 impl Shape {
     /// The convex hull of `points` (shape space, metres) with a convex radius in metres.
     ///
     /// Needs at least 4 points ([`HullError::TooFewPoints`]), each finite with every component
     /// at most [`limits::MAX_SHAPE_EXTENT`] in absolute value, and a convex radius that is
-    /// finite and not negative ([`ShapeError::InvalidDimensions`]). Points on a line or in one
-    /// spot ([`HullError::Degenerate`]: no triangle of them is larger than Jolt's minimum
-    /// initial triangle) and points in one plane ([`HullError::Coplanar`]) are refused: a flat
-    /// hull has no volume, so Jolt would give a dynamic body made of it zero mass and a
-    /// meaningless inertia. Use a mesh or a thin box for a flat surface. Whatever else Jolt's
-    /// hull builder refuses comes back as [`ShapeError::Rejected`].
+    /// finite and not negative ([`ShapeError::InvalidDimensions`]). Points on or close to a line
+    /// or in one spot are refused as [`HullError::Degenerate`], points on or close to a plane as
+    /// [`HullError::Coplanar`]: a flat hull has no volume, so Jolt would give a dynamic body made
+    /// of it zero mass and a meaningless inertia, and Jolt's single-precision hull builder cannot
+    /// build very thin needles and slabs reliably. "Close" grows with the cloud's length and its
+    /// distance from the shape origin; [docs/limits.md#convex-hulls] gives the rules. Use a
+    /// mesh, a capsule or a thin box instead. Whatever else Jolt's hull builder refuses comes
+    /// back as [`ShapeError::Rejected`].
     ///
     /// Jolt keeps at most 256 vertices of the hull and drops the points inside it. It shrinks the
     /// hull by the convex radius and inflates it again, reducing the radius where the hull is too
@@ -49,9 +65,7 @@ impl Shape {
     ) -> Result<Self, ShapeError> {
         validate_hull_points(points)?;
         validate_convex_radius(convex_radius)?;
-        if !spans_initial_triangle(points) {
-            return Err(ShapeError::ConvexHull(HullError::Degenerate));
-        }
+        InitialSimplex::of(points).classify()?;
         initialize()?;
         let jolt_points: Vec<JPH_Vec3> = points.iter().map(|point| point.to_jph()).collect();
         // SAFETY: Jolt is initialised; `jolt_points` is live and holds the count passed, which
@@ -110,24 +124,81 @@ fn validate_hull_points(points: &[Vec3]) -> Result<(), ShapeError> {
     Ok(())
 }
 
-/// Whether Jolt's hull builder finds an initial triangle in `points`, replayed in `f64`:
-/// the first point farthest from the origin, the first point farthest from it, and the third
-/// point that makes the largest triangle with both (`ConvexHullBuilder::Initialize`). Near
-/// the threshold Jolt's `f32` result can differ; Jolt then refuses with its own message.
-fn spans_initial_triangle(points: &[Vec3]) -> bool {
-    let points: Vec<[f64; 3]> = points
-        .iter()
-        .map(|point| [point.x, point.y, point.z].map(f64::from))
-        .collect();
-    let first = farthest(&points, None, length_sq);
-    let second = farthest(&points, Some(first), |p| length_sq(sub(p, points[first])));
-    let best = points
-        .iter()
-        .enumerate()
-        .filter(|&(index, _)| index != first && index != second)
-        .map(|(_, &p)| length_sq(cross(sub(points[first], p), sub(points[second], p))))
-        .fold(-1.0, f64::max);
-    best >= MIN_TRIANGLE_AREA_SQ
+/// Jolt's initial simplex of a point cloud (`ConvexHullBuilder::Initialize`), replayed in `f64`:
+/// the first point farthest from the origin, the first point farthest from it, the point that
+/// makes the largest triangle with both, and the point farthest from that triangle's plane.
+struct InitialSimplex {
+    /// Squared length of the cross product of the triangle's edges.
+    area_sq: f64,
+    /// Distance between the first two points, metres.
+    length: f64,
+    /// Distance of the third point from the line through the first two, metres: no point lies
+    /// farther from that line.
+    width: f64,
+    /// Distance of the farthest point from the triangle's plane, metres.
+    thickness: f64,
+    /// Jolt's `DetermineCoplanarDistance`: `3 * FLT_EPSILON` times the sum of the largest
+    /// absolute coordinate per axis, metres.
+    coplanar_distance: f64,
+}
+
+impl InitialSimplex {
+    fn of(points: &[Vec3]) -> Self {
+        let points: Vec<[f64; 3]> = points
+            .iter()
+            .map(|point| [point.x, point.y, point.z].map(f64::from))
+            .collect();
+        let first = farthest(&points, None, length_sq);
+        let second = farthest(&points, Some(first), |p| length_sq(sub(p, points[first])));
+        let (a, b) = (points[first], points[second]);
+        let mut third = (first, -1.0);
+        for (index, &p) in points.iter().enumerate() {
+            let area_sq = length_sq(cross(sub(a, p), sub(b, p)));
+            if index != first && index != second && area_sq > third.1 {
+                third = (index, area_sq);
+            }
+        }
+        let (area_sq, c) = (third.1, points[third.0]);
+        let length = length_sq(sub(b, a)).sqrt();
+        let normal = cross(sub(b, a), sub(c, a));
+        let normal_length = length_sq(normal).sqrt();
+        let centroid = [0, 1, 2].map(|i| (a[i] + b[i] + c[i]) / 3.0);
+        let thickness = points
+            .iter()
+            .map(|&p| (dot(sub(p, centroid), normal) / normal_length).abs())
+            .fold(0.0, f64::max);
+        let largest = [0, 1, 2].map(|i| points.iter().map(|p| p[i].abs()).fold(0.0, f64::max));
+        Self {
+            area_sq,
+            length,
+            width: area_sq.sqrt() / length,
+            thickness,
+            coplanar_distance: 3.0
+                * f64::from(f32::EPSILON)
+                * (largest[0] + largest[1] + largest[2]),
+        }
+    }
+
+    /// What [`Shape::new_convex_hull`] refuses before Jolt sees the points. Clouds smaller than
+    /// Jolt's minimum initial triangle are degenerate; needles and slabs too thin for Jolt's
+    /// single-precision builder are refused as degenerate and coplanar. Near these thresholds
+    /// Jolt's `f32` result can differ from this `f64` replay.
+    fn classify(&self) -> Result<(), ShapeError> {
+        if self.area_sq < MIN_TRIANGLE_AREA_SQ {
+            return Err(ShapeError::ConvexHull(HullError::Degenerate));
+        }
+        // The rounding of a position, about the coplanar distance, tilts a face built over the
+        // width by `coplanar / width`, which moves it by `length * coplanar / width` at the far
+        // end; the builder needs that well inside its tolerance.
+        let tolerance = HULL_TOLERANCE.max(self.coplanar_distance);
+        if self.width * tolerance < MIN_NEEDLE_LEVER * self.length * self.coplanar_distance {
+            return Err(ShapeError::ConvexHull(HullError::Degenerate));
+        }
+        if self.thickness < MIN_SLAB_THICKNESS * self.coplanar_distance {
+            return Err(ShapeError::ConvexHull(HullError::Coplanar));
+        }
+        Ok(())
+    }
 }
 
 /// The index of the first point with the largest `measure`, skipping `skip`.
@@ -154,8 +225,12 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     ]
 }
 
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
 fn length_sq(a: [f64; 3]) -> f64 {
-    a[0] * a[0] + a[1] * a[1] + a[2] * a[2]
+    dot(a, a)
 }
 
 #[cfg(test)]

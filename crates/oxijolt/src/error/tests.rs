@@ -103,11 +103,11 @@ fn shape_error_variants_display_their_payload() {
     );
     assert_eq!(
         ShapeError::ConvexHull(HullError::Degenerate).to_string(),
-        "invalid convex hull: the points do not span a triangle"
+        "invalid convex hull: the points lie on or close to a line"
     );
     assert_eq!(
         ShapeError::ConvexHull(HullError::Coplanar).to_string(),
-        "invalid convex hull: the points lie in one plane"
+        "invalid convex hull: the points lie on or close to a plane"
     );
     assert_eq!(
         ShapeError::Mesh(MeshError::NoTriangles).to_string(),

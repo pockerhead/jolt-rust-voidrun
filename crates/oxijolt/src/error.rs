@@ -80,10 +80,10 @@ impl std::error::Error for ShapeError {}
 pub enum HullError {
     /// Fewer than 4 points.
     TooFewPoints,
-    /// The points lie on a line or in a single point: no triangle of them is larger than Jolt's
-    /// minimum initial triangle.
+    /// The points lie in one spot, on a line, or so close to a line that Jolt's hull builder
+    /// cannot build a reliable hull of them.
     Degenerate,
-    /// The points lie in one plane, so the hull has no volume.
+    /// The points lie in one plane, or so close to one that the hull has next to no volume.
     Coplanar,
 }
 
@@ -91,8 +91,8 @@ impl fmt::Display for HullError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::TooFewPoints => "a convex hull needs at least 4 points",
-            Self::Degenerate => "the points do not span a triangle",
-            Self::Coplanar => "the points lie in one plane",
+            Self::Degenerate => "the points lie on or close to a line",
+            Self::Coplanar => "the points lie on or close to a plane",
         })
     }
 }

@@ -462,7 +462,7 @@ fn expected_hull_error(kind: Cloud, points: &[Vec3]) -> Option<&'static [HullErr
     }
 }
 
-const HULL_CASES: usize = 600;
+const HULL_CASES: usize = 3000;
 
 fn hull_family(arena: &mut Arena) {
     let mut rng = Rng::new(0x5EED_0001);
@@ -494,7 +494,7 @@ fn hull_family(arena: &mut Arena) {
             }
         };
         accepted += 1;
-        if accepted % 6 == 0 {
+        if accepted % 4 == 0 {
             let extent = Extent::of(&points);
             arena.drop_dynamic(&shape, extent, 30, &what);
             arena.query_static(&shape, extent, &what);
@@ -502,7 +502,7 @@ fn hull_family(arena: &mut Arena) {
     }
     eprintln!("hull: {accepted} of {HULL_CASES} accepted");
     assert!(
-        accepted > HULL_CASES / 5,
+        accepted > HULL_CASES / 10,
         "only {accepted} hulls were accepted"
     );
 }
@@ -617,7 +617,7 @@ fn soup(rng: &mut Rng, kind: Soup) -> (Vec<Vec3>, Vec<[u32; 3]>) {
     (vertices, triangles)
 }
 
-const MESH_CASES: usize = 150;
+const MESH_CASES: usize = 600;
 
 fn mesh_family(arena: &mut Arena) {
     let mut rng = Rng::new(0x5EED_0002);

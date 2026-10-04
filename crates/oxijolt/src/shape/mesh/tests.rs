@@ -221,7 +221,7 @@ fn mesh_settings_reach_jolt() {
         .build_quality(MeshBuildQuality::FavorBuildSpeed);
     let (vertices, triangles) = quad();
     initialize().unwrap();
-    let jolt_settings = mesh_settings(&vertices, &triangles, &settings).unwrap();
+    let jolt_settings = mesh_settings(&vertices, &triangles, &[0, 1], &settings).unwrap();
     let ptr: *mut JPH_MeshShapeSettings = jolt_settings.as_ptr();
     // SAFETY: the settings are live and were created as mesh settings; getters only read them.
     unsafe {
@@ -236,7 +236,7 @@ fn mesh_settings_reach_jolt() {
         );
         assert_eq!(JPH_MeshShapeSettings_GetTriangleCount(ptr), 2);
     }
-    let defaults = mesh_settings(&vertices, &triangles, &MeshSettings::default()).unwrap();
+    let defaults = mesh_settings(&vertices, &triangles, &[0, 1], &MeshSettings::default()).unwrap();
     let ptr: *mut JPH_MeshShapeSettings = defaults.as_ptr();
     // SAFETY: as above.
     unsafe {
@@ -286,11 +286,12 @@ fn kinematic_eligibility_looks_through_compounds_and_decorators() {
 }
 
 #[test]
-fn sanitizing_runs_until_no_triangle_is_left_to_drop() {
+fn slivers_that_collapse_under_quantization_are_dropped() {
     // The repeated-index triangle widens the bounds of Jolt's first clean-up pass to x = -1000.
     // Within those bounds the sliver's 3e-4 m edge spans two quantization cells; once the
     // degenerate triangle is gone the bounds start at x = 0 and the edge collapses, which
-    // Jolt's shape constructor would refuse ("Triangle 1 is degenerate!").
+    // Jolt's shape constructor refused ("Triangle 1 is degenerate!") before slivers were
+    // dropped in Rust.
     let x = f32::from_bits(0x43c8_0055);
     let vertices = [
         Vec3::new(0.0, 0.0, 0.0),
@@ -302,5 +303,39 @@ fn sanitizing_runs_until_no_triangle_is_left_to_drop() {
         Vec3::new(x, 0.6, 500.0),
     ];
     let triangles = [[0, 1, 2], [3, 3, 0], [4, 5, 6]];
+    assert_eq!(collidable_triangles(&vertices, &triangles), [0]);
     assert!(Shape::new_mesh(&vertices, &triangles).is_ok());
+}
+
+#[test]
+fn small_and_thin_triangles_are_dropped() {
+    // Twice the area of a right triangle with legs `leg` is `leg^2`; the threshold is 1e-5 m²
+    // plus the rounding margin, which is tiny for a mesh this small near the origin.
+    let triangle = |leg: f32| {
+        [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, leg),
+            Vec3::new(leg, 0.0, 0.0),
+        ]
+    };
+    assert_eq!(collidable_triangles(&triangle(0.0032), &[[0, 1, 2]]), [0]);
+    assert!(collidable_triangles(&triangle(0.0031), &[[0, 1, 2]]).is_empty());
+    assert!(no_triangles(Shape::new_mesh(
+        &triangle(0.0031),
+        &[[0, 1, 2]]
+    )));
+    // A 10 m sliver 1e-5 m wide has a cross product of 1e-4, above the floor, but its margin
+    // for a 10 m mesh is 8 * (10 / 2^21 + rounding) * 10, about 4e-4.
+    let sliver = [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(10.0, 0.0, 0.0),
+        Vec3::new(5.0, 0.0, 1.0e-5),
+    ];
+    assert!(collidable_triangles(&sliver, &[[0, 1, 2]]).is_empty());
+    let wide = [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(10.0, 0.0, 0.0),
+        Vec3::new(5.0, 0.0, 1.0e-3),
+    ];
+    assert_eq!(collidable_triangles(&wide, &[[0, 1, 2]]), [0]);
 }
