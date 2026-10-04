@@ -67,10 +67,10 @@ impl<'a> ShapeCast<'a> {
         }
     }
 
-    /// Stops the cast `metres` before the shape would touch an obstacle, finite, not negative
-    /// and at most [`MAX_TARGET_DISTANCE`](Self::MAX_TARGET_DISTANCE). Default 0. Only sphere and capsule query shapes support a target distance
-    /// above 0: the cast uses a copy of the shape whose radius is grown by `metres`, which
-    /// allocates one temporary shape per cast.
+    /// Stops the cast `metres` before the shape would touch an obstacle, finite, not negative and
+    /// at most [`MAX_TARGET_DISTANCE`](Self::MAX_TARGET_DISTANCE). Default 0. Only sphere and
+    /// capsule query shapes support a target distance above 0: the cast uses a copy of the shape
+    /// whose radius is grown by `metres`, which allocates one temporary shape per cast.
     #[must_use]
     pub fn target_distance(mut self, metres: f32) -> Self {
         self.target_distance = metres;
@@ -168,8 +168,9 @@ impl PhysicsWorld {
     /// The position must be finite and within [`limits::MAX_POSITION`], the rotation a finite unit
     /// quaternion, the direction finite, not zero and at most `2 *` [`limits::MAX_POSITION`] per
     /// component, the target distance finite, not negative and at most
-    /// [`ShapeCast::MAX_TARGET_DISTANCE`] (and 0 unless the shape is a sphere or capsule), the shape not a heightfield, and the filter valid for this world;
-    /// otherwise [`QueryError::InvalidValue`] is returned.
+    /// [`ShapeCast::MAX_TARGET_DISTANCE`] (and 0 unless the shape is a sphere or capsule), the
+    /// shape not a heightfield, and the filter valid for this world; otherwise
+    /// [`QueryError::InvalidValue`] is returned.
     pub fn cast_shape(
         &self,
         cast: &ShapeCast<'_>,

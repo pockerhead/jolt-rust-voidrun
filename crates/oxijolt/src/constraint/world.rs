@@ -358,21 +358,25 @@ impl<K: ConstraintKind> ConstraintMut<'_, K> {
 impl PhysicsWorld {
     /// Creates a constraint between `body1` and `body2` and returns its typed id.
     ///
-    /// Frames given in [`ConstraintSpace::WorldSpace`] are
-    /// world space at the time the constraint is created; Jolt turns them into each body's own
-    /// frame then. Both bodies must be bodies of this world, different, and neither the inner
-    /// body of a character nor a part of a ragdoll ([`ConstraintError::Body`]). Except for a
-    /// gear, a rack and pinion and a pulley, one of them may be static or kinematic, which
-    /// anchors the constraint to the world or to the kinematic body. Those three need two
-    /// dynamic bodies ([`ConstraintError::NotDynamic`]), because Jolt's solver parts for them
-    /// cannot handle a static or kinematic body; a pulley's fixed points already anchor its
-    /// rope. Jolt still lets the two bodies collide with each other where their shapes touch. While the constraint exists,
-    /// [`remove_body`](Self::remove_body) refuses its bodies ([`BodyError::UsedByConstraint`]).
+    /// Frames given in [`ConstraintSpace::WorldSpace`] are world space at the time the
+    /// constraint is created; Jolt turns them into each body's own frame then. Both bodies must
+    /// be bodies of this world, different, and neither the inner body of a character nor a part
+    /// of a ragdoll ([`ConstraintError::Body`]). Except for a gear, a rack and pinion and a
+    /// pulley, one of them may be static or kinematic, which anchors the constraint to the world
+    /// or to the kinematic body. Those three need two dynamic bodies
+    /// ([`ConstraintError::NotDynamic`]): Jolt's solver parts for them read both bodies' motion
+    /// properties without checking, so a static body breaks them and a kinematic one gets
+    /// pushed. A pulley's fixed points already anchor its rope. The safe API cannot change a
+    /// body's motion type afterwards, so checking at creation is enough.
+    ///
+    /// Jolt still lets the two bodies collide with each other where their shapes touch. While
+    /// the constraint exists, [`remove_body`](Self::remove_body) refuses its bodies
+    /// ([`BodyError::UsedByConstraint`]).
     ///
     /// Each point where the constraint holds a dynamic body must have a lever-arm ratio of at
     /// most [`limits::MAX_LEVER_ARM_RATIO`], its distance from the body's centre of mass
-    /// measured against the body's size. The check uses the bodies' poses now and
-    /// covers every point of a path and, for an automatic point, the point Jolt picks: between
+    /// measured against the body's size. The check uses the bodies' poses now and covers
+    /// every point of a path and, for an automatic point, the point Jolt picks: between
     /// the centres of mass, weighted by inverse mass towards the lighter body.
     ///
     /// The new constraint wakes its bodies that can move, as its setters do, so a sleeping body

@@ -155,9 +155,7 @@ pub const MAX_GEAR_RATIO: f32 = 10.0;
 /// radius of gyration about it. A sphere or cube with radius of gyration `k` has
 /// `2 · (|r| / k)²`, so the bound allows `|r|` up to about `22 · k`; a rod held at its end has a
 /// ratio of 6 at any length.
-/// [`PhysicsWorld::create_constraint`] checks every point a constraint holds a dynamic body by
-/// (for a path, every point of the path; for an automatic point, the point Jolt picks
-/// between the centres of mass, weighted by inverse mass towards the lighter body).
+/// [`PhysicsWorld::create_constraint`] says which points of a constraint it checks.
 ///
 /// The bound allows a door on a hinge at its edge, a weld at the surface of a part, and a
 /// pendulum bob of radius `a` on a point or hinge constraint up to about `14 · a` from the pivot;

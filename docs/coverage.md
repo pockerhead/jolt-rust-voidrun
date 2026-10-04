@@ -14,7 +14,7 @@ that check it at its boundary.
 |---|---|---|
 | `WorldSettings::gravity`, `PhysicsWorld::set_gravity` | `MAX_ACCELERATION` | `world_gravity_is_bounded_by_max_acceleration` |
 | `WorldSettings::max_contact_constraints` | `1..=WorldSettings::MAX_CONTACT_CONSTRAINTS` | `contact_constraint_capacity_is_bounded` |
-| `WorldSettings::max_bodies`, `worker_threads` | Jolt's and oxijolt' counts | `invalid_settings_are_rejected`, `worker_thread_bounds_are_validated` |
+| `WorldSettings::max_bodies`, `worker_threads` | Jolt's and oxijolt's counts | `invalid_settings_are_rejected`, `worker_thread_bounds_are_validated` |
 | `WorldSettings::job_system` (`JobSystem::max_concurrency`) | `1..=WorldSettings::MAX_CONCURRENCY`, read once in `PhysicsWorld::new` | `max_concurrency_is_bounded` |
 | `WorldSettings::max_body_pairs`, `temp_allocator_size` | at least 1; Jolt asserts nothing on their size, and joltc's temp allocator falls back to `malloc` | `invalid_settings_are_rejected` |
 | `PhysicsWorld::step` delta time | `MIN_DELTA_TIME..=MAX_DELTA_TIME` | `step_rejects_delta_time_above_the_bound`, `step_rejects_delta_time_below_the_bound` |
@@ -251,5 +251,5 @@ scenes with inputs at their bounds; no derivation backs them:
   inertia tensor as an error, but Jolt asserts on that path first (`Ragdoll.cpp:158`).
 - The assertion `errors == EPhysicsUpdateError::None` at the end of every step that drops
   contacts (`PhysicsSystem.cpp:679`) is intentional: `PhysicsWorld::step` returns the same
-  errors in its `StepReport`, and oxijolt' assertion handler lets the
+  errors in its `StepReport`, and oxijolt's assertion handler lets the
   process continue for this assertion only.

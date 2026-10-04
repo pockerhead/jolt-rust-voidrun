@@ -515,10 +515,11 @@ impl Shape {
 
     /// A cylinder along the local Y axis, centred on the origin, `2 * half_height` metres high.
     ///
-    /// Half height and radius must be finite, positive and at most
-    /// [`limits::MAX_SHAPE_EXTENT`], the convex radius finite and not negative. Like a box's, the convex radius rounds the edges for contacts and shape casts;
-    /// Jolt clamps it to `min(half_height, radius)` (`CylinderShape.cpp`) and uses at most
-    /// 0.05 m of it there (`ScaleHelpers::ScaleConvexRadius`).
+    /// Half height and radius must be finite, positive and at most [`limits::MAX_SHAPE_EXTENT`],
+    /// the convex radius finite and not negative. Like a box's, the convex radius rounds the edges
+    /// for contacts and shape casts; Jolt clamps it to `min(half_height, radius)`
+    /// (`CylinderShape.cpp`) and uses at most 0.05 m of it there
+    /// (`ScaleHelpers::ScaleConvexRadius`).
     pub fn new_cylinder_with_convex_radius(
         half_height: f32,
         radius: f32,
