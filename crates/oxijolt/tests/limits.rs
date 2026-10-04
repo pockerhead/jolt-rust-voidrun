@@ -85,6 +85,10 @@ fn query_invalid(result: Result<impl Sized, QueryError>) -> bool {
     matches!(result, Err(QueryError::InvalidValue(_)))
 }
 
+fn character_invalid(result: Result<impl Sized, CharacterError>) -> bool {
+    matches!(result, Err(CharacterError::InvalidValue(_)))
+}
+
 #[test]
 fn world_gravity_is_bounded_by_max_acceleration() {
     let bound = limits::MAX_ACCELERATION;
@@ -449,24 +453,22 @@ fn character_settings_and_setters_are_bounded() {
         base().collision_tolerance(beyond),
     ];
     for settings in &rejected {
-        assert!(matches!(
-            world.create_character(settings, RVec3::ZERO, Quat::IDENTITY),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(world.create_character(
+            settings,
+            RVec3::ZERO,
+            Quat::IDENTITY
+        )));
     }
 
     let corner = RVec3::new(limits::MAX_POSITION, limits::MAX_POSITION, 0.0);
     let id = world
         .create_character(&base(), corner, Quat::IDENTITY)
         .unwrap();
-    assert!(matches!(
-        world.create_character(
-            &base(),
-            RVec3::new(limits::MAX_POSITION.next_up(), 0.0, 0.0),
-            Quat::IDENTITY
-        ),
-        Err(CharacterError::InvalidValue(_))
-    ));
+    assert!(character_invalid(world.create_character(
+        &base(),
+        RVec3::new(limits::MAX_POSITION.next_up(), 0.0, 0.0),
+        Quat::IDENTITY
+    )));
     let mut character = world.character_mut(id).unwrap();
     for p in real_on_axes(limits::MAX_POSITION) {
         character.set_position(p).unwrap();
@@ -475,16 +477,10 @@ fn character_settings_and_setters_are_bounded() {
         character.set_linear_velocity(v).unwrap();
     }
     for p in real_on_axes(limits::MAX_POSITION.next_up()) {
-        assert!(matches!(
-            character.set_position(p),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(character.set_position(p)));
     }
     for v in on_axes(limits::MAX_LINEAR_VELOCITY.next_up()) {
-        assert!(matches!(
-            character.set_linear_velocity(v),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(character.set_linear_velocity(v)));
     }
     let reached = world.character(id).unwrap();
     assert_eq!(
@@ -517,10 +513,7 @@ fn character_update_gravity_and_steps_are_bounded() {
         update(&mut world, gravity, &defaults).unwrap();
     }
     for gravity in on_axes(limits::MAX_ACCELERATION.next_up()) {
-        assert!(matches!(
-            update(&mut world, gravity, &defaults),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(update(&mut world, gravity, &defaults)));
     }
     let extent = limits::MAX_SHAPE_EXTENT;
     let gravity = Vec3::new(0.0, -9.81, 0.0);
@@ -544,10 +537,7 @@ fn character_update_gravity_and_steps_are_bounded() {
         defaults.walk_stairs_step_forward_test(beyond),
     ];
     for settings in &rejected {
-        assert!(matches!(
-            update(&mut world, gravity, settings),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(update(&mut world, gravity, settings)));
     }
 }
 
@@ -976,10 +966,7 @@ fn character_weight_impulse_at_a_lever_arm_is_bounded() {
     for gravity in [at_bound.next_up(), limits::MAX_ACCELERATION] {
         let (mut world, cube, id) = character_on_the_edge_of_a_light_cube();
         let position = world.character(id).unwrap().position();
-        assert!(matches!(
-            update(&mut world, id, gravity),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(update(&mut world, id, gravity)));
         assert_eq!(
             real_bits(world.character(id).unwrap().position()),
             real_bits(position)
