@@ -4,6 +4,20 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Shapes: convex hulls (`Shape::new_convex_hull`, `new_convex_hull_with_material`, `HullError`),
+  triangle meshes with a material per triangle for static and kinematic bodies (`Shape::new_mesh`,
+  `new_mesh_with_settings`, `MeshSettings`, `MeshBuildQuality`, `MeshError`), scaled shapes
+  (`Shape::scaled`) and tapered capsules and cylinders, cones among them
+  (`Shape::new_tapered_capsule`, `new_tapered_cylinder`). Point clouds, scales and radii that Jolt
+  cannot build or collide with reliably are refused with typed errors; anything else Jolt refuses
+  comes back as `ShapeError::Rejected` with Jolt's message (`JoltMessage`, cut after a whole word).
+- Mesh triangles too small or too thin to collide with are dropped and returned as
+  `DroppedTriangles` (indices and area). The rule counts the rounding of the triangle in the space
+  of the convex shape it collides with, up to `MeshSettings::max_convex_extent` (default 750 m,
+  below `limits::MAX_SHAPE_EXTENT`; see `docs/limits.md`).
+- joltc extension: `JPH_ShapeSettings_CreateShapeWithError`, `JPH_MeshShapeSettings_Create3`
+  (materials), `JPH_MeshShapeSettings_GetTriangleCount` and `JPH_Shape_GetTriangles`.
+
 ## 0.4.0 — 2026-10-04
 
 First release on crates.io.
