@@ -12,6 +12,8 @@
 //! swing axes.
 
 mod coupling;
+mod id;
+mod lever;
 mod linear;
 mod path;
 mod pulley;
@@ -24,6 +26,7 @@ use std::f32::consts::PI;
 use oxijolt_sys::*;
 
 pub use coupling::{GearConstraintSettings, RackAndPinionConstraintSettings};
+pub use id::{AnyConstraintId, ConstraintId};
 pub use linear::{
     DistanceConstraintSettings, DistanceRange, FixedConstraintSettings, PointConstraintSettings,
 };
@@ -33,10 +36,10 @@ pub use rotational::ConeConstraintSettings;
 pub use slider::SliderConstraintSettings;
 pub(crate) use world::ConstraintEntry;
 pub use world::{
-    AnyConstraintId, ConeConstraint, ConstraintId, ConstraintKind, ConstraintMut, ConstraintRef,
-    ConstraintSettings, ConstraintType, DistanceConstraint, FixedConstraint, GearConstraint,
-    HingeConstraint, MotorState, PathConstraint, PointConstraint, PulleyConstraint,
-    RackAndPinionConstraint, SixDofConstraint, SliderConstraint, SwingTwistConstraint,
+    ConeConstraint, ConstraintKind, ConstraintMut, ConstraintRef, ConstraintSettings,
+    ConstraintType, DistanceConstraint, FixedConstraint, GearConstraint, HingeConstraint,
+    MotorState, PathConstraint, PointConstraint, PulleyConstraint, RackAndPinionConstraint,
+    SixDofConstraint, SliderConstraint, SwingTwistConstraint,
 };
 
 use crate::limits;

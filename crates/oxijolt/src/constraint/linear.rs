@@ -4,7 +4,8 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
-use super::world::{check_spring, sealed, ConstraintSettings};
+use super::lever::check_spring;
+use super::world::{sealed, ConstraintSettings};
 use super::{
     constraint_base, point_anchors, validate_frame, validate_point, within, ConstraintSpace,
     SpringSettings,

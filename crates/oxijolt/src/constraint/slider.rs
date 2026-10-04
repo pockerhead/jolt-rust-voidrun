@@ -4,8 +4,9 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
+use super::lever::check_spring;
 use super::rotational::{check_friction, check_motor};
-use super::world::{check_spring, sealed, ConstraintSettings};
+use super::world::{sealed, ConstraintSettings};
 use super::{
     constraint_base, non_negative, point_anchors, validate_frame, within, ConstraintSpace,
     MotorSettings, SpringSettings,

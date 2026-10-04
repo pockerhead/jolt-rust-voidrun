@@ -6,7 +6,8 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
-use super::world::{check_spring, sealed, ConstraintSettings};
+use super::lever::check_spring;
+use super::world::{sealed, ConstraintSettings};
 use super::{
     constraint_base, non_negative, point_anchors, validate_hinge_limits, validate_point, within,
     ConstraintSpace, MotorSettings, SpringSettings,
