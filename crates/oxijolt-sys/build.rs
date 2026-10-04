@@ -25,11 +25,14 @@ use anyhow::{bail, Context};
 #[cfg(feature = "bindgen")]
 #[path = "build/bindgen_options.rs"]
 mod bindgen_options;
+#[path = "build/cmake_options.rs"]
+mod cmake_options;
 // Shared with the xtask regenerator; each bindings mode uses a part of it.
 #[allow(dead_code)]
 #[path = "build/targets.rs"]
 mod targets;
 
+use cmake_options::{AndroidNdk, FeatureSwitches, ANDROID_GENERATOR};
 use targets::Family;
 
 /// joltc commit of the `vendor/joltc` submodule. Must match the gitlink; CI checks this.
@@ -218,15 +221,10 @@ fn build_with_cmake(cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").context("OUT_DIR is not set")?);
     let mut config = cmake::Config::new(crate_dir.join("native"));
 
-    // We always have to build in Release.
-    //
-    // On Windows, Rust always links against the non-debug CRT. Using the Debug
-    // profile (which the cmake crate will sometimes pick by default) causes
-    // Jolt/joltc to be linked against the debug CRT, causing linker issues.
-    //
-    // As a nice side effect, this ensures that we build with a known
-    // configuration instead of accidentally enabling or disabling extra
-    // features just based on opt-level.
+    // Release whatever Cargo's profile: the cmake crate maps an unoptimized Rust
+    // build to CMake's Debug, which on MSVC selects the debug CRT that Rust
+    // binaries do not link. One fixed profile also keeps Jolt's own
+    // configuration switches the same for every Cargo profile.
     config.profile("Release");
     config.out_dir(out_dir.join("joltc"));
 
@@ -268,16 +266,14 @@ fn build_with_cmake(cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
         on_off(cfg.debug_renderer),
     );
 
-    // These feature flags affect the compilation of both Jolt and joltc.
-    config.define("DOUBLE_PRECISION", on_off(cfg.double_precision));
-    config.define("USE_ASSERTS", on_off(cfg.asserts));
-    // Pins Jolt's floating-point flags to its cross-platform-deterministic
-    // settings: MSVC `/fp:precise` instead of `/fp:fast`, Clang
-    // `-ffp-contract=off`, FMADD off on x86. See the feature in Cargo.toml.
-    config.define(
-        "CROSS_PLATFORM_DETERMINISTIC",
-        on_off(cfg.cross_platform_deterministic),
-    );
+    let features = FeatureSwitches {
+        double_precision: cfg.double_precision,
+        asserts: cfg.asserts,
+        cross_platform_deterministic: cfg.cross_platform_deterministic,
+    };
+    for (option, enabled) in features.options() {
+        config.define(option, on_off(enabled));
+    }
 
     if cfg.target_env == "msvc" {
         // Jolt and joltc strip `/EHsc` from their own scopes while C++
@@ -291,43 +287,12 @@ fn build_with_cmake(cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
         config.define("CMAKE_MSVC_RUNTIME_LIBRARY", cfg.crt);
     }
 
-    // Native Android cross-compile setup. Without this, building
-    // oxijolt-sys for Android via the standard
-    // `cargo ndk --target <android-triple> check` flow fails because
-    // (a) cmake-rs defaults to MSBuild on Windows hosts which can't
-    // target Android; (b) the NDK's `android.toolchain.cmake` requires
-    // `ANDROID_ABI` to be set as a CMake variable (env var is
-    // ignored); (c) `ANDROID_NDK_HOME` is the canonical env name set
-    // by `nttld/setup-ndk` GitHub Action + cargo-ndk's local
-    // workflow.
-    //
-    // We translate cargo's target arch to NDK's ABI string and route
-    // CMake through the NDK toolchain file. `ANDROID_PLATFORM=android-21`
-    // is the same baseline most cargo-ndk users target.
     if cfg.target_os == "android" {
-        let android_ndk_home = env::var("ANDROID_NDK_HOME")
-            .or_else(|_| env::var("ANDROID_NDK_ROOT"))
-            .or_else(|_| env::var("ANDROID_NDK"))
-            .context(
-                "Android cross-compile requires ANDROID_NDK_HOME (or ANDROID_NDK_ROOT / \
-                 ANDROID_NDK) to point at the NDK install. Install via \
-                 `nttld/setup-ndk@v1` in CI or the Android SDK manager locally.",
-            )?;
-        let toolchain_file = format!("{android_ndk_home}/build/cmake/android.toolchain.cmake");
-        config.define("CMAKE_TOOLCHAIN_FILE", &toolchain_file);
-        let android_abi = match cfg.target_arch.as_str() {
-            "aarch64" => "arm64-v8a",
-            "arm" => "armeabi-v7a",
-            "x86" => "x86",
-            "x86_64" => "x86_64",
-            arch => bail!("unsupported Android target arch: {arch}"),
-        };
-        config.define("ANDROID_ABI", android_abi);
-        config.define("ANDROID_PLATFORM", "android-21");
-        // cmake-rs defaults to the host-OS generator (MSBuild on Win);
-        // the NDK toolchain only supports Ninja / Makefiles. Force
-        // Ninja explicitly.
-        config.generator("Ninja");
+        let ndk = AndroidNdk::locate(&cfg.target_arch, |name| env::var(name).ok())?;
+        for (name, value) in ndk.options() {
+            config.define(name, value);
+        }
+        config.generator(ANDROID_GENERATOR);
     }
 
     let prefix = config.build();
