@@ -8,12 +8,34 @@ vendored Jolt 5.6 sources (`crates/oxijolt-sys/vendor/JoltPhysics/Jolt/Physics/`
 The derivations hold with every input at its bound and a time step `dt <= 1` s
 (`PhysicsWorld::MAX_DELTA_TIME`); numbers are rounded.
 
+## Frame and extent
+
+`MAX_POSITION` follows Jolt's "Big Worlds" documentation (`Docs/Architecture.md`):
+single-precision simulation is accurate within roughly 5 km of the origin, and double precision
+handles worlds of thousands of km; at 10 000 km Jolt's `f32` broad phase still has a resolution
+of about 1 m. It is not a Jolt assertion threshold.
+
+`MAX_SHAPE_EXTENT` follows Jolt's "Conventions and Limits" documentation, which recommends static
+objects of 0.1 to 2000 m; the bound applies on each side of the centre of mass. It bounds a
+shape's inertia to at most `6 · mass · MAX_SHAPE_EXTENT²`.
+
+## Accelerations
+
+`MAX_ACCELERATION` is `MAX_LINEAR_VELOCITY / PhysicsWorld::MIN_DELTA_TIME`, about 5e8 m/s². A
+larger acceleration already reaches Jolt's speed clamp within every step `PhysicsWorld::step`
+accepts, so the bound removes no motion that the clamp keeps. `MAX_ANGULAR_ACCELERATION` is the
+same for Jolt's angular speed clamp.
+
 ## Velocities at creation
 
 Jolt asserts `Length() <= mMaxLinearVelocity` (and the angular
 counterpart) when it creates a body (`Body.cpp:424`, `MotionProperties.h:48`). The checks
 compare Jolt's own `Vec3::Length`, called through joltc, with Jolt's defaults; a test creates
 bodies on the bound in 64 directions, which the asserts leg runs.
+
+`MAX_LINEAR_VELOCITY` is Jolt's default `BodyCreationSettings::mMaxLinearVelocity`
+(`BodyCreationSettings.h:111`), `MAX_ANGULAR_VELOCITY` its default `mMaxAngularVelocity`
+(`BodyCreationSettings.h:112`).
 
 ## Integration
 
@@ -72,6 +94,11 @@ at most `1e-36` per face. An edge in `A` is bounded by
 `1.0001 · (|e| + 15 u (|pa| + |pb|))`. A tetrahedron with three 1 m edges at a right
 corner takes a pressure of up to about 9e4; the ball of radius 0.5 m in
 `pressure_at_the_bound_steps_finitely` takes `MAX_SOFT_BODY_PRESSURE`.
+
+`MAX_SOFT_BODY_PRESSURE` is measured: Jolt applies `pressure · dt / (6 · volume)` times each
+face's area as an impulse (`SoftBodyMotionProperties.cpp:290-312`), and a closed ball of 1 m with
+vertex masses at `MIN_MASS` and at the total-mass bound, at this pressure, stepped 600 times on a
+floor in the `asserts` build, stays finite (`pressure_at_the_bound_steps_finitely`).
 
 ## Rigid body inertia
 
@@ -154,6 +181,22 @@ on the origin, a 2.5 m ribbon 1, 2 or 3 cm wide and a 3 m tube of radius 1 or 2 
 refused, and Jolt created and stepped them without an assert at baked rotations of 0,
 0.001 and 0.3 rad. A kinematic vertex skips the check.
 
+## Soft body edge length
+
+Jolt only asserts that a rest length is above zero (`SoftBodySharedSettings.cpp:226,377`) and
+divides by edge lengths while it solves; `MIN_SOFT_BODY_EDGE_LENGTH` keeps a degenerate edge out
+of the solver with a margin.
+
+## Soft body compliance
+
+Jolt divides each compliance by the squared sub-step
+(`SoftBodyMotionProperties.cpp:371,445,496,577,594`). `PhysicsWorld::step` always runs one
+collision step, so a sub-step is at least `PhysicsWorld::MIN_DELTA_TIME` divided by
+`SoftBodySettings::MAX_ITERATIONS`, 1e-8 s, and `compliance / dt²` is at most
+`1e20 · 1e16 = 1e36`, below `f32::MAX`; Jolt's average of two compliances, `0.5 · (c1 + c2)`, stays
+finite as well. This proves that the product is finite, not that the solver is stable at every
+compliance.
+
 ## Vehicle gravity
 
 Jolt adds `gravity / inverse_mass` to the chassis
@@ -168,10 +211,21 @@ impulse also turns the ground body. `PhysicsWorld::update_character` accepts at 
 `MAX_WEIGHT_IMPULSE`, 1e9 N·s, which changes the linear velocity of a body of the
 smallest mass by at most 1e12 m/s and the angular velocity of a body whose principal
 inverse inertia is at most `√3 · 1e6` by at most about 6e18 rad/s; both squares are
-finite (see `MAX_WEIGHT_IMPULSE` for the derivation). Its push impulse is capped at
+finite (derivation below). Its push impulse is capped at
 `delta_velocity / inv_effective_mass` (`CharacterVirtual.cpp:795-811`), whose effective
 mass includes the body's rotation, so the velocity change at the contact is at most the
 relative normal speed whatever the strength.
+
+`MAX_WEIGHT_IMPULSE` in detail. Jolt keeps a body's principal moments of inertia only while their
+vector is longer than 1e-6 (`Vec3::IsNearZero` in `MotionProperties.cpp:46-56`) and otherwise
+uses the inertia of a sphere of radius 1, an inverse of `2.5 / mass`, at most 2500 for
+`MIN_MASS`. So a body whose principal moments are equal has an inverse inertia of at most
+`√3 · 1e6`, and the ground contact lies within `√3 · MAX_SHAPE_EXTENT` of its centre of mass. For
+such a body and every body with a smaller principal inverse inertia, the angular velocity change
+is at most `√3e6 · 3464 · 1e9`, about 6e18 rad/s, whose square is finite; the linear velocity
+change is at most `1e9 · 1e3` m/s. Without the bound, a character of `MAX_MASS` at
+`MAX_ACCELERATION` with a one-second update (5e14 N·s) on the edge of a 6 cm cube of `MIN_MASS`
+overflows the cube's squared angular speed, which Jolt asserts on (`MotionProperties.inl:38`).
 
 ## Springs
 
@@ -185,6 +239,9 @@ larger of the mass and the largest principal moment of inertia
 (`PhysicsWorld::create_constraint`); the constraint's spring setters use the same bound.
 For a wheel's suspension it is `MAX_MASS`, since Jolt's suspension effective mass is at most the
 chassis mass (`VehicleConstraint.cpp:448-451`).
+
+`MAX_SPRING_COEFFICIENT` keeps `c + dt · k` finite (at most 2e30 for `dt <= 1`), so the softness,
+bias and effective mass Jolt computes from them stay finite.
 
 ## Anti-roll bars
 
@@ -207,6 +264,54 @@ At most `MAX_FRICTION`, so Jolt's combined friction `sqrt(f1 · f2)`
 (`ContactConstraintManager.h:554`) is finite and the friction impulse bound, combined friction
 times the normal impulse (`ContactConstraintManager.cpp:1714-1715`), is never `0 · ∞` = NaN.
 A cube sliding on a floor, both at `f32::MAX`, had NaN velocities within three 60 Hz steps.
+
+`MAX_FRICTION` keeps that product finite: any coefficient whose square is finite (below about
+1.8e19) does, and 1000 is far above the friction of real materials.
+
+## Coupling ratios
+
+Jolt multiplies the inverse mass or inertia of body 2 by the ratio's square in the effective mass,
+and body 2's velocity (for racks and pulleys also its impulse) by the ratio
+(`GearConstraintPart.h:81,122`, `RackAndPinionConstraintPart.h:82,123`,
+`IndependentAxisConstraintPart.h:71,112` for pulleys). With a principal inverse inertia of at most
+`√3 · 1e6` (see "Character weight and push"), `MAX_RATIO² · I⁻¹` is at most about 1.7e14, far
+from `f32` overflow. A ratio of 1e4 already turns a pinion ten thousand radians per metre of its
+rack; tests step both bounds on the lightest and heaviest bodies.
+
+Gears get a tighter range, `1..=MAX_GEAR_RATIO`, measured rather than derived. Jolt 5.6 applies a
+gear's impulse to body 2 without the ratio (`GearConstraintPart::ApplyVelocityStep`), so each
+solver iteration keeps up to `1 − 1/ratio` of the velocity error `ω1 + ratio · ω2`, the worst case
+being a body 1 much heavier than body 2. With Jolt's 10 velocity iterations per step the gear then
+needs more steps to restore the relation the larger the ratio. `MAX_GEAR_RATIO` is the largest
+round ratio that, after a disturbance, brings the error back to within 2 % of its initial value
+within 10 steps for any mass distribution: measured worst 1.6 % at ratio 10, 6.5 % at 20, 60 % at
+100, and at 1e4 91 % still after 60 steps. The first step after a disturbance leaves up to
+`(1 − 1/ratio)^10`, 35 % at ratio 10. `gear_keeps_its_velocity_relation_at_the_largest_ratio`
+tests it at the bound.
+
+## Lever-arm ratio
+
+`MAX_LEVER_ARM_RATIO` is measured, not derived. Jolt solves each constraint part with its
+effective mass `K = Σ (m⁻¹ · 1 + [r]× I⁻¹ [r]×ᵀ)` (`PointConstraintPart.h`,
+`AxisConstraintPart.h`) in `f32`. A ratio of at most `B` per body bounds the lever terms by
+`B · m⁻¹`, so `K`'s condition number stays below `1 + B`. Two failures were measured with a body
+at the velocity bounds, under gravity, for 120 steps, in the `asserts` build:
+- a body held far from its centre of mass: a 1 g, 6 cm cube on a hinge 116 m away (a ratio of
+  4.5e7) went to NaN, two 1 kg, 1 m cubes joined by a point 3000 m away (1.1e8) moved
+  erratically and at 4000 m Jolt asserted that a squared velocity is finite
+  (`MotionProperties.inl:28`), and a cube on a static body took angular velocities rounded to
+  powers of two from a ratio of about 1e8;
+- two light bodies held rigidly (a fixed constraint, a six-DOF constraint with every axis fixed,
+  a swing-twist constraint with zero ranges): their accumulated impulse grows step after step
+  until Jolt asserts that the squared angular velocity is finite (`MotionProperties.inl:38`),
+  from `|r| / k` of about 37 (a ratio of 2700) for 1 g and 1 kg cubes of 6 cm and 20 cm, for the
+  6 cm cube also at a tenth of the velocity bounds; none of 24 seeded cases failed at `|r| / k`
+  of 34 or below. Point, hinge, cone, slider and six-DOF constraints with limited rotations did
+  not fail at `|r| / k` of 650.
+
+A derivation in the style of `MAX_WEIGHT_IMPULSE` (products of the largest accepted inverse
+inertia, lever and impulse kept finite in `f32`) allows levers of hundreds of metres and does not
+exclude the second failure, so the bound is the measured onset divided by 2.7.
 
 ## Kinematic drive
 
@@ -278,6 +383,9 @@ with `MotionQuality::LinearCast`, and a light cube at a heavy one, with the mass
 factors at the floor or 0; `soft_body_contact_scales_at_their_floor_step_finitely` throws a
 cloth at blocks of both masses with the vertex and block factors at the floor or 0. Both stay
 finite and assert-free in the asserts build.
+
+`MIN_CONTACT_SCALE` is written as the literal `1e-9`: the `f32` division `MIN_MASS / MAX_MASS`
+rounds one step above it, which would refuse the round number callers type.
 
 ### Sensor contacts
 

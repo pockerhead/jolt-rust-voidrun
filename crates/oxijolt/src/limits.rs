@@ -31,10 +31,9 @@ use crate::{PhysicsWorld, Quat, RVec3, Real, Vec3};
 /// Largest absolute value of each component of a caller-given world position, in metres:
 /// 5 km with `f32` positions, 10 000 km with the `double-precision` feature.
 ///
-/// Crate policy, not a Jolt assertion threshold. Jolt's "Big Worlds" documentation
-/// (`Docs/Architecture.md`) says single-precision simulation is accurate within roughly 5 km of
-/// the origin, and that double precision handles worlds of thousands of km; at 10 000 km Jolt's
-/// `f32` broad phase still has a resolution of about 1 m.
+/// See [docs/limits.md#frame-and-extent].
+///
+/// [docs/limits.md#frame-and-extent]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#frame-and-extent
 pub const MAX_POSITION: Real = (if core::mem::size_of::<Real>() == 8 {
     1.0e7_f64
 } else {
@@ -44,70 +43,63 @@ pub const MAX_POSITION: Real = (if core::mem::size_of::<Real>() == 8 {
 /// Largest absolute value of each component of a shape's local bounds (around its centre of
 /// mass), of a shape offset and of a local step distance, in metres.
 ///
-/// Crate policy from Jolt's "Conventions and Limits" documentation, which recommends static
-/// objects of 0.1 to 2000 m; the bound applies on each side of the centre of mass. It bounds a
-/// shape's inertia to at most `6 * mass * MAX_SHAPE_EXTENT²`.
+/// See [docs/limits.md#frame-and-extent].
+///
+/// [docs/limits.md#frame-and-extent]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#frame-and-extent
 pub const MAX_SHAPE_EXTENT: f32 = 2000.0;
 
-/// Largest linear velocity a caller may give a body or character, in m/s.
+/// Largest linear velocity a caller may give a body or character, in m/s: Jolt's default
+/// `BodyCreationSettings::mMaxLinearVelocity`, to which Jolt also clamps a body's velocity every
+/// step.
 ///
-/// Jolt's default `BodyCreationSettings::mMaxLinearVelocity` (`BodyCreationSettings.h:111`). Jolt
-/// asserts `Length() <= mMaxLinearVelocity` when it creates a body (`Body.cpp:424`,
-/// `MotionProperties.h:48`) and clamps a body's velocity to it every step.
+/// See [docs/limits.md#velocities-at-creation].
+///
+/// [docs/limits.md#velocities-at-creation]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#velocities-at-creation
 pub const MAX_LINEAR_VELOCITY: f32 = 500.0;
 
-/// Largest angular velocity a caller may give a body, in rad/s.
-///
-/// Jolt's default `BodyCreationSettings::mMaxAngularVelocity` (`BodyCreationSettings.h:112`),
-/// written as Jolt writes it so the `f32` bits match.
+/// Largest angular velocity a caller may give a body, in rad/s: Jolt's default
+/// `BodyCreationSettings::mMaxAngularVelocity`, written as Jolt writes it so the `f32` bits match.
 pub const MAX_ANGULAR_VELOCITY: f32 = 0.25 * core::f32::consts::PI * 60.0;
 
 /// Largest length of a caller-given acceleration (world gravity, a character's or vehicle's
-/// gravity, the acceleration a body's added forces give it), in m/s²: about 5e8.
+/// gravity, the acceleration a body's added forces give it), in m/s²: about 5e8,
+/// [`MAX_LINEAR_VELOCITY`] over [`PhysicsWorld::MIN_DELTA_TIME`].
 ///
-/// Crate policy, not a Jolt limit. A larger acceleration already reaches Jolt's speed clamp
-/// within every step [`PhysicsWorld::step`] accepts, so the bound removes no motion that the
-/// clamp keeps.
+/// See [docs/limits.md#accelerations].
+///
+/// [docs/limits.md#accelerations]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#accelerations
 pub const MAX_ACCELERATION: f32 = MAX_LINEAR_VELOCITY / PhysicsWorld::MIN_DELTA_TIME;
 
-/// Largest angular acceleration a body's added torques may give it, in rad/s²: about 4.71e7.
+/// Largest angular acceleration a body's added torques may give it, in rad/s²: about 4.71e7,
+/// [`MAX_ANGULAR_VELOCITY`] over [`PhysicsWorld::MIN_DELTA_TIME`].
 ///
-/// Crate policy with the reasoning of [`MAX_ACCELERATION`], for Jolt's angular speed clamp.
+/// See [docs/limits.md#accelerations].
+///
+/// [docs/limits.md#accelerations]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#accelerations
 pub const MAX_ANGULAR_ACCELERATION: f32 = MAX_ANGULAR_VELOCITY / PhysicsWorld::MIN_DELTA_TIME;
 
 /// Largest absolute gravity factor of a body.
-///
-/// Crate policy (like [`WorldSettings::MAX_WORKER_THREADS`](crate::WorldSettings::MAX_WORKER_THREADS)).
 pub const MAX_GRAVITY_FACTOR: f32 = 1000.0;
 
-/// Largest friction coefficient of a body.
+/// Largest friction coefficient of a body or contact.
 ///
-/// Crate policy. Jolt combines the friction of two bodies in contact as
-/// `sqrt(friction1 * friction2)` (`ContactConstraintManager.h:554`) and multiplies the result by
-/// the contact's normal impulse (`ContactConstraintManager.cpp:1714-1715`). A product that
-/// overflows makes the combined friction infinite, and an infinite friction times a zero normal
-/// impulse is NaN, which reaches the bodies' velocities; two bodies with friction `f32::MAX` do
-/// that within a few steps. Any coefficient whose square is finite (below about 1.8e19) avoids
-/// it; 1000 is far above the friction of real materials.
+/// See [docs/limits.md#friction].
+///
+/// [docs/limits.md#friction]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#friction
 pub const MAX_FRICTION: f32 = 1000.0;
 
 /// Smallest mass of a dynamic body or ragdoll part, in kg: an inverse mass of at most 1000 per kg,
 /// a 1 cm cube of water.
-///
-/// Crate policy.
 pub const MIN_MASS: f32 = 1.0e-3;
 
 /// Largest inverse mass of a movable soft body vertex, in 1/kg: 1000, whose inverse Jolt
 /// computes in `f32` as exactly [`MIN_MASS`]. `1.0 / MIN_MASS` itself rounds to 999.99994.
-///
-/// Derived from [`MIN_MASS`].
 pub const MAX_VERTEX_INVERSE_MASS: f32 = 1000.0;
 
 /// Largest mass of a dynamic body, ragdoll part or character, in kg: a 10 m cube of water, the
-/// top of the dynamic object sizes Jolt documents.
-///
-/// Crate policy. It bounds the forces [`MAX_ACCELERATION`] accepts (at most 5e14 N), contact
-/// effective masses, a vehicle's gravity force and a character's weight impulse.
+/// top of the dynamic object sizes Jolt documents. It also bounds the forces [`MAX_ACCELERATION`]
+/// accepts (at most 5e14 N), contact effective masses, a vehicle's gravity force and a
+/// character's weight impulse.
 pub const MAX_MASS: f32 = 1.0e6;
 
 /// Smallest positive factor a contact may put on a body's inverse mass or inverse inertia
@@ -116,62 +108,43 @@ pub const MAX_MASS: f32 = 1.0e6;
 /// much as one of [`MAX_MASS`] in the contact; a factor of exactly 0 makes the body immovable,
 /// and a contact whose dynamic bodies all have 0 is dropped.
 ///
-/// Derived from [`MIN_MASS`] and [`MAX_MASS`] (written as the literal `1e-9`, which `f32`
-/// division of the two would round one step above); `docs/limits.md` ("Inverse mass and
-/// inertia scales") has the reasoning.
+/// See [docs/limits.md#inverse-mass-and-inertia-scales].
+///
+/// [docs/limits.md#inverse-mass-and-inertia-scales]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#inverse-mass-and-inertia-scales
 pub const MIN_CONTACT_SCALE: f32 = 1.0e-9;
 
-/// Largest spring stiffness `k` and damping `c` Jolt may derive from a constraint spring
-/// (`SpringPart.h:36-55,91-104`).
+/// Largest spring stiffness `k` and damping `c` Jolt may derive from a constraint spring.
 ///
-/// Crate policy. `c + dt * k` stays finite (at most 2e30 for `dt <= 1`), so the softness, bias
-/// and effective mass Jolt computes from them stay finite.
+/// See [docs/limits.md#springs].
+///
+/// [docs/limits.md#springs]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#springs
 pub const MAX_SPRING_COEFFICIENT: f32 = 1.0e30;
 
-/// Largest weight impulse a character may press on what it stands on during one update, its
-/// mass times the length of the update's gravity times the update's delta time, in N·s.
+/// Largest weight impulse a character may press on what it stands on during one update, in N·s:
+/// its mass times the length of the update's gravity times the update's delta time. It allows a
+/// character of [`MAX_MASS`] at 1000 m/s² with one-second updates.
 ///
-/// Crate policy. Jolt applies the weight impulse at the ground contact point
-/// (`CharacterVirtual.cpp:1474-1481`), so it also turns the ground body. Jolt keeps a body's
-/// principal moments of inertia only while their vector is longer than 1e-6 (`Vec3::IsNearZero`
-/// in `MotionProperties.cpp:46-56`) and otherwise uses the inertia of a sphere of radius 1, an
-/// inverse of `2.5 / mass`, at most 2500 for [`MIN_MASS`]. So a body whose principal moments are
-/// equal has an inverse inertia of at most `√3 · 1e6`, and the ground contact lies within
-/// `√3 ·` [`MAX_SHAPE_EXTENT`] of its centre of mass. For such a body and every body with a
-/// smaller principal inverse inertia, the angular velocity change is at most
-/// `√3e6 · 3464 · 1e9`, about 6e18 rad/s, whose square is finite; the linear velocity change is
-/// at most `1e9 · 1e3` m/s. Without the bound, a character of [`MAX_MASS`] at
-/// [`MAX_ACCELERATION`] with a one-second update (5e14 N·s) on the edge of a 6 cm cube of
-/// [`MIN_MASS`] overflows the cube's squared angular speed, which Jolt asserts on
-/// (`MotionProperties.inl:38`). The bound allows a character of [`MAX_MASS`] at 1000 m/s² with
-/// one-second updates, far above the characters of a game.
+/// See [docs/limits.md#character-weight-and-push].
+///
+/// [docs/limits.md#character-weight-and-push]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#character-weight-and-push
 pub const MAX_WEIGHT_IMPULSE: f32 = 1.0e9;
 
 /// Largest magnitude of a rack-and-pinion or pulley ratio; the smallest is its inverse. Gears
 /// have their own, tighter range (see [`MAX_GEAR_RATIO`]).
 ///
-/// Crate policy. Jolt multiplies the inverse mass or inertia of body 2 by the ratio's square in
-/// the effective mass, and body 2's velocity (for racks and pulleys also its impulse) by the
-/// ratio (`GearConstraintPart.h:81,122`, `RackAndPinionConstraintPart.h:82,123`,
-/// `IndependentAxisConstraintPart.h:71,112` for pulleys). With a principal inverse inertia of at
-/// most `√3 · 1e6` (see [`MAX_WEIGHT_IMPULSE`]), `ratio² · I⁻¹` is at most about 1.7e14, far from
-/// `f32` overflow. A ratio of 1e4 already turns a pinion ten thousand radians per metre of its
-/// rack; tests step both bounds on the lightest and heaviest bodies.
+/// See [docs/limits.md#coupling-ratios].
+///
+/// [docs/limits.md#coupling-ratios]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#coupling-ratios
 pub const MAX_RATIO: f32 = 1.0e4;
 
 /// Largest gear ratio; the smallest is 1 (see
-/// [`GearConstraintSettings`](crate::GearConstraintSettings)).
+/// [`GearConstraintSettings`](crate::GearConstraintSettings)). The larger the ratio, the more steps
+/// Jolt's gear needs to restore its velocity relation after a disturbance; at this bound it is
+/// measured back within 2 % of the initial error after 10 steps.
 ///
-/// Crate policy, measured. Jolt 5.6 applies a gear's impulse to body 2 without the ratio
-/// (`GearConstraintPart::ApplyVelocityStep`), so each solver iteration keeps up to `1 − 1/ratio`
-/// of the velocity error `ω1 + ratio · ω2`, the worst case being a body 1 much heavier than
-/// body 2. With Jolt's 10 velocity iterations per step the gear then needs more steps to restore
-/// the relation the larger the ratio. The bound is the largest round ratio that, after a
-/// disturbance, brings the error back to within 2 % of its initial value within 10 steps for any
-/// mass distribution: measured worst 1.6 % at ratio 10, 6.5 % at 20, 60 % at 100, and at 1e4
-/// 91 % still after 60 steps. The first step after a disturbance leaves up to
-/// `(1 − 1/ratio)^10`, 35 % at ratio 10. Tested at the bound by
-/// `gear_keeps_its_velocity_relation_at_the_largest_ratio`.
+/// See [docs/limits.md#coupling-ratios].
+///
+/// [docs/limits.md#coupling-ratios]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#coupling-ratios
 pub const MAX_GEAR_RATIO: f32 = 10.0;
 
 /// Largest lever-arm ratio a world constraint may give a dynamic body: how far the point where
@@ -188,63 +161,39 @@ pub const MAX_GEAR_RATIO: f32 = 10.0;
 /// (for a path, every point of the path; for an automatic point, the point Jolt picks
 /// between the centres of mass, weighted by inverse mass towards the lighter body).
 ///
-/// Crate policy, measured, not derived. Jolt solves each constraint part with its effective mass
-/// `K = Σ (m⁻¹ · 1 + [r]× I⁻¹ [r]×ᵀ)` (`PointConstraintPart.h`, `AxisConstraintPart.h`) in `f32`.
-/// A ratio of at most `B` per body bounds the lever terms by `B · m⁻¹`, so `K`'s condition number
-/// stays below `1 + B`. Two failures were measured with a body at the velocity bounds, under
-/// gravity, for 120 steps, in the `asserts` build:
-/// - a body held far from its centre of mass: a 1 g, 6 cm cube on a hinge 116 m away (a ratio
-///   of 4.5e7) went to NaN, two 1 kg, 1 m cubes joined by a point 3000 m away (1.1e8) moved
-///   erratically and at 4000 m Jolt asserted that a squared velocity is finite
-///   (`MotionProperties.inl:28`), and a cube on a static body took angular velocities rounded to
-///   powers of two from a ratio of about 1e8;
-/// - two light bodies held rigidly (a fixed constraint, a six-DOF constraint with every axis
-///   fixed, a swing-twist constraint with zero ranges): their accumulated impulse grows step
-///   after step until Jolt asserts that the squared angular velocity is finite
-///   (`MotionProperties.inl:38`), from `|r| / k` of about 37 (a ratio of 2700) for 1 g and 1 kg
-///   cubes of 6 cm and 20 cm, for the 6 cm cube also at a tenth of the velocity bounds; none of
-///   24 seeded cases failed at `|r| / k` of 34 or below. Point, hinge, cone, slider and six-DOF
-///   constraints with limited rotations did not fail at `|r| / k` of 650.
+/// The bound allows a door on a hinge at its edge, a weld at the surface of a part, and a
+/// pendulum bob of radius `a` on a point or hinge constraint up to about `14 · a` from the pivot;
+/// a longer pendulum is a [`DistanceConstraintSettings`](crate::DistanceConstraintSettings) whose
+/// points lie on the bodies.
 ///
-/// A derivation in the style of [`MAX_WEIGHT_IMPULSE`] (products of the largest accepted
-/// inverse inertia, lever and impulse kept finite in `f32`) allows levers of hundreds of metres
-/// and does not exclude the second failure, so the bound is the measured onset divided by 2.7.
-/// It allows a door on a hinge at its edge, a weld at the surface of a part, and a pendulum bob
-/// of radius `a` on a point or hinge constraint up to about `14 · a` from the pivot; a longer
-/// pendulum is a [`DistanceConstraintSettings`](crate::DistanceConstraintSettings) whose points
-/// lie on the bodies.
+/// See [docs/limits.md#lever-arm-ratio].
+///
+/// [docs/limits.md#lever-arm-ratio]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#lever-arm-ratio
 pub const MAX_LEVER_ARM_RATIO: f32 = 1000.0;
 
 /// Shortest distance between two soft body vertices that a face edge or an explicit edge
 /// joins, in metres: 1 mm, measured as Jolt measures a rest length (an `f32` difference and an
 /// `f32` length).
 ///
-/// Crate policy. Jolt only asserts that a rest length is above zero
-/// (`SoftBodySharedSettings.cpp:226,377`) and divides by edge lengths while it solves; the
-/// bound keeps a degenerate edge out of the solver with a margin.
+/// See [docs/limits.md#soft-body-edge-length].
+///
+/// [docs/limits.md#soft-body-edge-length]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#soft-body-edge-length
 pub const MIN_SOFT_BODY_EDGE_LENGTH: f32 = 1.0e-3;
 
 /// Largest compliance (inverse stiffness) of a soft body constraint, in the units of the
-/// constraint's own equation; 0 is rigid.
+/// constraint's own equation; 0 is rigid. It keeps Jolt's compliance terms finite; it does not
+/// make the solver stable at every compliance.
 ///
-/// Crate policy, derived. Jolt divides each compliance by the squared sub-step
-/// (`SoftBodyMotionProperties.cpp:371,445,496,577,594`). [`PhysicsWorld::step`] always runs one
-/// collision step, so a sub-step is at least [`PhysicsWorld::MIN_DELTA_TIME`] divided by
-/// [`SoftBodySettings::MAX_ITERATIONS`](crate::SoftBodySettings::MAX_ITERATIONS), 1e-8 s, and
-/// `compliance / dt²` is at most `1e20 · 1e16 = 1e36`, below `f32::MAX`; Jolt's average of two
-/// compliances, `0.5 · (c1 + c2)`, stays finite as well. This proves that the product is finite,
-/// not that the solver is stable at every compliance.
+/// See [docs/limits.md#soft-body-compliance].
+///
+/// [docs/limits.md#soft-body-compliance]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#soft-body-compliance
 pub const MAX_COMPLIANCE: f32 = 1.0e20;
 
-/// Largest pressure coefficient of a soft body (`n · R · T` in Jolt's terms, N·m).
+/// Largest pressure coefficient of a soft body (`n · R · T` in Jolt's terms, N·m). A new body
+/// with pressure must also enclose enough volume for its faces; a body crushed to a tiny volume
+/// later is not covered.
 ///
-/// Crate policy, measured. Jolt applies `pressure · dt / (6 · volume)` times each face's area
-/// as an impulse (`SoftBodyMotionProperties.cpp:290-312`). A closed ball of 1 m with vertex
-/// masses at [`MIN_MASS`] and at the total-mass bound, at this pressure, stepped 600 times on a
-/// floor in the `asserts` build, stays finite (`pressure_at_the_bound_steps_finitely`).
-///
-/// A new body with pressure must also enclose enough volume for its faces (see
-/// [docs/limits.md#soft-body-pressure]); a body crushed to a tiny volume later is not covered.
+/// See [docs/limits.md#soft-body-pressure].
 ///
 /// [docs/limits.md#soft-body-pressure]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#soft-body-pressure
 pub const MAX_SOFT_BODY_PRESSURE: f32 = 1.0e6;
