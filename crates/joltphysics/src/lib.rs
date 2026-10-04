@@ -366,8 +366,8 @@ pub use job_system::{Job, JobSystem};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use listener::{
     ActivationEvent, ContactEvent, ContactListener, ContactManifold, ContactPoint, ContactSettings,
-    EventSettings, SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult,
-    SoftBodyValidation, SoftBodyVertexContact, SubShapeIdPair, WorldEvents,
+    ContactSettingsRejection, EventSettings, SoftBodyContactSettings, SoftBodyContacts,
+    SoftBodyValidateResult, SoftBodyValidation, SoftBodyVertexContact, SubShapeIdPair, WorldEvents,
 };
 pub use material::PhysicsMaterial;
 pub use math::{Quat, RVec3, Real, Vec3};

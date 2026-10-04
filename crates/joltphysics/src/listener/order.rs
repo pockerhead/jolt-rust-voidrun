@@ -7,8 +7,9 @@
 use std::cmp::Ordering;
 
 use super::{
-    ActivationEvent, ContactEvent, ContactManifold, ContactSettings, SoftBodyContactSettings,
-    SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation, SubShapeIdPair,
+    ActivationEvent, ContactEvent, ContactManifold, ContactSettings, ContactSettingsRejection,
+    SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
+    SubShapeIdPair,
 };
 use crate::{RVec3, Real, Vec3};
 
@@ -37,6 +38,10 @@ pub(super) fn sort_soft_body_contacts(events: &mut [SoftBodyContacts]) {
             .cmp(&b.soft_body.to_raw())
             .then_with(|| compare_soft_payload(a, b))
     });
+}
+
+pub(super) fn sort_rejections(rejections: &mut [ContactSettingsRejection]) {
+    rejections.sort_by_key(|rejection| (pair_key(&rejection.pair), rejection.error as u8));
 }
 
 fn pair_key(pair: &SubShapeIdPair) -> [u32; 4] {
@@ -385,6 +390,31 @@ mod tests {
         assert_ne!(
             compare_contacts(&with(0.0, real_nan(0)), &with(0.0, real_nan(1))),
             Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn rejections_sort_by_pair_then_error() {
+        let world = tag();
+        let rejection = |body1, error| ContactSettingsRejection {
+            pair: pair(world, body1, 9),
+            error,
+        };
+        let sensor = crate::ContactSettingsError::SensorBody;
+        let velocity = crate::ContactSettingsError::SurfaceVelocity;
+        let mut rejections = vec![
+            rejection(5, velocity),
+            rejection(2, velocity),
+            rejection(5, sensor),
+        ];
+        sort_rejections(&mut rejections);
+        assert_eq!(
+            rejections,
+            vec![
+                rejection(2, velocity),
+                rejection(5, sensor),
+                rejection(5, velocity),
+            ]
         );
     }
 

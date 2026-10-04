@@ -337,13 +337,35 @@ fn next_up(value: f32) -> f32 {
 
 type Setter = fn(&mut ContactSettings, f32) -> Result<(), ContactSettingsError>;
 
+/// Values beyond 1, which Jolt would take (2 halves a body's mass) and this API refuses.
+fn beyond_one() -> Vec<f32> {
+    vec![
+        next_up(1.0),
+        2.0,
+        -f32::MIN_POSITIVE,
+        -1.0,
+        f32::NAN,
+        f32::INFINITY,
+    ]
+}
+
+/// Positive scales below `limits::MIN_CONTACT_SCALE`, down to ones that make Jolt's contact
+/// impulse overflow.
+fn below_the_scale_floor() -> Vec<f32> {
+    let floor = crate::limits::MIN_CONTACT_SCALE;
+    vec![
+        floor.next_down(),
+        1.0e-20,
+        1.0e-36,
+        f32::MIN_POSITIVE,
+        1.0e-45,
+    ]
+}
+
 #[test]
 fn contact_settings_setters_accept_their_range_and_refuse_beyond() {
-    let unit_setters: [(Setter, ContactSettingsError); 5] = [
-        (
-            ContactSettings::set_combined_restitution,
-            ContactSettingsError::Restitution,
-        ),
+    let floor = crate::limits::MIN_CONTACT_SCALE;
+    let scale_setters: [(Setter, ContactSettingsError); 4] = [
         (
             ContactSettings::set_inv_mass_scale1,
             ContactSettingsError::InverseMassScale,
@@ -361,20 +383,22 @@ fn contact_settings_setters_accept_their_range_and_refuse_beyond() {
             ContactSettingsError::InverseInertiaScale,
         ),
     ];
-    for (setter, error) in unit_setters {
+    let scales = scale_setters.into_iter().map(|(setter, error)| {
+        let invalid = [beyond_one(), below_the_scale_floor()].concat();
+        (setter, error, vec![0.0, -0.0, floor, 0.5, 1.0], invalid)
+    });
+    let restitution = (
+        ContactSettings::set_combined_restitution as Setter,
+        ContactSettingsError::Restitution,
+        vec![0.0, 1.0e-36, 0.5, 1.0],
+        beyond_one(),
+    );
+    for (setter, error, valid, invalid) in scales.chain([restitution]) {
         let mut settings = contact_settings(false, 0.0);
-        for valid in [0.0, 0.5, 1.0] {
-            assert_eq!(setter(&mut settings, valid), Ok(()));
+        for valid in valid {
+            assert_eq!(setter(&mut settings, valid), Ok(()), "{valid}");
         }
-        // Jolt allows 2 (half the mass); this API keeps scales at most 1.
-        for invalid in [
-            next_up(1.0),
-            2.0,
-            -f32::MIN_POSITIVE,
-            -1.0,
-            f32::NAN,
-            f32::INFINITY,
-        ] {
+        for invalid in invalid {
             let before = settings;
             assert_eq!(setter(&mut settings, invalid), Err(error), "{invalid}");
             assert_eq!(settings, before, "a refused value changes nothing");
@@ -487,10 +511,10 @@ fn soft_body_contact_settings_setters_keep_scales_in_range() {
         SoftBodyContactSettings::set_inv_inertia_scale2,
     ];
     for setter in setters {
-        for valid in [0.0, 1.0] {
+        for valid in [0.0, crate::limits::MIN_CONTACT_SCALE, 1.0] {
             assert_eq!(setter(&mut settings, valid), Ok(()));
         }
-        for invalid in [next_up(1.0), 2.0, -1.0, f32::NAN] {
+        for invalid in [beyond_one(), below_the_scale_floor()].concat() {
             assert!(setter(&mut settings, invalid).is_err(), "{invalid}");
         }
     }
@@ -534,6 +558,56 @@ fn settings_are_checked_again_against_the_contact_that_takes_them() {
     );
     let sensor_contact = contact_settings(true, 0.0).checked_for(sensor).unwrap();
     assert!(sensor_contact.checked_for(ordinary).is_ok());
+}
+
+#[test]
+fn equality_and_debug_leave_out_the_contact_facts() {
+    let near = contact_settings(false, 0.5);
+    let far = contact_settings(false, 60.0);
+    assert_eq!(near, far);
+    assert_eq!(format!("{near:?}"), format!("{far:?}"));
+    assert!(!format!("{near:?}").contains("lever"));
+    let mut spun = near;
+    spun.set_relative_angular_surface_velocity(Vec3::new(0.0, 1.0, 0.0))
+        .unwrap();
+    assert_ne!(near, spun);
+}
+
+/// A listener that changes nothing.
+struct Unchanged;
+
+impl ContactListener for Unchanged {}
+
+#[test]
+fn a_rejection_is_recorded_and_the_listener_is_still_called() {
+    let mut world = PhysicsWorld::new(WorldSettings::default().worker_threads(1)).unwrap();
+    let shape = Shape::new_box(Vec3::new(1.0, 1.0, 1.0)).unwrap();
+    let body = world
+        .create_body(&shape, &BodySettings::new_static())
+        .unwrap();
+    world.set_contact_listener(Some(Arc::new(Unchanged)));
+    let context = world.listeners.context.clone().expect("a listener is set");
+    let pair = SubShapeIdPair {
+        body1: body,
+        sub_shape1: crate::SubShapeId::new(0),
+        body2: body,
+        sub_shape2: crate::SubShapeId::new(0),
+    };
+    context.reject(pair, ContactSettingsError::SensorBody);
+    assert_eq!(
+        context.call_listener(|| 7),
+        Some(7),
+        "the listener is called"
+    );
+    assert!(world.step(DT).is_ok(), "a rejection is not a panic");
+    let rejection = ContactSettingsRejection {
+        pair,
+        error: ContactSettingsError::SensorBody,
+    };
+    assert_eq!(
+        world.take_events().rejected_contact_settings,
+        vec![rejection]
+    );
 }
 
 /// Keeps the settings of the donor's first contact, spun by `spin`, and assigns them over the
@@ -596,7 +670,7 @@ fn recorded_settings(
 /// A listener assigns settings kept from an ordinary contact near the floor's centre to a
 /// contact with a sensor body, or to a contact 60 m from the floor's centre, whose lever turns
 /// the kept 20 rad/s into 1 200 m/s. Jolt keeps its own settings, so an asserts build does not
-/// reach Jolt's sensor assertion, and the step panics with the refusal.
+/// reach Jolt's sensor assertion, and the step reports the refusal.
 #[test]
 fn settings_moved_to_a_contact_they_do_not_fit_are_rejected() {
     let cases = [
@@ -647,20 +721,28 @@ fn settings_moved_to_a_contact_they_do_not_fit_are_rejected() {
             world.take_events();
 
             let recipient = world.create_body(&cube, &dynamic(recipient_at)).unwrap();
-            let wanted = format!("contact listener settings rejected: {error}");
-            let mut rejected = None;
-            for _ in 0..10 {
-                if let Err(payload) = catch_unwind(AssertUnwindSafe(|| world.step(DT))) {
-                    rejected = Some(message(&*payload));
-                    break;
-                }
-            }
-            assert_eq!(rejected, Some(wanted), "persisted: {in_persisted}");
             let target = match error {
                 ContactSettingsError::SensorBody => sensor,
                 _ => floor,
             };
-            let recorded = recorded_settings(world.take_events(), in_persisted, target, recipient)
+            let mut events = WorldEvents::default();
+            let mut reported = 0;
+            for _ in 0..10 {
+                reported += world.step(DT).unwrap().rejected_contact_settings;
+                events.append(world.take_events());
+            }
+            assert!(!events.rejected_contact_settings.is_empty());
+            assert_eq!(
+                reported as usize,
+                events.rejected_contact_settings.len(),
+                "the step reports count the events"
+            );
+            for rejection in &events.rejected_contact_settings {
+                assert_eq!(rejection.error, error, "persisted: {in_persisted}");
+                let bodies = [rejection.pair.body1, rejection.pair.body2];
+                assert!(bodies.contains(&recipient) && bodies.contains(&target));
+            }
+            let recorded = recorded_settings(events, in_persisted, target, recipient)
                 .expect("the contact is recorded");
             assert_eq!(
                 recorded.is_sensor(),

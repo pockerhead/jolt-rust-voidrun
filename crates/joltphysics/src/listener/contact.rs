@@ -1,6 +1,7 @@
 //! Rigid body contact events: what joltc's contact listener reports, copied into Rust values.
 
 use std::ffi::c_void;
+use std::fmt;
 
 use joltphysics_sys::*;
 
@@ -57,7 +58,9 @@ pub struct ContactManifold {
 /// replaces the whole value, for example with settings kept from another contact, gets it
 /// checked again against the contact it is called for; see
 /// [`ContactListener`](crate::ContactListener) for what happens when that check fails.
-#[derive(Clone, Copy, Debug, PartialEq)]
+///
+/// Equality and `Debug` cover the values Jolt resolves the contact with.
+#[derive(Clone, Copy)]
 pub struct ContactSettings {
     combined_friction: f32,
     combined_restitution: f32,
@@ -119,11 +122,13 @@ impl ContactSettings {
             ContactSettingsError::Restitution,
         )?;
         check(
-            is_unit_interval(self.inv_mass_scale1) && is_unit_interval(self.inv_mass_scale2),
+            limits::is_contact_scale(self.inv_mass_scale1)
+                && limits::is_contact_scale(self.inv_mass_scale2),
             ContactSettingsError::InverseMassScale,
         )?;
         check(
-            is_unit_interval(self.inv_inertia_scale1) && is_unit_interval(self.inv_inertia_scale2),
+            limits::is_contact_scale(self.inv_inertia_scale1)
+                && limits::is_contact_scale(self.inv_inertia_scale2),
             ContactSettingsError::InverseInertiaScale,
         )?;
         check(
@@ -154,6 +159,23 @@ impl ContactSettings {
         settings.isSensor = u32::from(self.is_sensor);
         settings.relativeLinearSurfaceVelocity = self.relative_linear_surface_velocity.to_jph();
         settings.relativeAngularSurfaceVelocity = self.relative_angular_surface_velocity.to_jph();
+    }
+
+    /// The values Jolt resolves the contact with, without the facts they are checked against.
+    fn values(&self) -> (f32, f32, [f32; 4], bool, Vec3, Vec3) {
+        (
+            self.combined_friction,
+            self.combined_restitution,
+            [
+                self.inv_mass_scale1,
+                self.inv_inertia_scale1,
+                self.inv_mass_scale2,
+                self.inv_inertia_scale2,
+            ],
+            self.is_sensor,
+            self.relative_linear_surface_velocity,
+            self.relative_angular_surface_velocity,
+        )
     }
 
     /// The setter facts as bits, for the canonical order.
@@ -191,11 +213,11 @@ impl ContactSettings {
         self.inv_mass_scale1
     }
 
-    /// Sets the factor on body 1's inverse mass, `0..=1`: 0 makes body 1 immovable for this
-    /// contact.
+    /// Sets the factor on body 1's inverse mass, 0 or [`limits::MIN_CONTACT_SCALE`]`..=1`: 0
+    /// makes body 1 immovable for this contact.
     pub fn set_inv_mass_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
-            is_unit_interval(value),
+            limits::is_contact_scale(value),
             ContactSettingsError::InverseMassScale,
         )?;
         self.inv_mass_scale1 = value;
@@ -207,10 +229,11 @@ impl ContactSettings {
         self.inv_inertia_scale1
     }
 
-    /// Sets the factor on body 1's inverse inertia, `0..=1`.
+    /// Sets the factor on body 1's inverse inertia, 0 or
+    /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
     pub fn set_inv_inertia_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
-            is_unit_interval(value),
+            limits::is_contact_scale(value),
             ContactSettingsError::InverseInertiaScale,
         )?;
         self.inv_inertia_scale1 = value;
@@ -222,10 +245,10 @@ impl ContactSettings {
         self.inv_mass_scale2
     }
 
-    /// Sets the factor on body 2's inverse mass, `0..=1`.
+    /// Sets the factor on body 2's inverse mass, 0 or [`limits::MIN_CONTACT_SCALE`]`..=1`.
     pub fn set_inv_mass_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
-            is_unit_interval(value),
+            limits::is_contact_scale(value),
             ContactSettingsError::InverseMassScale,
         )?;
         self.inv_mass_scale2 = value;
@@ -237,10 +260,11 @@ impl ContactSettings {
         self.inv_inertia_scale2
     }
 
-    /// Sets the factor on body 2's inverse inertia, `0..=1`.
+    /// Sets the factor on body 2's inverse inertia, 0 or
+    /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
     pub fn set_inv_inertia_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
-            is_unit_interval(value),
+            limits::is_contact_scale(value),
             ContactSettingsError::InverseInertiaScale,
         )?;
         self.inv_inertia_scale2 = value;
@@ -318,6 +342,34 @@ impl ContactSettings {
     }
 }
 
+impl PartialEq for ContactSettings {
+    fn eq(&self, other: &Self) -> bool {
+        self.values() == other.values()
+    }
+}
+
+impl fmt::Debug for ContactSettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ContactSettings")
+            .field("combined_friction", &self.combined_friction)
+            .field("combined_restitution", &self.combined_restitution)
+            .field("inv_mass_scale1", &self.inv_mass_scale1)
+            .field("inv_inertia_scale1", &self.inv_inertia_scale1)
+            .field("inv_mass_scale2", &self.inv_mass_scale2)
+            .field("inv_inertia_scale2", &self.inv_inertia_scale2)
+            .field("is_sensor", &self.is_sensor)
+            .field(
+                "relative_linear_surface_velocity",
+                &self.relative_linear_surface_velocity,
+            )
+            .field(
+                "relative_angular_surface_velocity",
+                &self.relative_angular_surface_velocity,
+            )
+            .finish()
+    }
+}
+
 /// `Ok` when `valid`, otherwise `error`.
 pub(super) fn check(valid: bool, error: ContactSettingsError) -> Result<(), ContactSettingsError> {
     if valid {
@@ -328,7 +380,7 @@ pub(super) fn check(valid: bool, error: ContactSettingsError) -> Result<(), Cont
 }
 
 /// Whether `value` is finite and in `0..=1`.
-pub(super) fn is_unit_interval(value: f32) -> bool {
+fn is_unit_interval(value: f32) -> bool {
     (0.0..=1.0).contains(&value)
 }
 
@@ -369,6 +421,17 @@ impl ContactEvent {
             Self::Removed(pair) => *pair,
         }
     }
+}
+
+/// Contact settings a [`ContactListener`](crate::ContactListener) returned that do not fit the
+/// contact it was called for, such as a value kept from another contact (see
+/// [`ContactSettings`]). Jolt resolved the contact with its own settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContactSettingsRejection {
+    /// The contact the listener was called for.
+    pub pair: SubShapeIdPair,
+    /// The first rule the returned settings break.
+    pub error: ContactSettingsError,
 }
 
 /// Reads the manifold Jolt passes to a contact callback.
@@ -484,7 +547,7 @@ unsafe fn on_manifold(
                     accepted.write_to(settings);
                     contact_settings = accepted;
                 }
-                Err(error) => context.reject(error),
+                Err(error) => context.reject(manifold.pair, error),
             }
         }
     }

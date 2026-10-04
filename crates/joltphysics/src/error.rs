@@ -64,7 +64,8 @@ impl fmt::Display for ShapeError {
 impl std::error::Error for ShapeError {}
 
 /// Why a [`ContactSettings`](crate::ContactSettings) or
-/// [`SoftBodyContactSettings`](crate::SoftBodyContactSettings) setter refused a value.
+/// [`SoftBodyContactSettings`](crate::SoftBodyContactSettings) setter refused a value, or why
+/// the settings a [`ContactListener`](crate::ContactListener) returned do not fit their contact.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ContactSettingsError {
@@ -72,9 +73,9 @@ pub enum ContactSettingsError {
     Friction,
     /// Restitution outside `0..=1`.
     Restitution,
-    /// An inverse mass scale outside `0..=1`.
+    /// An inverse mass scale neither 0 nor within `limits::MIN_CONTACT_SCALE..=1`.
     InverseMassScale,
-    /// An inverse inertia scale outside `0..=1`.
+    /// An inverse inertia scale neither 0 nor within `limits::MIN_CONTACT_SCALE..=1`.
     InverseInertiaScale,
     /// A contact with a sensor body must stay a sensor contact.
     SensorBody,

@@ -210,7 +210,13 @@ fn record_events(events: &WorldEvents, out: &mut Vec<u8>) {
                 .iter()
                 .map(|e| format!("{e:?}")),
         )
-        .chain(events.soft_body_contacts.iter().map(|e| format!("{e:?}")));
+        .chain(events.soft_body_contacts.iter().map(|e| format!("{e:?}")))
+        .chain(
+            events
+                .rejected_contact_settings
+                .iter()
+                .map(|e| format!("{e:?}")),
+        );
     for line in lines {
         assert!(!line.contains("NaN"), "{line}");
         out.extend_from_slice(line.as_bytes());

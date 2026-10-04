@@ -988,14 +988,15 @@ impl PhysicsWorld {
             )
         };
         let job_panic = self.job_system.finish_update();
-        let listener_panic = self.listeners.finish_step();
-        if let Some(payload) = first_payload(job_panic, listener_panic) {
+        let listeners = self.listeners.finish_step();
+        if let Some(payload) = first_payload(job_panic, listeners.panic) {
             std::panic::resume_unwind(payload);
         }
         Ok(StepReport {
             manifold_cache_full: errors & JPH_PhysicsUpdateError_ManifoldCacheFull != 0,
             body_pair_cache_full: errors & JPH_PhysicsUpdateError_BodyPairCacheFull != 0,
             contact_constraints_full: errors & JPH_PhysicsUpdateError_ContactConstraintsFull != 0,
+            rejected_contact_settings: listeners.rejected_contact_settings,
         })
     }
 }
@@ -1017,6 +1018,11 @@ pub struct StepReport {
     /// The contact constraint buffer was full. Raise
     /// [`WorldSettings::max_contact_constraints`].
     pub contact_constraints_full: bool,
+    /// How many contact settings a [`ContactListener`](crate::ContactListener) returned in this
+    /// step that did not fit their contact and were not applied; the world's events name them
+    /// ([`WorldEvents::rejected_contact_settings`](crate::WorldEvents::rejected_contact_settings)).
+    /// Jolt still resolved those contacts, so they do not make the step incomplete.
+    pub rejected_contact_settings: u32,
 }
 
 impl StepReport {
@@ -1037,6 +1043,7 @@ mod tests {
             manifold_cache_full: false,
             body_pair_cache_full: false,
             contact_constraints_full: false,
+            rejected_contact_settings: 0,
         };
         assert!(complete.is_complete());
         for report in [

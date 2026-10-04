@@ -28,7 +28,10 @@ use crate::world::WorldTag;
 use crate::{BodyId, PhysicsWorld};
 
 pub use activation::ActivationEvent;
-pub use contact::{ContactEvent, ContactManifold, ContactPoint, ContactSettings, SubShapeIdPair};
+pub use contact::{
+    ContactEvent, ContactManifold, ContactPoint, ContactSettings, ContactSettingsRejection,
+    SubShapeIdPair,
+};
 pub use soft_body::{
     SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
     SoftBodyVertexContact,
@@ -48,10 +51,11 @@ pub use soft_body::{
 /// the world: it is outside the replay guarantee.
 ///
 /// Settings a method leaves invalid for its contact (a value of another contact assigned over
-/// them, see [`ContactSettings`]) are handled like a panic: Jolt keeps its own settings for
-/// that contact, and `step` panics with a message that names the [`ContactSettingsError`].
-///
-/// [`ContactSettingsError`]: crate::ContactSettingsError
+/// them, see [`ContactSettings`]) are not applied: Jolt keeps its own settings for that
+/// contact, the world records a [`ContactSettingsRejection`] in
+/// [`WorldEvents::rejected_contact_settings`] and counts it in
+/// [`StepReport::rejected_contact_settings`](crate::StepReport::rejected_contact_settings),
+/// and the listener is still called for every other contact.
 pub trait ContactListener: Send + Sync + 'static {
     /// A rigid contact appeared; `settings` may be changed for it.
     fn contact_added(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
@@ -177,15 +181,12 @@ impl EventSettings {
 /// The events a world recorded, in recording order across steps; see
 /// [`PhysicsWorld::take_events`].
 ///
-/// Within the events of one step, each list is in a canonical order: contacts by their
-/// [`SubShapeIdPair`] as `(body1, sub_shape1, body2, sub_shape2)` and then by kind, Added before
-/// Persisted before Removed;
-/// activations by body id; soft body events by soft body id. Equal keys keep every event, so a
-/// pair can appear twice in one step (a [`MotionQuality::LinearCast`](crate::MotionQuality)
-/// body's discrete and continuous contact). Events of different steps are not separated. The
-/// determinism tests compare the events of complete steps
-/// ([`StepReport::is_complete`](crate::StepReport::is_complete)) for 1 and 4 worker threads and
-/// caller job systems; `docs/events.md` has the details.
+/// Within the events of one step, each list is in a canonical order: contacts and rejected
+/// contact settings by their [`SubShapeIdPair`] as `(body1, sub_shape1, body2, sub_shape2)`,
+/// contacts then by kind, Added before Persisted before Removed; activations by body id; soft
+/// body events by soft body id. Equal keys keep every event, so a pair can appear twice in one
+/// step (a [`MotionQuality::LinearCast`](crate::MotionQuality) body's discrete and continuous
+/// contact). Events of different steps are not separated. `docs/events.md` has the details.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct WorldEvents {
@@ -197,6 +198,9 @@ pub struct WorldEvents {
     pub soft_body_validations: Vec<SoftBodyValidation>,
     /// Soft body vertex contacts.
     pub soft_body_contacts: Vec<SoftBodyContacts>,
+    /// Contact settings a [`ContactListener`] returned that Jolt did not take. Recorded
+    /// whenever a listener is set, whatever the [`EventSettings`].
+    pub rejected_contact_settings: Vec<ContactSettingsRejection>,
 }
 
 impl WorldEvents {
@@ -206,6 +210,7 @@ impl WorldEvents {
             && self.activations.is_empty()
             && self.soft_body_validations.is_empty()
             && self.soft_body_contacts.is_empty()
+            && self.rejected_contact_settings.is_empty()
     }
 
     fn append(&mut self, mut other: WorldEvents) {
@@ -215,6 +220,8 @@ impl WorldEvents {
             .append(&mut other.soft_body_validations);
         self.soft_body_contacts
             .append(&mut other.soft_body_contacts);
+        self.rejected_contact_settings
+            .append(&mut other.rejected_contact_settings);
     }
 
     fn sort_canonically(&mut self) {
@@ -222,6 +229,7 @@ impl WorldEvents {
         order::sort_activations(&mut self.activations);
         order::sort_soft_body_validations(&mut self.soft_body_validations);
         order::sort_soft_body_contacts(&mut self.soft_body_contacts);
+        order::sort_rejections(&mut self.rejected_contact_settings);
     }
 }
 
@@ -346,12 +354,10 @@ impl ListenerContext {
         }
     }
 
-    /// Keeps the refusal of a listener's settings for the world to resume as a panic, and stops
-    /// calling the listener like a panic does.
-    fn reject(&self, error: crate::ContactSettingsError) {
-        self.panic.record(Box::new(format!(
-            "contact listener settings rejected: {error}"
-        )));
+    /// Records that the settings a listener returned for the contact `pair` were not applied.
+    fn reject(&self, pair: SubShapeIdPair, error: crate::ContactSettingsError) {
+        let rejection = ContactSettingsRejection { pair, error };
+        self.batch().rejected_contact_settings.push(rejection);
     }
 
     /// Runs a callback body; a panic is kept for the world to resume and `fallback` returned.
@@ -549,17 +555,22 @@ impl Listeners {
         }
     }
 
-    /// Sorts the events of the step that just ended, appends them to the queue, and returns
-    /// the first panic of a callback since the last step or `take_events`, or of a replaced
-    /// configuration.
-    pub(crate) fn finish_step(&mut self) -> Option<Box<dyn Any + Send>> {
+    /// Sorts the events of the step that just ended and appends them to the queue.
+    pub(crate) fn finish_step(&mut self) -> FinishedStep {
         let Some(context) = &self.context else {
-            return self.pending_panic.take();
+            return FinishedStep {
+                rejected_contact_settings: 0,
+                panic: self.pending_panic.take(),
+            };
         };
         let mut batch = context.take_batch();
         batch.sort_canonically();
+        let rejected = batch.rejected_contact_settings.len();
         self.queue.append(batch);
-        first_payload(self.pending_panic.take(), context.panic.take())
+        FinishedStep {
+            rejected_contact_settings: u32::try_from(rejected).unwrap_or(u32::MAX),
+            panic: first_payload(self.pending_panic.take(), context.panic.take()),
+        }
     }
 
     /// Takes the queue with the events recorded since the last step, or, when a callback
@@ -577,6 +588,15 @@ impl Listeners {
             None => Ok(mem::take(&mut self.queue)),
         }
     }
+}
+
+/// What the listeners report about a step that just ended.
+pub(crate) struct FinishedStep {
+    /// How many contact settings a listener returned that were not applied.
+    pub(crate) rejected_contact_settings: u32,
+    /// The first panic of a callback since the last step or `take_events`, or of a replaced
+    /// configuration.
+    pub(crate) panic: Option<Box<dyn Any + Send>>,
 }
 
 /// The pointer of an optional native listener, null when there is none.

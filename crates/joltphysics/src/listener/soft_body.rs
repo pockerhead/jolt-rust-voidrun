@@ -4,9 +4,9 @@ use std::ffi::c_void;
 
 use joltphysics_sys::*;
 
-use super::contact::{check, is_unit_interval};
+use super::contact::check;
 use super::{Callback, ListenerContext};
-use crate::{BodyId, ContactSettingsError, Quat, RVec3, Real, Vec3};
+use crate::{limits, BodyId, ContactSettingsError, Quat, RVec3, Real, Vec3};
 
 /// How Jolt resolves the contacts between a soft body and another body (Jolt
 /// `SoftBodyContactSettings`).
@@ -35,30 +35,33 @@ impl SoftBodyContactSettings {
         settings.isSensor = self.is_sensor;
     }
 
-    /// Sets the factor on the soft body's vertex inverse masses, `0..=1`.
+    /// Sets the factor on the soft body's vertex inverse masses, 0 or
+    /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
     pub fn set_inv_mass_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
-            is_unit_interval(value),
+            limits::is_contact_scale(value),
             ContactSettingsError::InverseMassScale,
         )?;
         self.inv_mass_scale1 = value;
         Ok(())
     }
 
-    /// Sets the factor on the other body's inverse mass, `0..=1`.
+    /// Sets the factor on the other body's inverse mass, 0 or
+    /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
     pub fn set_inv_mass_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
-            is_unit_interval(value),
+            limits::is_contact_scale(value),
             ContactSettingsError::InverseMassScale,
         )?;
         self.inv_mass_scale2 = value;
         Ok(())
     }
 
-    /// Sets the factor on the other body's inverse inertia, `0..=1`.
+    /// Sets the factor on the other body's inverse inertia, 0 or
+    /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
     pub fn set_inv_inertia_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
-            is_unit_interval(value),
+            limits::is_contact_scale(value),
             ContactSettingsError::InverseInertiaScale,
         )?;
         self.inv_inertia_scale2 = value;

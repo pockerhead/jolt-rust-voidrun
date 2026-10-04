@@ -12,7 +12,7 @@ A `ContactListener` may change the settings Jolt resolves a contact with. Every 
 range with a `ContactSettingsError`, leaving the settings unchanged. The rules below that depend
 on the contact (sensor bodies, the lever `R`) are checked again on the value a listener returns,
 against the contact it was called for, because a listener can assign a value kept from another
-contact; `docs/events.md` ("Panics") says what happens to a value that fails.
+contact; `docs/events.md` ("Rejected contact settings") says what happens to a value that fails.
 
 ### Friction and restitution
 
@@ -30,8 +30,28 @@ contact (`ContactConstraintManager.cpp:930-949`); the soft body solver does the 
 vertices and the other body (`SoftBodyMotionProperties.cpp:205-215`). Every bound this crate
 derives for masses and inertia (`limits::MIN_MASS`, the inertia conditioning floor) assumes the
 inverse mass and inertia a body has; a scale above 1 would raise them past what those bounds
-were derived for. The API therefore accepts `0..=1`: a contact can make a body heavier or
+were derived for. The API therefore accepts at most 1: a contact can make a body heavier or
 immovable, never lighter. This is a policy of this API, not a Jolt limit.
+
+Jolt treats only an exact 0 as immovable (`ContactConstraintManager.cpp:917-918`,
+`SoftBodyMotionProperties.cpp:167-169`). Any other factor goes into the inverse effective mass,
+so a tiny one makes the body enormously heavy: with a 1 kg cube landing at 8 m/s, a factor of
+1e-36 on its inverse mass and inertia overflows the contact impulse, the cube's position is NaN
+three steps later, and an asserts build stops on `MotionProperties.h:233`. A cloth landing on a
+block with the vertex factor 0 and the block's factor 1e-35 goes NaN the same way, through
+`p = dv / (w1 + w2)` (`SoftBodyMotionProperties.cpp:763-788`).
+
+A positive factor is therefore at least `limits::MIN_CONTACT_SCALE = MIN_MASS / MAX_MASS`
+(1e-9). It turns a body of `MIN_MASS` into one of `MAX_MASS`, the spread of masses two bodies
+can already have, and makes any accepted body at most `MAX_MASS / MIN_CONTACT_SCALE = 1e15` kg
+heavy for the contact. At the velocity bounds such a contact needs an impulse of about
+`1e15 kg * 1000 m/s = 1e18` N s, twenty orders of magnitude below `f32::MAX`; the onsets measured
+above lie 26 to 27 orders below the floor. `contact_scales_at_their_floor_step_finitely` throws
+cubes and spheres of `MIN_MASS` and `MAX_MASS` at a floor at the velocity bounds, discrete and
+with `MotionQuality::LinearCast`, and a light cube at a heavy one, with the mass and inertia
+factors at the floor or 0; `soft_body_contact_scales_at_their_floor_step_finitely` throws a
+cloth at blocks of both masses with the vertex and block factors at the floor or 0. Both stay
+finite and assert-free in the asserts build.
 
 ### Sensor contacts
 

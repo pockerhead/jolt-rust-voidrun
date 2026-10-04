@@ -112,16 +112,21 @@ Once a panic is kept, callbacks that start skip the user's `ContactListener` unt
 resumed. A worker that already passed that check, or is inside the listener, finishes its call;
 its settings are still applied when they are valid.
 
+## Rejected contact settings
+
 A `ContactListener` can assign a whole `ContactSettings` value it kept from another contact. The
 setters checked that value against the contact it was read for, so the callback checks the
 returned value again, field by field, against the contact it runs for: its sensor bodies and
-the lever of its surface velocity (`docs/limits.md`, "Contact settings"). A value that fails
-is not written to Jolt, which keeps its own settings for that contact, and the refusal is kept
-like a panic, with the message `contact listener settings rejected: <error>`. Without this check
-a kept ordinary value turns a sensor contact into a solid one, which Jolt asserts against
-(`ContactConstraintManager.cpp:915`). The unit test
-`settings_moved_to_a_contact_they_do_not_fit_are_rejected` covers both cases for Added and
-Persisted.
+the lever of its surface velocity (`docs/limits.md`, "Contact settings"). Without this check a
+kept ordinary value turns a sensor contact into a solid one, which Jolt asserts against
+(`ContactConstraintManager.cpp:915`).
+
+A value that fails is not written to Jolt, which keeps its own settings for that contact. The
+callback records a `ContactSettingsRejection` (the pair and the first rule broken) in
+`WorldEvents::rejected_contact_settings`, whatever the event settings, and `StepReport` counts
+the step's rejections. A rejection is not a panic: the listener is still called for every other
+contact of the step, so which contacts get its settings does not depend on the thread count.
+Rejections sort by pair and error like the other events of a step.
 
 ## Leaks
 

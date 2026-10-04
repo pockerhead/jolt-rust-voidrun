@@ -434,9 +434,10 @@
 //! | `SoftBodyMut::move_kinematic_vertex` | target within [`MAX_POSITION`]; a time step `step` accepts; the implied velocity within [`MAX_LINEAR_VELOCITY`] | new: `soft_body_vertex_writes_are_bounded_and_rejection_changes_nothing` |
 //! | `BodyMut::add_force` on a soft body | accumulated `|F| · w_max / N <=` [`MAX_ACCELERATION`], `N` the vertex count (Jolt's divisor), and `|F| <= MAX_ACCELERATION · MAX_MASS` | new: `soft_body_forces_are_bounded_by_the_acceleration_of_a_vertex`, `unpinning_cannot_release_an_accumulated_force` |
 //! | `ContactSettings::set_combined_friction` (in a `ContactListener`) | `0..=`[`MAX_FRICTION`] | new: `contact_settings_setters_accept_their_range_and_refuse_beyond` |
-//! | `ContactSettings::set_combined_restitution`, `set_inv_mass_scale1`, `set_inv_mass_scale2`, `set_inv_inertia_scale1`, `set_inv_inertia_scale2`; the `SoftBodyContactSettings` scales | `0..=1` (why: `docs/limits.md`, Contact settings) | new: `contact_settings_setters_accept_their_range_and_refuse_beyond`, `soft_body_contact_settings_setters_keep_scales_in_range` |
+//! | `ContactSettings::set_combined_restitution` | `0..=1` | new: `contact_settings_setters_accept_their_range_and_refuse_beyond` |
+//! | `ContactSettings::set_inv_mass_scale1`, `set_inv_mass_scale2`, `set_inv_inertia_scale1`, `set_inv_inertia_scale2`; the `SoftBodyContactSettings` scales | 0 or [`MIN_CONTACT_SCALE`]`..=1` (why: `docs/limits.md`, Contact settings) | new: `contact_settings_setters_accept_their_range_and_refuse_beyond`, `soft_body_contact_settings_setters_keep_scales_in_range`, `contact_scales_at_their_floor_step_finitely` |
 //! | `ContactSettings::set_is_sensor` | stays `true` for a contact with a sensor body, as Jolt asserts | new: `a_contact_with_a_sensor_body_stays_a_sensor_contact` |
-//! | `ContactSettings` returned by a `ContactListener` | every rule above, checked again against the contact the listener was called for; a failing value is not applied | new: `settings_are_checked_again_against_the_contact_that_takes_them`, `settings_moved_to_a_contact_they_do_not_fit_are_rejected` |
+//! | `ContactSettings` returned by a `ContactListener` | every rule above, checked again against the contact the listener was called for; a failing value is not applied and is reported in `WorldEvents::rejected_contact_settings` | new: `settings_are_checked_again_against_the_contact_that_takes_them`, `settings_moved_to_a_contact_they_do_not_fit_are_rejected` |
 //! | `ContactSettings::set_relative_linear_surface_velocity`, `set_relative_angular_surface_velocity` | [`MAX_LINEAR_VELOCITY`], [`MAX_ANGULAR_VELOCITY`], and `len(v) + len(ω) · R <=` [`MAX_LINEAR_VELOCITY`] (why: `docs/limits.md`, Contact settings) | new: `surface_velocities_are_bounded_alone_and_together`, `a_conveyor_moves_a_resting_cube` |
 //! | `DebugLineSettings` (feature `debug-renderer`) | centre within [`MAX_POSITION`], radius at most twice it | new: `center_and_radius_are_bounded_by_the_frame` |
 //!
@@ -526,6 +527,16 @@ pub const MAX_VERTEX_INVERSE_MASS: f32 = 1000.0;
 /// Crate policy. It bounds the forces [`MAX_ACCELERATION`] accepts (at most 5e14 N), contact
 /// effective masses, a vehicle's gravity force and a character's weight impulse.
 pub const MAX_MASS: f32 = 1.0e6;
+
+/// Smallest positive factor a contact may put on a body's inverse mass or inverse inertia
+/// ([`ContactSettings`](crate::ContactSettings), [`SoftBodyContactSettings`](crate::SoftBodyContactSettings)):
+/// 1e-9, the ratio [`MIN_MASS`]` / `[`MAX_MASS`]. At this factor a body of [`MIN_MASS`] weighs as
+/// much as one of [`MAX_MASS`] in the contact; a factor of exactly 0 makes the body immovable.
+///
+/// Derived from [`MIN_MASS`] and [`MAX_MASS`] (written as the literal `1e-9`, which `f32`
+/// division of the two would round one step above); `docs/limits.md` ("Inverse mass and
+/// inertia scales") has the reasoning.
+pub const MIN_CONTACT_SCALE: f32 = 1.0e-9;
 
 /// Largest spring stiffness `k` and damping `c` Jolt may derive from a constraint spring
 /// (`SpringPart.h:36-55,91-104`).
@@ -953,6 +964,11 @@ pub(crate) fn is_acceleration(acceleration: Vec3) -> bool {
 /// Whether `factor` is finite and at most [`MAX_GRAVITY_FACTOR`] in absolute value.
 pub(crate) fn is_gravity_factor(factor: f32) -> bool {
     factor.abs() <= MAX_GRAVITY_FACTOR
+}
+
+/// Whether `scale` is 0 or within `MIN_CONTACT_SCALE..=1`.
+pub(crate) fn is_contact_scale(scale: f32) -> bool {
+    scale == 0.0 || (MIN_CONTACT_SCALE..=1.0).contains(&scale)
 }
 
 /// Whether `friction` is finite and within `0..=MAX_FRICTION`.
@@ -1459,6 +1475,13 @@ mod tests {
             &at(&[[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, -3.0]]),
             Some(rotation)
         ));
+    }
+
+    #[test]
+    fn contact_scale_floor_is_the_mass_ratio() {
+        let ratio = f64::from(MIN_MASS) / f64::from(MAX_MASS);
+        assert!((f64::from(MIN_CONTACT_SCALE) - ratio).abs() <= ratio * f64::from(f32::EPSILON));
+        assert!(is_contact_scale(1.0e-9) && !is_contact_scale(MIN_CONTACT_SCALE.next_down()));
     }
 
     #[test]
