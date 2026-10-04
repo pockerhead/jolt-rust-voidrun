@@ -92,10 +92,14 @@ default, `cross-platform-deterministic`, `double-precision`, `debug-renderer` an
 tests behind the `debug-renderer` feature run only in that configuration. The leak gates read the
 process's private bytes through a Windows API and are built only on Windows.
 
-Not in the safe API yet (joltc exposes them, so `oxijolt-sys` has them): mesh and convex hull
-shapes, tracked vehicles, motorcycles and the manual transmission, the skeleton mapper, Jolt's
-rigid-body `Character`, and the character contact listener. Skinned soft bodies (Jolt's skin
-constraints) are in neither layer.
+Not in the safe API yet (joltc exposes them, so `oxijolt-sys` has them):
+- mesh, convex hull, scaled and tapered shapes;
+- for rigid bodies: impulses, `MoveKinematic`, activating and deactivating a body on demand, the
+  sensor flag, and changing a body's shape or motion type after creation;
+- tracked vehicles, motorcycles and the manual transmission;
+- the skeleton mapper, Jolt's rigid-body `Character` and the character contact listener.
+
+Skinned soft bodies (Jolt's skin constraints) are in neither layer.
 
 ## Inputs and their boundary tests
 

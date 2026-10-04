@@ -114,7 +114,10 @@ The settings are checked before anything reaches Jolt, and a failing call change
   ever more steps to restore its relation after a disturbance
   ([limits.md](limits.md#coupling-ratios)). For the same reason the torque passed to body 2 is not
   `ratio` times the torque on body 1; the rotation rates follow the ratio.
-- **Rack and pinion and pulley ratios** lie within `1 / limits::MAX_RATIO..=limits::MAX_RATIO`.
+- **Rack and pinion ratios**, in radians per metre, have a magnitude within
+  `1 / limits::MAX_RATIO..=limits::MAX_RATIO`. A negative ratio reverses the direction of the
+  coupling.
+- **Pulley ratios** are positive and within `1 / limits::MAX_RATIO..=limits::MAX_RATIO`.
 
 ## References between constraints
 

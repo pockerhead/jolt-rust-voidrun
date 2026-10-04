@@ -52,7 +52,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `SoftBodyValidation` reports a soft body whose bounding box overlaps a rigid body;
   `SoftBodyContacts` lists the vertices that touched a body in the step and the sensors the soft
   body overlaps. Jolt clears a soft body's vertex contacts at the end of each step, so these events
-  are the only way to see them.
+  are the only way to see them. The safe API cannot make a body a sensor yet; sensors come only
+  from `oxijolt-sys`.
 
 ## Materials
 

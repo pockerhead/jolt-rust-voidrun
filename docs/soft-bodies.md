@@ -114,8 +114,11 @@ changes nothing when it fails, and wakes the body when it succeeds:
 
 ## Mass, inertia and pressure rules
 
-These rules keep Jolt's arithmetic finite; [limits.md](limits.md) derives them. Each refuses some
-bodies Jolt would simulate; the workarounds are listed with them.
+These rules keep Jolt's mass, inertia and pressure arithmetic finite for the body as created;
+[limits.md](limits.md) derives them. They are checked when the body is created, and vertex masses
+and forces again when they change. Each rule refuses some bodies Jolt would simulate; the
+workarounds are listed with them. A body that shrinks after creation, and solver settings that
+diverge, are not covered ([coverage.md](coverage.md#not-covered)).
 
 - **1 g per vertex.** A movable vertex weighs at least `limits::MIN_MASS` (1 g), and the movable
   vertices together at most `limits::MAX_MASS`. A light, finely divided body is refused at its real

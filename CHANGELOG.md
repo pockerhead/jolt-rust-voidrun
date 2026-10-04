@@ -5,7 +5,7 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 ## Unreleased
 
 - Renamed the crates: `joltc-sys` is now `oxijolt-sys` (`crates/oxijolt-sys`, Rust path `oxijolt_sys`)
-  and `rolt` is now `oxijolt` (`crates/oxijolt`); the old names belong to jolt-rust on crates.io. Before
+  and `rolt` is now `oxijolt` (`crates/oxijolt`); the old names belong to the upstream project on crates.io. Before
   the first release the crates were briefly called `joltphysics-sys` and `joltphysics`. The repository is
   now https://github.com/pockerhead/oxijolt. The prebuilt manifest is now `oxijolt-sys-manifest.txt`;
   `JOLTC_LIB_DIR` and the features are unchanged. Existing checkouts run
@@ -122,14 +122,14 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - The guide has sections on vehicles and ragdolls, with a car on terrain and a ragdoll in a
   second world run as a doctest; the README and the ragdoll docs state how far joints pass their
   limits on impact.
-- `PhysicsWorld::step` also rejects time steps above `PhysicsWorld::MAX_DELTA_TIME` (1 s), which
-  Jolt runs to NaN positions.
+- `PhysicsWorld::step` also rejects time steps above `PhysicsWorld::MAX_DELTA_TIME` (1 s), a guard
+  against overflow-scale steps; it is not a Jolt limit.
 - A magnitude policy for the safe API: the public `oxijolt::limits` module holds the bounds
   (positions within `MAX_POSITION`, shape extents, velocities, accelerations, masses, friction,
-  spring coefficients, ratios, ...), and every public setter checks its inputs against them
-  before they reach Jolt. Some bounds are derived from Jolt's arithmetic (`docs/limits.md`), some
-  paths are covered only by tests at the bounds, and some cases no bound excludes
-  (`docs/coverage.md` lists all three). New checks refuse values that were accepted before, among
+  spring coefficients, ratios, ...), and the setters of those inputs check them before they reach
+  Jolt. Some inputs, such as damping and ray directions, are only checked to be finite. Some bounds
+  are derived from Jolt's arithmetic (`docs/limits.md`), some paths are covered only by tests at
+  the bounds, and some cases no bound excludes (`docs/coverage.md` lists all three). New checks refuse values that were accepted before, among
   them `WorldSettings::max_contact_constraints` above `WorldSettings::MAX_CONTACT_CONSTRAINTS`,
   body friction above `limits::MAX_FRICTION`, a character weight impulse above
   `limits::MAX_WEIGHT_IMPULSE` and six-DOF translation limits beyond `limits::MAX_SHAPE_EXTENT`.
@@ -157,9 +157,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   and `constraints_of_body` manage them, and `ConstraintError` reports refusals.
 - `remove_body` refuses a body a constraint uses (`BodyError::UsedByConstraint`), and a hinge or
   slider a gear or rack references cannot be removed before the coupling. Gears, racks and
-  pulleys need two dynamic bodies, gear ratios lie within `1..=limits::MAX_GEAR_RATIO` (10)
-  because of a defect in Jolt 5.6's gear solver, and every point where a constraint holds a
-  dynamic body has a lever-arm ratio of at most `limits::MAX_LEVER_ARM_RATIO`. Creating,
+  pulleys need two dynamic bodies. Gear ratios lie within `1..=limits::MAX_GEAR_RATIO` (10),
+  because of a defect in Jolt 5.6's gear solver. Every point where a constraint holds a dynamic
+  body has a lever-arm ratio of at most `limits::MAX_LEVER_ARM_RATIO`. Creating,
   changing or removing a constraint wakes its bodies. `rebase` recreates pulleys in the new frame.
 - Caller job systems: the `JobSystem` trait and `Job` run a world's jobs on the caller's thread
   pool, such as Rayon (`WorldSettings::job_system`, `WorldSettings::MAX_CONCURRENCY`). A job run
@@ -175,8 +175,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   `PhysicsWorld::create_soft_body`, vertex readout (`soft_body`) and writes (`soft_body_mut`:
   velocities, pinning, kinematic moves). Body-level velocity, torque and point-force setters,
   constraints and vehicles refuse soft bodies (`BodyError::SoftBody`); vehicle wheels look through
-  them. Mass, inertia and pressure rules keep Jolt's arithmetic finite and refuse some thin or
-  far-from-origin bodies Jolt would simulate (`docs/soft-bodies.md`).
+  them. Mass, inertia and pressure rules are checked at creation, and vertex masses and forces
+  again in the vertex setters; they refuse some thin or far-from-origin bodies Jolt would simulate
+  (`docs/soft-bodies.md`). A pressurised body whose volume shrinks later is not covered
+  (`docs/coverage.md`, "Not covered").
 - Events: `PhysicsWorld::set_event_settings` and `take_events` record contact, body activation
   and soft body contact events (`EventSettings`, `WorldEvents`), sorted per step into an order
   that does not depend on the thread count. A `ContactListener` (`set_contact_listener`) may change

@@ -26,15 +26,11 @@ The workspace layout, the licence files (`LICENSE-MIT`, `LICENSE-APACHE`) and tw
   filters and temp allocator, ragdoll parts and joints that keep every setting, constraint motor
   access, path, pulley and rack-and-pinion constraints, soft body functions, materials with user
   data and a soft body contact listener.
-- `oxijolt`: a safe, idiomatic Rust API with headless tests. It covers the physics world and rigid
-  bodies; box, sphere, cylinder, capsule, heightfield and compound shapes with materials; scene
-  queries with layer and group filters; a floating-origin rebase; the virtual character controller;
-  the wheeled vehicle; ragdolls; twelve kinds of world constraints; soft bodies; contact, activation
-  and soft body contact events with a contact listener; world state save and restore; caller job
-  systems; debug lines as data; and a magnitude policy (`oxijolt::limits`).
-- Determinism gates over thread counts and job systems, leak gates, and CI on Windows and Linux in
-  five configurations, one of them with Jolt's assertions on. `docs/coverage.md` lists each feature
-  with its tests.
+- `oxijolt`: a safe, idiomatic Rust API with headless tests. The README lists its features, and
+  `docs/coverage.md` lists each one with its tests and what is not bound yet.
+- A magnitude policy (`oxijolt::limits`) that refuses values out of bounds before they reach Jolt.
+- Determinism gates over thread counts and job systems, and leak gates.
+- CI on Windows and Linux in five configurations, one of them with Jolt's assertions on.
 
 ## Licence
 Our additions are dual-licensed MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`). Jolt Physics

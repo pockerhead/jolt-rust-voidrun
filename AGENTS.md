@@ -3,9 +3,8 @@
 Working rules for anyone (human or agent) changing this repository. `CLAUDE.md` only includes this file.
 
 ## What this is
-Rust bindings to [Jolt Physics](https://github.com/jrouwe/JoltPhysics), started as a fork of
-[SecondHalfGames/jolt-rust](https://github.com/SecondHalfGames/jolt-rust) and moving its raw layer onto the
-more complete [amerkoleci/joltc](https://github.com/amerkoleci/joltc) C wrapper (Jolt 5.6). The fork exists to make Jolt usable as the simulation physics of the game VOIDRUN: a
+Rust bindings to [Jolt Physics](https://github.com/jrouwe/JoltPhysics), a fork whose raw layer is built on
+the [amerkoleci/joltc](https://github.com/amerkoleci/joltc) C wrapper (Jolt 5.6). The fork exists to make Jolt usable as the simulation physics of the game VOIDRUN: a
 deterministic, headless, ECS-owned physics world with a character controller, a heightfield terrain, a
 wheeled vehicle and ragdolls. Work for the game comes first; after it, the features the wider Rust community keeps asking for. See
 [LINEAGE.md](LINEAGE.md) for who we inherit from and under which licences.

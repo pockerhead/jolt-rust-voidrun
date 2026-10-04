@@ -56,8 +56,11 @@
 //! - **Errors.** A call that returns `Err` was refused and changed nothing, unless its
 //!   documentation says otherwise. A step that ran but dropped work returns `Ok`, and its
 //!   [`StepReport`] says what was dropped.
-//! - **Magnitudes.** Inputs with a magnitude are checked against [`limits`] before they reach
-//!   Jolt.
+//! - **Magnitudes.** Positions, extents, velocities, masses and the other inputs [`limits`]
+//!   bounds are checked against it before they reach Jolt. Some inputs, such as damping and ray
+//!   directions, are only checked to be finite. Some bounds are derived from Jolt's arithmetic
+//!   ([limits doc]), some are only tested at the bound, and some cases no bound excludes
+//!   ([coverage]).
 //! - **Threads.** Changing a world, [`PhysicsWorld::step`] included, takes `&mut PhysicsWorld`;
 //!   reading it takes `&PhysicsWorld`. `PhysicsWorld` is `Send` and `Sync`: many threads may read
 //!   one world while nobody steps it, and different worlds may step on different threads at the
@@ -96,6 +99,8 @@
 //! [state guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/state.md
 //! [job system guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/job-system.md
 //! [determinism]: https://github.com/pockerhead/oxijolt/blob/main/docs/determinism.md
+//! [limits doc]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md
+//! [coverage]: https://github.com/pockerhead/oxijolt/blob/main/docs/coverage.md#not-covered
 #![warn(
     missing_docs,
     unsafe_op_in_unsafe_fn,

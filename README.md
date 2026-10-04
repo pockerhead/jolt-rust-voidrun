@@ -74,8 +74,11 @@ oxijolt = { git = "https://github.com/pockerhead/oxijolt" }
 - Jolt's jobs on Jolt's thread pool or on your own, such as Rayon ([guide](docs/job-system.md)).
 - Debug wireframes as line data (feature `debug-renderer`); nothing is drawn.
 
-[docs/coverage.md](docs/coverage.md) lists every bound feature with the tests that check it, and
-what is not bound yet.
+Not in the safe API yet: mesh, convex hull, scaled and tapered shapes. A rigid body cannot yet take
+an impulse, be moved kinematically to a target, be activated or deactivated on demand, be created
+as a sensor, or change its shape or motion type after creation; `oxijolt-sys` has the joltc
+functions for all of them. [docs/coverage.md](docs/coverage.md) lists every bound feature with the
+tests that check it, and the rest of what is not bound yet.
 
 ## Status
 
@@ -116,7 +119,8 @@ they have no character controller, vehicles, ragdolls or heightfields. oxijolt b
 through [joltc] and has a safe API for those as well as twelve constraint kinds, soft bodies,
 contact events, state save and restore and caller job systems. It also has determinism gates over
 thread counts and job systems, the magnitude policy with a CI leg under Jolt's assertions, and
-builds without LLVM.
+builds without LLVM. Its shape and rigid-body API is not complete yet; [Features](#features) says
+what is missing.
 
 ## Documentation
 
