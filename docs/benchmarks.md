@@ -16,7 +16,8 @@ below). The first run builds Jolt and joltc in Release under `target/release` un
 `cargo bench` passes (for example under `cargo test --benches`) the binary returns at once. Words
 after `--` run only the cases whose names contain one of them, for example
 `cargo bench -p oxijolt --bench budgets -- tick`. The names are `update_character`, `near step`,
-`landing`, `steady step`, `ray`, `tick`, `events` and `poses`, and a word matches any part of a name:
+`landing`, `steady step`, `ray`, `tick`, `events`, `poses` and `shape creation`, and a word matches
+any part of a name:
 `-- step` runs both the near step and the steady step. A word that matches no case prints an empty
 table, without a warning.
 
@@ -168,25 +169,33 @@ description), not what they time, and the table shows the labels and notes the b
 
 ## Shape creation
 
-Building a triangle mesh or a convex hull costs time and memory once, when the shape is created,
-not per step. Measured once on the machine above in a release build, each time the median of five
-creations; the meshes are height grids, the hulls random points in a unit cube. The memory is the
-growth of the process's private bytes while the shape is alive, which the allocator's reuse makes
-noisy for the smaller meshes.
+Building a triangle mesh or a convex hull costs time once, when the shape is created, not per step.
+The `shape creation` case of the budgets bench (`benches/budgets/shapes.rs`) times it. The meshes are
+height grids of 0.5 m cells, 23, 71, 224 and 708 cells per side, built with both build qualities and
+then scaled by 2 with `Shape::scaled`; the hulls are 100 to 100 000 points uniform in a 1 m cube from
+the bench's linear congruential generator, seed `0x1234_5678`. Each row times five calls after one
+untimed call, and the shape is dropped outside the timing. The medians below come from a run of the
+case alone on 2026-10-04, on the machine above:
 
-| triangles | `FavorRuntimePerformance` ms | `FavorBuildSpeed` ms | private bytes held | `Shape::scaled` by 2 ms |
-|---:|---:|---:|---:|---:|
-| 1 058 | 0.42 | 0.40 | about 20 kB | 0.16 |
-| 10 082 | 4.8 | 3.2 | up to 0.6 MB | 0.64 |
-| 100 352 | 48 | 32 | about 1.35 MB | 6.1 |
-| 1 002 528 | 641 | 457 | about 15.6 MB | 69 |
+```bash
+cargo bench -p oxijolt --bench budgets -- creation
+```
+
+| triangles | `FavorRuntimePerformance` ms | `FavorBuildSpeed` ms | `Shape::scaled` by 2 ms |
+|---:|---:|---:|---:|
+| 1 058 | 0.45 | 0.36 | 0.08 |
+| 10 082 | 5.1 | 3.7 | 0.49 |
+| 100 352 | 50 | 36 | 6.5 |
+| 1 002 528 | 661 | 494 | 71 |
 
 | hull points | `Shape::new_convex_hull` ms |
 |---:|---:|
 | 100 | 0.08 |
-| 10 000 | 3.6 |
-| 100 000 | 34 |
+| 10 000 | 4.2 |
+| 100 000 | 32 |
 
-`Shape::scaled` reads every stored triangle of a mesh once to check that it stays collidable,
-which is the last column. A game that streams meshes builds them off the simulation thread, like
-the chunk shapes above.
+The slowest of the five calls was up to 45 % above the median for the meshes of 10 082 triangles and
+fewer and for the smallest hull, and within 7 % for the rest. `Shape::scaled` reads every stored
+triangle of the mesh back from Jolt, once to count them and once to copy them, to check that they
+stay collidable; that is the last column. A game that streams meshes builds them off the simulation
+thread, like the chunk shapes above.

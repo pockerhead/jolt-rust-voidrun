@@ -22,6 +22,9 @@
 //! - The poses of 256 awake cubes floating above the planet scene, read once per tick one body
 //!   at a time (`world.body(id)`) and with `active_body_poses_into`. One sample is one readout of
 //!   all 256.
+//! - Shape creation: height-grid meshes of 1 058 to 1 002 528 triangles built with both build
+//!   qualities and scaled by 2, and convex hulls of 100 to 100 000 seeded random points. One
+//!   sample is one constructor call, five per row after one untimed call.
 //!
 //! Every case runs a warm-up that is not reported. The first call after the scene is built is
 //! shown as its own "cold first call" row; the landing reports it for the insertion and the rays
@@ -31,7 +34,7 @@
 //!
 //! Run with `cargo bench -p oxijolt --bench budgets`; words after `--` run only the cases
 //! whose names contain one of them (`update_character`, `near step`, `landing`, `steady step`,
-//! `ray`, `tick`, `events`, `poses`). The timings are wall-clock and only reported, never checked; nothing timed
+//! `ray`, `tick`, `events`, `poses`, `shape creation`). The timings are wall-clock and only reported, never checked; nothing timed
 //! feeds back into the simulation.
 
 #[path = "../tests/common/mod.rs"]
@@ -42,6 +45,8 @@ mod planet;
 mod poses;
 #[path = "budgets/report.rs"]
 mod report;
+#[path = "budgets/shapes.rs"]
+mod shapes;
 
 use std::error::Error;
 use std::time::Instant;
@@ -838,6 +843,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if selected("poses") {
         rows.extend(poses::run_poses()?);
+    }
+    if selected("shape creation") {
+        rows.extend(shapes::run_shape_creation()?);
     }
     print_table(&rows);
     println!();
