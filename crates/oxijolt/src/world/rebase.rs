@@ -165,11 +165,11 @@ impl PhysicsWorld {
     /// warm start and its cached rope directions (Jolt starts them at -Y, which matters only
     /// for a rope segment of zero length), and changes Jolt's constraint order (the new pulley
     /// goes to the end, the last constraint takes the old one's place). The same calls give the
-    /// same order. A translation alone recreates pulleys too. In the new frame a taut rope's
-    /// length rounds differently in `f32`; a step in which it comes out just under the maximum
-    /// leaves the rope slack, so a hanging pair can drift by a few millimetres from where it
-    /// would be without the rebase (0.0023 m measured after a turn of 0.4 rad), and the drift
-    /// then decays.
+    /// same order. A translation alone recreates pulleys too. A taut rope can go slack for one
+    /// step after a rebase, so a hanging pair can drift by a few millimetres; the drift then
+    /// decays ([docs/guide.md#floating-origin]).
+    ///
+    /// [docs/guide.md#floating-origin]: https://github.com/pockerhead/oxijolt/blob/main/docs/guide.md#floating-origin
     pub fn rebase(
         &mut self,
         bodies_in_key_order: &[BodyId],

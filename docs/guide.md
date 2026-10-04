@@ -73,6 +73,13 @@ falls asleep, and resting bodies keep their contacts. The list must name every b
 once, in a stable order of the caller's choice. Rebase between steps, before adding the tick's
 forces.
 
+A pulley's fixed points are world points, so a rebase recreates the pulley in the new frame. A
+taut rope's length then rounds differently in `f32`; a step in which it comes out just under the
+maximum length leaves the rope slack, and a hanging pair drifts by a few millimetres from where it
+would be without the rebase before the drift decays; 0.0023 m was measured after a turn of
+0.4 rad. In double precision the slack step can come later than the first step after the
+rebase.
+
 ## Determinism
 
 On one machine the same calls in the same order give bit-identical results for any
