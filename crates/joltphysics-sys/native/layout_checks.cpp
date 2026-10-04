@@ -505,6 +505,19 @@ JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ShapeFilter_Procs, 16, 8);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeFilter_Procs, ShouldCollide, 0);
 JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ShapeFilter_Procs, ShouldCollide2, 8);
 
+// Listener proc tables that joltphysics fills with its callbacks.
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_ContactListener_Procs, 32, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactListener_Procs, OnContactValidate, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactListener_Procs, OnContactAdded, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactListener_Procs, OnContactPersisted, 16);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_ContactListener_Procs, OnContactRemoved, 24);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_BodyActivationListener_Procs, 16, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_BodyActivationListener_Procs, OnBodyActivated, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_BodyActivationListener_Procs, OnBodyDeactivated, 8);
+JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_SoftBodyContactListener_Procs, 16, 8);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyContactListener_Procs, OnSoftBodyContactValidate, 0);
+JOLTPHYSICS_SYS_ASSERT_OFFSET(JPH_SoftBodyContactListener_Procs, OnSoftBodyContactAdded, 8);
+
 #ifdef JPH_DEBUG_RENDERER
 // Debug renderer proc table that joltphysics fills with its line callback.
 JOLTPHYSICS_SYS_ASSERT_LAYOUT(JPH_DebugRenderer_Procs, 24, 8);
@@ -643,6 +656,7 @@ static_assert(sizeof(JPH_MotorState) == 4, "JPH_MotorState: unexpected size");
 static_assert(sizeof(JPH_SwingType) == 4, "JPH_SwingType: unexpected size");
 static_assert(sizeof(JPH_ConstraintSpace) == 4, "JPH_ConstraintSpace: unexpected size");
 static_assert(sizeof(JPH_SixDOFConstraintAxis) == 4, "JPH_SixDOFConstraintAxis: unexpected size");
+static_assert(sizeof(JPH_SoftBodyValidateResult) == 4, "JPH_SoftBodyValidateResult: unexpected size");
 
 static_assert(int(JPH_MotionType_Static) == int(JPH::EMotionType::Static), "JPH_MotionType_Static");
 static_assert(int(JPH_MotionType_Kinematic) == int(JPH::EMotionType::Kinematic), "JPH_MotionType_Kinematic");

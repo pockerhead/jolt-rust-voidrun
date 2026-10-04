@@ -125,6 +125,12 @@ unsafe fn manifold_pair(
     }
 }
 
+/// joltc's `OnContactAdded`.
+///
+/// # Safety
+/// `user_data` is the `userData` of a contact listener of this file, a live `Recorder`; the
+/// bodies and the manifold are the non-null ones Jolt passes for the duration of the callback.
+/// `_settings` is not read.
 unsafe extern "C" fn on_contact_added(
     user_data: *mut c_void,
     body1: *const JPH_Body,
@@ -139,6 +145,10 @@ unsafe extern "C" fn on_contact_added(
     }
 }
 
+/// joltc's `OnContactPersisted`.
+///
+/// # Safety
+/// As for [`on_contact_added`].
 unsafe extern "C" fn on_contact_persisted(
     user_data: *mut c_void,
     body1: *const JPH_Body,
@@ -153,6 +163,11 @@ unsafe extern "C" fn on_contact_persisted(
     }
 }
 
+/// joltc's `OnContactRemoved`.
+///
+/// # Safety
+/// `user_data` is a live `Recorder` as for [`on_contact_added`]; `pair` is joltc's non-null cast
+/// of the Jolt pair, live for the duration of the callback.
 unsafe extern "C" fn on_contact_removed(user_data: *mut c_void, pair: *const JPH_SubShapeIDPair) {
     // SAFETY: joltc passes the listener's `userData` and the live Jolt pair; the extension's
     // getters read it through Jolt's accessors.
@@ -167,16 +182,30 @@ unsafe extern "C" fn on_contact_removed(user_data: *mut c_void, pair: *const JPH
     }
 }
 
+/// joltc's `OnBodyActivated`.
+///
+/// # Safety
+/// `user_data` is the `userData` of an activation listener of this file, a live `Recorder`.
 unsafe extern "C" fn on_body_activated(user_data: *mut c_void, id: JPH_BodyID, _: u64) {
     // SAFETY: joltc passes the listener's `userData`.
     unsafe { with_recorder(user_data, |r| r.push(Event::Activated(id))) };
 }
 
+/// joltc's `OnBodyDeactivated`.
+///
+/// # Safety
+/// As for [`on_body_activated`].
 unsafe extern "C" fn on_body_deactivated(user_data: *mut c_void, id: JPH_BodyID, _: u64) {
     // SAFETY: joltc passes the listener's `userData`.
     unsafe { with_recorder(user_data, |r| r.push(Event::Deactivated(id))) };
 }
 
+/// The extension's `OnSoftBodyContactValidate`.
+///
+/// # Safety
+/// `user_data` is the `userData` of a soft body contact listener of this file, a live
+/// `Recorder`; both bodies and `settings` are the non-null ones the extension passes for the
+/// duration of the callback, and `settings` may be written.
 unsafe extern "C" fn on_soft_body_contact_validate(
     user_data: *mut c_void,
     soft_body: *const JPH_Body,
@@ -201,6 +230,11 @@ unsafe extern "C" fn on_soft_body_contact_validate(
     }
 }
 
+/// The extension's `OnSoftBodyContactAdded`.
+///
+/// # Safety
+/// `user_data` is a live `Recorder` as for [`on_soft_body_contact_validate`]; the soft body and
+/// the manifold are the non-null ones the extension passes for the duration of the callback.
 unsafe extern "C" fn on_soft_body_contact_added(
     user_data: *mut c_void,
     soft_body: *const JPH_Body,

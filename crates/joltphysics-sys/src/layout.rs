@@ -250,6 +250,7 @@ const _: () = {
     assert!(size_of::<JPH_ConstraintSpace>() == 4);
     assert!(size_of::<JPH_SixDOFConstraintAxis>() == 4);
     assert!(size_of::<JPH_PathRotationConstraintType>() == 4);
+    assert!(size_of::<JPH_SoftBodyValidateResult>() == 4);
 };
 
 #[cfg(feature = "double-precision")]
@@ -553,6 +554,23 @@ const _: () = {
     assert!(align_of::<JPH_ShapeFilter_Procs>() == 8);
     assert!(offset_of!(JPH_ShapeFilter_Procs, ShouldCollide) == 0);
     assert!(offset_of!(JPH_ShapeFilter_Procs, ShouldCollide2) == 8);
+
+    assert!(size_of::<JPH_ContactListener_Procs>() == 32);
+    assert!(align_of::<JPH_ContactListener_Procs>() == 8);
+    assert!(offset_of!(JPH_ContactListener_Procs, OnContactValidate) == 0);
+    assert!(offset_of!(JPH_ContactListener_Procs, OnContactAdded) == 8);
+    assert!(offset_of!(JPH_ContactListener_Procs, OnContactPersisted) == 16);
+    assert!(offset_of!(JPH_ContactListener_Procs, OnContactRemoved) == 24);
+
+    assert!(size_of::<JPH_BodyActivationListener_Procs>() == 16);
+    assert!(align_of::<JPH_BodyActivationListener_Procs>() == 8);
+    assert!(offset_of!(JPH_BodyActivationListener_Procs, OnBodyActivated) == 0);
+    assert!(offset_of!(JPH_BodyActivationListener_Procs, OnBodyDeactivated) == 8);
+
+    assert!(size_of::<JPH_SoftBodyContactListener_Procs>() == 16);
+    assert!(align_of::<JPH_SoftBodyContactListener_Procs>() == 8);
+    assert!(offset_of!(JPH_SoftBodyContactListener_Procs, OnSoftBodyContactValidate) == 0);
+    assert!(offset_of!(JPH_SoftBodyContactListener_Procs, OnSoftBodyContactAdded) == 8);
 
     assert!(size_of::<JPH_CharacterBaseSettings>() == 48);
     assert!(align_of::<JPH_CharacterBaseSettings>() == 8);
