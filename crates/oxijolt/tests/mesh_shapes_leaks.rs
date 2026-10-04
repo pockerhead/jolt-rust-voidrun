@@ -2,14 +2,15 @@
 //! a failed Jolt creation and bodies of the new shapes, round after round in one world.
 //!
 //! It measures the private bytes of the process (Windows `K32GetProcessMemoryInfo`), because
-//! the shapes are allocated by C++, which a Rust global allocator does not see. After 500
-//! warm-up rounds it measures seven consecutive blocks of 500 rounds and fails when the median
-//! block grows by 100 bytes per round or more, or when all blocks together grow by 4 MiB or
-//! more: a steady leak of 100 bytes per round shows in the median, a leak that lands in a few
-//! blocks only (or a heap step) in the total. Smaller leaks pass. A control run then forgets one
-//! four-point hull per round, measured at about 600 bytes, and must fail the median gate, which
-//! shows the gate sees a leak of that size. The file holds exactly one test, so its binary runs alone and no parallel test
-//! disturbs the counter.
+//! the shapes are allocated by C++, which a Rust global allocator does not see. The heap grows in
+//! steps for about the first 2500 rounds and now and then later (in up to three of seven blocks),
+//! so the gate measures after 3000 warm-up rounds: nine consecutive blocks of 500 rounds. It fails
+//! when the median block grows by 100 bytes per round or more, or when all blocks together grow
+//! by 4 MiB or more: a steady leak of 100 bytes per round shows in the median, a leak that lands
+//! in a few blocks only (or a heap step) in the total. Smaller leaks pass. A control run then
+//! forgets one four-point hull per round, measured at about 600 bytes, and must fail the median
+//! gate, which shows the gate sees a leak of that size. The file holds exactly one test, so its
+//! binary runs alone and no parallel test disturbs the counter.
 #![cfg(windows)]
 
 mod common;
@@ -22,9 +23,9 @@ use common::*;
 use oxijolt::*;
 use oxijolt_sys::*;
 
-const WARM_UP_ROUNDS: usize = 500;
+const WARM_UP_ROUNDS: usize = 3000;
 const BLOCK_ROUNDS: usize = 500;
-const BLOCKS: usize = 7;
+const BLOCKS: usize = 9;
 const MAX_ROUND_GROWTH: usize = 100;
 const MAX_TOTAL_GROWTH: usize = 4 * 1024 * 1024;
 
