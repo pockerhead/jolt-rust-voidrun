@@ -73,6 +73,13 @@ falls asleep, and resting bodies keep their contacts. The list must name every b
 once, in a stable order of the caller's choice. Rebase between steps, before adding the tick's
 forces.
 
+A pulley's fixed points are world points, so a rebase recreates the pulley in the new frame. A
+taut rope's length then rounds differently in `f32`; a step in which it comes out just under the
+maximum length leaves the rope slack, and a hanging pair drifts by a few millimetres from where it
+would be without the rebase before the drift decays; 0.0023 m was measured after a turn of
+0.4 rad. In double precision the slack step can come later than the first step after the
+rebase.
+
 ## Determinism
 
 On one machine the same calls in the same order give bit-identical results for any
@@ -81,6 +88,13 @@ state: it decides the `BodyId`s. Keep hash-map iteration order, time and thread 
 calls that drive the world, and sort `collide_shape` hits before acting on them. Equal results
 across platforms and compilers need the `cross-platform-deterministic` feature; the README's
 Determinism section has the details.
+
+The determinism tests compare a caller `JobSystem` with Jolt's own thread pool: a Rayon pool and
+a job system that calls `Job::run` inside `queue_job` give the same results. The tests do not
+cover side effects of the caller's own code in `queue_job`. Jolt does not let a job start inside
+another job on one thread (some jobs release their dependents while they still hold body access
+rights, which Jolt's assertions track per thread in `BodyAccess::Grant`), so such a job is left
+to the stepping thread.
 
 ## Debug lines
 
@@ -578,7 +592,8 @@ factor, initial velocity) at the part's bind pose in world space, and the joint 
   when a falling ragdoll hits the ground the contacts win and joints pass their limits for a few
   dozen ticks before the constraints pull them mostly back. These are measurements, not bounds:
   in the repository's drop test (a 12-part humanoid dropped with its pelvis 1.5 m above the
-  terrain) the worst overshoot is 0.29 rad and 0.0037 rad remain at rest. Over a sweep of 126
+  terrain) the worst overshoot is 0.29 rad and 0.0037 rad remain at rest; the test's bounds,
+  0.40 rad during the fall and 0.01 rad at rest, hold for that drop only. Over a sweep of 126
   drops of that humanoid (from 1 to 2.5 m, with raw and stabilized masses) the overshoot reached
   0.48 rad, the joints were up to 0.15 rad outside their limits when the ragdoll came to rest,
   and hinges bent about their fixed axes by up to 0.57 rad on impact. Check joint limits at rest,

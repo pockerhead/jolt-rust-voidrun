@@ -415,10 +415,6 @@ fn assert_refused_after<T>(
     );
 }
 
-fn cube_shape() -> Shape {
-    Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap()
-}
-
 fn extra_cube(scene: &mut Scene, x: Real) -> BodyId {
     let id = add_cube(&mut scene.world, RVec3::new(x, 0.5, 9.0));
     scene.bodies.push(id);

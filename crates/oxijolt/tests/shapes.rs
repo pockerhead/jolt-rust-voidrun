@@ -901,7 +901,7 @@ fn roll_after_release(offset: Option<Vec3>, tilt_degrees: f32) -> f32 {
         )
         .unwrap();
     step(&mut world, 300);
-    let up = walker::rotate(world.body(body).unwrap().rotation(), [0.0, 1.0, 0.0]);
+    let up = math::rotate(world.body(body).unwrap().rotation(), [0.0, 1.0, 0.0]);
     up[1].clamp(-1.0, 1.0).acos().to_degrees() as f32
 }
 

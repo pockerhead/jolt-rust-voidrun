@@ -9,7 +9,7 @@
 
 use oxijolt::*;
 
-use super::walker::{dot, f3, rotate, v3};
+use super::math::{dot, f3, rotate, v3};
 use super::DT;
 
 pub const WHEEL_RADIUS: f32 = 0.35;

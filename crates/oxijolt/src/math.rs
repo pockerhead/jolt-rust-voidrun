@@ -239,6 +239,9 @@ pub struct Quat {
     pub w: f32,
 }
 
+/// What a caller-given rotation must satisfy ([`Quat::is_valid_rotation`]).
+pub(crate) const ROTATION_RULE: &str = "rotation must be a finite unit quaternion";
+
 impl Quat {
     /// The rotation that does nothing.
     pub const IDENTITY: Self = Self::from_xyzw(0.0, 0.0, 0.0, 1.0);

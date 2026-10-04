@@ -29,12 +29,12 @@ use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyError, BodyId, MotionType, PhysicsWorld, RVec3, SubShapeId, Vec3, VehicleError};
 
-use settings::WheelGeometry;
 pub use settings::{
     SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings,
     VehicleEngineSettings, VehicleSettings, VehicleTransmissionSettings, WheelSettings,
     DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
 };
+use settings::{WheelGeometry, MAX_PITCH_ROLL_RULE};
 
 /// Jolt's invalid `BodyID` value.
 const INVALID_BODY_ID: u32 = 0xffff_ffff;
@@ -379,9 +379,7 @@ impl VehicleMut<'_> {
     /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_gravity(&mut self, gravity: Vec3) -> Result<(), VehicleError> {
         if !limits::is_acceleration(gravity) {
-            return Err(VehicleError::InvalidValue(
-                "gravity must be finite and at most limits::MAX_ACCELERATION long",
-            ));
+            return Err(VehicleError::InvalidValue(limits::GRAVITY_RULE));
         }
         let gravity = gravity.to_jph();
         // SAFETY: as in `set_driver_input`; `gravity` is a live local.
@@ -395,9 +393,7 @@ impl VehicleMut<'_> {
     /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_max_pitch_roll_angle(&mut self, radians: f32) -> Result<(), VehicleError> {
         if !(radians.is_finite() && (0.0..=std::f32::consts::PI).contains(&radians)) {
-            return Err(VehicleError::InvalidValue(
-                "max pitch roll angle must be between 0 and pi",
-            ));
+            return Err(VehicleError::InvalidValue(MAX_PITCH_ROLL_RULE));
         }
         // SAFETY: as in `set_driver_input`.
         unsafe { JPH_VehicleConstraint_SetMaxPitchRollAngle(self.ptr(), radians) };

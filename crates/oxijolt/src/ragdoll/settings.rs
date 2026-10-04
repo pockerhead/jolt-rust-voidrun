@@ -6,8 +6,11 @@ use std::ffi::CString;
 
 use oxijolt_sys::*;
 
-use crate::body::{has_finite_inverse, mass_properties, CreationSettings, INERTIA_RULE, MASS_RULE};
-use crate::limits;
+use super::PART_MOTION_RULE;
+use crate::body::{
+    has_finite_inverse, mass_properties, CreationSettings, INERTIA_RULE, STATIC_SHAPE_RULE,
+};
+use crate::limits::{self, MASS_RULE};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
 use crate::{
@@ -234,13 +237,9 @@ pub struct RagdollPart<'a> {
 /// Joints do not stay within their limits on every tick. In each solver iteration Jolt solves
 /// contacts after constraints, so when a ragdoll hits the ground the contacts win and joints pass
 /// their limits for a few dozen ticks; hinges also bend about their fixed axes, and a small error
-/// can remain at rest. How far depends on the
-/// ragdoll and the fall. In the repository's drop test (a 12-part humanoid dropped with its pelvis
-/// 1.5 m above a heightfield) the worst overshoot is 0.29 rad and 0.0037 rad remain at rest; the
-/// test's bounds, 0.40 rad during the fall and 0.01 rad at rest, hold for that drop only. Over a
-/// sweep of 126 drops of that humanoid the overshoot reached 0.48 rad, and up to 0.15 rad
-/// remained when the ragdoll came to rest. Thin parts falling fast can also sink into the ground
-/// with
+/// can remain at rest. How far depends on the ragdoll and the fall; [docs/guide.md#ragdolls] has
+/// the sizes measured for a humanoid. Check joint limits at rest, with a tolerance. Thin parts
+/// falling fast can also sink into the ground with
 /// [`MotionQuality::Discrete`](crate::MotionQuality::Discrete); use
 /// [`MotionQuality::LinearCast`](crate::MotionQuality::LinearCast) on them for high falls.
 ///
@@ -248,6 +247,8 @@ pub struct RagdollPart<'a> {
 /// every ragdoll created from them holds one reference to the settings, so they may be dropped
 /// while ragdolls live. Never changes after construction; one value may create ragdolls in any
 /// number of worlds.
+///
+/// [docs/guide.md#ragdolls]: https://github.com/pockerhead/oxijolt/blob/main/docs/guide.md#ragdolls
 pub struct RagdollSettings {
     settings: Owned<JPH_RagdollSettings>,
     parents: Vec<Option<u32>>,
@@ -303,8 +304,10 @@ impl RagdollSettings {
             .flat_map(RagdollJoint::springs)
             .all(|spring| spring.fits_effective_mass(bound));
         if !springs_fit {
+            // Stiffness and damping derived from the effective mass of the parts a joint
+            // connects.
             return Err(RagdollError::InvalidValue(
-                "a joint spring's stiffness or damping exceeds limits::MAX_SPRING_COEFFICIENT for the parts it connects",
+                "joint spring stiffness or damping exceeds limits::MAX_SPRING_COEFFICIENT",
             ));
         }
         // SAFETY: Jolt is initialised (the skeleton exists). The handles take over the one
@@ -430,11 +433,11 @@ fn validate_parts(skeleton: &Skeleton, parts: &[RagdollPart<'_>]) -> Result<(), 
             error => RagdollError::Body(error),
         })?;
         if part.body.motion_type == MotionType::Static {
-            return invalid("ragdoll parts are dynamic or kinematic");
+            return invalid(PART_MOTION_RULE);
         }
         // SAFETY: the shape is live for the call; the getter only reads it.
         if unsafe { JPH_Shape_MustBeStatic(part.shape.as_ptr()) } {
-            return invalid("this shape can only be used by static bodies");
+            return invalid(STATIC_SHAPE_RULE);
         }
         let properties = mass_properties(part.shape, part.body.mass);
         if !has_finite_inverse(&properties) {

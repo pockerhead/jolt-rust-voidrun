@@ -6,7 +6,10 @@ use oxijolt_sys::*;
 
 use super::rotational::{check_friction, check_motor};
 use super::world::{sealed, ConstraintSettings};
-use super::{constraint_base, non_negative, within, MotorSettings, SpringSettings};
+use super::{
+    constraint_base, non_negative, within, MotorSettings, SpringSettings, FRICTION_RULE,
+    TARGET_VELOCITY_RULE,
+};
 use crate::limits;
 use crate::math::is_unit;
 use crate::owned::{JoltObject, Owned};
@@ -37,8 +40,10 @@ pub struct HermitePathPoint {
 /// The smallest chord between two consecutive path points, metres.
 const MIN_CHORD: f64 = 1.0e-3;
 
-/// What every segment of a path must satisfy.
-const SEGMENT_RULE: &str = "each path segment needs a chord of at least 1 mm and tangents that keep the curve moving along the chord and away from the normal";
+/// What every segment of a path must satisfy: a chord of at least [`MIN_CHORD`], and tangents
+/// that keep the curve moving along the chord and away from the normal.
+const SEGMENT_RULE: &str =
+    "each path segment needs a chord of at least 1 mm and tangents that follow it";
 
 /// A planar Hermite path (Jolt `PathConstraintPathHermite`) for a [`PathConstraintSettings`]:
 /// cubic Hermite segments through the points, one plane normal for all of them. Fraction `i`
@@ -379,7 +384,7 @@ impl sealed::Settings for PathConstraintSettings {
             return Err("path fraction must be between 0 and the path's max fraction");
         }
         if !non_negative(self.max_friction_force) {
-            return Err("friction must be finite and not negative");
+            return Err(FRICTION_RULE);
         }
         self.position_motor.validate()
     }
@@ -581,9 +586,7 @@ impl ConstraintMut<'_, PathConstraint> {
     pub fn set_target_velocity(&mut self, velocity: f32) -> Result<(), ConstraintError> {
         let speed = limits::MAX_LINEAR_VELOCITY;
         if !within(velocity, -speed, speed) {
-            return Err(ConstraintError::InvalidValue(
-                "target velocity must be finite and at most limits::MAX_LINEAR_VELOCITY",
-            ));
+            return Err(ConstraintError::InvalidValue(TARGET_VELOCITY_RULE));
         }
         // SAFETY: as in `set_motor_state`.
         unsafe { JPH_PathConstraint_SetTargetVelocity(self.ptr(), velocity) };

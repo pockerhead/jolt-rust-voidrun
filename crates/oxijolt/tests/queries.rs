@@ -9,15 +9,6 @@ fn down_from(x: Real, y: Real, z: Real, length: f32) -> RayCast {
     RayCast::new(RVec3::new(x, y, z), Vec3::new(0.0, -length, 0.0))
 }
 
-fn child(shape: &Shape, position: Vec3, user_data: u32) -> CompoundChild<'_> {
-    CompoundChild {
-        shape,
-        position,
-        rotation: Quat::IDENTITY,
-        user_data,
-    }
-}
-
 const ALL: QueryFilter<'static> = QueryFilter::new();
 
 fn dot(a: Vec3, b: Vec3) -> f32 {

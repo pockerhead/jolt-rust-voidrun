@@ -59,32 +59,6 @@ fn character_round(world: &mut PhysicsWorld, capsule: &Shape, round: usize) {
     world.remove_character(id).unwrap();
 }
 
-/// A bare joltc physics system with one object layer, for the control run.
-///
-/// # Safety
-/// Jolt is initialised, and no other thread creates or destroys a physics system meanwhile.
-unsafe fn raw_system() -> *mut JPH_PhysicsSystem {
-    // SAFETY: Jolt is initialised and system creation is not concurrent (function contract).
-    // The three layer tables are consistent and handed to the system, which owns them.
-    unsafe {
-        let pair_filter = JPH_ObjectLayerPairFilterTable_Create(1);
-        let broad_phase = JPH_BroadPhaseLayerInterfaceTable_Create(1, 1);
-        JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(broad_phase, 0, 0);
-        let object_vs_broad_phase =
-            JPH_ObjectVsBroadPhaseLayerFilterTable_Create(broad_phase, 1, pair_filter, 1);
-        let settings = JPH_PhysicsSystemSettings {
-            maxBodies: 16,
-            maxBodyPairs: 16,
-            maxContactConstraints: 16,
-            broadPhaseLayerInterface: broad_phase,
-            objectLayerPairFilter: pair_filter,
-            objectVsBroadPhaseLayerFilter: object_vs_broad_phase,
-            ..std::mem::zeroed()
-        };
-        JPH_PhysicsSystem_Create(&settings)
-    }
-}
-
 /// Creates `count` characters on `system` and never releases them.
 ///
 /// # Safety

@@ -8,44 +8,9 @@
 
 mod common;
 
+use common::math::*;
 use common::*;
 use oxijolt::*;
-
-type V = [f64; 3];
-
-// `Real` is already `f64` with the `double-precision` feature.
-#[allow(clippy::useless_conversion)]
-fn real3(p: RVec3) -> V {
-    [f64::from(p.x), f64::from(p.y), f64::from(p.z)]
-}
-
-fn vec3(v: Vec3) -> V {
-    [f64::from(v.x), f64::from(v.y), f64::from(v.z)]
-}
-
-fn to_rvec3(p: V) -> RVec3 {
-    RVec3::new(p[0] as Real, p[1] as Real, p[2] as Real)
-}
-
-fn to_vec3(v: V) -> Vec3 {
-    Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32)
-}
-
-fn sub(a: V, b: V) -> V {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-fn norm(a: V) -> f64 {
-    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
-}
-
-fn cross(a: V, b: V) -> V {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
 
 fn quat4(q: Quat) -> [f64; 4] {
     [q.x, q.y, q.z, q.w].map(f64::from)
@@ -92,7 +57,7 @@ impl Frame {
         }
     }
 
-    fn map_vector_f64(&self, v: V) -> V {
+    fn map_vector_f64(&self, v: V3) -> V3 {
         let [x, y, z, w] = quat4(self.rotation);
         let q = [x, y, z];
         let t = cross(q, v).map(|c| 2.0 * c);
@@ -104,18 +69,18 @@ impl Frame {
         ]
     }
 
-    fn map_point_f64(&self, p: V) -> V {
+    fn map_point_f64(&self, p: V3) -> V3 {
         let rotated = self.map_vector_f64(p);
-        let t = real3(self.translation);
+        let t = v3(self.translation);
         [rotated[0] + t[0], rotated[1] + t[1], rotated[2] + t[2]]
     }
 
     fn map_point(&self, p: RVec3) -> RVec3 {
-        to_rvec3(self.map_point_f64(real3(p)))
+        rvec3(self.map_point_f64(v3(p)))
     }
 
     fn map_vector(&self, v: Vec3) -> Vec3 {
-        to_vec3(self.map_vector_f64(vec3(v)))
+        vec3(self.map_vector_f64(f3(v)))
     }
 
     fn map_rotation(&self, q: Quat) -> Quat {
@@ -155,15 +120,6 @@ fn frames() -> [(&'static str, Frame, RVec3); 2] {
     ]
 }
 
-fn child(shape: &Shape, position: Vec3, user_data: u32) -> CompoundChild<'_> {
-    CompoundChild {
-        shape,
-        position,
-        rotation: Quat::IDENTITY,
-        user_data,
-    }
-}
-
 const ALL: QueryFilter<'static> = QueryFilter::new();
 const ITEM_MASS: f32 = 1.2;
 const GRAVITY: f32 = 9.8;
@@ -179,7 +135,7 @@ struct Scene {
     terrain: BodyId,
     chunk: BodyId,
     item: BodyId,
-    centre: V,
+    centre: V3,
 }
 
 impl Scene {
@@ -194,21 +150,21 @@ impl Scene {
 
     /// Distance of the item origin from the planet centre.
     fn item_radius(&self) -> f64 {
-        norm(sub(real3(self.item().position()), self.centre))
+        norm(sub(v3(self.item().position()), self.centre))
     }
 
     fn item_speed(&self) -> f64 {
-        norm(vec3(self.item().linear_velocity()))
+        norm(f3(self.item().linear_velocity()))
     }
 
     /// Pulls the item towards the planet centre with its weight, then steps.
     fn tick(&mut self) {
-        let position = real3(self.item().position());
+        let position = v3(self.item().position());
         let towards = sub(self.centre, position);
         let pull = towards.map(|c| f64::from(ITEM_MASS * GRAVITY) * c / norm(towards));
         let mut item = self.world.body_mut(self.item).unwrap();
         item.reset_forces();
-        item.add_force(to_vec3(pull)).unwrap();
+        item.add_force(vec3(pull)).unwrap();
         assert!(self.world.step(DT).unwrap().is_complete());
     }
 
@@ -259,7 +215,7 @@ fn scene(offset: RVec3, item_y: Real) -> Scene {
         )
         .unwrap();
 
-    let centre = real3(offset);
+    let centre = v3(offset);
     Scene {
         world,
         terrain,
@@ -274,18 +230,15 @@ fn scene(offset: RVec3, item_y: Real) -> Scene {
 fn differences(a: &Scene, b: &Scene, frame: &Frame) -> [f64; 4] {
     let (a, b) = (a.item(), b.item());
     [
-        norm(sub(
-            real3(b.position()),
-            frame.map_point_f64(real3(a.position())),
-        )),
+        norm(sub(v3(b.position()), frame.map_point_f64(v3(a.position())))),
         angle_between(b.rotation(), frame.map_rotation(a.rotation())),
         norm(sub(
-            vec3(b.linear_velocity()),
-            frame.map_vector_f64(vec3(a.linear_velocity())),
+            f3(b.linear_velocity()),
+            frame.map_vector_f64(f3(a.linear_velocity())),
         )),
         norm(sub(
-            vec3(b.angular_velocity()),
-            frame.map_vector_f64(vec3(a.angular_velocity())),
+            f3(b.angular_velocity()),
+            frame.map_vector_f64(f3(a.angular_velocity())),
         )),
     ]
 }
@@ -556,14 +509,11 @@ fn rays_answer_the_same_across_a_rebase() {
                     "{context}: {hit:?} {old:?}"
                 );
                 let point = norm(sub(
-                    real3(mapped.point_at(hit.fraction)),
-                    frame.map_point_f64(real3(ray.point_at(old.fraction))),
+                    v3(mapped.point_at(hit.fraction)),
+                    frame.map_point_f64(v3(ray.point_at(old.fraction))),
                 ));
                 assert!(point <= 1e-3, "{context}: point off by {point}");
-                let normal = norm(sub(
-                    vec3(hit.normal),
-                    frame.map_vector_f64(vec3(old.normal)),
-                ));
+                let normal = norm(sub(f3(hit.normal), frame.map_vector_f64(f3(old.normal))));
                 assert!(normal <= 1e-3, "{context}: normal off by {normal}");
             }
         }
@@ -571,7 +521,7 @@ fn rays_answer_the_same_across_a_rebase() {
 }
 
 fn assert_vector_near(what: &str, actual: Vec3, expected: Vec3, tolerance: f64) {
-    let error = norm(sub(vec3(actual), vec3(expected)));
+    let error = norm(sub(f3(actual), f3(expected)));
     assert!(error <= tolerance, "{what}: {actual:?} vs {expected:?}");
 }
 
@@ -583,10 +533,7 @@ fn assert_pose_mapped(
     frame: &Frame,
 ) {
     let body = world.body(id).unwrap();
-    let position = norm(sub(
-        real3(body.position()),
-        frame.map_point_f64(real3(before.0)),
-    ));
+    let position = norm(sub(v3(body.position()), frame.map_point_f64(v3(before.0))));
     assert!(position <= 1e-4, "{what}: position off by {position}");
     let angle = angle_between(body.rotation(), frame.map_rotation(before.1));
     assert!(angle <= 1e-5, "{what}: rotation off by {angle}");
@@ -781,9 +728,9 @@ fn identity_rebase_changes_nothing() {
     {
         assert_eq!(bits, old_bits);
         assert_eq!(sleeping, old_sleeping);
-        let [x, y, z] = real3(old_position);
+        let [x, y, z] = v3(old_position);
         let expected = [x + 5.0, y, z - 2.0];
-        let error = norm(sub(real3(position), expected));
+        let error = norm(sub(v3(position), expected));
         assert!(error <= 1e-4, "{position:?} vs {expected:?}");
     }
     assert_eq!(gravity_bits(&world), gravity);
@@ -999,15 +946,12 @@ fn vehicle_drives_across_a_rotating_rebase() {
     let a = unrebased.body(chassis_a).unwrap();
     let b = rebased.body(chassis_b).unwrap();
     // The car moved: the comparison is not between two resting cars.
-    assert!(real3(a.position())[2] > 1.0);
-    let position = norm(sub(
-        real3(b.position()),
-        frame.map_point_f64(real3(a.position())),
-    ));
+    assert!(v3(a.position())[2] > 1.0);
+    let position = norm(sub(v3(b.position()), frame.map_point_f64(v3(a.position()))));
     assert!(position <= 1e-2, "position off by {position}");
     let velocity = norm(sub(
-        vec3(b.linear_velocity()),
-        vec3(frame.map_vector(a.linear_velocity())),
+        f3(b.linear_velocity()),
+        f3(frame.map_vector(a.linear_velocity())),
     ));
     assert!(velocity <= 1e-2, "velocity off by {velocity}");
     assert_eq!(
@@ -1018,19 +962,6 @@ fn vehicle_drives_across_a_rotating_rebase() {
     // The control: the same rebase with the tester's old up loses the floor at once.
     let (_, _, _, wheels_down_c) = drive_across(Some(&frame), TesterAfterRebase::OldUp);
     assert_eq!(wheels_down_c[0], 0, "{wheels_down_c:?}");
-}
-
-/// `v` rotated by the unit quaternion `q`, in `f64`.
-fn rotate(q: Quat, v: V) -> V {
-    let [x, y, z, w] = quat4(q);
-    let axis = [x, y, z];
-    let t = cross(axis, v).map(|c| 2.0 * c);
-    let u = cross(axis, t);
-    [
-        v[0] + w * t[0] + u[0],
-        v[1] + w * t[1] + u[1],
-        v[2] + w * t[2] + u[2],
-    ]
 }
 
 #[test]
@@ -1071,19 +1002,19 @@ fn a_resting_cloth_moves_with_a_rebase_and_stays_at_rest() {
     assert!(world.body(resting).unwrap().is_sleeping(), "nothing wakes");
     let after = world.soft_body(resting).unwrap().vertices();
     for (old, new) in before.iter().zip(&after) {
-        let expected = rotate(rotation, real3(old.position));
+        let expected = rotate(rotation, v3(old.position));
         let expected = [
-            expected[0] + real3(translation)[0],
-            expected[1] + real3(translation)[1],
-            expected[2] + real3(translation)[2],
+            expected[0] + v3(translation)[0],
+            expected[1] + v3(translation)[1],
+            expected[2] + v3(translation)[2],
         ];
-        let error = norm(sub(real3(new.position), expected));
+        let error = norm(sub(v3(new.position), expected));
         assert!(
             error < 1.0e-4,
             "vertex moved {error} m off the mapped position"
         );
-        let velocity = rotate(rotation, vec3(old.velocity));
-        assert!(norm(sub(vec3(new.velocity), velocity)) < 1.0e-5);
+        let velocity = rotate(rotation, f3(old.velocity));
+        assert!(norm(sub(f3(new.velocity), velocity)) < 1.0e-5);
     }
 
     step(&mut world, 30);
@@ -1100,7 +1031,7 @@ fn a_resting_cloth_moves_with_a_rebase_and_stays_at_rest() {
     step(&mut world, 1);
     let vertices = world.soft_body(free).unwrap().vertices();
     let mean = vertices.iter().fold([0.0; 3], |m, v| {
-        let v = vec3(v.velocity);
+        let v = f3(v.velocity);
         [m[0] + v[0], m[1] + v[1], m[2] + v[2]]
     });
     let direction = mean.map(|c| c / norm(mean));

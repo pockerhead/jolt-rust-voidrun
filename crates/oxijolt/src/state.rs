@@ -54,8 +54,8 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 /// ([`set_vertex_inverse_mass`](crate::SoftBodyMut::set_vertex_inverse_mass)) are configuration
 /// too: a restore keeps the ones set last, not those at the save.
 ///
-/// Body properties set at creation (shape, mass, friction, layers, ...) are not saved either;
-/// the body setters change only poses and velocities. A setting the caller applies again before every
+/// Body properties set at creation (shape, mass, friction, layers, ...) are not saved either; the
+/// body setters change only poses and velocities. A setting the caller applies again before every
 /// [`step`](PhysicsWorld::step), such as a vehicle's gravity on a planet, replays exactly, as long
 /// as that gravity is not zero (see the vehicle world up below).
 ///
@@ -73,12 +73,12 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 ///
 /// # No bytes, no equality
 /// A state is opaque: it gives neither its bytes nor `==`. Jolt writes fields it has never
-/// initialised into its stream, a wheel's contact position, normal and lateral direction before
-/// the wheel's first contact (`VehicleConstraint::SaveState`), so the stream may hold bytes
-/// without a defined value. A restore copies them back as they were, and Jolt uses them only
-/// for a wheel with a contact, so a restore is not affected, but Rust may not read them as `u8`: the state keeps them as
-/// [`MaybeUninit<u8>`](std::mem::MaybeUninit), which only Jolt copies. Compare what a world
-/// reports (poses, velocities, character and vehicle state) instead. Loading a state into another
+/// initialised into its stream, a wheel's contact position, normal and lateral direction before the
+/// wheel's first contact (`VehicleConstraint::SaveState`), so the stream may hold bytes without a
+/// defined value. A restore copies them back as they were, and Jolt uses them only for a wheel with
+/// a contact, so a restore is not affected, but Rust may not read them as `u8`: the state keeps
+/// them as [`MaybeUninit<u8>`](std::mem::MaybeUninit), which only Jolt copies. Compare what a
+/// world reports (poses, velocities, character and vehicle state) instead. Loading a state into another
 /// world, which would need the bytes, is not supported.
 #[derive(Clone)]
 pub struct WorldState {

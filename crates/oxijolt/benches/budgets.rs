@@ -37,10 +37,10 @@ mod common;
 use std::error::Error;
 use std::time::Instant;
 
+use common::math::{add, normalize, rvec3, scale, v3, vec3};
 use common::walker::{
-    add, add_terrain, add_walker, fixture_world, flat_terrain, from_y_to, near_tick, normalize,
-    rvec3, scale, tangent, up_at, v3, vec3, Carry, Layers as PlanetLayers, Walker, CENTRE, R,
-    REST_HEIGHT,
+    add_terrain, add_walker, fixture_world, flat_terrain, from_y_to, near_tick, tangent, up_at,
+    Carry, Layers as PlanetLayers, Walker, CENTRE, R, REST_HEIGHT,
 };
 use common::{is_calm, Groups};
 use oxijolt::*;

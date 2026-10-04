@@ -5,6 +5,7 @@ mod common;
 
 use std::f32::consts::{FRAC_PI_2, PI};
 
+use common::math::wide;
 use common::ragdoll::{humanoid_settings, ragdoll_world};
 use common::*;
 use oxijolt::*;
@@ -28,12 +29,6 @@ fn add_box(world: &mut PhysicsWorld, half: Vec3, position: RVec3) -> BodyId {
     world
         .create_body(&shape, &BodySettings::new_dynamic().position(position))
         .unwrap()
-}
-
-/// `value` as `f64`, which it already is with the `double-precision` feature.
-#[allow(clippy::useless_conversion)]
-fn wide(value: Real) -> f64 {
-    f64::from(value)
 }
 
 fn distance(a: RVec3, b: RVec3) -> f64 {

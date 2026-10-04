@@ -7,8 +7,8 @@ mod common;
 
 use std::f32::consts::PI;
 
+use common::math::{bits, f3, v3, wide};
 use common::vehicle::*;
-use common::walker::{f3, v3};
 use common::*;
 use oxijolt::*;
 
@@ -49,16 +49,6 @@ fn real_on_axes(value: Real) -> Vec<RVec3> {
 
 const NON_FINITE: [f32; 3] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
 
-fn bits(v: Vec3) -> [u32; 3] {
-    <[f32; 3]>::from(v).map(f32::to_bits)
-}
-
-/// `value` as `f64`, which it already is with the `double-precision` feature.
-#[allow(clippy::useless_conversion)]
-fn wide(value: Real) -> f64 {
-    f64::from(value)
-}
-
 fn real_bits(v: RVec3) -> [u64; 3] {
     <[Real; 3]>::from(v).map(|c| wide(c).to_bits())
 }
@@ -93,6 +83,10 @@ fn body_invalid(result: Result<impl Sized, BodyError>) -> bool {
 
 fn query_invalid(result: Result<impl Sized, QueryError>) -> bool {
     matches!(result, Err(QueryError::InvalidValue(_)))
+}
+
+fn character_invalid(result: Result<impl Sized, CharacterError>) -> bool {
+    matches!(result, Err(CharacterError::InvalidValue(_)))
 }
 
 #[test]
@@ -459,24 +453,22 @@ fn character_settings_and_setters_are_bounded() {
         base().collision_tolerance(beyond),
     ];
     for settings in &rejected {
-        assert!(matches!(
-            world.create_character(settings, RVec3::ZERO, Quat::IDENTITY),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(world.create_character(
+            settings,
+            RVec3::ZERO,
+            Quat::IDENTITY
+        )));
     }
 
     let corner = RVec3::new(limits::MAX_POSITION, limits::MAX_POSITION, 0.0);
     let id = world
         .create_character(&base(), corner, Quat::IDENTITY)
         .unwrap();
-    assert!(matches!(
-        world.create_character(
-            &base(),
-            RVec3::new(limits::MAX_POSITION.next_up(), 0.0, 0.0),
-            Quat::IDENTITY
-        ),
-        Err(CharacterError::InvalidValue(_))
-    ));
+    assert!(character_invalid(world.create_character(
+        &base(),
+        RVec3::new(limits::MAX_POSITION.next_up(), 0.0, 0.0),
+        Quat::IDENTITY
+    )));
     let mut character = world.character_mut(id).unwrap();
     for p in real_on_axes(limits::MAX_POSITION) {
         character.set_position(p).unwrap();
@@ -485,16 +477,10 @@ fn character_settings_and_setters_are_bounded() {
         character.set_linear_velocity(v).unwrap();
     }
     for p in real_on_axes(limits::MAX_POSITION.next_up()) {
-        assert!(matches!(
-            character.set_position(p),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(character.set_position(p)));
     }
     for v in on_axes(limits::MAX_LINEAR_VELOCITY.next_up()) {
-        assert!(matches!(
-            character.set_linear_velocity(v),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(character.set_linear_velocity(v)));
     }
     let reached = world.character(id).unwrap();
     assert_eq!(
@@ -527,10 +513,7 @@ fn character_update_gravity_and_steps_are_bounded() {
         update(&mut world, gravity, &defaults).unwrap();
     }
     for gravity in on_axes(limits::MAX_ACCELERATION.next_up()) {
-        assert!(matches!(
-            update(&mut world, gravity, &defaults),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(update(&mut world, gravity, &defaults)));
     }
     let extent = limits::MAX_SHAPE_EXTENT;
     let gravity = Vec3::new(0.0, -9.81, 0.0);
@@ -554,10 +537,7 @@ fn character_update_gravity_and_steps_are_bounded() {
         defaults.walk_stairs_step_forward_test(beyond),
     ];
     for settings in &rejected {
-        assert!(matches!(
-            update(&mut world, gravity, settings),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(update(&mut world, gravity, settings)));
     }
 }
 
@@ -986,10 +966,7 @@ fn character_weight_impulse_at_a_lever_arm_is_bounded() {
     for gravity in [at_bound.next_up(), limits::MAX_ACCELERATION] {
         let (mut world, cube, id) = character_on_the_edge_of_a_light_cube();
         let position = world.character(id).unwrap().position();
-        assert!(matches!(
-            update(&mut world, id, gravity),
-            Err(CharacterError::InvalidValue(_))
-        ));
+        assert!(character_invalid(update(&mut world, id, gravity)));
         assert_eq!(
             real_bits(world.character(id).unwrap().position()),
             real_bits(position)
@@ -3452,7 +3429,7 @@ fn stabilized_ragdoll_inertia_at_its_bound_decomposes() {
                 .map(|(index, mass)| {
                     let height = 3.0 * length * index as f32;
                     let joint = HingeConstraintSettings::new(
-                        common::walker::rvec3([0.0, f64::from(height - 1.5 * length), 0.0]),
+                        common::math::rvec3([0.0, f64::from(height - 1.5 * length), 0.0]),
                         Vec3::new(0.0, 0.0, 1.0),
                         Vec3::new(1.0, 0.0, 0.0),
                     );
@@ -3460,7 +3437,7 @@ fn stabilized_ragdoll_inertia_at_its_bound_decomposes() {
                         shape: &shapes[index],
                         body: BodySettings::new_dynamic()
                             .object_layer(layers.ragdoll)
-                            .position(common::walker::rvec3([0.0, f64::from(height), 0.0]))
+                            .position(common::math::rvec3([0.0, f64::from(height), 0.0]))
                             .mass(mass),
                         joint: (index > 0).then_some(RagdollJoint::Hinge(joint)),
                     }

@@ -114,7 +114,7 @@
 //!
 //! Joints do not stay within their limits on every tick: in each solver iteration Jolt solves
 //! contacts after constraints, so on impact joints pass their limits for a few dozen ticks, and a
-//! small error can remain at rest ([`RagdollSettings`] has the measured sizes).
+//! small error can remain at rest (see [`RagdollSettings`]).
 //!
 //! ```
 //! use oxijolt::*;
