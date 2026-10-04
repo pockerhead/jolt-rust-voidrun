@@ -41,9 +41,13 @@ with its own criteria.
   on steep terrain only at the ridge apex (630 of 635 planar runs, 45 of 45 planet slope runs);
   rows without it, with enhanced internal edge removal on, also ground mid-slide on 45.5 degree
   faces (624 of 635 planar, 15 of 45 planet).
-- Hangs: walking off a ledge along a structure wall, every row is grounded beside a wall that
-  leans back by half a degree or more, and the rows with a contact refresh before the Q5 snap
-  also beside an upright wall on the planet. See [Hangs beside walls](#hangs-beside-walls).
+- Hangs: rule 7's structure exception grounds a character in the air beside a structure wall
+  that leans back. Walking off a ledge along such a wall, the rows with Jolt's stick-to-floor
+  (`recommended` among them) hang from 0.2 degrees, the rows with the game's Q5 snap (`spec-d2`)
+  from 0.4 degrees, and the rows with a contact refresh before Q5 from 0.1 degree and beside
+  upright walls on the planet; jumping along it, every row hangs from 0.2 degrees. On the game's
+  planet a wall upright in its chunk leans 0.2 degrees at 15.5 m from where the chunk's up is
+  radial. See [Hangs beside walls](#hangs-beside-walls).
 - Law 2 is broken by every built-in configuration and by the game's own passes. Two changes to the
   game's Q5 floor snap carry it on the plane (`d2-noq4-floor`, 240 of 240): a contact refresh before
   the snap's gate (crests) and accepting a steep structure hit below the capsule (ledge edges). The
@@ -61,8 +65,9 @@ with its own criteria.
   only after a maintenance pass moved the character: 8.9 us per move at the median on the planet
   walk, against 10.8 us for all of the game's passes (`spec-d2`) and 5.1 us for the repository's
   reference near step, on one machine. It keeps Q4, so law 1 fails only at the ridge apex; it does
-  not hang beside an upright wall; it holds laws 3s, 3r, 4, 5v and 5r; it leaves the crest floating
-  of law 2.
+  not hang beside an upright wall, but walking off a ledge it hangs beside walls leaning back 0.2
+  to 0.35 degrees where `spec-d2` does not; it holds laws 3s, 3r, 4, 5v and 5r; it leaves the crest
+  floating of law 2.
 
 ## Method
 
@@ -90,8 +95,8 @@ is fixed:
    with target distance = padding, accepted on a walkable, not dynamic hit) when the character
    was grounded, is not rising and Jolt does not report OnGround. Two law 2 remedies, off in the
    game's passes, change the snap: a contact refresh before its gate, and accepting a steep
-   structure hit that faces up and that the capsule moves down to reach (a ledge edge below it,
-   not a wall it already touches).
+   structure hit that the capsule moves down to reach and that lies at least 0.05 m below the
+   lower sphere centre where the cast stops (a ledge edge under it, not a wall beside it).
 8. Rule 7: steep terrain is a wall. With Q4 (a capsule cast down by padding + 0.05 m against
    terrain only) the cast's normal decides; without it, Jolt's OnSteepGround on a terrain body.
    Steep terrain makes the character slide and not grounded even after a successful autostep or
@@ -185,7 +190,7 @@ reference near step (`near_tick`, including its actor sync) took 5.1 / 10.3 us (
 5.1 / 9.7 us ([benchmarks](benchmarks.md)). The game reports 16 to 19 us at the median for its own
 controller; that figure is from the game, not from this harness.
 
-The study test binary runs in about 20 s in a local debug build; the survey takes about 7
+The study test binary runs in about 20 s in a local debug build; the survey takes about 8
 minutes.
 
 ## Results
@@ -300,39 +305,70 @@ What the survey adds:
 
 Rule 7 excludes structures from steep-as-wall (spec D.2: a step edge reads steep). The study's
 caller, like the repository's reference near step, grounds the character when Jolt reports
-OnSteepGround on a structure. Jolt counts a contact as support unless its point lies in front of
-the supporting plane
+OnSteepGround on a structure. Jolt counts a colliding contact as support unless its point lies in
+front of the supporting plane
 ([CharacterVirtual.cpp:1119](https://github.com/jrouwe/JoltPhysics/blob/e77f175595e64cb44218cc9d9d56fc365ad0e36a/Jolt/Physics/Character/CharacterVirtual.cpp#L1119)).
-With the D.1 plane through the lower sphere centre, a wall that leans back touches the lower
-sphere, below the plane, and an upright wall touches the capsule along a line that starts on the
-plane, where rounding decides. A character grounded beside a wall in the air keeps vel_up at 0 and
-sinks by g dt each tick (2.7 mm).
+With the D.1 plane through the lower sphere centre, a wall that leans back by an angle a touches
+the lower sphere (radius + padding) sin a below the plane (1.5 mm at 0.2 degrees), and an upright
+wall touches the capsule along a line that starts on the plane, where rounding decides. A
+character grounded beside a wall in the air keeps vel_up at 0 and sinks by g dt squared each tick
+(2.7 mm).
 
 `walking_off_a_high_ledge_beside_a_wall_falls_to_the_floor` (`character_study_rules.rs`) walks off a
 2 m sharp ledge at 2 m/s along a sharp upright wall, pressing into it at 0.5 m/s, on the plane and
-on the planet, and requires a fall and a landing. `high_ledge_beside_wall_survey` varies it: for
-upright walls the face (0.40 to 0.43 m from the path), the press (0 to 1 m/s) and the start across
-the wall (144 variants, half on the planet); for walls leaning back or forward by 0.5, 2, 5 and 9
-degrees, the press (0 or 0.5 m/s), on the plane and the planet (16 variants each way).
+on the planet, and requires a fall and a landing. `high_ledge_beside_wall_survey` varies it, on the
+plane and the planet: upright walls with the face 0.40 to 0.43 m from the path, presses of 0 to
+1 m/s and three starts across the wall (144 variants); walls leaning back by 0.1 to 9 degrees with
+the face 0.415 to 0.43 m away, without and with a 0.5 m/s press (12 variants per lean); overhangs
+of 0.5 to 9 degrees; and a jump at 4 m/s on the platform along a wall 0.42 m away, upright or
+leaning back by 0.1 to 2 degrees, without and with the press (4 variants per lean).
 
-- Leaning back: every row hangs in 16 of 16 variants, through Jolt's ground state.
-- Upright: the rows with the D.1 supporting plane fall, except the rows with the refresh before Q5
-  on the planet (`d2-noq4-snap-refresh` 36, `d2-noq4-floor` and `d2-floor` 37 of 72 planet variants;
-  none on the plane). `d2-noq4-snap-edges` hangs in one planet variant through the snap: once Jolt
-  has pushed the character off the anchor's plane z = 0, away from the wall, the upright wall's
-  face looks slightly up along radial up, enough to pass the snap's facing-up test.
-  `jolt-defaults`, whose supporting volume takes every contact, hangs in 130 of 144.
-- Leaning forward (an overhang): no row with the D.1 plane hangs.
+| rows | upright wall, walking off | leaning back, walking off | leaning back, jumping |
+|---|---|---|---|
+| Jolt's stick-to-floor: `spec-d1`, `spec-d1+refresh`, `walker`, `d2-stick`, `d2-stick-norefresh`, `recommended`, `max-slope-50` | falls | hangs from 0.2 degrees, not at 0.15 | hangs from 0.2 degrees, not at 0.15 |
+| the Q5 snap without a refresh before it: `spec-d2`, `d2-noq4`, `d2-still`, `d2-inmove`, `d2-stairs`, `d2-noground`, `d2-noq4-snap-edges`; and `bare` | falls | hangs from 0.4 degrees, not at 0.35 | hangs from 0.2 degrees, not at 0.15 |
+| a refresh before Q5: `d2-noq4-snap-refresh`, `d2-noq4-floor`, `d2-floor` | hangs on the planet (36 or 37 of 72 variants) | hangs from 0.1 degree | hangs from 0.2 degrees, not at 0.15 |
+| `jolt-defaults`, Jolt's default supporting volume | hangs (130 of 144) | hangs from 0.1 degree | hangs, also beside an upright wall |
+
+From its onset a row hangs in 10 to 12 of the 12 walk-off variants, and in the 2 jumps that press
+into the wall, at the top of the jump 0.8 m up; it is Jolt's ground state that holds the character
+every time, not the snap. Overhangs hold no row with the D.1 plane. The refresh before Q5 makes the
+upright wall's contact, which starts on the plane, count as support on the planet.
+
+On the game's planet (radius about 4.44 km, spec A.4) a wall upright in its chunk's frame leans
+against the local radial up by d / 4440 rad at d metres from the point where the chunk's up is
+radial: 0.1 degree at 7.7 m, 0.2 degrees at 15.5 m, 0.4 degrees at 31 m. It leans back where its
+face looks away from that point. If a 32 m chunk (33 samples 1 m apart) has radial up at its
+centre, its corners are 22.6 m away: walls in the outer part of every chunk lean past 0.2
+degrees, where `recommended` hangs walking off and every row hangs jumping, and none reach 0.4
+degrees, where `spec-d2` hangs walking off.
+
+What Jolt decides. CharacterVirtual replaces a contact's surface normal by its contact normal when
+the contact normal points further up
+([CharacterVirtual.cpp:229-230](https://github.com/jrouwe/JoltPhysics/blob/e77f175595e64cb44218cc9d9d56fc365ad0e36a/Jolt/Physics/Character/CharacterVirtual.cpp#L229-L230)),
+and any supporting contact with a walkable surface normal makes the state OnGround
+([CharacterVirtual.cpp:1118-1133](https://github.com/jrouwe/JoltPhysics/blob/e77f175595e64cb44218cc9d9d56fc365ad0e36a/Jolt/Physics/Character/CharacterVirtual.cpp#L1118-L1133),
+[1207-1211](https://github.com/jrouwe/JoltPhysics/blob/e77f175595e64cb44218cc9d9d56fc365ad0e36a/Jolt/Physics/Character/CharacterVirtual.cpp#L1207-L1211)).
+So a walkable contact normal means OnGround, and under OnSteepGround no supporting contact has
+one: the exception cannot be narrowed by the contact normal. Options for the game, none measured
+here:
+
+- Ground on a steep structure only when a supporting contact lies a margin below the lower sphere
+  centre, as the snap's structure-edge change does: 0.05 m keeps faces up to 83 degrees and drops
+  walls within 7 degrees of vertical. Moving the D.1 supporting plane down by the margin would do
+  the same inside Jolt; walkable contacts lie about 0.3 m below the centre and would not change.
+- Ground on a steep structure for a few ticks only, then treat it as a wall, so a hang ends after
+  those ticks.
+- Drop the exception: steep structure faces then act as walls like steep terrain, and the 50
+  degree box ramp no longer holds the character
+  (`a_steep_structure_holds_the_character_and_steep_terrain_does_not` pins today's reading).
 
 The first version of the structure-edge snap accepted any steep structure hit, also a wall the
-padded capsule already touches at the start of the cast (fraction 0). It held the character beside
-an upright wall in 61 of 72 planar and 44 of 72 planet variants, and the ledge test fails with it.
-
-A wall upright in another frame than the local radial up leans against it by atan(d / 99) at d
-metres from where the frames agree, about 9 degrees at 16 m. The game needs a narrower structure
-exception than "OnSteepGround on a structure grounds": for instance ground on a steep structure
-only when the ground contact's contact normal is walkable (an edge under the capsule, judged as the
-autostep judges steps). It is not measured here.
+padded capsule already touches at the start of the cast (fraction 0), and held the character beside
+an upright wall in 61 of 72 planar and 44 of 72 planet variants. The second accepted any hit with
+fraction above 0 whose normal looked up, so it snapped onto a wall leaning back that the capsule
+did not yet touch. `walking_off_a_high_ledge_beside_a_wall_falls_to_the_floor` fails with the
+first, `the_structure_edge_snap_takes_a_ledge_edge_and_not_a_wall_leaning_back` with both.
 
 ## What the built-ins cannot carry
 
@@ -384,10 +420,14 @@ walls](#hangs-beside-walls)).
 capsule rolls over the edge. At tick 86 the character is already InAir, 28 mm above the floor
 below, and the snap's cast hits the edge first with a normal past 45 degrees, which Q5 rejects as
 not walkable; refreshing the contacts does not change that. The pass that carries it: accept a
-steep structure hit that faces up (normal along up above 0) and that the capsule moves down to
-reach (fraction above 0), which a ledge edge below the capsule is and a wall beside it is not.
-Every steep structure hit the law cases accept has fraction 0.085 or more and a normal at most 82
-degrees from up. Alone it passes 210 of 240 planar runs (`d2-noq4-snap-edges`, the crests fail);
+steep structure hit that the capsule moves down to reach (fraction above 0) and that lies at least
+0.05 m below the lower sphere centre where the cast stops. A hit on the lower sphere lies radius +
+padding times its normal's up component below that centre, so the check takes ledge edges under
+the capsule and rejects faces within 7 degrees of vertical, a wall beside the capsule whether it
+stands upright or leans back. Every steep structure hit in the law cases lies 0.063 m or more below
+that centre, with fraction 0.085 or more; measured from where the cast starts instead, a wall
+leaning back 2 degrees 0.43 m from the path lies 0.29 m down and would pass a 0.2 m check
+(`the_structure_edge_snap_takes_a_ledge_edge_and_not_a_wall_leaning_back`). Alone it passes 210 of 240 planar runs (`d2-noq4-snap-edges`, the crests fail);
 with the refresh, 240 of 240 under all five starts (`d2-noq4-floor`), at 16 bits per sample. Both
 cost 2.0 us per move on the planet walk (9.6 against 7.6 us), mostly the extra refresh.
 
@@ -471,8 +511,8 @@ planet; (3) the lowest median cost on the planet walk.
 Law 1, planet: the radial slope runs (`radial/1/*`); law 2, planet: the radial descents and the
 crest (`radial/2+4/*`); all under five starts. `d2-inmove` and `d2-noground` match `spec-d2` on
 these columns and break 5v and 5r; `d2-stairs` passes 198 of 240 planar law 2 runs and breaks 3s.
-`d2-stick-norefresh` is first: it shares the best law 1 and the no-hang result with `spec-d2`,
-`d2-stick` and `d2-still`, passes the most law 2 runs of those and costs the least. It is the
+`d2-stick-norefresh` is first: it shares the best law 1 and no hang beside an upright wall with
+`spec-d2`, `d2-stick` and `d2-still`, passes the most law 2 runs of those and costs the least. It is the
 `recommended` row:
 
 - Creation: the D.1 settings (capsule radius 0.4, half height 0.70845, shape offset 0.70844734,
@@ -496,12 +536,16 @@ except at a ridge's apex. It matches `spec-d2` on laws 1, 3, 4 and 5 and on the 
 better on law 2 on the plane (the 0.15 m ledges hold; 210 against 200 of 240) and on the seams (65
 against 55 of 90 runs). It does not fix the owner's crest report: walking down over a convex crest
 at 3.5 and 7 m/s the character floats 31 and 68 mm on the plane, and on the planet the 44.5 degree
-crest fails at 7 m/s and under two starts at 3.5 m/s. The row that fixes the crests on the plane,
-`d2-floor` (239 of 240, 12.7 us), hangs beside upright walls on the planet through its refresh
-before Q5, so it is second by the rule. It becomes the better choice once rule 7's structure
-exception no longer grounds on walls (see [Hangs beside walls](#hangs-beside-walls)); that pass is
-needed anyway, because beside a wall leaning back every row hangs, the recommended one included.
-Law 6 is carried by no row; the compound-body candidate above is measured on the seam cases only.
+crest fails at 7 m/s and under two starts at 3.5 m/s. Beside walls that lean back it hangs
+sooner: walking off a ledge from 0.2 degrees, where `spec-d2` hangs from 0.4 degrees (on the
+game's planet, chunk-upright walls 15.5 to 31 m from where the chunk's up is radial); jumping along
+such a wall both hang from 0.2 degrees. Every row shares that hang through rule 7's structure
+exception, which is the game's to change (see [Hangs beside walls](#hangs-beside-walls)). The row
+that fixes the crests on the plane, `d2-floor` (239 of 240, 12.7 us), hangs beside upright walls on
+the planet and beside walls leaning back from 0.1 degree, through its refresh before Q5 and the
+same exception (its snap rejects walls within 7 degrees of vertical), so the rule puts it behind
+every row that does not hang. How it would rank with a changed exception is not measured. Law 6
+is carried by no row; the compound-body candidate above is measured on the seam cases only.
 
 ## Mechanism inventory
 
