@@ -17,9 +17,11 @@ mod access;
 mod handle;
 mod load;
 mod lock;
+mod poses;
 
 pub use handle::{BodyMut, BodyRef};
 pub(crate) use lock::{with_locked_bodies, with_locked_body, with_read_locked_body};
+pub use poses::BodyPose;
 
 /// Identifies a body in the world that created it.
 ///
