@@ -466,13 +466,13 @@ impl Config {
         }
     }
 
-    /// The recommended configuration: the row with the most held law columns and, among those,
-    /// the lowest median cost per move on the planet walk (see the study doc). It is
-    /// `d2-noq4-floor`.
+    /// The recommended configuration (see the study doc for the rule): the fewest law 1 failures
+    /// on the plane and the planet, no hang beside an upright wall, then the most law 2 passes,
+    /// then the lowest median cost per move on the planet walk. It is `d2-stick-norefresh`.
     pub fn recommended() -> Self {
         Self {
             name: "recommended",
-            ..Self::d2_noq4_floor()
+            ..Self::d2_stick_norefresh()
         }
     }
 

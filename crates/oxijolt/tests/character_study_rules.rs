@@ -67,15 +67,20 @@ fn the_terrain_veto_stands_after_the_autostep_and_the_snap() {
 /// Standing still on a 50 degree face. On a structure (a sharp box ramp) Jolt reports
 /// OnSteepGround and the character stays grounded with vel_up 0 and does not move; on terrain (a
 /// heightfield plane) it is never grounded and slides with vel_up falling every tick. Checked
-/// for `spec-d2` (the Q4 cast decides), `recommended` (Jolt's ground state decides) and
-/// `walker`.
+/// for `spec-d2` and `recommended` (the Q4 cast decides), `d2-noq4` (Jolt's ground state decides)
+/// and `walker`.
 #[test]
 fn a_steep_structure_holds_the_character_and_steep_terrain_does_not() {
     let structure = SceneKey::BoxRamp {
         deg10: 500,
         tilted: false,
     };
-    for config in [Config::spec_d2(), Config::recommended(), Config::walker()] {
+    for config in [
+        Config::spec_d2(),
+        Config::recommended(),
+        Config::d2_noq4(),
+        Config::walker(),
+    ] {
         let name = config.name;
         let run = still_run(structure, &config);
         assert!(

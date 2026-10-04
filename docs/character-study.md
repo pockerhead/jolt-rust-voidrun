@@ -33,24 +33,36 @@ with its own criteria.
 
 ## Result in short
 
-- No configuration carries every law. Laws 1 and 6 and the radial family are broken in every
-  row; the failures come from Jolt mechanisms listed under [What the built-ins cannot
+- No configuration carries every law. Law 1 (the apex of a steep ridge) and law 6 are broken in
+  every row, and every row fails the radial 44.5 degree crest descent at some gait and start; the
+  failures come from Jolt mechanisms listed under [What the built-ins cannot
   carry](#what-the-built-ins-cannot-carry).
-- Law 2 is broken by every built-in configuration and by the game's own passes. Two changes to
-  the game's Q5 floor snap carry it (`d2-noq4-floor`): a contact refresh before the snap's gate
-  (crests) and accepting a steep hit on a structure (ledge edges). Neither alone is enough.
-- Law 4 (no hops downhill) holds with stick-to-floor alone (every row but `bare`).
+- Law 1, on the plane and on the planet: rows with the game's Q4 terrain support cast are grounded
+  on steep terrain only at the ridge apex (630 of 635 planar runs, 45 of 45 planet slope runs);
+  rows without it, with enhanced internal edge removal on, also ground mid-slide on 45.5 degree
+  faces (624 of 635 planar, 15 of 45 planet).
+- Hangs: walking off a ledge along a structure wall, every row is grounded beside a wall that
+  leans back by half a degree or more, and the rows with a contact refresh before the Q5 snap
+  also beside an upright wall on the planet. See [Hangs beside walls](#hangs-beside-walls).
+- Law 2 is broken by every built-in configuration and by the game's own passes. Two changes to the
+  game's Q5 floor snap carry it on the plane (`d2-noq4-floor`, 240 of 240): a contact refresh before
+  the snap's gate (crests) and accepting a steep structure hit below the capsule (ledge edges). The
+  refresh brings the planet hang. Without the changes, the rows with Jolt's stick-to-floor and no
+  refresh before every move pass 210 of 240 (225 with padding 0.04): `d2-stick-norefresh` floats 31
+  and 68 mm over convex crests at 3.5 and 7 m/s.
+- Law 4 (no hops downhill) holds with stick-to-floor or the Q5 snap (every row but `bare`).
 - Law 3 holds with the game's autostep on sharp and rounded steps. Jolt's walk stairs holds it on
   rounded steps with a step-up of 0.33 m (it climbs up to 0.467 m) and does not on sharp steps.
 - Law 5v holds when the overlap is resolved before the move (the game's Q6 push, or a still
   update) or Jolt's penetration recovery is 0 inside the move; law 5r needs the underground
   recovery for burials.
-- Recommended (`recommended` below, the same as `d2-noq4-floor`): the game's passes without the
-  Q4 terrain support cast, with the two snap changes: 9.5 us per move at the median on the
-  planet walk, against 10.7 us for all of the game's passes (`spec-d2`) and 5.1 us for the
-  repository's reference near step, on one machine. It holds laws 2, 3s, 3r, 4, 5v and 5r and
-  breaks 1, 6 and radial; Q4 removes some law 1 failures (a mid-slide grounding on 45.5 degree
-  terrain) and no law 6 failure.
+- Recommended (`recommended` below, the same as `d2-stick-norefresh`): the game's passes with
+  Jolt's stick-to-floor (0.3 m, gated by the caller) instead of the Q5 snap and a contact refresh
+  only after a maintenance pass moved the character: 8.9 us per move at the median on the planet
+  walk, against 10.8 us for all of the game's passes (`spec-d2`) and 5.1 us for the repository's
+  reference near step, on one machine. It keeps Q4, so law 1 fails only at the ridge apex; it does
+  not hang beside an upright wall; it holds laws 3s, 3r, 4, 5v and 5r; it leaves the crest floating
+  of law 2.
 
 ## Method
 
@@ -77,12 +89,15 @@ is fixed:
 7. Contact readout, then the game's autostep and the Q5 floor snap (a capsule cast down by 0.3 m
    with target distance = padding, accepted on a walkable, not dynamic hit) when the character
    was grounded, is not rising and Jolt does not report OnGround. Two law 2 remedies, off in the
-   game's passes, change the snap: a contact refresh before its gate, and accepting a steep hit
-   on a structure.
+   game's passes, change the snap: a contact refresh before its gate, and accepting a steep
+   structure hit that faces up and that the capsule moves down to reach (a ledge edge below it,
+   not a wall it already touches).
 8. Rule 7: steep terrain is a wall. With Q4 (a capsule cast down by padding + 0.05 m against
    terrain only) the cast's normal decides; without it, Jolt's OnSteepGround on a terrain body.
    Steep terrain makes the character slide and not grounded even after a successful autostep or
-   snap; steep structures (a step edge) still hold it (`character_study_rules.rs`).
+   snap; steep structures (a step edge) still hold it: Jolt's OnSteepGround on a structure
+   grounds the character, as in the reference near step (`character_study_rules.rs`; see
+   [Hangs beside walls](#hangs-beside-walls)).
 9. Rule 8 carries vel_up; rule 9 reports the velocity as the displacement from the locomotion
    origin (the origin after every maintenance pass) over dt, zero without input.
 
@@ -165,8 +180,8 @@ measures what each pass costs when it finds nothing to do.
 Machine and build: Intel Core i9-11900K (8 cores, 16 threads), Windows 11 Pro 10.0.26200, rustc
 1.95.0 (`bench` profile), MSVC 19.44.35211, Jolt 5.6.0 and joltc in Release, default features, one
 worker thread, power plan "High performance", 2026-10-04. In the same run the repository's
-reference near step (`near_tick`, including its actor sync) took 5.1 / 9.9 us (p50 / p99) and
-`update_character` alone with the walker's settings 3.5 / 6.5 us; the published budget row is
+reference near step (`near_tick`, including its actor sync) took 5.1 / 10.3 us (p50 / p99) and
+`update_character` alone with the walker's settings 3.6 / 7.2 us; the published budget row is
 5.1 / 9.7 us ([benchmarks](benchmarks.md)). The game reports 16 to 19 us at the median for its own
 controller; that figure is from the game, not from this harness.
 
@@ -180,22 +195,22 @@ Cells as the law gates check them; costs from the bench run above (microseconds 
 <!-- study-table:start -->
 | row | mechanisms and parameters | 1 | 2 | 3s | 3r | 4 | 5v | 5r | 6 | radial | W1 p50 us | W1 p99 us | W3 p50 us |
 |---|---|---|---|---|---|---|---|---|---|---|---:|---:|---:|
-| bare | D.1 settings | broken (`1/ridge50/apex/still`) | broken (`2/boxramp40/descent/v1.6`) | broken (`3s/h0.4/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.4/heading0/v1.6/z0.37/d1`) | broken (`4/boxramp40/diagonal/v1.6`) | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/descent44.5/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 3.8 | 7.4 | 3.4 |
-| jolt-defaults | Jolt default settings, stick 0.5, stairs 0.4 fwd 0.02 test 0.15 | broken (`1/ridge50/apex/still`) | broken (`2/ramp40/crest-descent/v3.5`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.5/heading0/v1.6/z0.37/d1`) | held | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/descent44.5/along/v7`) | broken (`radial/2+4/crest44.5/descent/v3.5`) | 4.0 | 9.8 | 3.6 |
-| spec-d1 | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken (`1/ridge50/apex/still`) | broken (`2/ramp40/crest-descent/v3.5`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.5/heading0/v1.6/z0.37/d1`) | held | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/flat/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 3.7 | 9.0 | 3.5 |
-| spec-d1+refresh | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.5/heading0/v1.6/z0.37/d1`) | held | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/flat/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 5.6 | 12.3 | 5.3 |
-| walker | D.1 settings, stick 0.3 (caller-gated), refresh when moved, Q3 underground, autostep, reference rule 7 | broken (`1/ridge50/apex/still`) | broken (`2/ramp40/crest-descent/v3.5`) | held | held | held | broken (`5v/plane30-0.1/contour`) | held | broken (`6/flat/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 4.7 | 9.3 | 4.5 |
-| spec-d2 | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 10.7 | 19.7 | 10.4 |
-| d2-stick | D.1 settings, stick 0.3 (caller-gated), refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | held | broken (`6/flat/across/v3.5`) | broken (`radial/2+4/crest44.5/descent/v1.6`) | 10.7 | 20.1 | 10.4 |
-| d2-stick-norefresh | D.1 settings, stick 0.3 (caller-gated), refresh when moved, still update when deep, Q3 underground, Q6 push, autostep, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ramp40/crest-descent/v3.5`) | held | held | held | held | held | broken (`6/flat/across/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 8.8 | 16.5 | 8.5 |
-| d2-noq4 | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 7.5 | 14.2 | 7.3 |
-| d2-still | D.1 settings, refresh every tick, still update when penetrating, recovery 0 in the move, Q3 underground, autostep, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 9.8 | 18.1 | 9.5 |
-| d2-inmove | D.1 settings, refresh every tick, Q3 underground, autostep, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | broken (`5v/plane30-0.1/contour`) | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 9.7 | 18.4 | 9.4 |
-| d2-stairs | D.1 settings, stairs 0.33 fwd 0.15 test 0.5, refresh every tick, still update when deep, Q3 underground, Q6 push, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 10.7 | 20.9 | 10.3 |
-| d2-noground | D.1 settings, refresh every tick, still update when deep, Q6 push, autostep, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | broken (`5r/burial1/still`) | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 9.8 | 18.9 | 9.5 |
-| d2-noq4-floor | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, refresh before Q5, Q5 on structure edges | broken (`1/ridge50/apex/still`) | held | held | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 9.5 | 17.9 | 9.4 |
-| max-slope-50 | D.1 settings, max slope 50, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken (`1/plane45.5/x-4z0.37/still`) | broken (`2/ramp40/crest-descent/v3.5`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.5/heading0/v1.6/z0.37/d1`) | held | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/flat/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 3.8 | 9.3 | 3.5 |
-| recommended | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, refresh before Q5, Q5 on structure edges | broken (`1/ridge50/apex/still`) | held | held | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 9.5 | 18.0 | 9.3 |
+| bare | D.1 settings | broken (`1/ridge50/apex/still`) | broken (`2/boxramp40/descent/v1.6`) | broken (`3s/h0.4/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.4/heading0/v1.6/z0.37/d1`) | broken (`4/boxramp40/diagonal/v1.6`) | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/descent44.5/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 3.8 | 7.7 | 3.5 |
+| jolt-defaults | Jolt default settings, stick 0.5, stairs 0.4 fwd 0.02 test 0.15 | broken (`1/ridge50/apex/still`) | broken (`2/ramp40/crest-descent/v3.5`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.5/heading0/v1.6/z0.37/d1`) | held | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/descent44.5/along/v7`) | broken (`radial/2+4/crest44.5/descent/v3.5`) | 4.0 | 10.5 | 3.6 |
+| spec-d1 | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken (`1/ridge50/apex/still`) | broken (`2/ramp40/crest-descent/v3.5`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.5/heading0/v1.6/z0.37/d1`) | held | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/flat/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 3.8 | 9.7 | 3.5 |
+| spec-d1+refresh | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.5/heading0/v1.6/z0.37/d1`) | held | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/flat/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 5.6 | 12.9 | 5.3 |
+| walker | D.1 settings, stick 0.3 (caller-gated), refresh when moved, Q3 underground, autostep, reference rule 7 | broken (`1/ridge50/apex/still`) | broken (`2/ramp40/crest-descent/v3.5`) | held | held | held | broken (`5v/plane30-0.1/contour`) | held | broken (`6/flat/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 4.8 | 10.0 | 4.5 |
+| spec-d2 | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 10.8 | 21.1 | 10.4 |
+| d2-stick | D.1 settings, stick 0.3 (caller-gated), refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | held | broken (`6/flat/across/v3.5`) | broken (`radial/2+4/crest44.5/descent/v1.6`) | 10.8 | 21.5 | 10.4 |
+| d2-stick-norefresh | D.1 settings, stick 0.3 (caller-gated), refresh when moved, still update when deep, Q3 underground, Q6 push, autostep, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ramp40/crest-descent/v3.5`) | held | held | held | held | held | broken (`6/flat/across/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 8.9 | 18.1 | 8.6 |
+| d2-noq4 | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 7.6 | 15.5 | 7.3 |
+| d2-still | D.1 settings, refresh every tick, still update when penetrating, recovery 0 in the move, Q3 underground, autostep, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 9.9 | 19.4 | 9.6 |
+| d2-inmove | D.1 settings, refresh every tick, Q3 underground, autostep, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | broken (`5v/plane30-0.1/contour`) | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 9.8 | 18.9 | 9.5 |
+| d2-stairs | D.1 settings, stairs 0.33 fwd 0.15 test 0.5, refresh every tick, still update when deep, Q3 underground, Q6 push, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 10.8 | 22.7 | 10.4 |
+| d2-noground | D.1 settings, refresh every tick, still update when deep, Q6 push, autostep, Q5 snap, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ledge0.15-rounded/v1.6`) | held | held | held | held | broken (`5r/burial1/still`) | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 9.8 | 19.3 | 9.5 |
+| d2-noq4-floor | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, refresh before Q5, Q5 on structure edges | broken (`1/ridge50/apex/still`) | held | held | held | held | held | held | broken (`6/descent44.5/diagonal/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 9.6 | 19.5 | 9.3 |
+| max-slope-50 | D.1 settings, max slope 50, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken (`1/plane45.5/x-4z0.37/still`) | broken (`2/ramp40/crest-descent/v3.5`) | broken (`3s/h0.5/heading0/v1.6/z0.37/d1`) | broken (`3r/h0.5/heading0/v1.6/z0.37/d1`) | held | broken (`5v/plane30-0.1/contour`) | broken (`5r/burial1/still`) | broken (`6/flat/across/v3.5`) | broken (`radial/1/spiral45.5/x2/still`) | 3.8 | 9.8 | 3.5 |
+| recommended | D.1 settings, stick 0.3 (caller-gated), refresh when moved, still update when deep, Q3 underground, Q6 push, autostep, Q4 support | broken (`1/ridge50/apex/still`) | broken (`2/ramp40/crest-descent/v3.5`) | held | held | held | held | held | broken (`6/flat/across/v3.5`) | broken (`radial/2+4/crest44.5/descent/v7`) | 8.9 | 17.6 | 8.5 |
 <!-- study-table:end -->
 
 `walker` is the repository's reference near step; `spec-d2` runs every pass the game added, in
@@ -204,46 +219,45 @@ instead of the Q5 snap (`d2-stick`, also without the every-tick refresh in `d2-s
 no Q4 (`d2-noq4`), Jolt's recovery in a still update instead of Q6 (`d2-still`) or inside the move
 (`d2-inmove`), Jolt's walk stairs instead of the autostep (`d2-stairs`), no underground recovery
 (`d2-noground`); `d2-noq4-floor` is `d2-noq4` with the two law 2 changes to the Q5 snap
-(a refresh before its gate, steep structure hits accepted). `max-slope-50` is the law 1 control (it reports OnGround on a 45.5 degree face,
-`the_controls_are_seen`). The 3 cm raised seam, the other control, fails law 6 in every case.
+(a refresh before its gate, steep structure hits below the capsule accepted); `recommended` is
+`d2-stick-norefresh`. `max-slope-50` is the law 1 control (it reports OnGround on a 45.5 degree
+face, `the_controls_are_seen`). The 3 cm raised seam, the other control, fails law 6 in every case.
 
 ### Survey rows
 
 Not pinned; cells from the five-start survey in the default debug build, with passing runs out
-of all runs; W1 from the bench run above. The rows `d2-noq4-snap-refresh`, `d2-noq4-snap-edges`
-(each law 2 remedy alone on `d2-noq4`) and `d2-floor` (both on `spec-d2`) were surveyed with the
-caller as it is now; the others at commit `9fac5f1`, whose caller differs only in rule 7 after an
-autostep or snap, which these rows do not run.
+of all runs; W1 from the bench run above. `d2-noq4-snap-refresh` and `d2-noq4-snap-edges` are each
+law 2 remedy alone on `d2-noq4`, `d2-floor` both on `spec-d2`.
 
 <!-- study-survey:start -->
 | row | mechanisms and parameters | 1 | 2 | 3s | 3r | 4 | 5v | 5r | 6 | radial | W1 p50 us | W1 p99 us |
 |---|---|---|---|---|---|---|---|---|---|---|---:|---:|
-| d2-noq4-snap-refresh | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, refresh before Q5 | broken 624/635, 6 unstable | broken 230/240 | held 720/720 | held 720/720 | held 360/360 | held 35/35 | held 70/70 | broken 65/90 | broken 89/120, 1 unstable | 9.5 | 17.9 |
-| d2-noq4-snap-edges | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, Q5 on structure edges | broken 624/635, 6 unstable | broken 210/240 | held 720/720 | held 720/720 | held 360/360 | held 35/35 | held 70/70 | broken 55/90 | broken 83/120, 2 unstable | 7.5 | 14.0 |
-| d2-floor | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, refresh before Q5, Q5 on structure edges, Q4 support | broken 630/635 | variable 239/240, 1 unstable | held 720/720 | held 720/720 | held 360/360 | held 35/35 | held 70/70 | broken 65/90 | variable 119/120, 1 unstable | 12.8 | 25.5 |
-| d1-up0.30-test0.15 | D.1 settings, stick 0.3, stairs 0.3 fwd 0.15 test 0.15 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 65/120, 3 unstable | 3.8 | 9.2 |
-| d1-up0.30-test0.5 | D.1 settings, stick 0.3, stairs 0.3 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 65/120, 2 unstable | 3.7 | 9.1 |
-| d1-up0.33-test0.15 | D.1 settings, stick 0.3, stairs 0.33 fwd 0.15 test 0.15 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | held 720/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 3 unstable | 3.8 | 9.1 |
-| d1-up0.33-test0.5 | D.1 settings, stick 0.3, stairs 0.33 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | held 720/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 66/120, 2 unstable | 3.7 | 9.0 |
-| d1-up0.36-test0.15 | D.1 settings, stick 0.3, stairs 0.36 fwd 0.15 test 0.15 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 710/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 68/120, 3 unstable | 3.7 | 9.0 |
-| d1-up0.36-test0.5 | D.1 settings, stick 0.3, stairs 0.36 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 710/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 3.8 | 9.3 |
-| d1-up0.40-test0.15 | D.1 settings, stick 0.3, stairs 0.4 fwd 0.15 test 0.15 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 3.7 | 8.9 |
-| d1-up0.40-test0.5 | D.1 settings, stick 0.3, stairs 0.4 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 3.8 | 9.1 |
-| d1r-tolerance0.01 | D.1 settings, tolerance 0.01, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 138/240, 1 unstable | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 59/120, 1 unstable | 5.6 | 12.7 |
-| d1r-tolerance0.02 | D.1 settings, tolerance 0.02, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 172/240, 2 unstable | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 59/120, 1 unstable | 5.6 | 12.8 |
-| d1r-stick0.5 | D.1 settings, stick 0.5, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 103/240, 3 unstable | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 59/120, 1 unstable | 5.6 | 12.8 |
-| d1r-predictive0.025 | D.1 settings, predictive 0.025, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 101/240, 3 unstable | broken 479/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 57/120, 1 unstable | 5.1 | 11.6 |
-| d1r-predictive0.05 | D.1 settings, predictive 0.05, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 105/240, 2 unstable | broken 479/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 57/120, 1 unstable | 5.3 | 12.0 |
-| d1r-predictive0.2 | D.1 settings, predictive 0.2, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 100/240, 2 unstable | broken 480/720 | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 56/120, 1 unstable | 6.2 | 13.3 |
-| d1-padding0.01 | D.1 settings, padding 0.01, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 540/635 | broken 210/240 | broken 473/720, 6 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 64/90, 1 unstable | broken 66/120, 1 unstable | 3.8 | 9.2 |
-| d1-padding0.04 | D.1 settings, padding 0.04, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 612/635, 18 unstable | broken 225/240 | broken 479/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 49/70, 1 unstable | broken 65/90 | broken 72/120, 2 unstable | 3.7 | 8.6 |
-| d1-no-edge-removal | D.1 settings, edge removal off, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 630/635 | broken 205/240, 2 unstable | broken 478/720, 2 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 35/90 | broken 79/120, 1 unstable | 4.0 | 9.7 |
-| d1-ignore-back-faces | D.1 settings, back faces ignored, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 3.6 | 8.6 |
-| d1-still-always | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, still update always | broken 624/635, 6 unstable | broken 103/240, 3 unstable | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | held 35/35 | broken 55/70 | broken 65/90 | broken 64/120, 1 unstable | 5.7 | 12.4 |
-| d1-still-penetrating | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, still update when penetrating | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 30/35 | broken 55/70 | broken 65/90 | broken 72/120, 2 unstable | 3.8 | 9.3 |
-| d1-moving-recovery0 | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, recovery 0 in the move | broken 624/635, 6 unstable | broken 210/240 | broken 476/720, 3 unstable | broken 480/720 | held 360/360 | held 35/35 | broken 5/70 | broken 65/90 | broken 70/120, 3 unstable | 3.8 | 9.7 |
-| d1-recovery0.5 | D.1 settings, recovery speed 0.5, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 472/720, 5 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 5/70 | broken 65/90 | broken 63/120, 2 unstable | 3.7 | 9.3 |
-| d1-inner-body | D.1 settings, inner body, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 4.1 | 10.2 |
+| d2-noq4-snap-refresh | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, refresh before Q5 | broken 624/635, 6 unstable | broken 230/240 | held 720/720 | held 720/720 | held 360/360 | held 35/35 | held 70/70 | broken 65/90 | broken 89/120, 1 unstable | 9.6 | 19.7 |
+| d2-noq4-snap-edges | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, Q5 on structure edges | broken 624/635, 6 unstable | broken 210/240 | held 720/720 | held 720/720 | held 360/360 | held 35/35 | held 70/70 | broken 55/90 | broken 83/120, 2 unstable | 7.6 | 15.4 |
+| d2-floor | D.1 settings, refresh every tick, still update when deep, Q3 underground, Q6 push, autostep, Q5 snap, refresh before Q5, Q5 on structure edges, Q4 support | broken 630/635 | variable 239/240, 1 unstable | held 720/720 | held 720/720 | held 360/360 | held 35/35 | held 70/70 | broken 65/90 | variable 119/120, 1 unstable | 12.7 | 24.4 |
+| d1-up0.30-test0.15 | D.1 settings, stick 0.3, stairs 0.3 fwd 0.15 test 0.15 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 65/120, 3 unstable | 3.8 | 9.8 |
+| d1-up0.30-test0.5 | D.1 settings, stick 0.3, stairs 0.3 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 65/120, 2 unstable | 3.8 | 9.6 |
+| d1-up0.33-test0.15 | D.1 settings, stick 0.3, stairs 0.33 fwd 0.15 test 0.15 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | held 720/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 3 unstable | 3.8 | 9.6 |
+| d1-up0.33-test0.5 | D.1 settings, stick 0.3, stairs 0.33 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | held 720/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 66/120, 2 unstable | 3.8 | 9.7 |
+| d1-up0.36-test0.15 | D.1 settings, stick 0.3, stairs 0.36 fwd 0.15 test 0.15 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 710/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 68/120, 3 unstable | 3.8 | 9.7 |
+| d1-up0.36-test0.5 | D.1 settings, stick 0.3, stairs 0.36 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 710/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 3.8 | 9.7 |
+| d1-up0.40-test0.15 | D.1 settings, stick 0.3, stairs 0.4 fwd 0.15 test 0.15 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 3.8 | 9.8 |
+| d1-up0.40-test0.5 | D.1 settings, stick 0.3, stairs 0.4 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 3.8 | 10.1 |
+| d1r-tolerance0.01 | D.1 settings, tolerance 0.01, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 138/240, 1 unstable | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 59/120, 1 unstable | 5.6 | 13.0 |
+| d1r-tolerance0.02 | D.1 settings, tolerance 0.02, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 172/240, 2 unstable | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 59/120, 1 unstable | 5.6 | 13.0 |
+| d1r-stick0.5 | D.1 settings, stick 0.5, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 103/240, 3 unstable | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 59/120, 1 unstable | 5.6 | 13.0 |
+| d1r-predictive0.025 | D.1 settings, predictive 0.025, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 101/240, 3 unstable | broken 479/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 57/120, 1 unstable | 5.1 | 12.3 |
+| d1r-predictive0.05 | D.1 settings, predictive 0.05, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 105/240, 2 unstable | broken 479/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 57/120, 1 unstable | 5.3 | 12.5 |
+| d1r-predictive0.2 | D.1 settings, predictive 0.2, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, refresh every tick | broken 624/635, 6 unstable | broken 100/240, 2 unstable | broken 480/720 | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 56/120, 1 unstable | 6.2 | 14.1 |
+| d1-padding0.01 | D.1 settings, padding 0.01, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 540/635 | broken 210/240 | broken 473/720, 6 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 64/90, 1 unstable | broken 66/120, 1 unstable | 3.8 | 10.3 |
+| d1-padding0.04 | D.1 settings, padding 0.04, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 612/635, 18 unstable | broken 225/240 | broken 479/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 49/70, 1 unstable | broken 65/90 | broken 72/120, 2 unstable | 3.8 | 9.4 |
+| d1-no-edge-removal | D.1 settings, edge removal off, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 630/635 | broken 205/240, 2 unstable | broken 478/720, 2 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 35/90 | broken 79/120, 1 unstable | 4.1 | 10.4 |
+| d1-ignore-back-faces | D.1 settings, back faces ignored, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 3.6 | 9.3 |
+| d1-still-always | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, still update always | broken 624/635, 6 unstable | broken 103/240, 3 unstable | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | held 35/35 | broken 55/70 | broken 65/90 | broken 64/120, 1 unstable | 5.8 | 13.3 |
+| d1-still-penetrating | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, still update when penetrating | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 30/35 | broken 55/70 | broken 65/90 | broken 72/120, 2 unstable | 3.9 | 10.0 |
+| d1-moving-recovery0 | D.1 settings, stick 0.3, stairs 0.45 fwd 0.15 test 0.5, recovery 0 in the move | broken 624/635, 6 unstable | broken 210/240 | broken 476/720, 3 unstable | broken 480/720 | held 360/360 | held 35/35 | broken 5/70 | broken 65/90 | broken 70/120, 3 unstable | 3.9 | 10.7 |
+| d1-recovery0.5 | D.1 settings, recovery speed 0.5, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 472/720, 5 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 5/70 | broken 65/90 | broken 63/120, 2 unstable | 3.8 | 10.1 |
+| d1-inner-body | D.1 settings, inner body, stick 0.3, stairs 0.45 fwd 0.15 test 0.5 | broken 624/635, 6 unstable | broken 210/240 | broken 478/720, 1 unstable | broken 480/720 | held 360/360 | broken 5/35 | broken 55/70 | broken 65/90 | broken 67/120, 2 unstable | 4.2 | 10.7 |
 <!-- study-survey:end -->
 
 What the survey adds:
@@ -262,18 +276,63 @@ What the survey adds:
   (35 of 90 runs pass instead of 65).
 - A still update before the move (always) or recovery 0 inside the move holds law 5v; with
   recovery 0 in the move and no still update the overlaps are not resolved (5r: 5 of 70).
-- 8 bits per sample instead of 16 (survey with `STUDY_BITS=8`, rows `recommended` and `spec-d2`):
-  `recommended`'s law 2 turns variable (`2/ridge44.5/over/v3.5` leaves the floor by 39 mm under
-  three of the five starts) and its laws 1, 4 and radial keep their cells; `spec-d2`'s law 1 turns
-  variable (one case changes with the start). The seam comparison is not valid on the sloped
-  profiles, because two bodies quantise their shared edge independently (3.9 mm apart); 16 bits
-  per sample keep adjacent chunks within 0.5 mm.
+- 8 bits per sample instead of 16 (survey with `STUDY_BITS=8`, rows `recommended`, `spec-d2`,
+  `d2-noq4-floor` and `d2-floor`, laws 1, 2, 4 and radial): `d2-noq4-floor`'s and `d2-floor`'s
+  law 2 turn variable (`2/ridge44.5/over/v3.5` leaves the floor by 39 mm under three of the five
+  starts); `recommended`'s and `spec-d2`'s law 1 turns variable (the ridge apex passes under one
+  start). On the planet 8 bits do not hurt: `d2-floor` passes every radial case at 8 bits (120 of
+  120) and fails one at 16 bits (`radial/2+4/crest44.5/descent/v1.6` under one start), and
+  `recommended` passes 114 and 113 of 120. The seam comparison is not valid at 8 bits on the sloped
+  profiles, because two bodies quantise their shared edge independently (3.9 mm apart); 16 bits per
+  sample keep adjacent chunks within 0.5 mm. So 16 bits are needed for the planar law 2 of the
+  snap-change rows and for seams, and are not what decides the planet's crest case.
 - The law 2 remedies one at a time on `d2-noq4`: the refresh before the snap passes 230 of 240
-  runs (the rounded ledge still fails), accepting structure edges 210 of 240 (the crests still
-  fail), both together 240 of 240. On `spec-d2` (`d2-floor`) both together leave law 2 and
-  radial variable: under one of the five starts `2/ridge44.5/over/v3.5` ends a tick not grounded
-  at zero gap, and `radial/2+4/crest44.5/descent/v1.6` fails a tick 17 mm above the floor; neither
-  was traced.
+  planar runs (the rounded ledge still fails), accepting structure edges 210 of 240 (the crests
+  still fail), both together 240 of 240. On the planet `d2-noq4-floor` and `d2-noq4-snap-refresh`
+  fail only `radial/2+4/crest44.5/descent/v1.6` under one start of five, 17 mm above the floor at
+  tick 76, a case `spec-d2` fails the same way (it also fails the crest at 3.5 and 7 m/s), and the
+  refresh makes them hang beside upright walls (below). On `spec-d2`
+  (`d2-floor`) both changes leave law 2 variable on the plane (`2/ridge44.5/over/v3.5` ends a tick
+  not grounded at zero gap under one start) and the planet cell variable (the same crest case);
+  neither was traced.
+
+## Hangs beside walls
+
+Rule 7 excludes structures from steep-as-wall (spec D.2: a step edge reads steep). The study's
+caller, like the repository's reference near step, grounds the character when Jolt reports
+OnSteepGround on a structure. Jolt counts a contact as support unless its point lies in front of
+the supporting plane
+([CharacterVirtual.cpp:1119](https://github.com/jrouwe/JoltPhysics/blob/e77f175595e64cb44218cc9d9d56fc365ad0e36a/Jolt/Physics/Character/CharacterVirtual.cpp#L1119)).
+With the D.1 plane through the lower sphere centre, a wall that leans back touches the lower
+sphere, below the plane, and an upright wall touches the capsule along a line that starts on the
+plane, where rounding decides. A character grounded beside a wall in the air keeps vel_up at 0 and
+sinks by g dt each tick (2.7 mm).
+
+`walking_off_a_high_ledge_beside_a_wall_falls_to_the_floor` (`character_study_rules.rs`) walks off a
+2 m sharp ledge at 2 m/s along a sharp upright wall, pressing into it at 0.5 m/s, on the plane and
+on the planet, and requires a fall and a landing. `high_ledge_beside_wall_survey` varies it: for
+upright walls the face (0.40 to 0.43 m from the path), the press (0 to 1 m/s) and the start across
+the wall (144 variants, half on the planet); for walls leaning back or forward by 0.5, 2, 5 and 9
+degrees, the press (0 or 0.5 m/s), on the plane and the planet (16 variants each way).
+
+- Leaning back: every row hangs in 16 of 16 variants, through Jolt's ground state.
+- Upright: the rows with the D.1 supporting plane fall, except the rows with the refresh before Q5
+  on the planet (`d2-noq4-snap-refresh` 36, `d2-noq4-floor` and `d2-floor` 37 of 72 planet variants;
+  none on the plane). `d2-noq4-snap-edges` hangs in one planet variant through the snap: once Jolt
+  has pushed the character off the anchor's plane z = 0, away from the wall, the upright wall's
+  face looks slightly up along radial up, enough to pass the snap's facing-up test.
+  `jolt-defaults`, whose supporting volume takes every contact, hangs in 130 of 144.
+- Leaning forward (an overhang): no row with the D.1 plane hangs.
+
+The first version of the structure-edge snap accepted any steep structure hit, also a wall the
+padded capsule already touches at the start of the cast (fraction 0). It held the character beside
+an upright wall in 61 of 72 planar and 44 of 72 planet variants, and the ledge test fails with it.
+
+A wall upright in another frame than the local radial up leans against it by atan(d / 99) at d
+metres from where the frames agree, about 9 degrees at 16 m. The game needs a narrower structure
+exception than "OnSteepGround on a structure grounds": for instance ground on a steep structure
+only when the ground contact's contact normal is walkable (an edge under the capsule, judged as the
+autostep judges steps). It is not measured here.
 
 ## What the built-ins cannot carry
 
@@ -294,9 +353,9 @@ limit:
   on the radial 45.5 degree spiral, two facets at 45.3 degrees gave OnGround at tick 10.
 
 The game's Q4 cast (D3) removes the mid-slide groundings on planes and spirals (`spec-d2` against
-`d2-noq4`: law 1 then fails only on the ridge apex; the radial slope cases pass); it costs
-3.2 us per move on the planet walk (10.7 against 7.5 us). It does not fix the ridge
-apex, where the cast also returns the edge normal. That apex case is a study criterion, not a
+`d2-noq4`: law 1 then fails only on the ridge apex; the radial slope cases pass); it costs 3.2 us
+per move on the planet walk (10.8 against 7.6 us). It does not fix the ridge apex, where the cast
+also returns the edge normal. That apex case is a study criterion, not a
 game one: rule 7 judges the support normal, and there it points nearly up. A support check by the
 face normal of the touched triangle (not the contact normal) would be the pass for apexes; it is
 not measured here.
@@ -317,16 +376,20 @@ stick-to-floor's precondition "supported before the update" fails (`d2-stick` ag
 The pass that carries crests: refresh the contacts after the move, before the snap's gate. A
 refresh judges collisions at the new position (a contact more than the collision tolerance away
 does not collide), so the stale OnGround turns into InAir and Q5 snaps. Alone it passes 230 of
-240 law 2 runs (`d2-noq4-snap-refresh`); what remains is the rounded ledge.
+240 planar law 2 runs (`d2-noq4-snap-refresh`); what remains is the rounded ledge. On the planet
+the refreshed contacts make the character hang beside upright walls (see [Hangs beside
+walls](#hangs-beside-walls)).
 
 **Law 2, rounded ledges.** Walking off a 0.15 m ledge with a 0.05 m convex radius at 1.6 m/s, the
 capsule rolls over the edge. At tick 86 the character is already InAir, 28 mm above the floor
 below, and the snap's cast hits the edge first with a normal past 45 degrees, which Q5 rejects as
 not walkable; refreshing the contacts does not change that. The pass that carries it: accept a
-steep snap hit on a structure, as rule 7 already excludes structures from steep-as-wall. Alone it
-passes 210 of 240 runs (`d2-noq4-snap-edges`, the crests fail); with the refresh, 240 of 240 under
-all five starts (`d2-noq4-floor`, the recommended row), at 16 bits per sample. It costs 2.0
-us per move on the planet walk (9.5 against 7.5 us), mostly the extra refresh.
+steep structure hit that faces up (normal along up above 0) and that the capsule moves down to
+reach (fraction above 0), which a ledge edge below the capsule is and a wall beside it is not.
+Every steep structure hit the law cases accept has fraction 0.085 or more and a normal at most 82
+degrees from up. Alone it passes 210 of 240 planar runs (`d2-noq4-snap-edges`, the crests fail);
+with the refresh, 240 of 240 under all five starts (`d2-noq4-floor`), at 16 bits per sample. Both
+cost 2.0 us per move on the planet walk (9.6 against 7.6 us), mostly the extra refresh.
 
 `CharacterVirtual::StickToFloor` itself has no ground-state condition: it sweeps down and moves
 to the contact
@@ -341,11 +404,11 @@ velocity
 so the push-out is part of the displacement the caller reports as velocity (0.07 m in one tick for
 a 0.05 m wall overlap). The game's Q6 push (D4) or a still update before the move with recovery 0
 in the move (`d2-still`, the runtime setter `CharacterMut::set_penetration_recovery_speed`) both
-hold 5v; `d2-still` costs 9.8 us against 10.7 us for Q6 on the planet walk.
+hold 5v; `d2-still` costs 9.9 us against 10.8 us for Q6 on the planet walk.
 
 **Law 5r, burials.** Jolt does not lift a character buried 1 m or more under a heightfield
 (`5r/burial1/still`, gap -1.47 m after the tick); the underground recovery (Q3) does, and costs
-little when it finds nothing (`d2-noground` 9.8 against 10.7 us).
+little when it finds nothing (`d2-noground` 9.8 against 10.8 us).
 
 **Law 6, seams.** Enhanced internal edge removal works within one body: its collector flushes at
 the end of each body
@@ -359,11 +422,14 @@ No setting or pass in the study removes it.
 A geometry candidate: put adjacent heightfields in one body, as the children of one static
 compound. The collector then sees both fields before it flushes, and voids the border edge like
 an internal one (it matches vertices by position). Report cases `6-compound/*` run the 18 seam
-cases on such a body: 16 pass at the unperturbed start, against 11 for two bodies. The two left,
-the 44.5 degree diagonal descents, fail the same way with two bodies and with the compound (not
-grounded for a tick, 27 mm above walkable slope, after crossing the seam); their cause is not
-traced. Its scope is one compound: the border of the compound is again a border between bodies,
-so streamed chunks would have to be merged per region, which is not measured.
+cases on such a body from the unperturbed start. With the D.1 settings 16 to 18 pass, against 11 to
+13 for two bodies: `spec-d2` 16 against 11, `recommended` 18 against 13, `d2-noq4-floor` and
+`d2-floor` 16 against 13, `walker` 18 against 13. Without enhanced internal edge removal
+(`jolt-defaults`, `d1-no-edge-removal`) 7 pass either way. The two left in the Q5 rows, the 44.5
+degree diagonal descents, fail the same way with two bodies and with the compound (not grounded
+for a tick, 27 mm above walkable slope, after crossing the seam); their cause is not traced. Its
+scope is one compound: the border of the compound is again a border between bodies, so streamed
+chunks would have to be merged per region, which is not measured.
 
 Law 6 asks more than the game's seam scenario: G.4 #15 (120 ticks at 2 m/s across the radial
 chunk seam, path 4.0 +- 0.08 m, rest height within 0.05 m, grounded every tick) is
@@ -387,40 +453,62 @@ rounding. A cast snap onto a rounded edge leaves the capsule about r (sqrt 2 - 1
 
 ## Recommendation
 
-No row holds every law column, so the recommendation is the row with the most held columns (of 1,
-2, 3s, 4, 5v, 5r, 6 and radial) and, among those, the lowest median cost on the planet walk.
-`d2-noq4-floor` holds five (2, 3s, 4, 5v, 5r); `spec-d2`, `d2-stick`, `d2-stick-norefresh`,
-`d2-noq4` and `d2-still` hold four each (3s, 4, 5v, 5r). `d2-noq4-floor` is the `recommended`
-row:
+The rule puts the laws the game reported first: (1) the fewest law 1 failures, on the plane and on
+the planet, and no hang beside an upright wall; (2) the most law 2 passes, on the plane and on the
+planet; (3) the lowest median cost on the planet walk.
+
+| row | law 1, plane | law 1, planet | hangs, upright wall | law 2, plane | law 2, planet | W1 p50 us |
+|---|---|---|---|---|---|---:|
+| `spec-d2` | 630 / 635 | 45 / 45 | 0 / 144 | 200 / 240 | 38 / 45 | 10.8 |
+| `d2-stick` | 630 / 635 | 45 / 45 | 0 / 144 | 103 / 240 | 30 / 45 | 10.8 |
+| `d2-stick-norefresh` | 630 / 635 | 45 / 45 | 0 / 144 | 210 / 240 | 38 / 45 | 8.9 |
+| `d2-still` | 630 / 635 | 45 / 45 | 0 / 144 | 200 / 240 | 38 / 45 | 9.9 |
+| `d2-floor` | 630 / 635 | 45 / 45 | 37 / 144 | 239 / 240 | 44 / 45 | 12.7 |
+| `d2-noq4` | 624 / 635 | 15 / 45 | 0 / 144 | 200 / 240 | 38 / 45 | 7.6 |
+| `d2-noq4-floor` | 624 / 635 | 15 / 45 | 37 / 144 | 240 / 240 | 44 / 45 | 9.6 |
+| `walker` | 624 / 635 | 15 / 45 | 0 / 144 | 210 / 240 | 38 / 45 | 4.8 |
+
+Law 1, planet: the radial slope runs (`radial/1/*`); law 2, planet: the radial descents and the
+crest (`radial/2+4/*`); all under five starts. `d2-inmove` and `d2-noground` match `spec-d2` on
+these columns and break 5v and 5r; `d2-stairs` passes 198 of 240 planar law 2 runs and breaks 3s.
+`d2-stick-norefresh` is first: it shares the best law 1 and the no-hang result with `spec-d2`,
+`d2-stick` and `d2-still`, passes the most law 2 runs of those and costs the least. It is the
+`recommended` row:
 
 - Creation: the D.1 settings (capsule radius 0.4, half height 0.70845, shape offset 0.70844734,
   padding 0.02, max slope 45 degrees, enhanced internal edge removal on, supporting plane through
   the lower sphere centre), penetration recovery speed 1.
-- Each tick: up, rotation, position; Q3 underground recovery; Q6 push; a contact refresh; a still
-  update when Q6 found an overlap deeper than radius + padding; the vertical feed; `ExtendedUpdate`
-  with stick-to-floor and walk stairs off; the autostep; when the character was grounded, is not
-  rising and did not step, a second contact refresh and then the Q5 snap if Jolt does not report
-  OnGround, accepting a walkable hit or a steep hit on a structure; rule 7 by Jolt's OnSteepGround
-  on terrain, which also overrides the autostep and the snap.
-- Terrain: 16 bits per sample (8 bits make law 2 variable and break the seam comparison);
-  structures sharp or rounded (the autostep holds both).
-- Cost on the planet walk: 9.5 / 18.0 us (p50 / p99), against 10.7 / 19.7 us for `spec-d2`,
-  7.5 / 14.2 us for `d2-noq4` (the same without the two snap changes), 4.7 / 9.3 us for `walker`,
-  3.8 / 7.4 us for `bare`, 5.1 / 9.9 us for the reference near step and 3.5 / 6.5 us for
-  `update_character` alone, in the same run.
+- Each tick: up, rotation, position; Q3 underground recovery; Q6 push; a contact refresh when Q3
+  or Q6 moved the character; a still update when Q6 found an overlap deeper than radius + padding;
+  the vertical feed; `ExtendedUpdate` with stick-to-floor 0.3 m along -up, passed only after a
+  grounded tick and when not rising, and walk stairs off; the autostep; rule 7 by the Q4 support
+  normal on terrain, which also overrides the autostep.
+- Terrain: 16 bits per sample for seams (at 8 bits its law 2, 4 and planet cells stay, and law 1's
+  ridge apex turns variable); structures sharp or rounded (the autostep holds both).
+- Cost on the planet walk: 8.9 / 17.6 us (p50 / p99), against 10.8 / 21.1 us for `spec-d2`,
+  12.7 / 24.4 us for `d2-floor`, 4.8 / 10.0 us for `walker`, 3.8 / 7.7 us for `bare`, 5.1 / 10.3 us
+  for the reference near step and 3.6 / 7.2 us for `update_character` alone, in the same run.
 
-Adding Q4 back removes the mid-slide groundings of law 1 on planes and on the radial spirals (+3.2
-us on `d2-noq4`); it is the only pass that changes law 1, but it completes no column, and with
-the two snap changes (`d2-floor`, 12.8 us) law 2 and radial turn variable. Without the two snap
-changes (`d2-noq4`, 7.5 us) the row loses law 2. Law 6 is carried by no row; the compound-body
-candidate above is measured on the seam cases only.
+What the game gets, in plain words. Compared with all of its passes (`spec-d2`) the recommended
+row drops the Q5 snap and the every-tick refresh, uses Jolt's stick-to-floor instead, and costs
+1.9 us less. It keeps Q4, so it is never grounded on steep terrain on the plane or the planet
+except at a ridge's apex. It matches `spec-d2` on laws 1, 3, 4 and 5 and on the planet, and does
+better on law 2 on the plane (the 0.15 m ledges hold; 210 against 200 of 240) and on the seams (65
+against 55 of 90 runs). It does not fix the owner's crest report: walking down over a convex crest
+at 3.5 and 7 m/s the character floats 31 and 68 mm on the plane, and on the planet the 44.5 degree
+crest fails at 7 m/s and under two starts at 3.5 m/s. The row that fixes the crests on the plane,
+`d2-floor` (239 of 240, 12.7 us), hangs beside upright walls on the planet through its refresh
+before Q5, so it is second by the rule. It becomes the better choice once rule 7's structure
+exception no longer grounds on walls (see [Hangs beside walls](#hangs-beside-walls)); that pass is
+needed anyway, because beside a wall leaning back every row hangs, the recommended one included.
+Law 6 is carried by no row; the compound-body candidate above is measured on the seam cases only.
 
 ## Mechanism inventory
 
 | Mechanism | Used | Why |
 |---|---|---|
-| Stick to floor (`stick_to_floor_step_down`) | rows `spec-d1*`, `walker`, `d2-stick*`; 0.3 and 0.5 m | holds law 4; law 2 fails on crests (see above); a refresh before the move disables it |
-| Contact refresh (`refresh_character_contacts`) | before the move (`*+refresh`, `spec-d2` and its variants); after the move before Q5 (`d2-noq4-floor`, `d2-noq4-snap-refresh`, `d2-floor`) | after the move it replaces the sweep's stale OnGround over crests, so Q5 acts |
+| Stick to floor (`stick_to_floor_step_down`) | rows `spec-d1*`, `walker`, `d2-stick*`, `recommended`; 0.3 and 0.5 m | holds law 4 and the 0.15 m ledges of law 2; law 2 fails on crests (see above); a refresh before every move disables it |
+| Contact refresh (`refresh_character_contacts`) | before the move (`*+refresh`, `spec-d2` and its variants; `recommended` only after a maintenance pass); after the move before Q5 (`d2-noq4-floor`, `d2-noq4-snap-refresh`, `d2-floor`) | after the move it replaces the sweep's stale OnGround over crests, so Q5 acts; on the planet it also makes an upright wall count as support |
 | Walk stairs (step up, min step forward, forward test, cos forward contact, step down extra) | `spec-d1*`, `jolt-defaults`, `d2-stairs`, the step-up survey; step down extra 0 | step-up + 0.137 m is the climbed height on rounded steps; unreliable on sharp steps |
 | Max slope angle | 45 degrees; 50 in the control | the law's limit; the control shows the engine grounds on 45.5 degrees with 50 |
 | Character padding | 0.02; 0.01 and 0.04 surveyed | no cell changes |
@@ -429,10 +517,10 @@ candidate above is measured on the seam cases only.
 | Collision tolerance | 1e-3; 0.01, 0.02 surveyed | no cell changes |
 | Back-face mode | collide; ignore surveyed | no cell changes |
 | Enhanced internal edge removal | on (D.1); off surveyed and in `jolt-defaults` | off removes the 45.5 degree mid-slide grounding and worsens seams |
-| Supporting volume | the D.1 plane; Jolt's default in `jolt-defaults` | part of the D.1 settings |
+| Supporting volume | the D.1 plane; Jolt's default in `jolt-defaults` | part of the D.1 settings; with Jolt's default every wall contact supports and rule 7 grounds the character beside upright walls |
 | Inner body | off; on surveyed | no cell changes |
 | Max collision / constraint iterations, min time remaining, hit reduction, max hits | Jolt's defaults | no traced failure pointed at them |
 | Active edge threshold of the heightfields | Jolt's default (5 degrees) | seams are a per-body effect the threshold does not reach |
-| Heightfields as children of one compound body | report cases `6-compound/*` | the per-body edge removal then covers the shared edge: 16 of 18 seam cases pass against 11 |
+| Heightfields as children of one compound body | report cases `6-compound/*` | the per-body edge removal then covers the shared edge: 16 to 18 of 18 seam cases pass against 11 to 13 for two bodies (D.1 settings) |
 | Contact listener hooks | not bound | no hook changes the ground classification or separates recovery from displacement; a listener could only re-implement a game pass inside Jolt's solver |
-| Explicit `StickToFloor` | not added | it has no ground-state condition of its own; a caller gates it, and with the refresh before the gate Q5 already carries law 2 |
+| Explicit `StickToFloor` | not added | it has no ground-state condition of its own; a caller gates it, and with the refresh before the gate Q5 already carries law 2 on the plane |

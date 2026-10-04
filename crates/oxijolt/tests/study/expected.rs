@@ -231,14 +231,14 @@ pub const PINNED: &[(&str, [Cell; 9])] = &[
         "recommended",
         [
             Broken("1/ridge50/apex/still"),
+            Broken("2/ramp40/crest-descent/v3.5"),
             Held,
             Held,
             Held,
             Held,
             Held,
-            Held,
-            Broken("6/descent44.5/diagonal/v3.5"),
-            Broken("radial/1/spiral45.5/x2/still"),
+            Broken("6/flat/across/v3.5"),
+            Broken("radial/2+4/crest44.5/descent/v7"),
         ],
     ),
 ];
