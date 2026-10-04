@@ -20,8 +20,8 @@ The laws:
 6. Heightfield chunk seams (adjacent heightfield bodies) behave like one surface.
 
 The scenarios live in `crates/oxijolt/tests/study/`, the gates in
-`crates/oxijolt/tests/character_study.rs`, the cost harness in
-`crates/oxijolt/benches/character_study.rs`.
+`crates/oxijolt/tests/character_study.rs` (frame and determinism checks in
+`character_study_determinism.rs`), the cost harness in `crates/oxijolt/benches/character_study.rs`.
 
 ## Result in short
 
