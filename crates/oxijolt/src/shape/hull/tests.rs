@@ -177,26 +177,45 @@ fn needle_rule_compares_the_rounding_lever_with_the_tolerance() {
     );
     // Far out the coplanar distance exceeds the tolerance and the bound is a pure ratio.
     let coplanar = 2.0e-3;
-    assert!(simplex(2.5, 1.0, coplanar).classify().is_ok());
-    assert!(simplex(2.49, 1.0, coplanar).classify().is_err());
+    assert!(simplex(2.5, 100.0, coplanar).classify().is_ok());
+    assert_eq!(
+        simplex(2.49, 100.0, coplanar).classify(),
+        Err(ShapeError::ConvexHull(HullError::Degenerate))
+    );
 }
 
 #[test]
 fn slab_rule_counts_coplanar_distances() {
     let coplanar = 1.0e-6;
-    assert!(simplex(1.0, 200.0 * coplanar, coplanar).classify().is_ok());
+    assert!(simplex(1.0, 6000.0 * coplanar, coplanar).classify().is_ok());
     assert_eq!(
-        simplex(1.0, 199.0 * coplanar, coplanar).classify(),
+        simplex(1.0, 5990.0 * coplanar, coplanar).classify(),
         Err(ShapeError::ConvexHull(HullError::Coplanar))
     );
 }
 
 #[test]
-fn thin_slabs_near_the_origin_build_down_to_a_fraction_of_a_millimetre() {
-    // A 2 m plank: 200 coplanar distances are about 0.14 mm.
+fn thin_slabs_near_the_origin_build_down_to_a_few_millimetres() {
+    // A 2 m plank: 6000 coplanar distances are about 4.3 mm.
     let plank = |thickness: f32| cube_with(Vec3::new(1.0, thickness / 2.0, 1.0));
-    assert!(Shape::new_convex_hull(&plank(2.0e-4), 0.0).is_ok());
-    assert_eq!(hull_error(&plank(1.0e-4)), Some(HullError::Coplanar));
+    assert!(Shape::new_convex_hull(&plank(4.4e-3), 0.0).is_ok());
+    assert_eq!(hull_error(&plank(4.2e-3)), Some(HullError::Coplanar));
+}
+
+#[test]
+fn far_clouds_need_more_thickness() {
+    // Near (-450, -1209, -1308) the coplanar distance is about 1.1 mm, so 6000 of them are
+    // about 6.4 m: a box 2 m by 1 m by 0.5 m there, the size of clouds whose noisy faces
+    // tripped Jolt's builder, is refused, and a 12 m cube is built.
+    let at = |points: Vec<Vec3>| -> Vec<Vec3> {
+        points
+            .into_iter()
+            .map(|p| Vec3::new(p.x - 450.0, p.y - 1209.0, p.z - 1308.0))
+            .collect()
+    };
+    let small = at(cube_with(Vec3::new(1.0, 0.25, 0.5)));
+    assert_eq!(hull_error(&small), Some(HullError::Coplanar));
+    assert!(Shape::new_convex_hull(&at(cube(6.0)), 0.0).is_ok());
 }
 
 fn cube_with(half: Vec3) -> Vec<Vec3> {

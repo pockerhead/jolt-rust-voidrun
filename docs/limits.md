@@ -37,7 +37,7 @@ The constructor refuses:
 - `w · T < 0.25 · L · c` as `Degenerate`: rounding a position by about `c` tilts a face built
   across the width by `c / w` and moves it by `L · c / w` at the far end, which must stay well inside
   the tolerance;
-- `t < 200 · c` as `Coplanar`. Jolt itself builds a flat hull of two faces up to `6 · c`
+- `t < 6000 · c` as `Coplanar`. Jolt itself builds a flat hull of two faces up to `6 · c`
   (`cCoplanarSlopFactor`), which gives a dynamic body zero mass, and asserts on slabs a little
   thicker.
 
@@ -45,21 +45,29 @@ The two last bounds are measured, not derived. In an asserts build, 37 440 near-
 near-plane clouds (lengths 0.1 to 1900 m, 5 to 200 points, up to 900 m from the origin) asserted
 396 times. The 395 needles among them asserted at `ConvexHullBuilder.cpp:641`
 (`edges.size() >= 3`), all with `w · T / (L · c)` at most 0.052, so the needle bound keeps a factor
-of about 5; the slab bound refuses the other one. Slabs asserted up to `t / c = 10.9`, and a
-seeded run found one cloud of 279 points on a sphere of radius 0.047 m about 1 km from the origin
-that asserted at `t / c = 60.3` (`ConvexHullBuilder.cpp:779`, `IsFacing`); the slab bound keeps a
-factor of about 3 over it. With both bounds in place, 40 000 random clouds of aspect ratios
-1e-7 to 1, sizes 1 mm to 1900 m and offsets up to 1 km, 30 000 compact clouds 5 to 5000 coplanar
-distances wide placed up to 1900 m from the origin, and four seeded stress runs of 6000 hull cases
-with dropped and queried bodies built and stepped without an assertion. Both bounds measure the
-builder's initial simplex, while the two assertions sit in later steps (the horizon of a new point,
-the facing test of a later face), so they are a guard tested on these clouds, not a proof. The stress
-therefore also builds well-spread clouds with a nearly collinear spike, a nearly flat cap above one
-face, or near copies of their extreme points, each in shuffled order; three seeds of 30 000 hull
-cases, three tenths of them of these kinds, ran without an assertion. Both bounds grow with the
-distance of the points from the shape origin: centre the points on the origin for the thinnest
-hulls. Near a bound Jolt's `f32` arithmetic can differ from the `f64` replay; Jolt then refuses
-with its own message.
+of about 5. The slab bound is set by clouds whose faces are sampled densely and moved off their
+planes by 0 to 10 (or 100) coplanar distances, as scanned or decimated geometry is. Among 177 000
+seeded clouds of spheres, lattices, such noisy boxes, flat cones and domes and thin cylinders, up
+to 1900 m from the origin, 17 asserted (`ConvexHullBuilder.cpp:779`, `IsFacing`, and once `:858`),
+all at `t / c` between 202 and 1948: about 1 in 1000 noisy boxes between 200 and 1000, none of
+92 000 above 2000. The slab bound keeps a factor of about 3 over 1948. Near the origin `6000 · c`
+is a few thousandths of the cloud's size (a 2 m plank must be about 4.3 mm thick); 1.5 km out it
+is several metres. With both bounds in place 309 000 clouds of these families, also sized from
+each cloud's own extent so they sit at the bounds near the origin, built and stepped without an
+assertion, and so did the seeded stress at ten times its size for three seeds. Both bounds measure
+the builder's initial simplex, while the assertions sit in later steps (the horizon of a new
+point, the facing test of a later face), so they are a guard tested on these clouds, not a proof.
+The stress therefore also builds well-spread clouds with a nearly collinear spike, a nearly flat
+cap above one face, or near copies of their extreme points, each in shuffled order.
+
+Both bounds grow with the distance of the points from the shape origin: centre the points on the
+origin for the thinnest hulls. The constructor does not move them there itself: a far cloud keeps
+the rounding of its far coordinates, about a twentieth of its coplanar distance, and moved to the
+origin that rounding is several coplanar distances of the moved cloud. Jolt's builder asserted on
+flat cones built that way. Near a bound Jolt's `f32` arithmetic can differ from the `f64` replay;
+Jolt then refuses with its own message. Jolt also refuses (in every build) about one cloud in eight
+of densely sampled boxes whose faces are noisy by up to 10 coplanar distances, with "Hull building
+failed": thin out scanned or decimated clouds, or snap their faces.
 
 Jolt keeps at most 256 vertices of a hull (`cMaxPointsInHull`) and drops the points inside it. It
 reduces the convex radius until twice the radius fits the hull's thinnest direction and its

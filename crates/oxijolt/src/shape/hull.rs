@@ -20,9 +20,11 @@ const HULL_TOLERANCE: f64 = 1.0e-3;
 const MIN_NEEDLE_LEVER: f64 = 0.25;
 /// Smallest distance of the farthest point from the initial triangle's plane, in Jolt's coplanar
 /// distances, of a cloud Jolt's hull builder is given. Jolt itself treats up to 6 as flat
-/// (`cCoplanarSlopFactor`); measured: thin slabs asserted up to 10.9 and a small sphere of
-/// points far from the origin at 60, so the bound keeps a factor of about 3.
-const MIN_SLAB_THICKNESS: f64 = 200.0;
+/// (`cCoplanarSlopFactor`); measured: clouds with noisy faces asserted up to 1948, so the bound
+/// keeps a factor of about 3; see [docs/limits.md#convex-hulls].
+///
+/// [docs/limits.md#convex-hulls]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-hulls
+const MIN_SLAB_THICKNESS: f64 = 6000.0;
 
 impl Shape {
     /// The convex hull of `points` (shape space, metres) with a convex radius in metres.
