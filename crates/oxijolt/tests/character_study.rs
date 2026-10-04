@@ -946,6 +946,7 @@ fn radial_acceptance() {
         "d2-noq4",
         "d2-still",
         "d2-stairs",
+        "d2-noq4-floor",
         "recommended",
     ]
     .into_iter()

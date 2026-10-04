@@ -5,15 +5,16 @@
 //! contact refresh; a still update; the vertical feed; the move (ExtendedUpdate); contact
 //! readout; the autostep and the floor snap (Q5); classification (rules 6 and 7, with or without
 //! the Q4 support normal); the carry (rule 8) and the velocity (rule 9). Where the reference near
-//! step has a statement, the arithmetic and order here are the same, so the `walker` row
-//! reproduces it bit for bit.
+//! step has a statement, the arithmetic and order here are the same, so the `walker` row, which
+//! keeps the reference's rule 7 ([`Rule7::Reference`]), reproduces it bit for bit. The other rows
+//! apply spec D.2's rule 7, whose steep-terrain veto also overrides the autostep and the snap.
 
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use oxijolt::*;
 
-use super::config::{position_for, Config, Refresh, StickGate, Still};
+use super::config::{position_for, Config, Refresh, Rule7, StickGate, Still};
 use super::passes::{depenetrate, snap, terrain_support_normal};
 use super::scenes::Scene;
 use crate::common::math::{add, dot, f3, scale, sub, v3, vec3, V3};
@@ -203,15 +204,8 @@ pub fn tick(
     }
     let ground_before = world.character(walker.id).unwrap().ground_state();
 
-    // Vertical feed (rule 3), as the reference near step.
     let walking = desired != [0.0; 3];
-    if !grounded_prev || vel_up > 0.0 {
-        vel_up -= G * DT;
-    } else if walking {
-        vel_up = -G * DT;
-    } else {
-        vel_up = 0.0;
-    }
+    vel_up = feed(vel_up, grounded_prev, walking);
     let velocity = add(
         scale(desired, 1.0 / f64::from(DT)),
         scale(up, f64::from(vel_up)),
@@ -317,14 +311,14 @@ pub fn tick(
         });
     let mut snapped = false;
     let mut q5_distance = None;
-    if cfg.passes.q5
-        && grounded_prev
-        && vel_up <= 0.0
-        && !stepped
-        && world.character(walker.id).unwrap().ground_state() != GroundState::OnGround
-    {
+    let snap_gate = cfg.passes.q5 && grounded_prev && vel_up <= 0.0 && !stepped;
+    if snap_gate && cfg.floor.refresh_before_snap {
+        physics(|| world.refresh_character_contacts(walker.id, &filter)).unwrap();
+    }
+    if snap_gate && world.character(walker.id).unwrap().ground_state() != GroundState::OnGround {
         let here = origin_of(world, walker, p);
-        if let Some(found) = physics(|| snap(world, &filter, here, up, p)) {
+        let edges = cfg.floor.snap_on_structure_edges;
+        if let Some(found) = physics(|| snap(world, &filter, here, up, p, edges)) {
             set_origin(world, walker, sub(here, scale(up, found.distance)), up, p);
             physics(|| world.refresh_character_contacts(walker.id, &filter)).unwrap();
             snapped = true;
@@ -336,11 +330,15 @@ pub fn tick(
     let character = world.character(walker.id).unwrap();
     let ground = character.ground_state();
     let ground_body = character.ground_body();
-    let ground_layer = ground_body.and_then(|body| {
-        contacts
-            .iter()
+    // The ground body is looked up in the contacts after the move; a snap or a refresh since may
+    // have found a body the move did not touch, which only the current contacts know.
+    let layer_in = |list: &[CharacterContact], body| {
+        list.iter()
             .find(|contact| contact.body == Some(body))
             .and_then(|contact| character.contact_object_layer(contact))
+    };
+    let ground_layer = ground_body.and_then(|body| {
+        layer_in(&contacts, body).or_else(|| layer_in(&character.active_contacts(), body))
     });
     let on_terrain = ground_layer == Some(scene.layers.terrain);
     let mut q4_normal = None;
@@ -351,17 +349,18 @@ pub fn tick(
     } else {
         ground == GroundState::OnSteepGround && on_terrain
     };
-    let grounded = vel_up <= 0.0
-        && (stepped
-            || snapped
-            || (!sliding
-                && (ground == GroundState::OnGround
-                    || (ground == GroundState::OnSteepGround && !on_terrain))));
-
-    // Rule 8, the carry.
-    if grounded || (ceiling && vel_up > 0.0) {
-        vel_up = 0.0;
-    }
+    let grounded = ends_grounded(
+        cfg.rule7,
+        vel_up,
+        Held {
+            stepped,
+            snapped,
+            jolt: ground == GroundState::OnGround
+                || (ground == GroundState::OnSteepGround && !on_terrain),
+        },
+        sliding,
+    );
+    vel_up = carried(vel_up, grounded, ceiling);
 
     // Rule 9, the velocity.
     let end = origin_of(world, walker, p);
@@ -409,6 +408,51 @@ pub fn tick(
         snapped,
         max_hits_exceeded,
         touched_groups,
+    }
+}
+
+/// Rule 3, the vertical feed: airborne or rising adds a tick of gravity, grounded and walking is
+/// one tick of gravity (the snap needs a downward component), grounded and still is zero.
+pub fn feed(vel_up: f32, grounded_prev: bool, walking: bool) -> f32 {
+    if !grounded_prev || vel_up > 0.0 {
+        vel_up - G * DT
+    } else if walking {
+        -G * DT
+    } else {
+        0.0
+    }
+}
+
+/// What can hold the character on the ground at the end of a tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Held {
+    /// The autostep put it on a step.
+    pub stepped: bool,
+    /// The Q5 floor snap put it on the floor.
+    pub snapped: bool,
+    /// Jolt reports OnGround, or OnSteepGround on a structure (a step edge reads steep).
+    pub jolt: bool,
+}
+
+/// Rules 6 and 7: whether the tick ends grounded. Rising is airborne; steep terrain support
+/// (`sliding`) is a wall, under [`Rule7::Spec`] whatever held the character, under
+/// [`Rule7::Reference`] only for Jolt's ground state.
+pub fn ends_grounded(rule: Rule7, vel_up: f32, held: Held, sliding: bool) -> bool {
+    let by_pass = held.stepped || held.snapped;
+    let on_ground = match rule {
+        Rule7::Spec => !sliding && (by_pass || held.jolt),
+        Rule7::Reference => by_pass || (!sliding && held.jolt),
+    };
+    vel_up <= 0.0 && on_ground
+}
+
+/// Rule 8: vel_up is reset on landing and on a ceiling while rising, and kept otherwise (a slide
+/// accelerates).
+pub fn carried(vel_up: f32, grounded: bool, ceiling: bool) -> f32 {
+    if grounded || (ceiling && vel_up > 0.0) {
+        0.0
+    } else {
+        vel_up
     }
 }
 

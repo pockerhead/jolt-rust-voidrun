@@ -204,6 +204,28 @@ pub enum Still {
     WhenDeep,
 }
 
+/// How rule 7 (spec D.2) combines the autostep and the floor snap with the steep-terrain veto.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rule7 {
+    /// Spec D.2: steep terrain support means sliding and not grounded, also after an autostep
+    /// or a snap.
+    Spec,
+    /// The reference near step (`tests/common/walker.rs`): a successful autostep grounds even
+    /// when Jolt reports steep terrain.
+    Reference,
+}
+
+/// Law 2 candidates the game does not run: changes to the Q5 floor snap that the study
+/// measures as remedies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct FloorRemedy {
+    /// Refresh the contacts after the move, so that the snap's gate reads the ground state at the
+    /// new position instead of the one the move's sweep left (crests).
+    pub refresh_before_snap: bool,
+    /// The snap also accepts a steep hit on a structure, as rule 7 does (ledge edges).
+    pub snap_on_structure_edges: bool,
+}
+
 /// The game's own passes (spec C.1, D.2) a configuration runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Passes {
@@ -231,6 +253,8 @@ pub struct Config {
     /// The recovery speed during the move, restored to the creation value after it.
     pub moving_recovery: Option<f32>,
     pub passes: Passes,
+    pub rule7: Rule7,
+    pub floor: FloorRemedy,
 }
 
 impl Config {
@@ -244,6 +268,8 @@ impl Config {
             still: Still::Never,
             moving_recovery: None,
             passes: Passes::default(),
+            rule7: Rule7::Spec,
+            floor: FloorRemedy::default(),
         }
     }
 
@@ -290,6 +316,7 @@ impl Config {
                 autostep: true,
                 ..Passes::default()
             },
+            rule7: Rule7::Reference,
             ..Self::bare()
         }
     }
@@ -413,6 +440,19 @@ impl Config {
         }
     }
 
+    /// `d2-noq4` with both law 2 remedies of the Q5 snap: a contact refresh before its gate
+    /// (crests) and steep structure hits accepted (ledge edges).
+    pub fn d2_noq4_floor() -> Self {
+        Self {
+            name: "d2-noq4-floor",
+            floor: FloorRemedy {
+                refresh_before_snap: true,
+                snap_on_structure_edges: true,
+            },
+            ..Self::d2_noq4()
+        }
+    }
+
     /// `spec-d1` with a 50 degree slope limit: the engine control of law 1.
     pub fn max_slope_50() -> Self {
         Self {
@@ -426,11 +466,12 @@ impl Config {
     }
 
     /// The recommended configuration: the row with the most held law columns and, among those,
-    /// the lowest median cost per move on the planet walk (see the study doc). It is `d2-noq4`.
+    /// the lowest median cost per move on the planet walk (see the study doc). It is
+    /// `d2-noq4-floor`.
     pub fn recommended() -> Self {
         Self {
             name: "recommended",
-            ..Self::d2_noq4()
+            ..Self::d2_noq4_floor()
         }
     }
 
@@ -450,6 +491,7 @@ impl Config {
             Self::d2_inmove(),
             Self::d2_stairs(),
             Self::d2_noground(),
+            Self::d2_noq4_floor(),
             Self::max_slope_50(),
             Self::recommended(),
         ]
@@ -468,7 +510,30 @@ impl Config {
     pub fn survey_rows() -> Vec<Self> {
         let d1 = Self::spec_d1();
         let refresh = Self::spec_d1_refresh();
+        let noq4 = Self::d2_noq4();
         let mut rows = Vec::new();
+        for (name, refresh_before_snap, snap_on_structure_edges) in [
+            ("d2-noq4-snap-refresh", true, false),
+            ("d2-noq4-snap-edges", false, true),
+        ] {
+            rows.push(Self {
+                name,
+                floor: FloorRemedy {
+                    refresh_before_snap,
+                    snap_on_structure_edges,
+                },
+                ..noq4
+            });
+        }
+        let floor = Self::d2_noq4_floor();
+        rows.push(Self {
+            name: "d2-floor",
+            passes: Passes {
+                q4: true,
+                ..floor.passes
+            },
+            ..floor
+        });
         for (name, up, test) in [
             ("d1-up0.30-test0.15", 0.30, 0.15),
             ("d1-up0.30-test0.5", 0.30, 0.5),
@@ -647,12 +712,16 @@ impl Config {
             parts.push(format!("recovery {speed} in the move"));
         }
         let p = &self.passes;
+        let f = &self.floor;
         for (on, name) in [
             (p.underground, "Q3 underground"),
             (p.q6, "Q6 push"),
             (p.autostep, "autostep"),
             (p.q5, "Q5 snap"),
+            (f.refresh_before_snap, "refresh before Q5"),
+            (f.snap_on_structure_edges, "Q5 on structure edges"),
             (p.q4, "Q4 support"),
+            (self.rule7 == Rule7::Reference, "reference rule 7"),
         ] {
             if on {
                 parts.push(name.to_owned());

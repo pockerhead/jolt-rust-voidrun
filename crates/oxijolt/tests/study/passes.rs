@@ -6,6 +6,7 @@ use oxijolt::*;
 
 use crate::common::math::{add, dot, f3, norm, rvec3, scale, V3};
 use crate::common::walker::{capsule, from_y_to, CENTRE_UP, RADIUS, SNAP};
+use crate::common::Groups;
 
 /// The capsule's centre for body origin `origin`.
 fn centre(origin: V3, up: V3) -> RVec3 {
@@ -98,13 +99,16 @@ pub struct Snap {
 }
 
 /// Q5, the floor snap: the capsule cast along -up by `SNAP` with target distance `p`; a
-/// walkable, not dynamic hit gives the distance to move down.
+/// walkable, not dynamic hit gives the distance to move down. With `structure_edges`, a steep
+/// hit on a structure is accepted too (rule 7's exclusion applied to the snap; a study remedy,
+/// not the game's pass).
 pub fn snap(
     world: &PhysicsWorld,
     filter: &QueryFilter<'_>,
     origin: V3,
     up: V3,
     p: f32,
+    structure_edges: bool,
 ) -> Option<Snap> {
     let shape = capsule();
     let query = ShapeCast::new(
@@ -117,8 +121,11 @@ pub fn snap(
     let hit = world.cast_shape(&query, filter).unwrap()?;
     let normal = f3(hit.normal);
     let walkable = dot(normal, up) >= std::f64::consts::FRAC_1_SQRT_2;
+    let structure = hit
+        .compound_child
+        .is_some_and(|child| child.user_data == Groups::STRUCTURE);
     let dynamic = world.body(hit.body).unwrap().motion_type() == MotionType::Dynamic;
-    (walkable && !dynamic).then_some(Snap {
+    ((walkable || (structure_edges && structure)) && !dynamic).then_some(Snap {
         distance: f64::from(hit.distance),
         normal,
     })

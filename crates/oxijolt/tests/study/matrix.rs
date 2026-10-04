@@ -27,7 +27,8 @@ pub fn cases(scenes: &mut Scenes, column: Column) -> Vec<Case> {
     cases
 }
 
-/// The report-only cases: exactly 45 degrees, the 0.5 m ledge and the raised seam control.
+/// The report-only cases: exactly 45 degrees, the 0.5 m ledge, the raised seam control and the
+/// seams in one compound body.
 pub fn report_cases(scenes: &mut Scenes) -> Vec<Case> {
     let mut cases = laws::slope::cases(scenes, true);
     cases.extend(
@@ -36,6 +37,7 @@ pub fn report_cases(scenes: &mut Scenes) -> Vec<Case> {
             .filter(|case| case.report_only),
     );
     cases.extend(laws::seam::cases(scenes, Split::Raised));
+    cases.extend(laws::seam::cases(scenes, Split::Compound));
     cases
 }
 

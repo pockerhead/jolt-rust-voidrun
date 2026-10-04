@@ -24,8 +24,8 @@ pub struct Check {
     pub along: bool,
 }
 
-/// The law 6 cases on `split` (`Pair`, or `Raised` for the control), each compared with the
-/// continuous field.
+/// The law 6 cases on `split` (`Pair`; `Raised` for the control and `Compound` for the remedy
+/// candidate, both report-only), each compared with the continuous field.
 pub fn cases(scenes: &mut Scenes, split: Split) -> Vec<Case> {
     let mut cases = Vec::new();
     let diagonal = std::f64::consts::FRAC_1_SQRT_2;
@@ -54,10 +54,10 @@ pub fn cases(scenes: &mut Scenes, split: Split) -> Vec<Case> {
             for speed in SPEEDS {
                 let start = super::resting(scenes.get(continuous), x, z);
                 let input = Input::walk(dir, speed);
-                let prefix = if split == Split::Raised {
-                    "6-control"
-                } else {
-                    "6"
+                let prefix = match split {
+                    Split::Raised => "6-control",
+                    Split::Compound => "6-compound",
+                    Split::Pair | Split::Continuous => "6",
                 };
                 cases.push(Case {
                     id: format!("{prefix}/{}/{route}/v{speed}", profile.name()),
@@ -74,7 +74,7 @@ pub fn cases(scenes: &mut Scenes, split: Split) -> Vec<Case> {
                         start,
                         input,
                     }),
-                    report_only: split == Split::Raised,
+                    report_only: split != Split::Pair,
                 });
             }
         }
@@ -147,9 +147,16 @@ pub fn judge(
     let whole_grounds = grounds(scenes.get(continuous), reference);
     let mut path = [0.0, 0.0];
     for (t, (a, b)) in run.reports.iter().zip(&reference.reports).enumerate() {
-        for (report, ground) in [(a, &seam_grounds[t]), (b, &whole_grounds[t])] {
+        for (report, ground, metric) in [
+            (a, &seam_grounds[t], "not grounded on walkable ground"),
+            (
+                b,
+                &whole_grounds[t],
+                "continuous run not grounded on walkable ground",
+            ),
+        ] {
             if ground.walkable_applicable(report.up) && !report.grounded {
-                return Outcome::fail(t, "not grounded on walkable ground", ground.gap);
+                return Outcome::fail(t, metric, ground.gap);
             }
         }
         if a.ground != b.ground {

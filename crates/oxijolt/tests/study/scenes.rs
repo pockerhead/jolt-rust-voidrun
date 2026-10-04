@@ -63,6 +63,9 @@ pub enum Split {
     Raised,
     /// One 65-sample body over the same span.
     Continuous,
+    /// The two fields of `Pair` as the children of one static compound body: a seam remedy
+    /// candidate, since Jolt's enhanced internal edge removal works within one body.
+    Compound,
 }
 
 /// Which scene to build. Angles are in tenths of a degree, heights in millimetres.
@@ -293,6 +296,11 @@ impl Builder {
                 Split::Continuous => {
                     self.field([0.0; 3], 65, 1.0, 16, move |x, _| profile.height(x));
                 }
+                Split::Compound => {
+                    self.fields_in_one_body(&[[-16.0, 0.0, 0.0], [16.0, 0.0, 0.0]], move |x, _| {
+                        profile.height(x)
+                    });
+                }
                 Split::Pair | Split::Raised => {
                     let lift = if split == Split::Raised { 0.03 } else { 0.0 };
                     self.field([-16.0, 0.0, 0.0], SAMPLES, 1.0, 16, move |x, _| {
@@ -355,6 +363,67 @@ impl Builder {
         bits: u32,
         height: impl Fn(f64, f64) -> f64,
     ) {
+        let (shape, field) = self.field_shape(centre, samples, spacing, bits, height);
+        let body = self
+            .world
+            .create_body(
+                &shape,
+                &BodySettings::new_static()
+                    .position(rvec3(field.frame.origin))
+                    .rotation(field.frame.rotation)
+                    .object_layer(self.layers.terrain),
+            )
+            .unwrap();
+        self.terrain.push(body);
+        self.surface.fields.push(field);
+    }
+
+    /// 33-sample, 1 m, 16-bit heightfields centred on the local points `centres`, as the
+    /// children of one static compound in the terrain layer. The children carry the feature
+    /// group: the controller filter collides with compound children of the structure, feature
+    /// and actor groups only.
+    fn fields_in_one_body(&mut self, centres: &[V3], height: impl Fn(f64, f64) -> f64 + Copy) {
+        let parts: Vec<(Shape, Field)> = centres
+            .iter()
+            .map(|&centre| self.field_shape(centre, SAMPLES, 1.0, 16, height))
+            .collect();
+        let children: Vec<CompoundChild<'_>> = parts
+            .iter()
+            .zip(centres)
+            .map(|((shape, _), &centre)| CompoundChild {
+                shape,
+                position: vec3(centre),
+                rotation: Quat::IDENTITY,
+                user_data: Groups::FEATURE,
+            })
+            .collect();
+        let compound = Shape::new_compound(&children).unwrap();
+        let body = self
+            .world
+            .create_body(
+                &compound,
+                &BodySettings::new_static()
+                    .position(rvec3(self.frame.origin))
+                    .rotation(self.frame.rotation)
+                    .object_layer(self.layers.terrain),
+            )
+            .unwrap();
+        self.terrain.push(body);
+        self.surface
+            .fields
+            .extend(parts.into_iter().map(|(_, field)| field));
+    }
+
+    /// The shape of a heightfield as [`field`](Self::field) describes it, and its decoded
+    /// geometry.
+    fn field_shape(
+        &self,
+        centre: V3,
+        samples: usize,
+        spacing: f64,
+        bits: u32,
+        height: impl Fn(f64, f64) -> f64,
+    ) -> (Shape, Field) {
         let half = (samples - 1) as f64 / 2.0 * spacing;
         let mut heights = Vec::with_capacity(samples * samples);
         for iz in 0..samples {
@@ -378,21 +447,9 @@ impl Builder {
             origin: self.frame.to_world_point(centre),
             rotation: self.frame.rotation,
         };
-        let body = self
-            .world
-            .create_body(
-                &shape,
-                &BodySettings::new_static()
-                    .position(rvec3(frame.origin))
-                    .rotation(frame.rotation)
-                    .object_layer(self.layers.terrain),
-            )
-            .unwrap();
-        self.terrain.push(body);
         let intended = heights.iter().map(|&h| f64::from(h as f32)).collect();
-        self.surface.fields.push(Field::decode(
-            &shape, frame, samples, spacing, offset, intended, bits,
-        ));
+        let field = Field::decode(&shape, frame, samples, spacing, offset, intended, bits);
+        (shape, field)
     }
 
     /// The flat terrain of the walker fixtures' chunk at `angle` from the anchor.
