@@ -33,6 +33,8 @@
 
 #[path = "../tests/common/mod.rs"]
 mod common;
+#[path = "budgets/report.rs"]
+mod report;
 
 use std::error::Error;
 use std::time::Instant;
@@ -44,6 +46,7 @@ use common::walker::{
 };
 use common::{is_calm, Groups};
 use oxijolt::*;
+use report::{micros, print_machine, print_table, Limit, Row};
 
 const CHUNK_SIDE: f32 = 32.0;
 const CHARACTERS: usize = 30;
@@ -176,11 +179,6 @@ fn build_world() -> Result<(PhysicsWorld, Layers, Vec<CharacterId>), Box<dyn Err
     Ok((world, layers, characters))
 }
 
-/// Microseconds since `start`.
-fn micros(start: Instant) -> f64 {
-    start.elapsed().as_secs_f64() * 1e6
-}
-
 /// A small deterministic generator of numbers in `[0, 1)`.
 struct Lcg(u32);
 
@@ -188,95 +186,6 @@ impl Lcg {
     fn next(&mut self) -> f64 {
         self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         f64::from(self.0 >> 8) / f64::from(1 << 24)
-    }
-}
-
-/// What a row is compared with.
-enum Limit {
-    /// A limit on the 99th percentile, microseconds.
-    P99AtMost(f64),
-    /// A limit the game's text gives without a percentile, microseconds; compared on p99.
-    AtMost(f64),
-    /// A number from elsewhere, shown for comparison.
-    Reference(&'static str),
-    None,
-}
-
-/// One line of the table.
-struct Row {
-    case: String,
-    sample: &'static str,
-    sorted_us: Vec<f64>,
-    limit: Limit,
-    note: String,
-}
-
-impl Row {
-    fn new(
-        case: &str,
-        sample: &'static str,
-        mut us: Vec<f64>,
-        limit: Limit,
-        note: impl Into<String>,
-    ) -> Self {
-        us.sort_by(f64::total_cmp);
-        Self {
-            case: case.to_owned(),
-            sample,
-            sorted_us: us,
-            limit,
-            note: note.into(),
-        }
-    }
-
-    /// The first call after the scene was built, one sample with no limit.
-    fn cold(case: &str, sample: &'static str, us: f64) -> Self {
-        Self::new(
-            &format!("{case}: cold first call"),
-            sample,
-            vec![us],
-            Limit::None,
-            "",
-        )
-    }
-}
-
-/// The nearest-rank `p` percentile of `sorted`, which is not empty.
-fn percentile(sorted: &[f64], p: f64) -> f64 {
-    let n = sorted.len();
-    sorted[((p * n as f64).ceil() as usize).clamp(1, n) - 1]
-}
-
-fn print_table(rows: &[Row]) {
-    println!(
-        "| case | one sample | samples | p50 us | p99 us | max us | limit / reference | status | note |"
-    );
-    println!("|---|---|---:|---:|---:|---:|---|---|---|");
-    for row in rows {
-        let sorted = &row.sorted_us;
-        let p99 = percentile(sorted, 0.99);
-        let (limit, status) = match row.limit {
-            Limit::P99AtMost(us) => (
-                format!("p99 <= {us:.0} us"),
-                if p99 <= us { "within" } else { "over" },
-            ),
-            Limit::AtMost(us) => (
-                format!("<= {us:.0} us (limit, no percentile given; p99 shown)"),
-                if p99 <= us { "within" } else { "over" },
-            ),
-            Limit::Reference(text) => (text.to_owned(), "-"),
-            Limit::None => (String::from("-"), "-"),
-        };
-        println!(
-            "| {} | {} | {} | {:.1} | {:.1} | {:.1} | {limit} | {status} | {} |",
-            row.case,
-            row.sample,
-            sorted.len(),
-            percentile(sorted, 0.5),
-            p99,
-            sorted[sorted.len() - 1],
-            row.note,
-        );
     }
 }
 
@@ -985,22 +894,6 @@ fn run_event_pile(record: bool) -> Result<Row, Box<dyn Error>> {
     ))
 }
 
-/// The CPU's name as the operating system reports it.
-fn cpu_name() -> String {
-    if let Ok(name) = std::env::var("PROCESSOR_IDENTIFIER") {
-        return name;
-    }
-    std::fs::read_to_string("/proc/cpuinfo")
-        .ok()
-        .and_then(|info| {
-            info.lines()
-                .find(|line| line.starts_with("model name"))
-                .and_then(|line| line.split(':').nth(1))
-                .map(|name| name.trim().to_owned())
-        })
-        .unwrap_or_else(|| String::from("unknown CPU"))
-}
-
 fn main() -> Result<(), Box<dyn Error>> {
     // `cargo test --benches` runs this binary without `--bench`; the full run would take minutes
     // in a debug build.
@@ -1045,20 +938,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     print_table(&rows);
-
-    let threads = std::thread::available_parallelism().map_or(0, |n| n.get());
-    let profile = if cfg!(debug_assertions) {
-        "debug assertions on"
-    } else {
-        "debug assertions off"
-    };
     println!();
-    println!(
-        "{} {}, {threads} logical threads, {}; Rust code with {profile}; Jolt and joltc built in \
-         Release",
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-        cpu_name()
-    );
+    print_machine();
     Ok(())
 }

@@ -5,7 +5,7 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 ## Unreleased
 
 - Renamed the crates: `joltc-sys` is now `oxijolt-sys` (`crates/oxijolt-sys`, Rust path `oxijolt_sys`)
-  and `rolt` is now `oxijolt` (`crates/oxijolt`); the old names belong to jolt-rust on crates.io. Before
+  and `rolt` is now `oxijolt` (`crates/oxijolt`); the old names belong to the upstream project on crates.io. Before
   the first release the crates were briefly called `joltphysics-sys` and `joltphysics`. The repository is
   now https://github.com/pockerhead/oxijolt. The prebuilt manifest is now `oxijolt-sys-manifest.txt`;
   `JOLTC_LIB_DIR` and the features are unchanged. Existing checkouts run
@@ -122,3 +122,97 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - The guide has sections on vehicles and ragdolls, with a car on terrain and a ragdoll in a
   second world run as a doctest; the README and the ragdoll docs state how far joints pass their
   limits on impact.
+- `PhysicsWorld::step` also rejects time steps above `PhysicsWorld::MAX_DELTA_TIME` (1 s), a guard
+  against overflow-scale steps; it is not a Jolt limit.
+- A magnitude policy for the safe API: the public `oxijolt::limits` module holds the bounds
+  (positions within `MAX_POSITION`, shape extents, velocities, accelerations, masses, friction,
+  spring coefficients, ratios, ...), and the setters of those inputs check them before they reach
+  Jolt. Some inputs, such as damping and ray directions, are only checked to be finite.
+  `docs/limits.md` shows how the bounds follow from Jolt's arithmetic; `docs/coverage.md` says
+  which values only tests check and which no bound covers. New checks refuse values that were
+  accepted before, among them `WorldSettings::max_contact_constraints` above
+  `WorldSettings::MAX_CONTACT_CONSTRAINTS`, body friction above `limits::MAX_FRICTION`, a
+  character weight impulse above `limits::MAX_WEIGHT_IMPULSE` and six-DOF translation limits
+  beyond `limits::MAX_SHAPE_EXTENT`.
+- The `asserts` feature of `oxijolt` (forwarded to `oxijolt-sys/asserts`), and Jolt's assertion
+  handler: oxijolt installs it before `JPH_Init`; with `asserts` a failed assertion prints its
+  expression, message, file and line and aborts the process, except the physics-update-error
+  assertion, whose condition `step` reports in its `StepReport`. CI runs the whole test suite with
+  `asserts` as a fifth configuration.
+- Behaviour change: the rigid-body inertia floor. A dynamic or kinematic body (also a character's
+  inner body and a ragdoll part) whose inertia tensor is not exactly diagonal (a rotated compound
+  child, an offset centre of mass) is refused with `InvalidValue` unless its smallest principal
+  moment is at least about 4.8e-4 of the tensor's norm, the rule soft bodies use. The earlier rule
+  accepted tensors on which Jolt's eigen decomposition asserted (`docs/limits.md`, "Rigid body
+  inertia"). In a rotated child this refuses a square needle box
+  past about 54 times longer than wide and a capsule or cylinder past about 47 times longer than
+  its diameter. Shapes with an exactly diagonal tensor, such as unrotated primitives, are not
+  affected.
+- World constraints of twelve kinds: `PhysicsWorld::create_constraint` with
+  `FixedConstraintSettings`, `PointConstraintSettings`, `DistanceConstraintSettings`,
+  `HingeConstraintSettings`, `SliderConstraintSettings`, `ConeConstraintSettings`,
+  `SwingTwistConstraintSettings`, `SixDofConstraintSettings`, `GearConstraintSettings`,
+  `RackAndPinionConstraintSettings`, `PulleyConstraintSettings` and `PathConstraintSettings`
+  (along a `HermitePath`). The typed `ConstraintId<K>` selects the motor, target, limit and
+  readout methods of `ConstraintRef` and `ConstraintMut`; `remove_constraint`, `constraint_ids`
+  and `constraints_of_body` manage them, and `ConstraintError` reports refusals.
+- `remove_body` refuses a body a constraint uses (`BodyError::UsedByConstraint`), and a hinge or
+  slider a gear or rack references cannot be removed before the coupling. Gears, racks and
+  pulleys need two dynamic bodies. Gear ratios lie within `1..=limits::MAX_GEAR_RATIO` (10),
+  because of a defect in Jolt 5.6's gear solver. Every point where a constraint holds a dynamic
+  body has a lever-arm ratio of at most `limits::MAX_LEVER_ARM_RATIO`. Creating,
+  changing or removing a constraint wakes its bodies. `rebase` recreates pulleys in the new frame.
+- Caller job systems: the `JobSystem` trait and `Job` run a world's jobs on the caller's thread
+  pool, such as Rayon (`WorldSettings::job_system`, `WorldSettings::MAX_CONCURRENCY`). A job run
+  inside `queue_job` is left to the stepping thread, a step finishes even when the pool runs a
+  job late or never, and a panic in `queue_job` is resumed from `step` after the world advanced.
+  The determinism gates also run with a Rayon pool and an inline job system.
+- World state save and restore: `PhysicsWorld::save_state`, `save_state_of` and `restore_state`
+  with an opaque `WorldState`, for rollback and replays. A state restores only into the world
+  that saved it while its structure is unchanged (`StateError`); configuration Jolt does not save
+  stays as it is (`docs/state.md`).
+- Soft bodies: `SoftBodySharedSettings` (built and checked by `SoftBodySharedSettingsBuilder`,
+  with generated or explicit edge, bend and volume constraints), `SoftBodySettings`,
+  `PhysicsWorld::create_soft_body`, vertex readout (`soft_body`) and writes (`soft_body_mut`:
+  velocities, pinning, kinematic moves). Body-level velocity, torque and point-force setters,
+  constraints and vehicles refuse soft bodies (`BodyError::SoftBody`); vehicle wheels look through
+  them. Mass, inertia and pressure rules are checked at creation, and vertex masses and forces
+  again in the vertex setters; they refuse some thin or far-from-origin bodies Jolt would simulate
+  (`docs/soft-bodies.md`). A pressurised body whose volume shrinks later is not covered
+  (`docs/coverage.md`, "Not covered").
+- Events: `PhysicsWorld::set_event_settings` and `take_events` record contact, body activation
+  and soft body contact events (`EventSettings`, `WorldEvents`), sorted per step into an order
+  that does not depend on the thread count. A `ContactListener` (`set_contact_listener`) may change
+  each contact's `ContactSettings`; settings that do not fit their contact are not applied and are
+  reported in `WorldEvents::rejected_contact_settings` and the new
+  `StepReport::rejected_contact_settings`. Panics in callbacks are resumed by `step` or
+  `take_events`.
+- `PhysicsMaterial` carries the caller's user data; `Shape::new_box_with_material`,
+  `new_sphere_with_material`, `new_capsule_with_material`, `new_cylinder_with_material` and
+  `new_height_field_with_materials` make shapes of materials, and contacts report each side's
+  material.
+- `oxijolt-sys` extension: `JPH_PhysicsSystem_SaveState` and `_RestoreState` with a body
+  selection, path, pulley and rack-and-pinion constraints and motor accessors, soft body
+  functions, vehicle collision testers that skip soft bodies, materials with user data
+  (`JPH_PhysicsMaterial_Create2`, `JPH_ConvexShapeSettings_SetMaterial`,
+  `JPH_HeightFieldShapeSettings_Create2`), a soft body contact listener and sub-shape pair
+  getters.
+- Builds without LLVM: the raw bindings are committed under `crates/oxijolt-sys/src/bindings/`,
+  one file per ABI family (`msvc`, `gnu`) and configuration, and `cargo xtask bindings`
+  regenerates them. The new `bindgen` feature (forwarded by `oxijolt`) generates them at build time
+  instead. The supported targets are the 64-bit ones in `build/targets.rs`; 32-bit targets,
+  including the Android armv7 and x86 ones accepted before, are refused when the build starts.
+  Raw API changes: the bindings no longer carry joltc's header comments, and on `gnu` targets
+  joltc's enum typedefs are `c_uint`.
+- CI runs on Linux (GCC) as well as Windows (MSVC), and a `Committed bindings` job checks the
+  bindings against LLVM 18. A release workflow builds prebuilt native libraries for
+  `JOLTC_LIB_DIR` (x86_64 Windows MSVC and Linux GNU, eight feature subsets each) and attaches
+  them to a tagged release. A prebuilt prefix's headers are compared without regard to line
+  endings.
+- A readability pass with no public API change: large modules are split by concern, the limits
+  derivations and the per-input audit table moved to `docs/limits.md` and `docs/coverage.md`
+  (both new), and 18 validation error messages are shorter; callers that compare exact
+  `InvalidValue` texts see the new ones.
+- Documentation: the README is a front page; the per-feature test table moved to
+  `docs/coverage.md`; new guides for constraints, soft bodies, events, state save and restore,
+  caller job systems, determinism and building (`docs/`), whose examples run as doctests.

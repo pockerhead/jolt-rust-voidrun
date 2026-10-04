@@ -3,9 +3,8 @@
 Working rules for anyone (human or agent) changing this repository. `CLAUDE.md` only includes this file.
 
 ## What this is
-Rust bindings to [Jolt Physics](https://github.com/jrouwe/JoltPhysics), started as a fork of
-[SecondHalfGames/jolt-rust](https://github.com/SecondHalfGames/jolt-rust) and moving its raw layer onto the
-more complete [amerkoleci/joltc](https://github.com/amerkoleci/joltc) C wrapper (Jolt 5.6). The fork exists to make Jolt usable as the simulation physics of the game VOIDRUN: a
+Rust bindings to [Jolt Physics](https://github.com/jrouwe/JoltPhysics), a fork whose raw layer is built on
+the [amerkoleci/joltc](https://github.com/amerkoleci/joltc) C wrapper (Jolt 5.6). The fork exists to make Jolt usable as the simulation physics of the game VOIDRUN: a
 deterministic, headless, ECS-owned physics world with a character controller, a heightfield terrain, a
 wheeled vehicle and ragdolls. Work for the game comes first; after it, the features the wider Rust community keeps asking for. See
 [LINEAGE.md](LINEAGE.md) for who we inherit from and under which licences.
@@ -55,8 +54,11 @@ Layers, bottom to top:
 ## Documentation
 - Rustdoc is part of the code: every public item a change adds or alters gets its doc comment in the same
   change (what it does, units, conventions such as normal direction, errors, a short example where it helps).
-- `README.md` (feature table, build steps, guarantees), `CHANGELOG.md` and guides are brought up to date in a
+- `README.md` (a front page: what it is, an example, status, guarantees in short, links), `docs/coverage.md`
+  (the feature table with its tests), `CHANGELOG.md` and the guides in `docs/` are brought up to date in a
   closing documentation step at the end of each body of work, against the code as it then is.
+- Rust code blocks in the README and the guides run as doctests (the `#[cfg(doctest)]` items at the end of
+  `crates/oxijolt/src/lib.rs`); a new guide with Rust code gets such an item.
 - Docs that describe something the code no longer does are a bug.
 
 ## Build and test
@@ -92,6 +94,11 @@ prefixes for `JOLTC_LIB_DIR` (x86_64 Windows MSVC and Linux GNU, eight feature s
 attaches the archives and their `.sha256` files to that tag's GitHub release. Pushing the tag again replaces
 assets of the same name. A manual run, or a branch push that changes the workflow, builds and checks the
 archives as workflow artifacts without publishing.
+
+## Publishing
+Nothing is published to crates.io yet; publishing is the owner's step, like cutting a release. `oxijolt`
+depends on `oxijolt-sys` by version, so `oxijolt-sys` is published first, both at the release's version.
+Agents do not publish, tag or create releases.
 
 ## Review checklist (every change)
 - Every new `unsafe` has a `SAFETY` comment; every new C function has a Rust safe wrapper with a test.

@@ -37,8 +37,8 @@ use crate::WorldError;
 /// Jolt documents its simulation as deterministic for the same binary, the same initial state
 /// and the same calls in the same order (Jolt docs, "Deterministic Simulation"); which threads
 /// ran the jobs is not part of that state. Side effects of the caller's own code in `queue_job`
-/// are the caller's to keep deterministic ([docs/guide.md#determinism] says what the tests
-/// compare).
+/// are the caller's to keep deterministic ([docs/job-system.md#determinism] says what the
+/// tests compare).
 ///
 /// Several worlds may share one job system and step on different threads at the same time.
 ///
@@ -76,7 +76,7 @@ use crate::WorldError;
 ///     &BodySettings::new_dynamic().position(RVec3::new(0.0, 2.0, 0.0)),
 /// )?;
 /// for _ in 0..60 {
-///     world.step(1.0 / 60.0)?;
+///     assert!(world.step(1.0 / 60.0)?.is_complete());
 /// }
 /// assert!(world.body(falling)?.position().y < 2.0);
 /// # Ok(())
@@ -87,7 +87,7 @@ use crate::WorldError;
 /// aborting the process when a spawned task panics does not come into play; an adapter that
 /// does more in the spawned closure owns that risk.
 ///
-/// [docs/guide.md#determinism]: https://github.com/pockerhead/oxijolt/blob/main/docs/guide.md#determinism
+/// [docs/job-system.md#determinism]: https://github.com/pockerhead/oxijolt/blob/main/docs/job-system.md#determinism
 pub trait JobSystem: Send + Sync + 'static {
     /// The most jobs that may run at the same time, counting the thread that calls
     /// [`PhysicsWorld::step`](crate::PhysicsWorld::step).

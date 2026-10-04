@@ -13,73 +13,26 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 /// A world's simulation state at one moment, from [`PhysicsWorld::save_state`] or
 /// [`PhysicsWorld::save_state_of`], to go back to with [`PhysicsWorld::restore_state`].
 ///
-/// # What is saved
-/// Jolt's saved state of the physics system: the previous step's delta time and the world's
-/// gravity; per body its pose, velocities, accumulated force and torque, sleep test data,
-/// whether it may sleep and whether it is awake; the contact cache; and every constraint's own
-/// state (its enabled flag, the solver parts' warm start, motor states and targets, and for
-/// path constraints also the motor settings and maximum friction). For a soft body that covers
-/// its vertex positions and velocities and its bounds
-/// (`SoftBodyMotionProperties::SaveState`). For vehicles that covers the
-/// driver input, the engine, transmission and wheel state. On top of Jolt's state it holds every
-/// character's [`CharacterState`].
+/// It holds Jolt's saved state of the physics system (bodies with their poses, velocities,
+/// forces and sleep data, soft body vertices, the contact cache, each constraint's own state,
+/// vehicles' driver input and drivetrain) and every character's [`CharacterState`].
 ///
-/// # Which world it restores into
 /// A state restores only into the world that saved it, and only while that world's structure is
 /// unchanged: creating or removing a body, character, vehicle, ragdoll or constraint, setting a
-/// ragdoll's motion type ([`RagdollMut::set_motion_type`](crate::RagdollMut::set_motion_type)) or
-/// a [`rebase`](PhysicsWorld::rebase) that moves anything makes every earlier state
-/// unrestorable ([`StateError::WorldChanged`]). Calls that fail their checks change nothing and
-/// keep states restorable. Jolt saves neither which objects exist nor its body id allocator, so
-/// rolling back across a creation or removal is not supported; after a restore, the same calls
-/// as in the original run create bodies with the same ids as in that run.
+/// ragdoll's motion type or a [`rebase`](PhysicsWorld::rebase) that moves anything makes every
+/// earlier state unrestorable ([`StateError::WorldChanged`]). Calls that fail their checks keep
+/// states restorable.
 ///
-/// # What is not saved
-/// Configuration Jolt does not save stays as it is when a state is restored. A caller that
-/// changes it during a run and rolls back must set it back and replay those calls, as Jolt's
-/// rollback documentation asks for body friction. These setters change such configuration:
-/// - hinge: `set_motor_settings`, `set_limits`, `set_limits_spring`, `set_max_friction_torque`;
-/// - slider: `set_motor_settings`, `set_limits`, `set_limits_spring`, `set_max_friction_force`;
-/// - distance: `set_distance`, `set_limits_spring`;
-/// - pulley: `set_length`;
-/// - cone: `set_half_cone_angle`;
-/// - swing-twist: `set_swing_motor_settings`, `set_twist_motor_settings`,
-///   `set_max_friction_torque`;
-/// - six-DOF: `set_motor_settings`;
-/// - vehicle: [`set_gravity`](crate::VehicleMut::set_gravity),
-///   [`set_max_pitch_roll_angle`](crate::VehicleMut::set_max_pitch_roll_angle),
-///   [`set_collision_tester`](crate::VehicleMut::set_collision_tester).
+/// Configuration Jolt does not save, such as constraint limits, motor settings, a vehicle's
+/// gravity override and soft body vertex inverse masses, stays as it is when a state is
+/// restored. So does a vehicle's world up, which a zero gravity keeps from the step before.
+/// [docs/state.md] lists every such setter.
 ///
-/// Soft body vertex inverse masses
-/// ([`set_vertex_inverse_mass`](crate::SoftBodyMut::set_vertex_inverse_mass)) are configuration
-/// too: a restore keeps the ones set last, not those at the save.
+/// A state is opaque: it gives neither its bytes nor `==`, because Jolt's stream may hold bytes
+/// without a defined value (a wheel's contact data before its first contact). Compare what a
+/// world reports instead.
 ///
-/// Body properties set at creation (shape, mass, friction, layers, ...) are not saved either; the
-/// body setters change only poses and velocities. A setting the caller applies again before every
-/// [`step`](PhysicsWorld::step), such as a vehicle's gravity on a planet, replays exactly, as long
-/// as that gravity is not zero (see the vehicle world up below).
-///
-/// A vehicle's [`world_up`](crate::VehicleRef::world_up) is not saved either. Every step sets it
-/// to the opposite of the gravity the vehicle uses, but a zero gravity (world gravity or
-/// [`set_gravity`](crate::VehicleMut::set_gravity)) keeps the world up of the step before, so a
-/// restore leaves the one the run before the restore ended with. A vehicle with a pitch and roll
-/// limit ([`VehicleSettings::max_pitch_roll_angle`](crate::VehicleSettings::max_pitch_roll_angle))
-/// in zero gravity then replays differently when that run's gravity pointed elsewhere. Jolt has
-/// no setter for the world up, so a restore cannot put it back.
-///
-/// The wheel contacts a vehicle reports ([`WheelState::contact`](crate::WheelState)) are empty
-/// right after a restore until the next step, because Jolt clears a wheel's contact body on
-/// restore.
-///
-/// # No bytes, no equality
-/// A state is opaque: it gives neither its bytes nor `==`. Jolt writes fields it has never
-/// initialised into its stream, a wheel's contact position, normal and lateral direction before the
-/// wheel's first contact (`VehicleConstraint::SaveState`), so the stream may hold bytes without a
-/// defined value. A restore copies them back as they were, and Jolt uses them only for a wheel with
-/// a contact, so a restore is not affected, but Rust may not read them as `u8`: the state keeps
-/// them as [`MaybeUninit<u8>`](std::mem::MaybeUninit), which only Jolt copies. Compare what a
-/// world reports (poses, velocities, character and vehicle state) instead. Loading a state into another
-/// world, which would need the bytes, is not supported.
+/// [docs/state.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/state.md
 #[derive(Clone)]
 pub struct WorldState {
     world: WorldTag,
@@ -120,12 +73,12 @@ impl PhysicsWorld {
     /// )?;
     ///
     /// let saved = world.save_state();
-    /// world.step(1.0 / 60.0)?;
+    /// assert!(world.step(1.0 / 60.0)?.is_complete());
     /// let after_one_step = world.body(ball)?.position();
     ///
     /// world.restore_state(&saved)?;
     /// assert_eq!(world.body(ball)?.position(), RVec3::new(0.0, 2.0, 0.0));
-    /// world.step(1.0 / 60.0)?;
+    /// assert!(world.step(1.0 / 60.0)?.is_complete());
     /// assert_eq!(world.body(ball)?.position(), after_one_step);
     /// # Ok(())
     /// # }

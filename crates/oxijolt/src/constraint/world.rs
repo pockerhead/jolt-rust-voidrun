@@ -423,7 +423,7 @@ impl PhysicsWorld {
     /// motor.set_motor_state(MotorState::Position);
     /// motor.set_target_angle(std::f32::consts::FRAC_PI_2)?;
     /// for _ in 0..120 {
-    ///     world.step(1.0 / 60.0)?;
+    ///     assert!(world.step(1.0 / 60.0)?.is_complete());
     /// }
     /// let angle = world.constraint(hinge)?.current_angle();
     /// assert!((angle - std::f32::consts::FRAC_PI_2).abs() < 0.05);

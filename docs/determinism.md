@@ -1,0 +1,99 @@
+# Determinism
+
+What oxijolt asks of the simulation, what the tests check, and what a caller must do to keep its own
+part deterministic.
+
+## The requirement
+
+On one machine, the same binary given the same initial state and the same calls in the same order
+produces bit-identical body ids, poses, velocities and sleep flags, whichever job system runs the
+step: Jolt's thread pool with any `WorldSettings::worker_threads` (n workers plus the thread that
+calls `step`) or a caller `JobSystem`. This rests on Jolt's own conditions (Jolt docs,
+["Deterministic
+Simulation"](https://github.com/jrouwe/JoltPhysics/blob/v5.6.0/Docs/Architecture.md#deterministic-simulation)).
+
+The tests check it with 1 and 4 workers, with a Rayon pool of 4 threads and with an inline job
+system, on the scenes listed below. They do not check every thread count or every call sequence.
+
+## The call history is state
+
+The order of body creation and removal decides each `BodyId`'s index and sequence number, so it is
+part of the state. So are rebases, `optimize_broad_phase`, forces and velocity writes.
+
+- **Characters.** Each world numbers its characters from 1 in creation order. Jolt's default
+  character id comes from a process-wide counter and orders contacts between characters, so the
+  world passes its own. A character's contacts come in a deterministic order while
+  `max_hits_exceeded` is false.
+- **Removal.** `remove_body` wakes the bodies whose exact bounds overlap the removed one, in id
+  order, so it adds no hidden state; `remove_ragdoll` does the same for each part.
+- **Vehicles** run as Jolt step listeners. A fleet of 40 is spread over a different number of
+  listener jobs with 1 and 4 workers.
+- **Ragdolls.** A pile of 16 ragdolls forms islands of 128 or more joints and contacts, and Jolt
+  splits islands of 128 or more for parallel solving (`LargeIslandSplitter.cpp:206,301`).
+- **Vehicles, ragdolls and constraints** are numbered from 1 per world in creation order and never
+  reuse an id.
+- **Events.** The world sorts each step's events into a canonical order before it queues them
+  ([events.md](events.md#canonical-order)).
+
+## What the caller keeps deterministic
+
+- Code that drives the world must not feed hash-map iteration order, time or thread identity into
+  its calls.
+- Narrow-phase query hits (`collide_shape`) come in an unspecified order; sort them by body id and
+  sub-shape id when order matters.
+- A `ContactListener` runs on Jolt's workers in no fixed order. Its decision must depend only on its
+  arguments and on data fixed for the step.
+- A caller `JobSystem` decides only which thread runs a job. Side effects of the caller's own code
+  in `queue_job` are the caller's to keep deterministic ([job-system.md](job-system.md)).
+
+## Across machines
+
+Equal results across compilers, compiler flags, operating systems or CPU architectures are not
+guaranteed by default. The `cross-platform-deterministic` feature (off by default, slower) builds
+Jolt with `CROSS_PLATFORM_DETERMINISTIC`. Jolt then
+[claims](https://github.com/jrouwe/JoltPhysics/blob/v5.6.0/Docs/Architecture.md#deterministic-simulation)
+equal results across compilers, configurations, operating systems and architectures, as long as the
+same source is built with the same defines: never compare a `double-precision` build with a
+single-precision one, and the FPU rounding and denormal (DAZ/FTZ) modes must match. The gates below
+run on one machine at a time and compare thread counts and job systems in each configuration; they
+do not compare machines.
+
+## How it is checked
+
+`cargo test -p oxijolt --test determinism` runs each scene in child processes, one with 1 worker and
+one with 4, and requires their per-tick records to match byte for byte. Each scene also runs with a
+Rayon pool of 4 threads and with an inline job system, which must record what Jolt's pool with 1
+worker records.
+
+- **Stacks**: cubes topple on a floor for 120 ticks, also across a rebase.
+- **Chunk**: a static compound chunk on a heightfield terrain and three items the caller pulls
+  towards a planet centre, created, coming to rest and removed under the game's item rules, with a
+  tilted rebase in the middle; ticks 0 to 1000. The same bodies created in another order must fail
+  the gate.
+- **Walker**: the game's reference controller (`tests/common/walker.rs`) for 600 ticks, with items
+  dropped along its path.
+- **Vehicle**: a car driving the acceptance route over terrain.
+- **Fleet**: 40 vehicles, whose digest must also change when one input changes.
+- **Ragdoll pile**: 16 humanoid ragdolls dropped into a pit, touching from the first tick.
+- **Constraints**: a hinge chain, a motor-driven slider, a gear pair, a pulley and a path; one
+  constraint is removed and re-created halfway.
+- **Soft bodies**: a cloth pinned at two corners draped over a sphere and a pressurised ball dropped
+  on a box; one corner is unpinned and the other moved halfway.
+
+Other gates of the same kind:
+- `tests/event_determinism.rs` compares the serialized events of every step for 1 and 4 workers and
+  for caller job systems, and checks that a scene stepped with every event on and a no-op contact
+  listener simulates bit for bit like the same scene with nothing installed.
+- `tests/state.rs` replays a rollback in two processes with 1 and 4 workers
+  (`rollback_replay_is_identical_across_processes`).
+- `crates/oxijolt-sys/tests/determinism.rs` checks the raw layer with 1 and 4 workers.
+
+CI runs all of them in each of its configurations (default, `cross-platform-deterministic`,
+`double-precision`, `debug-renderer`, `asserts`) on Windows and on Linux.
+
+## Replays
+
+`PhysicsWorld::save_state` and `restore_state` roll a world back for replays; after a restore the
+same calls give the same results bit for bit, except for the configuration Jolt does not save
+([state.md](state.md)). `CharacterRef::save_state` and `CharacterMut::restore_state` continue a
+single character in a world rebuilt the same way.

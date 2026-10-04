@@ -172,10 +172,12 @@ impl WorldSettings {
 
     /// Runs the world's jobs on Jolt's thread pool with `value` worker threads, in addition to
     /// the thread that calls [`PhysicsWorld::step`], which also runs jobs. At least 1 and at most
-    /// [`WorldSettings::MAX_WORKER_THREADS`]. Default 1. Results are bit-identical for any value
-    /// on one machine.
+    /// [`WorldSettings::MAX_WORKER_THREADS`]. Default 1. The determinism tests get bit-identical
+    /// results with 1 and 4 workers on one machine ([docs/determinism.md]).
     ///
     /// Of this and [`job_system`](Self::job_system), the call made last decides.
+    ///
+    /// [docs/determinism.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/determinism.md
     #[must_use]
     pub fn worker_threads(mut self, value: u32) -> Self {
         self.jobs = JobSystemChoice::ThreadPool(value);
