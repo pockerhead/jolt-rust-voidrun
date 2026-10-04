@@ -17,6 +17,8 @@
 //! - A tick of 30 near steps and 60 structure-top rays for the mid-band actors, on a world with
 //!   4 worker threads, once with the mid actors walking rings over mostly open ground and once
 //!   with every mid actor on a structure top. One sample is one tick.
+//! - A step of an awake pile of 64 cubes on 4 worker threads, recording no events and recording
+//!   every event (draining them after each step). One sample is one `step` and `take_events`.
 //!
 //! Every case runs a warm-up that is not reported. The first call after the scene is built is
 //! shown as its own "cold first call" row; the landing reports it for the insertion and the rays
@@ -26,7 +28,7 @@
 //!
 //! Run with `cargo bench -p joltphysics --bench budgets`; words after `--` run only the cases
 //! whose names contain one of them (`update_character`, `near step`, `landing`, `steady step`,
-//! `ray`, `tick`). The timings are wall-clock and only reported, never checked; nothing timed
+//! `ray`, `tick`, `events`). The timings are wall-clock and only reported, never checked; nothing timed
 //! feeds back into the simulation.
 
 #[path = "../tests/common/mod.rs"]
@@ -929,6 +931,60 @@ fn run_ticks(mid: MidBand) -> Result<[Row; 2], Box<dyn Error>> {
     ])
 }
 
+/// Steps an awake pile of 64 cubes on 4 worker threads, with every event recorded or none, and
+/// takes the events after each step.
+fn run_event_pile(record: bool) -> Result<Row, Box<dyn Error>> {
+    let mut world = PhysicsWorld::new(WorldSettings::default().worker_threads(4).gravity(GRAVITY))?;
+    if record {
+        let every = EventSettings::default()
+            .persisted_contacts(true)
+            .body_activation(true)
+            .soft_body_contacts(true)
+            .soft_body_validations(true);
+        world.set_event_settings(every);
+    }
+    let floor = Shape::new_box(Vec3::new(10.0, 1.0, 10.0))?;
+    world.create_body(
+        &floor,
+        &BodySettings::new_static().position(RVec3::new(0.0, -1.0, 0.0)),
+    )?;
+    let cube = Shape::new_box(Vec3::new(0.25, 0.25, 0.25))?;
+    for i in 0..64 {
+        let (x, y, z) = ((i % 4) as Real, (i / 16) as Real, ((i / 4) % 4) as Real);
+        let position = RVec3::new(0.6 * x + 0.1 * y, 0.3 + 0.55 * y, 0.6 * z);
+        world.create_body(
+            &cube,
+            &BodySettings::new_dynamic()
+                .position(position)
+                .allow_sleeping(false),
+        )?;
+    }
+    let mut durations = Vec::with_capacity(TICKS);
+    let mut events = 0;
+    for tick in 0..WARMUP_TICKS + TICKS {
+        let start = Instant::now();
+        assert!(world.step(DT)?.is_complete());
+        let taken = world.take_events();
+        let us = micros(start);
+        if tick >= WARMUP_TICKS {
+            durations.push(us);
+            events += taken.contacts.len() + taken.activations.len();
+        }
+    }
+    let case = if record {
+        "events pile, every event, 4 worker threads"
+    } else {
+        "events pile, no events, 4 worker threads"
+    };
+    Ok(Row::new(
+        case,
+        "one step and take",
+        durations,
+        Limit::None,
+        format!("{:.1} events per step", events as f64 / TICKS as f64),
+    ))
+}
+
 /// The CPU's name as the operating system reports it.
 fn cpu_name() -> String {
     if let Ok(name) = std::env::var("PROCESSOR_IDENTIFIER") {
@@ -981,6 +1037,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     if selected("tick") {
         for mid in [MidBand::Rings, MidBand::OnStructures] {
             rows.extend(run_ticks(mid)?);
+        }
+    }
+    if selected("events") {
+        for record in [false, true] {
+            rows.push(run_event_pile(record)?);
         }
     }
     print_table(&rows);

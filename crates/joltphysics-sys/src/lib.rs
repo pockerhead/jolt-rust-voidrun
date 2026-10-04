@@ -13,8 +13,13 @@
 //! the swing-twist motor states (`JPH_SwingTwistConstraint_SetSwingMotorState`,
 //! `_GetSwingMotorState`, `_SetTwistMotorState`, `_GetTwistMotorState`), its
 //! `SetTargetOrientationBS` and `GetRotationInConstraintSpace`, and
-//! `JPH_HingeConstraint_SetTargetOrientationBS`. The safe API lives in the
-//! `joltphysics` crate.
+//! `JPH_HingeConstraint_SetTargetOrientationBS`, and materials with user data
+//! (`JPH_PhysicsMaterial_Create2`, `JPH_PhysicsMaterial_GetUserData`,
+//! `JPH_ConvexShapeSettings_SetMaterial`, `JPH_HeightFieldShapeSettings_Create2`), the
+//! sub-shape pair of a removed contact (`JPH_SubShapeIDPair_GetBody1ID` and its three siblings)
+//! and a soft body contact listener (`JPH_SoftBodyContactListener_*`,
+//! `JPH_PhysicsSystem_SetSoftBodyContactListener`, `JPH_SoftBodyManifold_*`). The safe API lives
+//! in the `joltphysics` crate.
 //!
 //! # Features
 //! - `asserts`: compile Jolt with its debug assertions. joltc's default handler prints a failed
@@ -66,6 +71,12 @@
 //!   both crates must not call `JPH_*Filter_SetProcs` for these three types, and must not pass
 //!   filters it created with `JPH_*Filter_Create` to queries, because the callbacks of
 //!   `joltphysics` would receive their `userData`.
+//! - joltc's contact and body activation listeners and the extension's soft body contact
+//!   listener also call one process-global proc table each. The `joltphysics` crate installs
+//!   them once and owns them: code that links both crates must not call
+//!   `JPH_ContactListener_SetProcs`, `JPH_BodyActivationListener_SetProcs` or
+//!   `JPH_SoftBodyContactListener_SetProcs`, nor create listeners of these types, whose
+//!   `userData` the callbacks of `joltphysics` would receive.
 //! - A vehicle constraint must be registered both as a constraint
 //!   (`JPH_PhysicsSystem_AddConstraint` with `JPH_VehicleConstraint_AsConstraint`) and as a
 //!   step listener (`JPH_PhysicsSystem_AddStepListener` with

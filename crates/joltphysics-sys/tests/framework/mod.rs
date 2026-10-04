@@ -122,8 +122,9 @@ pub struct TestWorld {
     system: *mut JPH_PhysicsSystem,
     job_system: *mut JPH_JobSystem,
     temp_allocator: *mut JPH_TempAllocator,
-    // Last field: released after `Drop::drop` destroyed the system.
-    _guard: MutexGuard<'static, ()>,
+    // Last field: released after `Drop::drop` destroyed the system. `None` for the worlds of a
+    // `TestWorldPair`, which holds the lock for both.
+    _guard: Option<MutexGuard<'static, ()>>,
 }
 
 impl TestWorld {
@@ -142,7 +143,7 @@ impl TestWorld {
         };
         // SAFETY: `pool_config` is a live local for the duration of the call.
         let job_system = unsafe { JPH_JobSystemThreadPool_Create(&pool_config) };
-        Self::assemble(system, job_system, guard)
+        Self::assemble(system, job_system, Some(guard))
     }
 
     /// Creates a world stepped by `job_system`.
@@ -156,14 +157,14 @@ impl TestWorld {
         init();
         let guard = world_lock();
         let system = create_system();
-        Self::assemble(system, job_system, guard)
+        Self::assemble(system, job_system, Some(guard))
     }
 
     /// Adds a temp allocator to `system` and `job_system`, which the world takes over.
     fn assemble(
         system: *mut JPH_PhysicsSystem,
         job_system: *mut JPH_JobSystem,
-        guard: MutexGuard<'static, ()>,
+        guard: Option<MutexGuard<'static, ()>>,
     ) -> Self {
         // SAFETY: plain allocation with no preconditions besides `JPH_Init`.
         let temp_allocator = unsafe { JPH_TempAllocator_Create(10 * 1024 * 1024) };
@@ -194,6 +195,38 @@ impl TestWorld {
     pub fn body_interface(&self) -> *mut JPH_BodyInterface {
         // SAFETY: `system` comes from `assemble` and lives until `drop`.
         unsafe { JPH_PhysicsSystem_GetBodyInterface(self.system) }
+    }
+}
+
+/// Two worlds that exist at the same time, each stepped by one Jolt worker thread. The pair
+/// holds the world lock for both; its fields drop in order, the lock last.
+pub struct TestWorldPair {
+    pub first: TestWorld,
+    pub second: TestWorld,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl TestWorldPair {
+    pub fn new() -> Self {
+        init();
+        let guard = world_lock();
+        let world = || {
+            let system = create_system();
+            let pool_config = JobSystemThreadPoolConfig {
+                maxJobs: 0,
+                maxBarriers: 0,
+                numThreads: 1,
+            };
+            // SAFETY: `pool_config` is a live local for the duration of the call.
+            let job_system = unsafe { JPH_JobSystemThreadPool_Create(&pool_config) };
+            TestWorld::assemble(system, job_system, None)
+        };
+        let (first, second) = (world(), world());
+        Self {
+            first,
+            second,
+            _guard: guard,
+        }
     }
 }
 

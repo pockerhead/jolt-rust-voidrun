@@ -299,3 +299,25 @@ pub fn digest_in_child_with_jobs(
         .unwrap_or_else(|error| panic!("child {request} wrote no digest: {error}"));
     Digest::decode(&bytes).unwrap_or_else(|error| panic!("child {request}: {error}"))
 }
+
+/// Runs `scenario` of the ignored child test `child_test` with Jolt's thread pool of 1 worker,
+/// a Rayon pool of 4 threads (concurrency 5) and an inline job system (concurrency 3), each in
+/// its own child, and asserts that both caller job systems record what the thread pool records.
+pub fn assert_caller_job_systems_agree(child_test: &str, scenario: &str, variant: &str) {
+    let run =
+        |threads, jobs| digest_in_child_with_jobs(child_test, scenario, threads, variant, jobs);
+    let native = run(1, JobChoice::Native);
+    let rayon = run(4, JobChoice::Rayon);
+    let inline = run(1, JobChoice::Inline);
+    assert!(!native.ticks.is_empty());
+    assert_same(
+        &format!("{scenario} {variant}, 1 worker vs Rayon 4 threads"),
+        &native,
+        &rayon,
+    );
+    assert_same(
+        &format!("{scenario} {variant}, 1 worker vs inline"),
+        &native,
+        &inline,
+    );
+}

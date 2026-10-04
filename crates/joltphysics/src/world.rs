@@ -14,7 +14,8 @@
 //! the world's own temp allocator through the `joltphysics-sys` extension
 //! (`JPH_CharacterVirtual_ExtendedUpdate2`, `JPH_CharacterVirtual_RefreshContacts2`), which
 //! needs `&mut self`. Callbacks that run inside a step must not use the locking body interface,
-//! which would deadlock.
+//! which would deadlock. The event listeners and their callbacks live in the `listener` module
+//! ([`PhysicsWorld::set_event_settings`]).
 
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
@@ -32,6 +33,7 @@ use crate::constraint::ConstraintEntry;
 use crate::job_system::{create_caller_job_system, QueueContext};
 use crate::jolt_assert;
 use crate::limits;
+use crate::listener::{first_payload, Listeners};
 use crate::owned::{JoltObject, Owned};
 use crate::ragdoll::RagdollEntry;
 use crate::vehicle::VehicleEntry;
@@ -331,7 +333,7 @@ impl JoltObject for JPH_PhysicsSystem {
 pub(crate) struct WorldTag(NonZeroU64);
 
 impl WorldTag {
-    fn next() -> Self {
+    pub(crate) fn next() -> Self {
         static NEXT_WORLD: AtomicU64 = AtomicU64::new(1);
         let value = NEXT_WORLD.fetch_add(1, Ordering::Relaxed);
         Self(NonZeroU64::new(value).expect("world counter overflowed"))
@@ -379,6 +381,9 @@ pub struct PhysicsWorld {
     /// other, created with the first of them.
     pub(crate) character_collision: Option<Owned<JPH_CharacterVsCharacterCollision>>,
     pub(crate) system: Owned<JPH_PhysicsSystem>,
+    /// The contact, activation and soft body listeners, detached first in `Drop` and destroyed
+    /// after the system.
+    pub(crate) listeners: Listeners,
     job_system: WorldJobSystem,
     pub(crate) temp_allocator: Owned<JPH_TempAllocator>,
     pub(crate) body_interface: NonNull<JPH_BodyInterface>,
@@ -411,6 +416,10 @@ pub struct PhysicsWorld {
 
 impl Drop for PhysicsWorld {
     fn drop(&mut self) {
+        // First: removing constraints, ragdolls and characters' inner bodies deactivates bodies,
+        // which must not reach a listener any more.
+        // SAFETY: the system is this world's and no step runs during `drop`.
+        unsafe { self.listeners.detach(self.system.as_ptr()) };
         self.remove_all_constraints();
         self.remove_all_vehicles();
         self.remove_all_ragdolls();
@@ -448,7 +457,10 @@ unsafe impl Send for PhysicsWorld {}
 // contact cache it reads is written only by `step` and `restore_state`, both behind `&mut self`.
 // The characters' `SaveState` is const as well. Soft body reads through `&self` copy the vertices
 // under Jolt's body read lock; vertices are written only by `step` and the `&mut` soft body and
-// body setters.
+// body setters. Event callbacks write the listener context only while Jolt steps, activates,
+// deactivates or removes bodies, which happens only in `&mut self` methods: no `&self` method
+// steps, adds, removes or wakes a body, and `event_settings` only reads the context's immutable
+// settings.
 unsafe impl Sync for PhysicsWorld {}
 
 /// One body's pose and velocities in a frame.
@@ -656,6 +668,7 @@ impl PhysicsWorld {
             constraints: BTreeMap::new(),
             character_collision: None,
             system,
+            listeners: Listeners::default(),
             job_system,
             temp_allocator,
             body_interface,
@@ -953,10 +966,16 @@ impl PhysicsWorld {
     /// handed to the caller's job system before the panic may still run on its threads; the jobs
     /// Jolt queues after it are not handed over and run on the stepping thread. The next step
     /// uses the caller's job system again.
+    ///
+    /// A panic in an event callback (see [`set_event_settings`](Self::set_event_settings))
+    /// does not stop the step either: `step` resumes it after the update, unless a `queue_job`
+    /// panic came first. It also resumes a callback panic from between steps that
+    /// [`take_events`](Self::take_events) has not resumed yet.
     pub fn step(&mut self, delta_time: f32) -> Result<StepReport, StepError> {
         if !Self::is_valid_delta_time(delta_time) {
             return Err(StepError::InvalidDeltaTime);
         }
+        self.listeners.begin_step();
         // SAFETY: the system, temp allocator and job system are live and owned by this world;
         // `&mut self` guarantees no other call uses them or touches a body during the update.
         let errors = unsafe {
@@ -968,13 +987,16 @@ impl PhysicsWorld {
                 self.job_system.as_ptr(),
             )
         };
-        if let Some(payload) = self.job_system.finish_update() {
+        let job_panic = self.job_system.finish_update();
+        let listeners = self.listeners.finish_step();
+        if let Some(payload) = first_payload(job_panic, listeners.panic) {
             std::panic::resume_unwind(payload);
         }
         Ok(StepReport {
             manifold_cache_full: errors & JPH_PhysicsUpdateError_ManifoldCacheFull != 0,
             body_pair_cache_full: errors & JPH_PhysicsUpdateError_BodyPairCacheFull != 0,
             contact_constraints_full: errors & JPH_PhysicsUpdateError_ContactConstraintsFull != 0,
+            rejected_contact_settings: listeners.rejected_contact_settings,
         })
     }
 }
@@ -996,6 +1018,11 @@ pub struct StepReport {
     /// The contact constraint buffer was full. Raise
     /// [`WorldSettings::max_contact_constraints`].
     pub contact_constraints_full: bool,
+    /// How many contact settings a [`ContactListener`](crate::ContactListener) returned in this
+    /// step that did not fit their contact and were not applied; the world's events name them
+    /// ([`WorldEvents::rejected_contact_settings`](crate::WorldEvents::rejected_contact_settings)).
+    /// Jolt still resolved those contacts, so they do not make the step incomplete.
+    pub rejected_contact_settings: u32,
 }
 
 impl StepReport {
@@ -1016,6 +1043,7 @@ mod tests {
             manifold_cache_full: false,
             body_pair_cache_full: false,
             contact_constraints_full: false,
+            rejected_contact_settings: 0,
         };
         assert!(complete.is_complete());
         for report in [

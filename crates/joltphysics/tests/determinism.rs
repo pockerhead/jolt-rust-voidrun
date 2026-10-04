@@ -945,75 +945,52 @@ fn determinism_child() {
     finish_child(&digest);
 }
 
-/// Runs `scenario` with Jolt's thread pool of 1 worker, a Rayon pool of 4 threads (concurrency
-/// 5) and an inline job system (concurrency 3), each in its own child, and asserts that both
-/// caller job systems record what the thread pool records.
-fn assert_caller_job_systems_agree(scenario: &str, variant: &str) {
-    let run = |threads, jobs| {
-        digest_in_child_with_jobs("determinism_child", scenario, threads, variant, jobs)
-    };
-    let native = run(1, JobChoice::Native);
-    let rayon = run(4, JobChoice::Rayon);
-    let inline = run(1, JobChoice::Inline);
-    assert!(!native.ticks.is_empty());
-    assert_same(
-        &format!("{scenario} {variant}, 1 worker vs Rayon 4 threads"),
-        &native,
-        &rayon,
-    );
-    assert_same(
-        &format!("{scenario} {variant}, 1 worker vs inline"),
-        &native,
-        &inline,
-    );
-}
-
 #[test]
 fn stacks_digest_is_identical_with_caller_job_systems() {
-    assert_caller_job_systems_agree("stacks", "forward");
-    assert_caller_job_systems_agree("stacks", "rebased");
+    assert_caller_job_systems_agree("determinism_child", "stacks", "forward");
+    assert_caller_job_systems_agree("determinism_child", "stacks", "rebased");
 }
 
 #[test]
 fn pile_digest_is_identical_with_caller_job_systems() {
     // The Rayon child also asserts that its pool executed Jolt jobs.
-    assert_caller_job_systems_agree("pile", "forward");
+    assert_caller_job_systems_agree("determinism_child", "pile", "forward");
 }
 
 #[test]
 fn chunk_digest_is_identical_with_caller_job_systems() {
-    assert_caller_job_systems_agree("chunk", "forward");
+    assert_caller_job_systems_agree("determinism_child", "chunk", "forward");
 }
 
 #[test]
 fn walker_digest_is_identical_with_caller_job_systems() {
-    assert_caller_job_systems_agree("walker", "forward");
+    assert_caller_job_systems_agree("determinism_child", "walker", "forward");
 }
 
 #[test]
 fn vehicle_digest_is_identical_with_caller_job_systems() {
-    assert_caller_job_systems_agree("vehicle", "forward");
+    assert_caller_job_systems_agree("determinism_child", "vehicle", "forward");
 }
 
 #[test]
 fn fleet_digest_is_identical_with_caller_job_systems() {
     // The 40 vehicle listeners run in 2, 5 and 3 jobs (`PhysicsSystem.cpp:243`).
-    assert_caller_job_systems_agree("fleet", "forward");
+    assert_caller_job_systems_agree("determinism_child", "fleet", "forward");
 }
 
 #[test]
 fn ragdoll_pile_digest_is_identical_with_caller_job_systems() {
-    assert_caller_job_systems_agree("ragdoll_pile", "forward");
+    assert_caller_job_systems_agree("determinism_child", "ragdoll_pile", "forward");
 }
 
 #[test]
 fn constraint_digest_is_identical_with_caller_job_systems() {
-    assert_caller_job_systems_agree("constraints", "forward");
+    assert_caller_job_systems_agree("determinism_child", "constraints", "forward");
 }
 
 #[test]
 fn soft_body_digest_is_identical_with_caller_job_systems() {
-    assert_caller_job_systems_agree("soft_bodies", "forward");
+    assert_caller_job_systems_agree("determinism_child", "soft_bodies", "forward");
 }
 
 fn stacks_in_child(threads: u32, variant: &str) -> Digest {
