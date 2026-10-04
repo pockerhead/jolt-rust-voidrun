@@ -1,6 +1,11 @@
 //! Error types. Every value Jolt only checks with debug assertions is validated before it
 //! reaches Jolt and reported through these; magnitudes follow [`crate::limits`], which says
 //! which assertion paths are derived and which are covered by tests.
+//!
+//! Each area has its own error, also exported at the crate root. [`Error`] wraps any of them and
+//! [`Result`] defaults to it; both are named by this module's path (`oxijolt::error::Result`, as
+//! `std::io::Result`), so `use oxijolt::*` does not bring in an `Error` or `Result` that would
+//! clash with another glob import.
 
 use std::fmt;
 
@@ -440,3 +445,179 @@ impl fmt::Display for StateError {
 }
 
 impl std::error::Error for StateError {}
+
+/// Any error of this crate: one variant per area, wrapping that area's error.
+///
+/// Every fallible call still returns its own area's error; `?` converts each of them into this
+/// type, so code that calls several areas can return [`Result<T>`](Result). The enum is
+/// `#[non_exhaustive]`: a `match` on it needs a `_` arm. `Display` and `source` are those of
+/// the wrapped error: a leaf area error has no source; `VehicleError::Body` reports its
+/// `BodyError`.
+///
+/// ```
+/// use oxijolt::prelude::*;
+///
+/// fn drop_ball(world: &mut PhysicsWorld) -> oxijolt::error::Result<BodyId> {
+///     let shape = Shape::new_sphere(0.5)?; // ShapeError
+///     let ball = world.create_body(&shape, &BodySettings::new_dynamic())?; // BodyError
+///     let report = world.step(1.0 / 60.0)?; // StepError
+///     assert!(report.is_complete());
+///     Ok(ball)
+/// }
+///
+/// # fn main() -> oxijolt::error::Result<()> {
+/// let mut world = PhysicsWorld::new(WorldSettings::default())?; // WorldError
+/// drop_ball(&mut world)?;
+/// let error: oxijolt::error::Error = world.step(0.0).unwrap_err().into();
+/// assert!(matches!(
+///     error,
+///     oxijolt::error::Error::Step(StepError::InvalidDeltaTime)
+/// ));
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// A [`WorldError`].
+    World(WorldError),
+    /// A [`ShapeError`].
+    Shape(ShapeError),
+    /// A [`BodyError`].
+    Body(BodyError),
+    /// A [`StepError`].
+    Step(StepError),
+    /// A [`QueryError`].
+    Query(QueryError),
+    /// A [`ContactSettingsError`].
+    ContactSettings(ContactSettingsError),
+    /// A [`CharacterError`].
+    Character(CharacterError),
+    /// A [`VehicleError`].
+    Vehicle(VehicleError),
+    /// A [`RagdollError`].
+    Ragdoll(RagdollError),
+    /// A [`ConstraintError`].
+    Constraint(ConstraintError),
+    /// A [`SoftBodyError`].
+    SoftBody(SoftBodyError),
+    /// A [`StateError`].
+    State(StateError),
+}
+
+/// `Result<T>` is `Result<T, oxijolt::error::Error>`; the second parameter keeps `Result<T, E>`
+/// working in code that glob-imports this module.
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+impl From<WorldError> for Error {
+    fn from(error: WorldError) -> Self {
+        Self::World(error)
+    }
+}
+
+impl From<ShapeError> for Error {
+    fn from(error: ShapeError) -> Self {
+        Self::Shape(error)
+    }
+}
+
+impl From<BodyError> for Error {
+    fn from(error: BodyError) -> Self {
+        Self::Body(error)
+    }
+}
+
+impl From<StepError> for Error {
+    fn from(error: StepError) -> Self {
+        Self::Step(error)
+    }
+}
+
+impl From<QueryError> for Error {
+    fn from(error: QueryError) -> Self {
+        Self::Query(error)
+    }
+}
+
+impl From<ContactSettingsError> for Error {
+    fn from(error: ContactSettingsError) -> Self {
+        Self::ContactSettings(error)
+    }
+}
+
+impl From<CharacterError> for Error {
+    fn from(error: CharacterError) -> Self {
+        Self::Character(error)
+    }
+}
+
+impl From<VehicleError> for Error {
+    fn from(error: VehicleError) -> Self {
+        Self::Vehicle(error)
+    }
+}
+
+impl From<RagdollError> for Error {
+    fn from(error: RagdollError) -> Self {
+        Self::Ragdoll(error)
+    }
+}
+
+impl From<ConstraintError> for Error {
+    fn from(error: ConstraintError) -> Self {
+        Self::Constraint(error)
+    }
+}
+
+impl From<SoftBodyError> for Error {
+    fn from(error: SoftBodyError) -> Self {
+        Self::SoftBody(error)
+    }
+}
+
+impl From<StateError> for Error {
+    fn from(error: StateError) -> Self {
+        Self::State(error)
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::World(error) => fmt::Display::fmt(error, f),
+            Self::Shape(error) => fmt::Display::fmt(error, f),
+            Self::Body(error) => fmt::Display::fmt(error, f),
+            Self::Step(error) => fmt::Display::fmt(error, f),
+            Self::Query(error) => fmt::Display::fmt(error, f),
+            Self::ContactSettings(error) => fmt::Display::fmt(error, f),
+            Self::Character(error) => fmt::Display::fmt(error, f),
+            Self::Vehicle(error) => fmt::Display::fmt(error, f),
+            Self::Ragdoll(error) => fmt::Display::fmt(error, f),
+            Self::Constraint(error) => fmt::Display::fmt(error, f),
+            Self::SoftBody(error) => fmt::Display::fmt(error, f),
+            Self::State(error) => fmt::Display::fmt(error, f),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::World(error) => error.source(),
+            Self::Shape(error) => error.source(),
+            Self::Body(error) => error.source(),
+            Self::Step(error) => error.source(),
+            Self::Query(error) => error.source(),
+            Self::ContactSettings(error) => error.source(),
+            Self::Character(error) => error.source(),
+            Self::Vehicle(error) => error.source(),
+            Self::Ragdoll(error) => error.source(),
+            Self::Constraint(error) => error.source(),
+            Self::SoftBody(error) => error.source(),
+            Self::State(error) => error.source(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

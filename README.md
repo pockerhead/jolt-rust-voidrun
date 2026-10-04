@@ -18,9 +18,10 @@ wrapper. Everything runs headless and is tested without a window.
 ## Example
 
 ```rust
-use oxijolt::*;
+use oxijolt::prelude::math::*;
+use oxijolt::prelude::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> oxijolt::error::Result<()> {
     let mut world = PhysicsWorld::new(WorldSettings::default())?;
 
     // A static floor whose top is at y = 0, and a ball dropped onto it.
@@ -46,6 +47,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+With Bevy, `use oxijolt::prelude::*` next to `bevy::prelude::*`; see `oxijolt::prelude`.
 
 ```toml
 [dependencies]

@@ -61,6 +61,48 @@ limit to raise.
 Gravity is per world (`WorldSettings::gravity`, `set_gravity`). A game with radial gravity sets it
 to zero and adds a force to each body before the step (`BodyMut::add_force`).
 
+After a step, a game copies body poses into its own entities.
+`PhysicsWorld::active_body_poses_into` fills a buffer with the id, position and rotation of every
+body that is awake when it is called, in ascending `BodyId` order, under one lock; sleeping and
+static bodies are absent. The poses are copies, so the world is free again once the call returns.
+
+The awake set is not the set of bodies that moved. A body that falls asleep at the end of a step
+still moved in that step and is absent from the readout after it; with
+`EventSettings::body_activation` on, its `ActivationEvent::Deactivated` from `take_events` says to
+read it once more with `world.body(id)`. A pose written to a sleeping body
+(`Activation::DontActivate`), `rebase` and `restore_state` move bodies that stay asleep, and
+`restore_state` changes the awake set without events: after those, sync every body the game
+tracks.
+
+```rust
+use oxijolt::prelude::math::*;
+use oxijolt::prelude::*;
+
+fn main() -> oxijolt::error::Result<()> {
+    let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    let ball = Shape::new_sphere(0.5)?;
+    let mut balls = Vec::new();
+    for x in 0..3 {
+        let at = RVec3::new(2.0 * x as Real, 5.0, 0.0);
+        balls.push(world.create_body(&ball, &BodySettings::new_dynamic().position(at))?);
+    }
+    let mut poses = Vec::new();
+    for _ in 0..10 {
+        assert!(world.step(1.0 / 60.0)?.is_complete());
+        world.active_body_poses_into(&mut poses);
+        for pose in &poses {
+            // Here a game writes `pose.position` and `pose.rotation` to the entity of `pose.id`.
+            assert!(balls.contains(&pose.id));
+        }
+    }
+    assert_eq!(poses.len(), 3);
+    Ok(())
+}
+```
+
+With Bevy, glob-import `oxijolt::prelude::*` next to `bevy::prelude::*`: the prelude leaves `Vec3`,
+`Quat` and `Result` to Bevy. The rustdoc of `oxijolt::prelude` has a transform-sync system.
+
 ## Queries
 
 Queries take `&PhysicsWorld`, so many threads may run them while nobody steps the world. They see
@@ -189,13 +231,14 @@ not part of the API: copy and adapt it.
 ## The whole example
 
 ```rust
-use oxijolt::*;
+use oxijolt::prelude::math::*;
+use oxijolt::prelude::*;
 
 /// The game's collision groups, stored as compound child user data.
 const STRUCTURE: u32 = 1;
 const FEATURE: u32 = 2;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> oxijolt::error::Result<()> {
     // Layers: static terrain and chunks, moving items. Items collide with everything.
     let mut layers = CollisionLayers::new(2);
     let fixed = BroadPhaseLayer::new(0);

@@ -2,11 +2,10 @@
 //!
 //! Run with `cargo run -p oxijolt --example hello_world`.
 
-use std::error::Error;
+use oxijolt::prelude::math::*;
+use oxijolt::prelude::*;
 
-use oxijolt::*;
-
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> oxijolt::error::Result<()> {
     let mut world = PhysicsWorld::new(WorldSettings::default())?;
 
     // A static floor whose top face is at y = 0.

@@ -16,7 +16,7 @@ below). The first run builds Jolt and joltc in Release under `target/release` un
 `cargo bench` passes (for example under `cargo test --benches`) the binary returns at once. Words
 after `--` run only the cases whose names contain one of them, for example
 `cargo bench -p oxijolt --bench budgets -- tick`. The names are `update_character`, `near step`,
-`landing`, `steady step`, `ray`, `tick` and `events`, and a word matches any part of a name:
+`landing`, `steady step`, `ray`, `tick`, `events` and `poses`, and a word matches any part of a name:
 `-- step` runs both the near step and the steady step. A word that matches no case prints an empty
 table, without a warning.
 
@@ -77,6 +77,12 @@ Other programs were not closed for the run, so single samples (the max column) c
 - **Events**: an awake pile of 64 cubes on a floor, 4 worker threads, stepped once recording no
   events and once recording every event and taking them after each step. It shows what recording
   events costs; the results below predate this case and have no rows for it.
+- **Poses**: the planet scene with 256 dynamic cubes (0.5 m) added in a 16 x 16 square 30 m above
+  the anchor, without gravity and never sleeping, so all 256 stay awake. After each untimed step
+  the poses of all of them are read twice on the same state: one body at a time
+  (`world.body(id)`, `is_active`, `position`, `rotation`) and with
+  `PhysicsWorld::active_body_poses_into` into a reused buffer. The two alternate which runs first.
+  Before timing, the bench checks that both give the same 256 poses bit for bit.
 
 ## Samples
 
@@ -88,6 +94,7 @@ Other programs were not closed for the run, so single samples (the max column) c
 | rays | 1,000 rays | 10,000 rays (5,000 of each kind) |
 | tick (each of the two variants) | 300 ticks | 5,000 ticks |
 | events (each of the two variants) | 300 steps | 5,000 steps |
+| poses (each of the two readouts) | 300 steps | 5,000 readouts |
 
 The first call after a scene is built is shown on its own "cold first call" row and is not among
 the samples. The landing has this row for the insertion only, and the rays for the first ray, a
@@ -149,4 +156,12 @@ description), not what they time, and the table shows the labels and notes the b
   terrain left out of the flat scene's filter the characters find nothing to stand on and fall
   through the world, so the update has almost nothing to collide with. That row only shows what the
   terrain adds; the bench prints no reference for it.
+- The pose readout rows come from a run of `-- poses` alone on 2026-10-04, same machine:
+
+  | case | one sample | samples | p50 us | p99 us | max us | limit / reference | status | note |
+  |---|---|---:|---:|---:|---:|---|---|---|
+  | pose readout, 256 awake bodies, per body | one readout | 5000 | 28.6 | 61.7 | 175.2 | - | - | 256 bodies per sample |
+  | pose readout, 256 awake bodies, batch | one readout | 5000 | 7.8 | 15.0 | 156.6 | - | - | 256 bodies per sample |
+
+  In this run the batch readout took about a quarter of the per-body time at the median and at p99.
 - Maximum values are single outliers (the machine's scheduler) and vary most between runs.

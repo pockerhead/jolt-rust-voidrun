@@ -7,9 +7,10 @@
 //! and [`BodySettings`] and named by a [`BodyId`]; one shape may serve many bodies in many worlds.
 //!
 //! ```
-//! use oxijolt::*;
+//! use oxijolt::prelude::math::*;
+//! use oxijolt::prelude::*;
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # fn main() -> oxijolt::error::Result<()> {
 //! let mut world = PhysicsWorld::new(WorldSettings::default())?;
 //!
 //! let floor_shape = Shape::new_box(Vec3::new(100.0, 1.0, 100.0))?;
@@ -55,7 +56,8 @@
 //! # Contract
 //! - **Errors.** A call that returns `Err` was refused and changed nothing, unless its
 //!   documentation says otherwise. A step that ran but dropped work returns `Ok`, and its
-//!   [`StepReport`] says what was dropped.
+//!   [`StepReport`] says what was dropped. Code that calls several areas can return
+//!   [`error::Result`]; `?` converts every area error into [`error::Error`].
 //! - **Magnitudes.** Positions, extents, velocities, masses and the other inputs [`limits`]
 //!   bounds are checked against it before they reach Jolt. Some inputs, such as damping and ray
 //!   directions, are only checked to be finite. Some bounds are derived from Jolt's arithmetic
@@ -142,7 +144,7 @@ mod character;
 mod constraint;
 #[cfg(feature = "debug-renderer")]
 mod debug;
-mod error;
+pub mod error;
 mod filter;
 #[cfg(feature = "glam")]
 mod glam_interop;
@@ -156,6 +158,7 @@ mod math;
 #[cfg(feature = "mint")]
 mod mint_interop;
 mod owned;
+pub mod prelude;
 mod query;
 mod ragdoll;
 mod shape;
@@ -164,7 +167,9 @@ mod state;
 mod vehicle;
 mod world;
 
-pub use body::{Activation, BodyId, BodyMut, BodyRef, BodySettings, MotionQuality, MotionType};
+pub use body::{
+    Activation, BodyId, BodyMut, BodyPose, BodyRef, BodySettings, MotionQuality, MotionType,
+};
 pub use character::{
     CharacterContact, CharacterId, CharacterMut, CharacterRef, CharacterSettings, CharacterState,
     ExtendedUpdateSettings, GroundState, InnerBody,

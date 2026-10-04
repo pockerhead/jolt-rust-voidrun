@@ -19,6 +19,9 @@
 //!   with every mid actor on a structure top. One sample is one tick.
 //! - A step of an awake pile of 64 cubes on 4 worker threads, recording no events and recording
 //!   every event (draining them after each step). One sample is one `step` and `take_events`.
+//! - The poses of 256 awake cubes floating above the planet scene, read once per tick one body
+//!   at a time (`world.body(id)`) and with `active_body_poses_into`. One sample is one readout of
+//!   all 256.
 //!
 //! Every case runs a warm-up that is not reported. The first call after the scene is built is
 //! shown as its own "cold first call" row; the landing reports it for the insertion and the rays
@@ -28,13 +31,15 @@
 //!
 //! Run with `cargo bench -p oxijolt --bench budgets`; words after `--` run only the cases
 //! whose names contain one of them (`update_character`, `near step`, `landing`, `steady step`,
-//! `ray`, `tick`, `events`). The timings are wall-clock and only reported, never checked; nothing timed
+//! `ray`, `tick`, `events`, `poses`). The timings are wall-clock and only reported, never checked; nothing timed
 //! feeds back into the simulation.
 
 #[path = "../tests/common/mod.rs"]
 mod common;
 #[path = "budgets/planet.rs"]
 mod planet;
+#[path = "budgets/poses.rs"]
+mod poses;
 #[path = "budgets/report.rs"]
 mod report;
 
@@ -830,6 +835,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         for record in [false, true] {
             rows.push(run_event_pile(record)?);
         }
+    }
+    if selected("poses") {
+        rows.extend(poses::run_poses()?);
     }
     print_table(&rows);
     println!();
