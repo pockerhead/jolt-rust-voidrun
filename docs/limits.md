@@ -51,7 +51,12 @@ that asserted at `t / c = 60.3` (`ConvexHullBuilder.cpp:779`, `IsFacing`); the s
 factor of about 3 over it. With both bounds in place, 40 000 random clouds of aspect ratios
 1e-7 to 1, sizes 1 mm to 1900 m and offsets up to 1 km, 30 000 compact clouds 5 to 5000 coplanar
 distances wide placed up to 1900 m from the origin, and four seeded stress runs of 6000 hull cases
-with dropped and queried bodies built and stepped without an assertion. Both bounds grow with the
+with dropped and queried bodies built and stepped without an assertion. Both bounds measure the
+builder's initial simplex, while the two assertions sit in later steps (the horizon of a new point,
+the facing test of a later face), so they are a guard tested on these clouds, not a proof. The stress
+therefore also builds well-spread clouds with a nearly collinear spike, a nearly flat cap above one
+face, or near copies of their extreme points, each in shuffled order; three seeds of 30 000 hull
+cases, three tenths of them of these kinds, ran without an assertion. Both bounds grow with the
 distance of the points from the shape origin: centre the points on the origin for the thinnest
 hulls. Near a bound Jolt's `f32` arithmetic can differ from the `f64` replay; Jolt then refuses
 with its own message.

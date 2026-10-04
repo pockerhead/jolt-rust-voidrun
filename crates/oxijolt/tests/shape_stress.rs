@@ -357,9 +357,15 @@ enum Cloud {
     NearLine,
     /// A few points repeated many times.
     Duplicates,
+    /// A well-spread cloud with a spike of nearly collinear points sticking out of it.
+    Spur,
+    /// A well-spread cloud with a nearly flat cap of points just above one face.
+    Cap,
+    /// A well-spread cloud whose extreme points each come again, slightly moved.
+    NearTies,
 }
 
-const CLOUDS: [Cloud; 7] = [
+const CLOUDS: [Cloud; 10] = [
     Cloud::Box,
     Cloud::Sphere,
     Cloud::ExactPlane,
@@ -367,6 +373,9 @@ const CLOUDS: [Cloud; 7] = [
     Cloud::ExactLine,
     Cloud::NearLine,
     Cloud::Duplicates,
+    Cloud::Spur,
+    Cloud::Cap,
+    Cloud::NearTies,
 ];
 
 /// A hull point cloud of `kind`, in shape space.
@@ -451,6 +460,51 @@ fn cloud(rng: &mut Rng, kind: Cloud) -> Vec<Vec3> {
             (0..rng.below(4, 80))
                 .map(|_| place(distinct[rng.below(0, distinct.len())]))
                 .collect()
+        }
+        Cloud::Spur | Cloud::Cap | Cloud::NearTies => {
+            let mut points: Vec<[f64; 3]> = (0..rng.below(4, 40))
+                .map(|_| [0; 3].map(|_| rng.range(-1.0, 1.0)))
+                .collect();
+            let jitter = rng.log_range(1.0e-9, 1.0e-3);
+            match kind {
+                Cloud::Spur => {
+                    let length = rng.range(1.5, 4.0);
+                    for _ in 0..rng.below(2, 20) {
+                        let t = rng.range(1.0, length);
+                        points.push([0; 3].map(|_| t + jitter * rng.range(-1.0, 1.0)));
+                    }
+                }
+                Cloud::Cap => {
+                    let lift = rng.log_range(1.0e-9, 1.0e-2);
+                    for _ in 0..rng.below(3, 40) {
+                        let (x, z) = (rng.range(-1.0, 1.0), rng.range(-1.0, 1.0));
+                        points.push([x, 1.0 + lift + jitter * rng.range(-1.0, 1.0), z]);
+                    }
+                }
+                _ => {
+                    for axis in 0..3 {
+                        for extreme in [f64::min, f64::max] {
+                            let far = points
+                                .iter()
+                                .copied()
+                                .reduce(|a, b| {
+                                    if extreme(a[axis], b[axis]) == a[axis] {
+                                        a
+                                    } else {
+                                        b
+                                    }
+                                })
+                                .unwrap();
+                            points.push(far.map(|c| c * (1.0 + jitter * rng.range(-1.0, 1.0))));
+                        }
+                    }
+                }
+            }
+            // Jolt's hull builder starts from points picked by index order and extremes.
+            for i in (1..points.len()).rev() {
+                points.swap(i, rng.below(0, i + 1));
+            }
+            points.into_iter().map(place).collect()
         }
     }
 }
