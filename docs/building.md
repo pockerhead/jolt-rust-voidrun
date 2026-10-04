@@ -14,8 +14,14 @@ LLVM/libclang is needed only to regenerate the bindings (`cargo xtask bindings`)
 
 ## Getting the crates
 
-The crates are not on crates.io yet. Use the repository as a git dependency; Cargo checks out the
-submodules (joltc and Jolt) with it:
+From crates.io; the `oxijolt-sys` package carries the joltc and Jolt sources:
+
+```toml
+[dependencies]
+oxijolt = "0.4"
+```
+
+Or from the repository, for changes not released yet; Cargo checks out the submodules with it:
 
 ```toml
 [dependencies]

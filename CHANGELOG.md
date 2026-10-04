@@ -4,6 +4,11 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-04
+
+First release on crates.io.
+
+
 - Renamed the crates: `joltc-sys` is now `oxijolt-sys` (`crates/oxijolt-sys`, Rust path `oxijolt_sys`)
   and `rolt` is now `oxijolt` (`crates/oxijolt`); the old names belong to the upstream project on crates.io. Before
   the first release the crates were briefly called `joltphysics-sys` and `joltphysics`. The repository is

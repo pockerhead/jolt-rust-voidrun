@@ -96,8 +96,10 @@ assets of the same name. A manual run, or a branch push that changes the workflo
 archives as workflow artifacts without publishing.
 
 ## Publishing
-Nothing is published to crates.io yet; publishing is the owner's step, like cutting a release. `oxijolt`
-depends on `oxijolt-sys` by version, so `oxijolt-sys` is published first, both at the release's version.
+Publishing to crates.io is the owner's step, like cutting a release: the owner starts the
+`Publish to crates.io` workflow by hand, which runs `cargo publish --workspace` with the repository secret
+`CARGO_REGISTRY_TOKEN` (`oxijolt-sys` first, since `oxijolt` depends on it by version). docs.rs builds the
+documentation without compiling Jolt: under `DOCS_RS` the build script uses the committed bindings only.
 Agents do not publish, tag or create releases.
 
 ## Review checklist (every change)
