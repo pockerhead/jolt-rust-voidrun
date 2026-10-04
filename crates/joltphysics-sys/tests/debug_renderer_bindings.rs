@@ -1,7 +1,7 @@
 //! The drawing functions are bound exactly when the `debug-renderer` feature is on.
 
 /// The generated bindings of this build.
-const BINDINGS: &str = include_str!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+const BINDINGS: &str = include_str!(env!("JOLTC_BINDINGS"));
 
 /// One function of each family that joltc defines only under `JPH_DEBUG_RENDERER`.
 const DEBUG_RENDERER_FUNCTIONS: [&str; 4] = [

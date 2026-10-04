@@ -1,7 +1,11 @@
 //! Unsafe bindings to [Jolt Physics] 5.6.0 through the [joltc] C wrapper.
 //!
 //! Everything here is `bindgen` output over joltc's `include/joltc.h` plus this
-//! fork's `native/joltc_ext/joltc_ext.h`, and keeps their `JPH_*` names. The
+//! fork's `native/joltc_ext/joltc_ext.h`, and keeps their `JPH_*` names. The output is
+//! committed under `src/bindings/`, one file per ABI family and configuration, so building
+//! needs no libclang; the `bindgen` feature generates it at build time instead. The
+//! supported targets are the registry in `build/targets.rs`; 32-bit targets are not
+//! supported. The
 //! extension adds functions in joltc's naming that are compiled into the joltc
 //! archive: a `JPH_StateRecorder`, `JPH_CharacterVirtual_SaveState` and
 //! `RestoreState`, `JPH_CharacterVirtual_ExtendedUpdate2` and
@@ -31,6 +35,8 @@
 //!   floating point settings (slower; same results across compilers and platforms).
 //! - `debug-renderer`: compile Jolt's debug renderer into the native libraries and bind joltc's
 //!   debug drawing functions.
+//! - `bindgen`: generate the bindings at build time with libclang instead of using the
+//!   committed ones. It does not add supported targets.
 //!
 //! # Native build and `JOLTC_LIB_DIR`
 //! By default the build script builds joltc and Jolt from the `vendor/` submodules with

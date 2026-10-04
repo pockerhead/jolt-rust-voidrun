@@ -53,9 +53,13 @@ cross-platform-deterministic = []
 # nothing is drawn. Changes Jolt's class layouts, so it is part of the native manifest.
 debug-renderer = []
 
+# Generates the raw bindings at build time with libclang instead of using the committed ones.
+# For checking the generator; it does not add supported targets.
+bindgen = ["dep:bindgen"]
+
 [dependencies]
 
 [build-dependencies]
-bindgen = "0.73"
+bindgen = { version = "0.73", optional = true }
 cmake = "0.1.58"
 anyhow = "1"

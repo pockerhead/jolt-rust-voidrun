@@ -9,6 +9,11 @@
 //! - with `JOLTC_LIB_DIR` set, an already built prefix of that shape is used
 //!   after its manifest, archives and header are validated, and CMake is not
 //!   run at all.
+//!
+//! The bindings are committed under `src/bindings/`, one file per ABI family
+//! (see `build/targets.rs`) and configuration; the script checks that they were
+//! generated from the linked headers and picks one. With the `bindgen` feature
+//! it generates them into `OUT_DIR` with libclang instead.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -17,8 +22,15 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
 
+#[cfg(feature = "bindgen")]
 #[path = "build/bindgen_options.rs"]
 mod bindgen_options;
+// Shared with the xtask regenerator; each bindings mode uses a part of it.
+#[allow(dead_code)]
+#[path = "build/targets.rs"]
+mod targets;
+
+use targets::Family;
 
 /// joltc commit of the `vendor/joltc` submodule. Must match the gitlink; CI checks this.
 const JOLTC_COMMIT: &str = "886e088675bae3a086f8318c7803f8ee962c2f2c";
@@ -43,13 +55,18 @@ struct NativeConfig {
     target_os: String,
     target_env: String,
     target_arch: String,
+    /// The target's family of committed bindings.
+    #[cfg_attr(feature = "bindgen", allow(dead_code))]
+    family: &'static Family,
     /// MSVC runtime library in CMake's spelling, or `"none"` off MSVC.
     crt: &'static str,
 }
 
 impl NativeConfig {
     /// Reads the target from Cargo's environment; `cfg!` would describe the build host.
-    fn from_env() -> Self {
+    ///
+    /// Fails for a target without committed bindings, before any native work.
+    fn from_env() -> anyhow::Result<Self> {
         let feature = |name: &str| env::var_os(format!("CARGO_FEATURE_{name}")).is_some();
         let var = |name: &str| env::var(name).unwrap_or_default();
 
@@ -63,17 +80,21 @@ impl NativeConfig {
             _ => "none",
         };
 
-        NativeConfig {
+        let target = var("TARGET");
+        let family = targets::check_target(&target, &var("CARGO_CFG_TARGET_POINTER_WIDTH"))?;
+
+        Ok(NativeConfig {
             double_precision: feature("DOUBLE_PRECISION"),
             cross_platform_deterministic: feature("CROSS_PLATFORM_DETERMINISTIC"),
             asserts: feature("ASSERTS"),
             debug_renderer: feature("DEBUG_RENDERER"),
-            target: var("TARGET"),
+            target,
             target_os: var("CARGO_CFG_TARGET_OS"),
             target_env,
             target_arch: var("CARGO_CFG_TARGET_ARCH"),
+            family,
             crt,
-        }
+        })
     }
 
     /// Name of the joltc library target, which joltc derives from the precision.
@@ -155,14 +176,16 @@ fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-env-changed=JOLTC_LIB_DIR");
     println!("cargo:rerun-if-changed=build.rs");
 
-    let cfg = NativeConfig::from_env();
+    let cfg = NativeConfig::from_env()?;
     let prefix = match env::var_os("JOLTC_LIB_DIR") {
         Some(dir) => use_prebuilt(PathBuf::from(dir), &cfg)?,
         None => build_with_cmake(&cfg)?,
     };
 
     link(&prefix, &cfg);
-    generate_bindings(&prefix.join("include").join("joltc_ext.h"), &cfg)
+    let bindings = select_bindings(&prefix, &cfg)?;
+    println!("cargo:rustc-env=JOLTC_BINDINGS={}", bindings.display());
+    Ok(())
 }
 
 /// Builds the native prefix from the submodules with CMake and returns its path.
@@ -404,6 +427,7 @@ fn check_manifest(path: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
 }
 
 /// Fails if the prebuilt header differs from the vendored one, when the submodule is present.
+/// Line endings are not compared.
 fn check_header(prebuilt: &Path) -> anyhow::Result<()> {
     let vendored = manifest_dir()?
         .join("vendor")
@@ -419,7 +443,7 @@ fn check_header(prebuilt: &Path) -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed={}", vendored.display());
     let read =
         |path: &Path| fs::read(path).with_context(|| format!("cannot read {}", path.display()));
-    if read(prebuilt)? != read(&vendored)? {
+    if targets::normalize_crlf(&read(prebuilt)?) != targets::normalize_crlf(&read(&vendored)?) {
         bail!(
             "{} differs from {}: the prebuilt prefix is from another joltc version. \
              Rebuild it or unset JOLTC_LIB_DIR.",
@@ -431,7 +455,7 @@ fn check_header(prebuilt: &Path) -> anyhow::Result<()> {
 }
 
 /// Fails if the prebuilt `joltc_ext.h` differs from the one in `native/joltc_ext/`, which
-/// always ships with the crate.
+/// always ships with the crate. Line endings are not compared.
 fn check_ext_header(prebuilt: &Path) -> anyhow::Result<()> {
     let ours = manifest_dir()?
         .join("native")
@@ -440,7 +464,7 @@ fn check_ext_header(prebuilt: &Path) -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed={}", ours.display());
     let read =
         |path: &Path| fs::read(path).with_context(|| format!("cannot read {}", path.display()));
-    if read(prebuilt)? != read(&ours)? {
+    if targets::normalize_crlf(&read(prebuilt)?) != targets::normalize_crlf(&read(&ours)?) {
         bail!(
             "{} differs from {}: the prebuilt prefix is from another revision of the joltc              additions. Rebuild it or unset JOLTC_LIB_DIR.",
             prebuilt.display(),
@@ -470,8 +494,62 @@ fn link(prefix: &Path, cfg: &NativeConfig) {
     println!("cargo:root={}", prefix.display());
 }
 
-/// Generates `OUT_DIR/bindings.rs` from `joltc_ext.h`, which includes `joltc.h`.
-fn generate_bindings(header: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
+/// The bindings `src/generated.rs` includes: generated into `OUT_DIR` with libclang.
+#[cfg(feature = "bindgen")]
+fn select_bindings(prefix: &Path, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
+    generate_bindings(&prefix.join("include").join("joltc_ext.h"), cfg)
+}
+
+/// The bindings `src/generated.rs` includes: the committed file of the target's family and
+/// configuration, after checking that it was generated from the linked headers and the
+/// current generator sources.
+#[cfg(not(feature = "bindgen"))]
+fn select_bindings(prefix: &Path, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
+    let crate_dir = manifest_dir()?;
+    let read =
+        |path: &Path| fs::read(path).with_context(|| format!("cannot read {}", path.display()));
+
+    let include = prefix.join("include");
+    let policy = targets::POLICY_SOURCES
+        .iter()
+        .map(|source| Ok((*source, read(&crate_dir.join(source))?)))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let policy: Vec<(&str, &[u8])> = policy
+        .iter()
+        .map(|(source, bytes)| (*source, bytes.as_slice()))
+        .collect();
+    let expected = targets::input_fingerprints(
+        &read(&include.join("joltc.h"))?,
+        &read(&include.join("joltc_ext.h"))?,
+        &policy,
+    );
+
+    let inputs = crate_dir.join(targets::INPUTS_FILE);
+    println!("cargo:rerun-if-changed={}", inputs.display());
+    let recorded = String::from_utf8_lossy(&read(&inputs)?).into_owned();
+    let stale = targets::differing_keys(&expected, &recorded);
+    if !stale.is_empty() {
+        bail!(
+            "the committed bindings were generated from other inputs ({}); regenerate them with `cargo xtask bindings` or enable the `bindgen` feature",
+            stale.join(", ")
+        );
+    }
+
+    let bindings = crate_dir.join(targets::bindings_file(
+        cfg.family.name,
+        cfg.double_precision,
+        cfg.debug_renderer,
+    ));
+    if !bindings.is_file() {
+        bail!("{} is missing", bindings.display());
+    }
+    Ok(bindings)
+}
+
+/// Generates `OUT_DIR/bindings.rs` from `joltc_ext.h`, which includes `joltc.h`, and returns
+/// its path.
+#[cfg(feature = "bindgen")]
+fn generate_bindings(header: &Path, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
     let include_dir = header
         .parent()
         .context("joltc_ext.h has no parent directory")?;
@@ -495,5 +573,6 @@ fn generate_bindings(header: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
         PathBuf::from(env::var_os("OUT_DIR").context("OUT_DIR is not set")?).join("bindings.rs");
     bindings
         .write_to_file(&out_path)
-        .with_context(|| format!("cannot write {}", out_path.display()))
+        .with_context(|| format!("cannot write {}", out_path.display()))?;
+    Ok(out_path)
 }

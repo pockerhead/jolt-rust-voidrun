@@ -4,4 +4,6 @@
 // joltc defines `JPH_M_PI` as a literal; bindgen keeps it as written.
 #![allow(clippy::approx_constant)]
 
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+// The build script picks the committed bindings of the target, or generates them with the
+// `bindgen` feature.
+include!(env!("JOLTC_BINDINGS"));

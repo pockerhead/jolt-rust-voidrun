@@ -72,6 +72,8 @@ impl fmt::Display for TargetError {
     }
 }
 
+impl std::error::Error for TargetError {}
+
 /// The family of `target`, given Cargo's `target_pointer_width` for it.
 pub fn check_target(target: &str, pointer_width: &str) -> Result<&'static Family, TargetError> {
     if pointer_width != "64" {
