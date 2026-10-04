@@ -28,16 +28,20 @@ impl PhysicsWorld {
     /// The id, position and rotation of every awake body, in ascending [`BodyId`] order.
     ///
     /// The order does not depend on the worker threads or on the order in which Jolt woke the
-    /// bodies. Static and sleeping bodies are absent. Characters' inner bodies, ragdoll parts,
-    /// vehicle chassis and soft bodies appear like any other awake body. A soft body's pose is
-    /// its body transform; its deformed vertices come from
-    /// [`SoftBodyRef::vertices`](crate::SoftBodyRef::vertices). A character's inner body has its
-    /// own pose, which is not the character's position.
+    /// bodies. The poses are those of the bodies awake at the time of the call, which is not
+    /// the set of bodies that moved: static and sleeping bodies are absent, including a body
+    /// that moved in the last step and fell asleep at its end (its [`Deactivated`] event
+    /// reports it) and a body moved while asleep. The [guide] says how a game syncs those.
+    /// Characters' inner bodies, ragdoll parts, vehicle chassis and soft bodies appear like any
+    /// other awake body. A soft body's pose is its body transform; its deformed vertices come
+    /// from [`SoftBodyRef::vertices`](crate::SoftBodyRef::vertices). A character's inner body
+    /// has its own pose, which is not the character's position.
     ///
     /// One call takes one multi-body read lock over the awake bodies instead of one lock per
     /// body as [`body`](Self::body) does; once there are at least as many awake bodies as Jolt
     /// has body mutexes, that lock takes every body mutex shared. To reuse the result's
-    /// allocation, use [`active_body_poses_into`](Self::active_body_poses_into).
+    /// allocation, use [`active_body_poses_into`](Self::active_body_poses_into); each call
+    /// still allocates the list of awake ids and Jolt's lock.
     ///
     /// ```
     /// use oxijolt::prelude::math::*;
@@ -58,6 +62,9 @@ impl PhysicsWorld {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// [`Deactivated`]: crate::ActivationEvent::Deactivated
+    /// [guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/guide.md#stepping
     pub fn active_body_poses(&self) -> Vec<BodyPose> {
         let mut poses = Vec::new();
         self.active_body_poses_into(&mut poses);
@@ -68,8 +75,9 @@ impl PhysicsWorld {
     /// reusing it avoids reallocating the result.
     pub fn active_body_poses_into(&self, out: &mut Vec<BodyPose>) {
         out.clear();
-        // Jolt asserts that its active-list mutex is never taken while a body lock is held, so
-        // the ids are copied before the bodies are locked.
+        // Jolt ranks its locks (`PhysicsLock.h`): a body lock may not be taken while the
+        // higher-ranked active-list mutex is held. The id copies release that mutex before the
+        // bodies are locked.
         let ids = self.active_body_ids();
         if ids.is_empty() {
             return;
@@ -118,8 +126,8 @@ impl PhysicsWorld {
     /// compares the raw value, as `BodyId`'s `Ord` does).
     fn active_body_ids(&self) -> Vec<JPH_BodyID> {
         let system = self.system.as_ptr();
-        // SAFETY: the system is this live world's; the getter only reads the active-list length
-        // under Jolt's active-list mutex.
+        // SAFETY: the system is this live world's; the getter only reads the atomic active-list
+        // length. The copies below rely on it staying put, which the shared world borrow ensures.
         let (rigid, soft) = unsafe {
             (
                 JPH_PhysicsSystem_GetNumActiveBodies(system, JPH_BodyType_Rigid),

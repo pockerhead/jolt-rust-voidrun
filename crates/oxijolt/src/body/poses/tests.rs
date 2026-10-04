@@ -298,3 +298,85 @@ fn concurrent_shared_reads_and_saves_agree() {
         });
     });
 }
+
+#[test]
+fn each_call_reads_the_awake_set_again_into_the_same_buffer() {
+    let mut world = world();
+    add_floor(&mut world);
+    let kept = add_cube(&mut world, RVec3::new(-2.0, 2.0, 0.0), Activation::Activate);
+    let removed = add_cube(&mut world, RVec3::new(2.0, 2.0, 0.0), Activation::Activate);
+    let mut out = Vec::new();
+    world.active_body_poses_into(&mut out);
+    assert_eq!(
+        out.iter().map(|pose| pose.id).collect::<Vec<_>>(),
+        [kept, removed]
+    );
+
+    world.remove_body(removed).unwrap();
+    let reused = add_cube(&mut world, RVec3::new(0.0, 4.0, 0.0), Activation::Activate);
+    assert_eq!(reused.index(), removed.index());
+    world.active_body_poses_into(&mut out);
+    assert_eq!(
+        out.iter().map(|pose| pose.id).collect::<Vec<_>>(),
+        [kept, reused]
+    );
+    assert_eq!(out[1].position, RVec3::new(0.0, 4.0, 0.0));
+}
+
+#[test]
+fn a_world_with_only_soft_bodies_awake_reads_them() {
+    let mut world = world();
+    add_floor(&mut world);
+    add_cube(
+        &mut world,
+        RVec3::new(4.0, 1.0, 0.0),
+        Activation::DontActivate,
+    );
+    let soft = cloth(&mut world, RVec3::new(0.0, 2.0, 0.0));
+    assert!(native_active_rigid_bodies(&world).is_empty());
+    let poses = world.active_body_poses();
+    assert_eq!(poses.len(), 1);
+    assert_eq!(poses[0].id, soft);
+    assert_bit_equal_to_body(&world, &poses[0]);
+}
+
+/// The sync the guide describes: the awake poses, plus the bodies reported asleep by the step.
+#[test]
+fn bodies_that_fall_asleep_are_synced_through_their_deactivation_event() {
+    let mut world = world();
+    add_floor(&mut world);
+    let cube = add_cube(&mut world, RVec3::new(0.0, 0.5, 0.0), Activation::Activate);
+    world.set_event_settings(EventSettings::default().body_activation(true));
+    let mut synced = world.body(cube).unwrap().position();
+    let mut poses = Vec::new();
+    let mut slept = false;
+    for _ in 0..600 {
+        assert!(world.step(1.0 / 60.0).unwrap().is_complete());
+        world.active_body_poses_into(&mut poses);
+        if let Some(pose) = poses.iter().find(|pose| pose.id == cube) {
+            synced = pose.position;
+        }
+        for event in world.take_events().activations {
+            if let ActivationEvent::Deactivated(id) = event {
+                assert!(poses.iter().all(|pose| pose.id != id));
+                synced = world.body(id).unwrap().position();
+                slept = true;
+            }
+        }
+        if slept {
+            break;
+        }
+    }
+    assert!(slept);
+    assert_eq!(synced, world.body(cube).unwrap().position());
+
+    // A pose written to a sleeping body leaves it asleep and out of the readout.
+    let moved = RVec3::new(1.0, 0.25, 0.0);
+    world
+        .body_mut(cube)
+        .unwrap()
+        .set_position(moved, Activation::DontActivate)
+        .unwrap();
+    assert!(world.active_body_poses().is_empty());
+    assert_eq!(world.body(cube).unwrap().position(), moved);
+}
