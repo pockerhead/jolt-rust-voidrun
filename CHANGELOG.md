@@ -13,8 +13,15 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   comes back as `ShapeError::Rejected` with Jolt's message (`JoltMessage`, cut after a whole word).
 - Mesh triangles too small or too thin to collide with are dropped and returned as
   `DroppedTriangles` (indices and area). The rule counts the rounding of the triangle in the space
-  of the convex shape it collides with, up to `MeshSettings::max_convex_extent` (default 750 m,
-  below `limits::MAX_SHAPE_EXTENT`; see `docs/limits.md`).
+  of the convex shape it collides with, up to `MeshSettings::max_convex_extent` (default 1100 m,
+  below `limits::MAX_SHAPE_EXTENT`; see `docs/limits.md`), and does not depend on the order of a
+  triangle's corners. `Shape::scaled` checks a mesh inside it for the extent the mesh was built
+  with and refuses a scale that leaves its triangles too thin with `ShapeError::ThinTriangles`
+  (`ThinTrianglesError`: the scale and the extent).
+- With the `asserts` feature Jolt's hull builder can abort on rare point clouds with many nearly
+  coplanar faces (densely sampled noisy faces, dense flat cones and domes) that pass the hull
+  rules; without it Jolt refuses them as `ShapeError::Rejected`. See `docs/limits.md`. The
+  `HullError::Coplanar` message suggests thickening the cloud or centring it on the shape origin.
 - joltc extension: `JPH_ShapeSettings_CreateShapeWithError`, `JPH_MeshShapeSettings_Create3`
   (materials), `JPH_MeshShapeSettings_GetTriangleCount` and `JPH_Shape_GetTriangles`.
 
