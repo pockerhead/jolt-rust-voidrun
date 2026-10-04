@@ -14,7 +14,9 @@
 mod coupling;
 mod linear;
 mod path;
+mod pulley;
 mod rotational;
+mod slider;
 mod world;
 
 use std::f32::consts::PI;
@@ -24,10 +26,11 @@ use oxijolt_sys::*;
 pub use coupling::{GearConstraintSettings, RackAndPinionConstraintSettings};
 pub use linear::{
     DistanceConstraintSettings, DistanceRange, FixedConstraintSettings, PointConstraintSettings,
-    PulleyConstraintSettings, PulleyLength, SliderConstraintSettings,
 };
 pub use path::{HermitePath, HermitePathPoint, PathConstraintSettings, PathRotationConstraint};
+pub use pulley::{PulleyConstraintSettings, PulleyLength};
 pub use rotational::ConeConstraintSettings;
+pub use slider::SliderConstraintSettings;
 pub(crate) use world::ConstraintEntry;
 pub use world::{
     AnyConstraintId, ConeConstraint, ConstraintId, ConstraintKind, ConstraintMut, ConstraintRef,
