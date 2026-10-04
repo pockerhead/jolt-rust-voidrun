@@ -84,8 +84,8 @@ pub struct DebugLine {
 ///
 /// Each call clears the buffer and refills it, keeping its capacity, so drawing every frame
 /// allocates only when the line count grows. [`release`](Self::release) or dropping the buffer
-/// frees the line storage. Jolt's own per-shape debug geometry (built for heightfields on their
-/// first draw) stays with the shape and is not affected.
+/// frees the line storage. Jolt's own per-shape debug geometry (built for heightfields and meshes
+/// on their first draw) stays with the shape and is not affected.
 #[derive(Debug, Default)]
 pub struct DebugLines {
     lines: Vec<DebugLine>,
@@ -133,8 +133,8 @@ impl PhysicsWorld {
     /// shape it was drawing, and the lines past the cap are dropped.
     ///
     /// Calls are serialized process-wide, because Jolt's debug renderer is a process
-    /// singleton. Jolt keeps a heightfield's debug geometry in the shape after the first draw,
-    /// until the shape is freed.
+    /// singleton. Jolt keeps a heightfield's or mesh's debug geometry in the shape after the
+    /// first draw, until the shape is freed.
     ///
     /// # Cost
     /// There is no level of detail by camera distance: every shape is drawn with Jolt's finest

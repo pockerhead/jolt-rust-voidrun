@@ -10,11 +10,35 @@ use oxijolt_sys::*;
 
 use super::{
     has_finite_inverse, mass_properties, with_locked_body, BodyId, BodyMut, BodyRef, BodySettings,
-    CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID, STATIC_SHAPE_RULE,
+    CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID, KINEMATIC_MESH_MASS_RULE,
+    MESH_DYNAMIC_RULE, STATIC_SHAPE_RULE,
 };
 use crate::limits::{is_mass, MASS_RULE};
 use crate::owned::Owned;
 use crate::{BodyError, PhysicsWorld, Shape, Vec3};
+
+/// Whether a body that is not static may use `shape`, which Jolt allows only on static bodies
+/// (Jolt itself never checks this when creating a body).
+///
+/// A kinematic body may carry a shape whose static-only leaves are all meshes, given a mass.
+/// Jolt cannot collide a mesh with a mesh or a heightfield ("Unsupported shape pair" in
+/// `CollisionDispatch`), and such pairs stay out of reach: only kinematic bodies carry meshes,
+/// Jolt pairs a kinematic body with a static or kinematic one only with
+/// `mCollideKinematicVsNonDynamic` or a sensor (`Body::sFindCollidingPairsCanCollide`), which
+/// this crate does not expose, and query, character and ragdoll shapes refuse static-only
+/// shapes. Exposing either switch must revisit this rule.
+fn validate_static_only_shape(shape: &Shape, settings: &BodySettings) -> Result<(), BodyError> {
+    if !shape.static_only_leaves_are_meshes() {
+        return Err(BodyError::InvalidValue(STATIC_SHAPE_RULE));
+    }
+    if settings.motion_type == MotionType::Dynamic {
+        return Err(BodyError::InvalidValue(MESH_DYNAMIC_RULE));
+    }
+    if settings.mass.is_none() {
+        return Err(BodyError::InvalidValue(KINEMATIC_MESH_MASS_RULE));
+    }
+    Ok(())
+}
 
 impl PhysicsWorld {
     /// Creates a body from `shape` and adds it to the world. The body keeps its own reference
@@ -22,8 +46,10 @@ impl PhysicsWorld {
     ///
     /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, and, for a dynamic
     /// or kinematic body, when:
-    /// - the shape is one that only static bodies may use (a heightfield, or a compound that
-    ///   contains one);
+    /// - the shape is one that only static bodies may use: a heightfield, or a compound or
+    ///   decorated shape that contains one;
+    /// - the shape contains a mesh and the body is dynamic, or kinematic without
+    ///   [`BodySettings::mass`] (Jolt computes no mass for a mesh);
     /// - the mass or inertia (overridden, or computed from a tiny shape) has no finite inverse;
     /// - the inertia tensor is not diagonal (a rotated or offset compound child, an offset centre
     ///   of mass) and too badly conditioned for Jolt to decompose, such as a slender shape in a
@@ -42,12 +68,8 @@ impl PhysicsWorld {
         settings: &BodySettings,
     ) -> Result<BodyId, BodyError> {
         settings.validate(self.object_layer_count)?;
-        // Jolt itself never checks this when creating a body.
-        if settings.motion_type != MotionType::Static
-            // SAFETY: `shape` is live for the call; the getter only reads it.
-            && unsafe { JPH_Shape_MustBeStatic(shape.as_ptr()) }
-        {
-            return Err(BodyError::InvalidValue(STATIC_SHAPE_RULE));
+        if settings.motion_type != MotionType::Static && shape.must_be_static() {
+            validate_static_only_shape(shape, settings)?;
         }
         // Jolt computes mass properties for every body that is not static
         // (`BodyCreationSettings::HasMassProperties`).

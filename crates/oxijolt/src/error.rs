@@ -50,6 +50,8 @@ pub enum ShapeError {
     InvalidSettings(&'static str),
     /// The points of a convex hull do not span a volume.
     ConvexHull(HullError),
+    /// A triangle mesh has nothing Jolt can build.
+    Mesh(MeshError),
     /// Jolt refused the shape settings; the payload is Jolt's message.
     Rejected(JoltMessage),
     /// joltc returned null.
@@ -63,6 +65,7 @@ impl fmt::Display for ShapeError {
             Self::InvalidDimensions(what) => write!(f, "invalid shape dimensions: {what}"),
             Self::InvalidSettings(what) => write!(f, "invalid shape setting: {what}"),
             Self::ConvexHull(error) => write!(f, "invalid convex hull: {error}"),
+            Self::Mesh(error) => write!(f, "invalid triangle mesh: {error}"),
             Self::Rejected(message) => write!(f, "Jolt rejected the shape settings: {message}"),
             Self::AllocationFailed => f.write_str("could not create the shape"),
         }
@@ -95,6 +98,24 @@ impl fmt::Display for HullError {
 }
 
 impl std::error::Error for HullError {}
+
+/// Why [`Shape::new_mesh`](crate::Shape::new_mesh) built nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MeshError {
+    /// Every triangle was degenerate (also after Jolt's vertex quantization) or a duplicate.
+    NoTriangles,
+}
+
+impl fmt::Display for MeshError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NoTriangles => "no triangle is left after removing degenerate and duplicate ones",
+        })
+    }
+}
+
+impl std::error::Error for MeshError {}
 
 /// Jolt's diagnostic text for a refused shape, truncated to [`JoltMessage::CAPACITY`] bytes.
 ///

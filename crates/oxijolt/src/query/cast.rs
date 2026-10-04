@@ -169,7 +169,7 @@ impl PhysicsWorld {
     /// quaternion, the direction finite, not zero and at most `2 *` [`limits::MAX_POSITION`] per
     /// component, the target distance finite, not negative and at most
     /// [`ShapeCast::MAX_TARGET_DISTANCE`] (and 0 unless the shape is a sphere or capsule), the
-    /// shape not a heightfield, and the filter valid for this world; otherwise
+    /// shape not a mesh or heightfield, and the filter valid for this world; otherwise
     /// [`QueryError::InvalidValue`] is returned.
     pub fn cast_shape(
         &self,

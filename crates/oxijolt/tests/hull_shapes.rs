@@ -2,52 +2,9 @@
 
 mod common;
 
+use common::meshes::*;
 use common::*;
 use oxijolt::*;
-
-/// An irregular hull of eleven points, roughly 1 m across, with its lowest point at y = -0.45.
-fn irregular_points() -> Vec<Vec3> {
-    vec![
-        Vec3::new(-0.5, -0.45, -0.4),
-        Vec3::new(0.55, -0.4, -0.35),
-        Vec3::new(0.45, -0.45, 0.5),
-        Vec3::new(-0.4, -0.35, 0.45),
-        Vec3::new(0.0, 0.6, 0.0),
-        Vec3::new(-0.45, 0.3, -0.3),
-        Vec3::new(0.4, 0.35, -0.25),
-        Vec3::new(0.3, 0.25, 0.45),
-        Vec3::new(-0.3, 0.2, 0.4),
-        Vec3::new(0.1, -0.1, 0.0),
-        Vec3::new(0.0, 0.0, -0.55),
-    ]
-}
-
-/// The eight corners of a box with the given half extents.
-fn box_corners(half: Vec3) -> Vec<Vec3> {
-    let mut points = Vec::new();
-    for x in [-half.x, half.x] {
-        for y in [-half.y, half.y] {
-            for z in [-half.z, half.z] {
-                points.push(Vec3::new(x, y, z));
-            }
-        }
-    }
-    points
-}
-
-fn is_finite_body(world: &PhysicsWorld, id: BodyId) -> bool {
-    let body = world.body(id).unwrap();
-    let position: [Real; 3] = body.position().into();
-    let rotation: [f32; 4] = body.rotation().into();
-    let linear: [f32; 3] = body.linear_velocity().into();
-    let angular: [f32; 3] = body.angular_velocity().into();
-    position.iter().all(|v| v.is_finite())
-        && rotation
-            .iter()
-            .chain(&linear)
-            .chain(&angular)
-            .all(|v| v.is_finite())
-}
 
 #[test]
 fn irregular_rotated_hull_falls_and_rests_on_a_floor() {

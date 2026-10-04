@@ -159,7 +159,7 @@ impl PhysicsWorld {
     ///
     /// The position must be finite and within [`limits::MAX_POSITION`], the rotation a finite unit
     /// quaternion, the maximum separation distance between 0 and [`limits::MAX_SHAPE_EXTENT`], the
-    /// shape not a heightfield, and the filter valid for this world; otherwise
+    /// shape not a mesh or heightfield, and the filter valid for this world; otherwise
     /// [`QueryError::InvalidValue`] is returned.
     pub fn collide_shape(
         &self,

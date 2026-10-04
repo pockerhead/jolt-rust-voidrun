@@ -53,6 +53,7 @@ fn shapes_survive_seeded_stress() {
 fn shape_stress_child() {
     let mut arena = Arena::new();
     hull_family(&mut arena);
+    mesh_family(&mut arena);
 }
 
 /// Announces a case on stderr before it runs, so a crash can be traced to it.
@@ -174,6 +175,8 @@ impl Extent {
 /// One world reused by every case, with a static floor whose top face is at y = 0.
 struct Arena {
     world: PhysicsWorld,
+    /// The dynamic shapes dropped onto static shapes under test.
+    probes: Vec<Shape>,
 }
 
 impl Arena {
@@ -186,7 +189,23 @@ impl Arena {
                 &BodySettings::new_static().position(RVec3::new(0.0, -1.0, 0.0)),
             )
             .unwrap();
-        Self { world }
+        let probes = vec![
+            Shape::new_sphere(0.3).unwrap(),
+            Shape::new_box(Vec3::new(0.3, 0.3, 0.3)).unwrap(),
+            Shape::new_capsule(0.3, 0.2).unwrap(),
+            Shape::new_convex_hull(
+                &[
+                    Vec3::new(-0.3, -0.2, -0.3),
+                    Vec3::new(0.3, -0.25, -0.2),
+                    Vec3::new(0.0, -0.3, 0.35),
+                    Vec3::new(0.05, 0.35, 0.0),
+                    Vec3::new(-0.2, 0.1, 0.2),
+                ],
+                0.05,
+            )
+            .unwrap(),
+        ];
+        Self { world, probes }
     }
 
     /// Drops `shape` as a dynamic body with its lowest point 0.5 m above the floor, when the
@@ -242,6 +261,54 @@ impl Arena {
             );
         }
         self.world.remove_body(id).unwrap();
+    }
+}
+
+impl Arena {
+    /// Adds `shape` as a static body at the origin, drops a dynamic sphere, box, capsule and
+    /// hull onto it for `ticks` steps, then runs a down-ray and a sphere cast at its centroid;
+    /// every body and result must stay finite.
+    fn drop_probes_on(&mut self, shape: &Shape, extent: Extent, ticks: usize, what: &str) {
+        let ground = self
+            .world
+            .create_body(shape, &BodySettings::new_static())
+            .unwrap();
+        let c = extent.centroid;
+        let top = real(extent.max_y) + 1.0;
+        let mut probes = Vec::new();
+        for (i, probe) in self.probes.iter().enumerate() {
+            let position = RVec3::new(real(c.x) + 1.2 * i as Real - 1.8, top, real(c.z));
+            let settings = BodySettings::new_dynamic().position(position);
+            probes.push(self.world.create_body(probe, &settings).unwrap());
+        }
+        for _ in 0..ticks {
+            assert!(self.world.step(DT).unwrap().is_complete());
+        }
+        for &id in &probes {
+            assert_finite_body(&self.world, id, what);
+            self.world.remove_body(id).unwrap();
+        }
+        let ray = RayCast::new(
+            RVec3::new(real(c.x), top, real(c.z)),
+            Vec3::new(0.0, -(extent.height() + 2.0), 0.0),
+        );
+        if let Some(hit) = self.world.cast_ray(ray, &QueryFilter::new()).unwrap() {
+            assert!(ray.point_at(hit.fraction).y.is_finite(), "{what}: {hit:?}");
+        }
+        let sphere = Shape::new_sphere(0.3).unwrap();
+        let cast = ShapeCast::new(
+            &sphere,
+            RVec3::new(real(c.x), top, real(c.z)),
+            Quat::IDENTITY,
+            Vec3::new(0.0, -(extent.height() + 2.0), 0.0),
+        );
+        if let Some(hit) = self.world.cast_shape(&cast, &QueryFilter::new()).unwrap() {
+            assert!(
+                hit.distance.is_finite() && hit.normal.y.is_finite(),
+                "{what}: {hit:?}"
+            );
+        }
+        self.world.remove_body(ground).unwrap();
     }
 }
 
@@ -437,5 +504,171 @@ fn hull_family(arena: &mut Arena) {
     assert!(
         accepted > HULL_CASES / 5,
         "only {accepted} hulls were accepted"
+    );
+}
+
+/// The kinds of triangle meshes the mesh family draws from.
+#[derive(Clone, Copy, Debug)]
+enum Soup {
+    /// A height grid.
+    Grid,
+    /// Random triangles, some near-degenerate, some duplicated.
+    Random,
+    /// One large triangle and slivers that collapse under Jolt's vertex quantization.
+    Collapsing,
+    /// Only degenerate triangles: repeated indices and collinear vertices.
+    Degenerate,
+}
+
+const SOUPS: [Soup; 4] = [Soup::Grid, Soup::Random, Soup::Collapsing, Soup::Degenerate];
+
+/// A mesh of `kind`, in shape space.
+fn soup(rng: &mut Rng, kind: Soup) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    let size = rng.log_range(1.0e-2, 500.0);
+    let translation = [0; 3].map(|_| rng.range(-500.0, 500.0));
+    let rotation = rng.rotation();
+    let place = |p: [f64; 3]| {
+        let r = rotate(&rotation, p);
+        to_vec3([0, 1, 2].map(|i| r[i] * size + translation[i]))
+    };
+    let mut vertices = Vec::new();
+    let mut triangles = Vec::new();
+    match kind {
+        Soup::Grid => {
+            let cells = rng.below(1, 51) as u32;
+            let roughness = rng.log_range(1.0e-4, 0.5);
+            let side = cells + 1;
+            for k in 0..side {
+                for i in 0..side {
+                    let (x, z) = (
+                        f64::from(i) / f64::from(cells) - 0.5,
+                        f64::from(k) / f64::from(cells) - 0.5,
+                    );
+                    vertices.push(place([x, roughness * rng.range(-1.0, 1.0), z]));
+                }
+            }
+            for k in 0..cells {
+                for i in 0..cells {
+                    let v = k * side + i;
+                    triangles.push([v, v + side, v + side + 1]);
+                    triangles.push([v, v + side + 1, v + 1]);
+                }
+            }
+        }
+        Soup::Random => {
+            for _ in 0..rng.below(1, 2001) {
+                let base = vertices.len() as u32;
+                let a = [0; 3].map(|_| rng.range(-0.5, 0.5));
+                let b = [0; 3].map(|_| rng.range(-0.5, 0.5));
+                // Every fifth triangle has a third vertex close to the first.
+                let c = if rng.below(0, 5) == 0 {
+                    let gap = rng.log_range(1.0e-7, 1.0e-3);
+                    [0, 1, 2].map(|i| a[i] + gap * rng.range(-1.0, 1.0))
+                } else {
+                    [0; 3].map(|_| rng.range(-0.5, 0.5))
+                };
+                vertices.extend([a, b, c].map(place));
+                triangles.push([base, base + 1, base + 2]);
+                // Every tenth triangle is repeated, with its indices rotated.
+                if rng.below(0, 10) == 0 {
+                    triangles.push([base + 1, base + 2, base]);
+                }
+            }
+        }
+        Soup::Collapsing => {
+            vertices.extend([[-0.5, 0.0, -0.5], [-0.5, 0.0, 0.5], [0.5, 0.0, -0.5]].map(place));
+            triangles.push([0, 1, 2]);
+            for _ in 0..rng.below(1, 200) {
+                let base = vertices.len() as u32;
+                let at = [0; 3].map(|_| rng.range(-0.4, 0.4));
+                let tiny = rng.log_range(1.0e-9, 1.0e-6);
+                let corners = [
+                    at,
+                    [at[0] + tiny, at[1], at[2]],
+                    [at[0], at[1] + 0.1, at[2]],
+                ];
+                vertices.extend(corners.map(place));
+                triangles.push([base, base + 1, base + 2]);
+            }
+        }
+        Soup::Degenerate => {
+            for _ in 0..rng.below(1, 100) {
+                let base = vertices.len() as u32;
+                if rng.below(0, 2) == 0 {
+                    let corners = [0; 3].map(|_| [0; 3].map(|_| rng.range(-0.5, 0.5)));
+                    vertices.extend(corners.map(place));
+                    let repeated = rng.below(0, 3) as u32;
+                    triangles.push([base + repeated, base + repeated, base + 2 - repeated]);
+                } else {
+                    // Collinear along x: y and z are exactly equal, so f32 keeps them collinear.
+                    let (y, z) = (
+                        rng.range(-500.0, 500.0) as f32,
+                        rng.range(-500.0, 500.0) as f32,
+                    );
+                    let size = size as f32;
+                    vertices.extend(
+                        [0; 3].map(|_| Vec3::new(size * rng.range(-0.5, 0.5) as f32, y, z)),
+                    );
+                    triangles.push([base, base + 1, base + 2]);
+                }
+            }
+        }
+    }
+    (vertices, triangles)
+}
+
+const MESH_CASES: usize = 150;
+
+fn mesh_family(arena: &mut Arena) {
+    let mut rng = Rng::new(0x5EED_0002);
+    let materials: Vec<PhysicsMaterial> = (0..32)
+        .map(|i| PhysicsMaterial::new(1000 + i).unwrap())
+        .collect();
+    let refs: Vec<&PhysicsMaterial> = materials.iter().collect();
+    let mut accepted = 0;
+    for index in 0..MESH_CASES {
+        announce("mesh", index);
+        let kind = SOUPS[index % SOUPS.len()];
+        let (vertices, triangles) = soup(&mut rng, kind);
+        let list = &refs[..rng.below(1, refs.len() + 1)];
+        let indices: Vec<u8> = triangles
+            .iter()
+            .map(|_| rng.below(0, list.len()) as u8)
+            .collect();
+        let settings = if index % 2 == 0 {
+            MeshSettings::default().materials(list, &indices)
+        } else {
+            MeshSettings::default().build_quality(MeshBuildQuality::FavorBuildSpeed)
+        };
+        let what = format!("mesh {index} ({kind:?}, {} triangles)", triangles.len());
+        let result = Shape::new_mesh_with_settings(&vertices, &triangles, &settings);
+        if let Soup::Degenerate = kind {
+            assert!(
+                matches!(result, Err(ShapeError::Mesh(MeshError::NoTriangles))),
+                "{what}: {:?}",
+                result.err()
+            );
+            continue;
+        }
+        if let Soup::Collapsing = kind {
+            // The large triangle always survives Jolt's clean-up.
+            assert!(result.is_ok(), "{what}: {:?}", result.err());
+        }
+        let shape = match result {
+            Ok(shape) => shape,
+            Err(error) => {
+                eprintln!("{what}: {error}");
+                continue;
+            }
+        };
+        accepted += 1;
+        if accepted % 4 == 0 {
+            arena.drop_probes_on(&shape, Extent::of(&vertices), 40, &what);
+        }
+    }
+    eprintln!("mesh: {accepted} of {MESH_CASES} accepted");
+    assert!(
+        accepted > MESH_CASES / 2,
+        "only {accepted} meshes were accepted"
     );
 }
