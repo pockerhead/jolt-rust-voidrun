@@ -448,7 +448,9 @@ impl VehicleAntiRollBar {
     /// suspension constraints, which the constraint's effective mass turns into an impulse.
     /// With a length difference of at most [`limits::MAX_SHAPE_EXTENT`] this bound keeps the
     /// bias at most about 5e14 for `dt <= 1`, so the velocity change it gives stays finite;
-    /// see [`limits`](crate::limits#derived-bounds).
+    /// see [docs/limits.md#anti-roll-bars].
+    ///
+    /// [docs/limits.md#anti-roll-bars]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#anti-roll-bars
     pub const MAX_STIFFNESS: f32 =
         limits::MAX_ACCELERATION * limits::MAX_MASS / limits::MAX_SHAPE_EXTENT;
 

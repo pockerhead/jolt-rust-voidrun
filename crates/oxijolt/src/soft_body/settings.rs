@@ -132,12 +132,14 @@ impl SoftBodySettings {
     /// passes when the signed volume Jolt computes about the body origin does): the pressure
     /// force Jolt computes for a vertex at the start geometry may give a vertex of
     /// [`limits::MIN_MASS`] at most [`limits::MAX_ACCELERATION`] (see
-    /// [Derived bounds](crate::limits#derived-bounds)). Jolt computes the volume in `f32` from
+    /// [docs/limits.md#soft-body-pressure]). Jolt computes the volume in `f32` from
     /// the vertex positions about the body origin, so the vertices of a pressurised body
     /// belong around that origin: far from it the rounding of that volume can exceed the
     /// volume itself, and the body is refused.
     ///
     /// [`PhysicsWorld::create_soft_body`]: crate::PhysicsWorld::create_soft_body
+    ///
+    /// [docs/limits.md#soft-body-pressure]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#soft-body-pressure
     #[must_use]
     pub fn pressure(mut self, value: f32) -> Self {
         self.pressure = value;
