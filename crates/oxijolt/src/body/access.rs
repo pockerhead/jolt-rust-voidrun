@@ -26,10 +26,14 @@ impl PhysicsWorld {
     /// (overridden, or computed from a tiny shape) has no finite inverse, when its inertia
     /// tensor is not diagonal (a rotated or offset compound child, an offset centre of mass) and
     /// too badly conditioned for Jolt to decompose, such as a slender shape in a rotated child
-    /// (see the rigid body inertia rule in [`limits`](crate::limits)), and when a dynamic body's mass
-    /// (overridden or computed) is outside [`limits::MIN_MASS`](crate::limits::MIN_MASS)`..=`[`limits::MAX_MASS`](crate::limits::MAX_MASS).
+    /// (see the rigid body inertia rule in [`limits`]), and when a dynamic body's mass
+    /// (overridden or computed) is outside [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`].
     /// Kinematic bodies are exempt from the mass range: Jolt gives them infinite mass in the
     /// solver.
+    ///
+    /// [`limits`]: crate::limits
+    /// [`limits::MIN_MASS`]: crate::limits::MIN_MASS
+    /// [`limits::MAX_MASS`]: crate::limits::MAX_MASS
     pub fn create_body(
         &mut self,
         shape: &Shape,

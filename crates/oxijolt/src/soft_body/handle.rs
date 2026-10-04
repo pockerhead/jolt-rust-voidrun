@@ -92,9 +92,10 @@ impl PhysicsWorld {
     ) -> Result<BodyId, BodyError> {
         settings.validate(self.object_layer_count)?;
         if !is_soft_body_pressure(settings.pressure, &shared.pressure_geometry) {
+            // Faces around the body origin, wound counter-clockwise seen from outside, that
+            // enclose a volume large enough for the pressure (`limits::is_soft_body_pressure`).
             return Err(BodyError::InvalidValue(
-                "pressure needs faces around the body origin that enclose a volume large \
-                 enough for it, wound counter-clockwise seen from outside (see limits)",
+                "pressure needs counter-clockwise faces enclosing a large enough volume",
             ));
         }
         let baked_rotation = settings.make_rotation_identity.then_some(settings.rotation);

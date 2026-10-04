@@ -15,15 +15,18 @@ use crate::{
     SliderConstraint, Vec3,
 };
 
-/// What a rack-and-pinion ratio must satisfy.
+/// What a rack-and-pinion ratio must satisfy: finite, with a magnitude between
+/// `1 / `[`limits::MAX_RATIO`] and [`limits::MAX_RATIO`].
 const RATIO_RULE: &str =
-    "ratio must be finite with a magnitude between 1 / limits::MAX_RATIO and limits::MAX_RATIO";
+    "ratio magnitude must be between 1 / limits::MAX_RATIO and limits::MAX_RATIO";
 
 /// What a gear ratio must satisfy.
 const GEAR_RATIO_RULE: &str = "gear ratio must be between 1 and limits::MAX_GEAR_RATIO";
 
-/// What a referenced hinge or slider must satisfy.
-const REFERENCE_RULE: &str = "a referenced hinge or slider must join the coupled body as its body 2, with the same axis direction";
+/// What a referenced hinge or slider must satisfy: it joins the coupled body as its body 2,
+/// with the same axis direction.
+const REFERENCE_RULE: &str =
+    "a referenced hinge or slider must join the coupled body as body 2, same axis";
 
 /// Smallest cosine between a coupling's axis and its reference's axis in the shared body.
 const SAME_DIRECTION: f32 = 1.0 - 1.0e-3;

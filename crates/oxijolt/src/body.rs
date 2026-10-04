@@ -296,11 +296,13 @@ impl BodySettings {
 
     /// Overrides the mass in kg, between [`limits::MIN_MASS`] and [`limits::MAX_MASS`] (and large
     /// enough that Jolt can invert the scaled inertia, which must also meet the rigid body
-    /// inertia floor when it is not diagonal; [`PhysicsWorld::create_body`](crate::PhysicsWorld::create_body) checks this).
+    /// inertia floor when it is not diagonal; [`PhysicsWorld::create_body`] checks this).
     /// Without an override, a dynamic body's computed mass must lie in the same range. The
     /// inertia is computed from the shape and scaled to this mass (Jolt
     /// `EOverrideMassProperties::CalculateInertia`).
     /// By default Jolt computes mass and inertia from the shape with a density of 1000 kg/m³.
+    ///
+    /// [`PhysicsWorld::create_body`]: crate::PhysicsWorld::create_body
     #[must_use]
     pub fn mass(mut self, value: f32) -> Self {
         self.mass = Some(value);
@@ -391,8 +393,11 @@ impl BodySettings {
     }
 }
 
-/// What the mass properties of a body that is not static must satisfy ([`has_finite_inverse`]).
-pub(crate) const INERTIA_RULE: &str = "mass and shape must give a finite inverse mass and inertia, and an inertia that is not diagonal must meet the rigid body inertia floor of limits";
+/// What the mass properties of a body that is not static must satisfy ([`has_finite_inverse`]):
+/// a finite inverse mass and inertia, and, for an inertia that is not diagonal, the rigid body
+/// inertia floor of [`limits`].
+pub(crate) const INERTIA_RULE: &str =
+    "mass and shape must give a finite inverse mass and a well-conditioned inertia";
 
 /// Zero mass and a zero inertia tensor.
 const ZERO_MASS_PROPERTIES: JPH_MassProperties = JPH_MassProperties {

@@ -13,7 +13,7 @@ use crate::{BodyError, Quat, RVec3, Vec3};
 /// two products cancel.
 const F32_PRODUCT_HEADROOM: f64 = 1.0e37;
 
-/// What [`BodyMut::check_load`] reads from a dynamic rigid body.
+/// What [`BodyMut::check_load`](crate::BodyMut::check_load) reads from a dynamic rigid body.
 pub(super) struct LoadState {
     pub(super) force: Vec3,
     pub(super) torque: Vec3,
@@ -22,7 +22,7 @@ pub(super) struct LoadState {
     pub(super) center_of_mass: RVec3,
 }
 
-/// What [`BodyMut::check_load`] reads from a soft body.
+/// What [`BodyMut::check_load`](crate::BodyMut::check_load) reads from a soft body.
 pub(super) struct SoftLoadState {
     force: Vec3,
     rotation: Quat,
@@ -104,6 +104,8 @@ pub(super) fn sum(a: Vec3, b: Vec3, c: [f64; 3]) -> [f64; 3] {
 /// The force to add to a soft body for the world-space `force`: `force` in the body frame Jolt
 /// accumulates it in, after checking the accumulated force against the soft body force bound
 /// of [`limits`] (Jolt adds `F · w / N` per vertex, `SoftBodyMotionProperties.cpp:334`).
+///
+/// [`limits`]: crate::limits
 pub(super) fn soft_body_force(state: &SoftLoadState, force: Vec3) -> Result<Vec3, BodyError> {
     // Jolt converts only gravity into the body frame (`InitializeUpdateContext`) and adds the
     // accumulated force to the vertex velocities, which are stored in that frame.

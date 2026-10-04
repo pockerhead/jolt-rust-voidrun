@@ -358,7 +358,7 @@ impl<K: ConstraintKind> ConstraintMut<'_, K> {
 impl PhysicsWorld {
     /// Creates a constraint between `body1` and `body2` and returns its typed id.
     ///
-    /// Frames given in [`ConstraintSpace::WorldSpace`](crate::ConstraintSpace::WorldSpace) are
+    /// Frames given in [`ConstraintSpace::WorldSpace`] are
     /// world space at the time the constraint is created; Jolt turns them into each body's own
     /// frame then. Both bodies must be bodies of this world, different, and neither the inner
     /// body of a character nor a part of a ragdoll ([`ConstraintError::Body`]). Except for a
@@ -373,7 +373,7 @@ impl PhysicsWorld {
     /// [`remove_body`](Self::remove_body) refuses its bodies ([`BodyError::UsedByConstraint`]).
     ///
     /// Each point where the constraint holds a dynamic body must have a lever-arm ratio of at
-    /// most [`limits::MAX_LEVER_ARM_RATIO`](crate::limits::MAX_LEVER_ARM_RATIO), its distance from the body's centre of mass
+    /// most [`limits::MAX_LEVER_ARM_RATIO`], its distance from the body's centre of mass
     /// measured against the body's size (see there). The check uses the bodies' poses now and
     /// covers every point of a path and, for an automatic point, the point Jolt picks: between
     /// the centres of mass, weighted by inverse mass towards the lighter body.
@@ -430,6 +430,9 @@ impl PhysicsWorld {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// [`ConstraintSpace::WorldSpace`]: crate::ConstraintSpace::WorldSpace
+    /// [`limits::MAX_LEVER_ARM_RATIO`]: crate::limits::MAX_LEVER_ARM_RATIO
     pub fn create_constraint<S: ConstraintSettings>(
         &mut self,
         body1: BodyId,

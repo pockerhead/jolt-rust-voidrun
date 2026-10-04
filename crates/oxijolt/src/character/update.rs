@@ -26,10 +26,12 @@ impl PhysicsWorld {
     /// [`CharacterError::TooManyCharacters`] when the world has run out of character ids.
     /// Nothing is created on failure.
     ///
-    /// The new character knows no contacts and reports [`GroundState::InAir`](crate::GroundState::InAir) until its first
+    /// The new character knows no contacts and reports [`GroundState::InAir`] until its first
     /// update or [`refresh_character_contacts`](Self::refresh_character_contacts). Refresh a
     /// character that starts on the ground: stick to floor acts only when the character was
     /// supported before the update.
+    ///
+    /// [`GroundState::InAir`]: crate::GroundState::InAir
     pub fn create_character(
         &mut self,
         settings: &CharacterSettings<'_>,

@@ -11,12 +11,14 @@ use crate::limits;
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::{CharacterError, Shape, Vec3};
 
-/// How to create a character, for [`PhysicsWorld::create_character`](crate::PhysicsWorld::create_character). Build it with
+/// How to create a character, for [`PhysicsWorld::create_character`]. Build it with
 /// [`new`](Self::new) and the setters.
 ///
 /// The defaults are Jolt's `CharacterVirtualSettings` defaults. Lengths are in metres, angles in
 /// radians, masses in kg and forces in newtons. The world gives every character its own id; it
 /// is not a setting.
+///
+/// [`PhysicsWorld::create_character`]: crate::PhysicsWorld::create_character
 #[derive(Clone)]
 pub struct CharacterSettings<'a> {
     shape: &'a Shape,
@@ -63,8 +65,10 @@ impl<'a> CharacterSettings<'a> {
     /// A character of `shape`, with Jolt's defaults for everything else.
     ///
     /// The shape must be convex (a capsule, sphere, box or cylinder):
-    /// [`PhysicsWorld::create_character`](crate::PhysicsWorld::create_character) rejects other shapes, because the character moves by
+    /// [`PhysicsWorld::create_character`] rejects other shapes, because the character moves by
     /// casting its shape, and Jolt's casts of compound or heightfield shapes find nothing.
+    ///
+    /// [`PhysicsWorld::create_character`]: crate::PhysicsWorld::create_character
     pub fn new(shape: &'a Shape) -> Self {
         Self {
             shape,
@@ -237,7 +241,9 @@ impl<'a> CharacterSettings<'a> {
     ///
     /// Jolt creates the body with the character, moves it with the character and removes it
     /// with the character; it never collides with its own character. While the character
-    /// exists, [`PhysicsWorld::remove_body`](crate::PhysicsWorld::remove_body) refuses to remove it.
+    /// exists, [`PhysicsWorld::remove_body`] refuses to remove it.
+    ///
+    /// [`PhysicsWorld::remove_body`]: crate::PhysicsWorld::remove_body
     #[must_use]
     pub fn inner_body(mut self, value: Option<InnerBody<'a>>) -> Self {
         self.inner_body = value;
@@ -382,12 +388,14 @@ pub(super) fn is_unit(v: Vec3) -> bool {
     v.is_finite() && (v.dot(v) - 1.0).abs() <= 1.0e-5
 }
 
-/// What an update does besides moving the character, for [`PhysicsWorld::update_character`](crate::PhysicsWorld::update_character)
+/// What an update does besides moving the character, for [`PhysicsWorld::update_character`]
 /// (Jolt `CharacterVirtual::ExtendedUpdateSettings`). The defaults are Jolt's.
 ///
 /// The vectors are in world space and assume `+Y` up by default; with another up the caller
 /// supplies them along its up. A zero stick-to-floor or step-up vector turns that feature off
 /// (Jolt's `IsNearZero`). Lengths are in metres.
+///
+/// [`PhysicsWorld::update_character`]: crate::PhysicsWorld::update_character
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExtendedUpdateSettings {
     stick_to_floor_step_down: Vec3,

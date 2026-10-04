@@ -20,8 +20,9 @@ pub(crate) fn check_spring(spring: SpringSettings, bound: f64) -> Result<(), Con
     }
 }
 
-/// What every point a world constraint holds a dynamic body by must satisfy.
-const LEVER_ARM_RULE: &str = "points where a constraint holds a dynamic body must have a lever-arm ratio of at most limits::MAX_LEVER_ARM_RATIO";
+/// What every point a world constraint holds a dynamic body by must satisfy: a lever-arm
+/// ratio of at most [`limits::MAX_LEVER_ARM_RATIO`].
+const LEVER_ARM_RULE: &str = "lever-arm ratio must be at most limits::MAX_LEVER_ARM_RATIO";
 
 /// The pose of a body and, for a dynamic one, its mass properties, as the lever-arm check of
 /// [`PhysicsWorld::create_constraint`] reads them.
@@ -151,8 +152,11 @@ impl LeverMotion {
     }
 }
 
-/// What every frequency-mode spring of a world constraint must satisfy.
-const SPRING_BOUND_RULE: &str = "spring stiffness and damping derived from the bodies' effective mass must be at most limits::MAX_SPRING_COEFFICIENT";
+/// What every frequency-mode spring of a world constraint must satisfy: the stiffness and
+/// damping derived from the bodies' effective mass are at most
+/// [`limits::MAX_SPRING_COEFFICIENT`].
+const SPRING_BOUND_RULE: &str =
+    "spring stiffness and damping must be at most limits::MAX_SPRING_COEFFICIENT";
 
 impl PhysicsWorld {
     /// `Err(InvalidValue)` unless every point where `anchors` hold the dynamic ones of

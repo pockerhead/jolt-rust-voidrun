@@ -5,6 +5,12 @@
 //! [`PhysicsWorld::remove_body`], saved by [`PhysicsWorld::save_state`], moved by
 //! [`PhysicsWorld::rebase`] and found by queries. Its particles are described by
 //! [`SoftBodySharedSettings`], which one or many soft bodies in any number of worlds share.
+//!
+//! [`PhysicsWorld::create_soft_body`]: crate::PhysicsWorld::create_soft_body
+//! [`BodyId`]: crate::BodyId
+//! [`PhysicsWorld::remove_body`]: crate::PhysicsWorld::remove_body
+//! [`PhysicsWorld::save_state`]: crate::PhysicsWorld::save_state
+//! [`PhysicsWorld::rebase`]: crate::PhysicsWorld::rebase
 
 use oxijolt_sys::*;
 
@@ -28,7 +34,9 @@ pub use shared::{
 pub struct SoftBodyVertex {
     /// Position relative to the body origin, in metres, every component at most
     /// [`limits::MAX_SHAPE_EXTENT`] in absolute value. The vertices of a body without a
-    /// kinematic vertex belong around the origin (see [`PhysicsWorld::create_soft_body`](crate::PhysicsWorld::create_soft_body)).
+    /// kinematic vertex belong around the origin (see [`PhysicsWorld::create_soft_body`]).
+    ///
+    /// [`PhysicsWorld::create_soft_body`]: crate::PhysicsWorld::create_soft_body
     pub position: Vec3,
     /// Initial velocity relative to the body, in m/s, at most
     /// [`limits::MAX_LINEAR_VELOCITY`] long.

@@ -306,8 +306,10 @@ impl RagdollSettings {
             .flat_map(RagdollJoint::springs)
             .all(|spring| spring.fits_effective_mass(bound));
         if !springs_fit {
+            // Stiffness and damping derived from the effective mass of the parts a joint
+            // connects.
             return Err(RagdollError::InvalidValue(
-                "a joint spring's stiffness or damping exceeds limits::MAX_SPRING_COEFFICIENT for the parts it connects",
+                "joint spring stiffness or damping exceeds limits::MAX_SPRING_COEFFICIENT",
             ));
         }
         // SAFETY: Jolt is initialised (the skeleton exists). The handles take over the one

@@ -40,8 +40,10 @@ pub struct HermitePathPoint {
 /// The smallest chord between two consecutive path points, metres.
 const MIN_CHORD: f64 = 1.0e-3;
 
-/// What every segment of a path must satisfy.
-const SEGMENT_RULE: &str = "each path segment needs a chord of at least 1 mm and tangents that keep the curve moving along the chord and away from the normal";
+/// What every segment of a path must satisfy: a chord of at least [`MIN_CHORD`], and tangents
+/// that keep the curve moving along the chord and away from the normal.
+const SEGMENT_RULE: &str =
+    "each path segment needs a chord of at least 1 mm and tangents that follow it";
 
 /// A planar Hermite path (Jolt `PathConstraintPathHermite`) for a [`PathConstraintSettings`]:
 /// cubic Hermite segments through the points, one plane normal for all of them. Fraction `i`

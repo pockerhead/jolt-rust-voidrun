@@ -167,8 +167,10 @@ impl CharacterRef<'_> {
     }
 
     /// Whether the last update found more contacts than
-    /// [`CharacterSettings::max_num_hits`](crate::CharacterSettings::max_num_hits). Jolt then drops contacts in an order that is not
+    /// [`CharacterSettings::max_num_hits`]. Jolt then drops contacts in an order that is not
     /// guaranteed to be deterministic.
+    ///
+    /// [`CharacterSettings::max_num_hits`]: crate::CharacterSettings::max_num_hits
     pub fn max_hits_exceeded(&self) -> bool {
         // SAFETY: as in `position`.
         unsafe { JPH_CharacterVirtual_GetMaxHitsExceeded(self.ptr()) }

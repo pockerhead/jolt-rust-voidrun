@@ -586,8 +586,11 @@ impl RagdollMut<'_> {
     }
 }
 
-/// What a kinematic drive must satisfy.
-const KINEMATIC_DRIVE_RULE: &str = "a kinematic drive must give every part a linear velocity within limits::MAX_LINEAR_VELOCITY and an angular velocity within limits::MAX_ANGULAR_VELOCITY";
+/// What a kinematic drive must satisfy: every part gets a linear velocity within
+/// [`limits::MAX_LINEAR_VELOCITY`] and an angular velocity within
+/// [`limits::MAX_ANGULAR_VELOCITY`].
+const KINEMATIC_DRIVE_RULE: &str =
+    "a kinematic drive must keep every part within the limits velocity bounds";
 
 /// Places each body of `bodies` at its transform in the validated `pose`, without waking it.
 fn place_parts(body_interface: NonNull<JPH_BodyInterface>, bodies: &[BodyId], pose: &SkeletonPose) {

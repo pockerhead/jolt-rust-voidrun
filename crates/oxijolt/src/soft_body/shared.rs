@@ -504,15 +504,18 @@ impl SoftBodySharedSettingsBuilder {
     }
 }
 
-/// What the inverse mass of a soft body vertex must satisfy.
+/// What the inverse mass of a soft body vertex must satisfy: 0 (kinematic), or the inverse
+/// of a mass within [`limits::MIN_MASS`]`..=`[`limits::MAX_MASS`]
+/// ([`limits::is_vertex_inverse_mass`]).
 pub(super) const VERTEX_INVERSE_MASS_RULE: &str =
-    "a vertex inverse mass must be 0 or the inverse of a mass within limits::MIN_MASS..=limits::MAX_MASS";
+    "vertex inverse mass must be 0 or within 1 / limits::MAX_MASS..=limits::MAX_VERTEX_INVERSE_MASS";
 /// What the vertex masses of a soft body must satisfy together.
 pub(super) const TOTAL_MASS_RULE: &str =
     "the masses of the movable vertices must add up to at most limits::MAX_MASS";
-/// What the movable vertices of a soft body without a kinematic vertex must satisfy.
+/// What the movable vertices of a soft body without a kinematic vertex must satisfy: they
+/// spread around the body origin so that Jolt can decompose their inertia (see [`limits`]).
 pub(super) const INERTIA_RULE: &str =
-    "without a kinematic vertex, the vertices must spread around the body origin so that Jolt can decompose their inertia (see limits)";
+    "without a kinematic vertex, the vertices must spread around the body origin";
 /// What an edge between two vertices must satisfy.
 pub(super) const EDGE_LENGTH_RULE: &str =
     "an edge must be at least limits::MIN_SOFT_BODY_EDGE_LENGTH long";
