@@ -291,3 +291,68 @@ fn sanitized_count_drops_degenerate_and_duplicate_triangles() {
         "a copy of a triangle is a duplicate"
     );
 }
+
+/// The triangles of `shape` read with room for `capacity` of them, and the count returned.
+fn triangles(shape: *const JPH_Shape, capacity: usize) -> (u32, Vec<JPH_Vec3>) {
+    let sentinel = vec3(f32::NAN, f32::NAN, f32::NAN);
+    let mut vertices = vec![sentinel; 3 * capacity];
+    let buffer = if capacity == 0 {
+        null_mut()
+    } else {
+        vertices.as_mut_ptr()
+    };
+    // SAFETY: the shape is live; `buffer` is null with capacity 0 or holds 3 * capacity vertices.
+    let count = unsafe { JPH_Shape_GetTriangles(shape, buffer, capacity as u32) };
+    (count, vertices)
+}
+
+#[test]
+fn mesh_triangles_read_back_in_shape_space() {
+    let settings = mesh_settings(
+        &two_triangle_vertices(),
+        &[triangle(0, 1, 2, 0), triangle(3, 4, 5, 0)],
+        &[],
+    );
+    let (shape, _) = create(settings.cast(), 0);
+    assert!(!shape.is_null());
+    let (count, _) = triangles(shape, 0);
+    assert_eq!(count, 2);
+    let (count, vertices) = triangles(shape, 2);
+    assert_eq!(count, 2);
+    let input = two_triangle_vertices();
+    // Every read vertex is an input vertex, up to Jolt's 21-bit quantization over 11 m.
+    for vertex in &vertices {
+        assert!(
+            input.iter().any(|v| (v.x - vertex.x).abs() < 1.0e-4
+                && (v.y - vertex.y).abs() < 1.0e-4
+                && (v.z - vertex.z).abs() < 1.0e-4),
+            "{vertex:?}"
+        );
+    }
+    // A buffer of one triangle gets the first one; the count is still the total.
+    let (count, partial) = triangles(shape, 1);
+    assert_eq!(count, 2);
+    assert!(partial.iter().all(|v| v.x.is_finite()));
+    // SAFETY: both are live and this test holds one reference to each.
+    unsafe {
+        JPH_Shape_Destroy(shape);
+        JPH_ShapeSettings_Destroy(settings.cast());
+    }
+}
+
+#[test]
+fn convex_shapes_give_a_triangulated_surface() {
+    init();
+    let half_extent = vec3(0.5, 1.0, 1.5);
+    // SAFETY: Jolt is initialised; `half_extent` is a live local. This test owns the reference.
+    let shape = unsafe { JPH_BoxShape_Create(&half_extent, 0.0) }.cast::<JPH_Shape>();
+    let (count, vertices) = triangles(shape, 64);
+    assert_eq!(count, 12, "two triangles per box face");
+    for vertex in &vertices[..36] {
+        assert_eq!(vertex.x.abs(), 0.5);
+        assert_eq!(vertex.y.abs(), 1.0);
+        assert_eq!(vertex.z.abs(), 1.5);
+    }
+    // SAFETY: the shape is live and this test holds one reference.
+    unsafe { JPH_Shape_Destroy(shape) };
+}

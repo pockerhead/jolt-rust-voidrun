@@ -1,5 +1,5 @@
-// Shape creation with Jolt's error message. Part of this fork's joltc additions (see
-// joltc_ext.cpp).
+// Shape creation with Jolt's error message and triangle readback. Part of this fork's joltc
+// additions (see joltc_ext.cpp).
 // Licensed under the MIT License (MIT), like joltc.
 //
 // Every joltc shape settings handle is a reinterpret_cast of a Jolt settings class that derives
@@ -8,6 +8,7 @@
 
 #include <Jolt/Jolt.h>
 
+#include <Jolt/Geometry/AABox.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 
 #include <algorithm>
@@ -40,4 +41,33 @@ JPH_Shape* JPH_ShapeSettings_CreateShapeWithError(const JPH_ShapeSettings* setti
 		error[length] = '\0';
 	}
 	return nullptr;
+}
+
+uint32_t JPH_Shape_GetTriangles(const JPH_Shape* shape, JPH_Vec3* vertices, uint32_t maxTriangles)
+{
+	const JPH::Shape* joltShape = reinterpret_cast<const JPH::Shape*>(shape);
+	JPH::Shape::GetTrianglesContext context;
+	joltShape->GetTrianglesStart(context, JPH::AABox::sBiggest(), JPH::Vec3::sZero(), JPH::Quat::sIdentity(), JPH::Vec3::sOne());
+	constexpr int batchSize = JPH::Shape::cGetTrianglesMinTrianglesRequested;
+	JPH::Float3 batch[batchSize * 3];
+	uint32_t count = 0;
+	for (;;)
+	{
+		const int found = joltShape->GetTrianglesNext(context, batchSize, batch);
+		if (found == 0)
+		{
+			return count;
+		}
+		for (int i = 0; i < found; ++i, ++count)
+		{
+			if (count < maxTriangles)
+			{
+				for (int v = 0; v < 3; ++v)
+				{
+					const JPH::Float3& vertex = batch[3 * i + v];
+					vertices[3 * size_t(count) + v] = JPH_Vec3{ vertex.x, vertex.y, vertex.z };
+				}
+			}
+		}
+	}
 }

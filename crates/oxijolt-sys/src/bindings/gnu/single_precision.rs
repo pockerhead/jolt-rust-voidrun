@@ -11274,6 +11274,13 @@ unsafe extern "C" {
     ) -> *mut JPH_Shape;
 }
 unsafe extern "C" {
+    pub fn JPH_Shape_GetTriangles(
+        shape: *const JPH_Shape,
+        vertices: *mut JPH_Vec3,
+        maxTriangles: u32,
+    ) -> u32;
+}
+unsafe extern "C" {
     pub fn JPH_SubShapeIDPair_GetBody1ID(pair: *const JPH_SubShapeIDPair) -> JPH_BodyID;
 }
 unsafe extern "C" {
