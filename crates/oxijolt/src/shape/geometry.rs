@@ -8,10 +8,6 @@ pub(super) fn v3(v: Vec3) -> V3 {
     [v.x, v.y, v.z].map(f64::from)
 }
 
-pub(super) fn add(a: V3, b: V3) -> V3 {
-    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-
 pub(super) fn sub(a: V3, b: V3) -> V3 {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
@@ -22,6 +18,10 @@ pub(super) fn dot(a: V3, b: V3) -> f64 {
 
 pub(super) fn length_sq(a: V3) -> f64 {
     dot(a, a)
+}
+
+pub(super) fn length(a: V3) -> f64 {
+    length_sq(a).sqrt()
 }
 
 pub(super) fn cross(a: V3, b: V3) -> V3 {

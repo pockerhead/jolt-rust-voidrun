@@ -66,7 +66,7 @@ fn round(world: &mut PhysicsWorld, inputs: &Inputs) {
     let hull = Shape::new_convex_hull(&inputs.cloud, 0.05).unwrap();
     let hull_with_material = Shape::new_convex_hull_with_material(&inputs.cloud, 0.05, &a).unwrap();
     let list = [&a, &b];
-    let mesh = Shape::new_mesh_with_settings(
+    let (mesh, _) = Shape::new_mesh_with_settings(
         &inputs.vertices,
         &inputs.triangles,
         &MeshSettings::default().materials(&list, &inputs.material_indices),

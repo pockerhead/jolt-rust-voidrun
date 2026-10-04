@@ -1,6 +1,7 @@
 use super::*;
 use crate::body::mass_properties;
 use crate::material::shape_material;
+use crate::shape::geometry::{cross, length, sub};
 use crate::{CompoundChild, HeightFieldSettings, PhysicsMaterial, Quat, SubShapeId};
 
 fn unit_box() -> Shape {
@@ -46,7 +47,9 @@ fn quad_mesh() -> Shape {
         Vec3::new(0.5, 0.0, 0.5),
         Vec3::new(0.5, 0.0, -0.5),
     ];
-    Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 2, 3]]).unwrap()
+    Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 2, 3]])
+        .unwrap()
+        .0
 }
 
 #[test]
@@ -214,4 +217,168 @@ fn scaled_meshes_stay_kinematic_and_collidable() {
         &field,
         Vec3::new(0.001, 1.0, 0.001)
     )));
+}
+
+/// A quarter turn about +y: x goes to -z, z to x.
+fn quarter_turn() -> Quat {
+    let half = std::f32::consts::FRAC_PI_4;
+    Quat::from_xyzw(0.0, half.sin(), 0.0, half.cos())
+}
+
+/// A 1 m square in the y = 0 plane around `(x, 0, 0)` of its own space, facing up.
+fn quad_at(x: f32) -> Shape {
+    let vertices = [
+        Vec3::new(x - 0.5, 0.0, -0.5),
+        Vec3::new(x - 0.5, 0.0, 0.5),
+        Vec3::new(x + 0.5, 0.0, 0.5),
+        Vec3::new(x + 0.5, 0.0, -0.5),
+    ];
+    Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 2, 3]])
+        .unwrap()
+        .0
+}
+
+/// Jolt's rotated-translated shape of `shape`, which the safe API only makes inside compounds.
+fn rotated_translated(shape: &Shape, position: Vec3, rotation: Quat) -> Shape {
+    let (position, rotation) = (position.to_jph(), rotation.to_jph());
+    // SAFETY: Jolt is initialised (`shape` exists); the arguments are live locals and a live
+    // shape, of which the decorator takes its own reference. The returned shape holds one
+    // reference, which `Shape` takes over.
+    unsafe {
+        Shape::from_raw(
+            JPH_RotatedTranslatedShape_Create(&position, &rotation, shape.as_ptr()).cast(),
+        )
+    }
+    .unwrap()
+}
+
+/// Checks the placements of the meshes in `inner` scaled by `scale` against Jolt: each placed
+/// triangle, moved by `translation` (the leaf's position in the scaled shape's centre of mass
+/// space, by Jolt's rules), is where a ray along its normal hits the scaled shape.
+fn assert_placements_match_jolt(inner: &Shape, scale: Vec3, translation: [f64; 3]) {
+    let scaled = Shape::scaled(inner, scale).unwrap();
+    let leaves = triangle_leaves(inner, scale).unwrap();
+    assert!(!leaves.is_empty());
+    for (leaf, placement) in leaves {
+        // SAFETY: `leaf` is a live mesh part of `inner`.
+        for [a, b, c] in unsafe { placed_triangles(leaf, &placement) } {
+            let normal = cross(sub(b, a), sub(c, a));
+            let unit = normal.map(|x| x / length(normal));
+            let centre = [0, 1, 2].map(|i| (a[i] + b[i] + c[i]) / 3.0 + translation[i]);
+            let to_vec3 = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
+            let origin = to_vec3([0, 1, 2].map(|i| centre[i] + 0.1 * unit[i])).to_jph();
+            let direction = to_vec3(unit.map(|x| -0.2 * x)).to_jph();
+            let mut hit = JPH_RayCastResult {
+                bodyID: 0,
+                fraction: 2.0,
+                subShapeID2: 0,
+            };
+            // SAFETY: the shape is live; every argument is a live local.
+            let found =
+                unsafe { JPH_Shape_CastRay(scaled.as_ptr(), &origin, &direction, &mut hit) };
+            assert!(found, "no hit at {centre:?}");
+            assert!(
+                (hit.fraction - 0.5).abs() < 1.0e-3,
+                "{} at {centre:?}",
+                hit.fraction
+            );
+        }
+    }
+}
+
+#[test]
+fn placements_match_jolts_centre_of_mass_spaces() {
+    let scale = Vec3::new(2.0, 3.0, 0.5);
+    let s = v3(scale);
+    // Off its own origin, so that a missing turn or translation moves it off Jolt's.
+    let quad = quad_at(2.0);
+    let block = unit_box();
+
+    // Scaled(offset(quad, d)): Jolt puts a point v at s * (v - d).
+    let offset = Shape::new_offset_center_of_mass(&quad, Vec3::new(3.0, 1.0, -2.0)).unwrap();
+    assert_placements_match_jolt(&offset, scale, [-3.0 * s[0], -s[1], 2.0 * s[2]]);
+    // Offsets that cancel out.
+    let back = Shape::new_offset_center_of_mass(&offset, Vec3::new(-3.0, -1.0, 2.0)).unwrap();
+    assert_placements_match_jolt(&back, scale, [0.0; 3]);
+
+    // A turned compound child at p, next to the box that holds the compound's centre of mass:
+    // s * (p + R v).
+    let p = Vec3::new(4.0, 0.0, 1.0);
+    let compound = Shape::new_compound(&[
+        child(&block, Vec3::ZERO, Quat::IDENTITY),
+        child(&quad, p, quarter_turn()),
+    ])
+    .unwrap();
+    assert_placements_match_jolt(&compound, scale, [4.0 * s[0], 0.0, s[2]]);
+
+    // A rotated-translated shape keeps its centre of mass at its position: s * R v.
+    let turned = rotated_translated(&quad, Vec3::new(5.0, 2.0, 0.0), quarter_turn());
+    assert_placements_match_jolt(&turned, scale, [0.0; 3]);
+
+    // A scaled mesh as a turned compound child, inside the scale.
+    let stretched = Shape::scaled(&quad, Vec3::new(2.0, 1.0, 3.0)).unwrap();
+    let nested = Shape::new_compound(&[
+        child(&block, Vec3::ZERO, Quat::IDENTITY),
+        child(&stretched, p, quarter_turn()),
+    ])
+    .unwrap();
+    assert_placements_match_jolt(&nested, scale, [4.0 * s[0], 0.0, s[2]]);
+}
+
+#[test]
+fn translations_above_a_mesh_do_not_change_its_check() {
+    // A 1 cm triangle at its own origin with the centre of mass moved 1999 m away: Jolt rounds
+    // the triangle's own coordinates and folds the offset into the transform it applies after.
+    let vertices = [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.01, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 0.01),
+    ];
+    let (tiny, _) = Shape::new_mesh(&vertices, &[[0, 2, 1]]).unwrap();
+    let away = Shape::new_offset_center_of_mass(&tiny, Vec3::new(-1999.0, 0.0, 0.0)).unwrap();
+    assert!(Shape::scaled(&away, Vec3::new(1.0, 1.0, 1.0)).is_ok());
+    let compound = Shape::new_compound(&[
+        child(&unit_box(), Vec3::ZERO, Quat::IDENTITY),
+        child(&tiny, Vec3::new(1999.0, 0.0, 0.0), Quat::IDENTITY),
+    ])
+    .unwrap();
+    assert!(Shape::scaled(&compound, Vec3::new(1.0, 1.0, 1.0)).is_ok());
+}
+
+#[test]
+fn flattening_follows_the_meshs_own_coordinates() {
+    // A quad built 1000 m from its own origin keeps the rounding of 1000 m coordinates wherever
+    // compounds, offsets and rotated-translated shapes move it. Flattened along z, twice a
+    // triangle's area is the z scale; with that rounding the floor is about 0.0019, so 0.006
+    // is kept and 0.001 refused.
+    let far = quad_at(1000.0);
+    let block = unit_box();
+    let to_origin = Vec3::new(-1000.0, 0.0, 0.0);
+    let offset = Shape::new_offset_center_of_mass(&far, Vec3::new(1000.0, 0.0, 0.0)).unwrap();
+    let cancelled = Shape::new_offset_center_of_mass(&offset, to_origin).unwrap();
+    let in_compound = Shape::new_compound(&[
+        child(&block, Vec3::ZERO, Quat::IDENTITY),
+        child(&far, to_origin, Quat::IDENTITY),
+    ])
+    .unwrap();
+    let moved = rotated_translated(&far, to_origin, Quat::IDENTITY);
+    for shape in [&far, &offset, &cancelled, &in_compound, &moved] {
+        assert!(Shape::scaled(shape, Vec3::new(1.0, 1.0, 0.006)).is_ok());
+        assert!(invalid_settings(Shape::scaled(
+            shape,
+            Vec3::new(1.0, 1.0, 0.001)
+        )));
+    }
+    // Turned a quarter about y, the quad's own z lies along x and its far coordinate along z:
+    // flattening x thins the triangles at 1000 m, flattening z shrinks that coordinate too.
+    let turned = Shape::new_compound(&[
+        child(&block, Vec3::ZERO, Quat::IDENTITY),
+        child(&far, to_origin, quarter_turn()),
+    ])
+    .unwrap();
+    assert!(invalid_settings(Shape::scaled(
+        &turned,
+        Vec3::new(0.001, 1.0, 1.0)
+    )));
+    assert!(Shape::scaled(&turned, Vec3::new(1.0, 1.0, 0.001)).is_ok());
 }

@@ -129,7 +129,7 @@ fn bases() -> Vec<Base> {
         },
         Base {
             name: "mesh",
-            shape: Shape::new_mesh(&vertices, &triangles).unwrap(),
+            shape: Shape::new_mesh(&vertices, &triangles).unwrap().0,
             corners: vertices,
         },
         Base {

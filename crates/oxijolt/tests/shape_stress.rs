@@ -527,9 +527,17 @@ enum Soup {
     Collapsing,
     /// Only degenerate triangles: repeated indices and collinear vertices.
     Degenerate,
+    /// A level-like ground with thin strips on it, sometimes next to far triangles.
+    Thin,
 }
 
-const SOUPS: [Soup; 4] = [Soup::Grid, Soup::Random, Soup::Collapsing, Soup::Degenerate];
+const SOUPS: [Soup; 5] = [
+    Soup::Grid,
+    Soup::Random,
+    Soup::Collapsing,
+    Soup::Degenerate,
+    Soup::Thin,
+];
 
 /// A mesh of `kind`, in shape space.
 fn soup(rng: &mut Rng, kind: Soup) -> (Vec<Vec3>, Vec<[u32; 3]>) {
@@ -622,8 +630,71 @@ fn soup(rng: &mut Rng, kind: Soup) -> (Vec<Vec3>, Vec<[u32; 3]>) {
                 }
             }
         }
+        Soup::Thin => thin_strips(rng, &mut vertices, &mut triangles),
     }
     (vertices, triangles)
+}
+
+/// A ground grid in metres, 1 m above the arena floor and up to 500 m from the origin, with
+/// strips 1 um to 1 cm wide lying on it where the probes land, and, in three cases of four, far
+/// triangles that stretch the mesh's bounds (and so its quantization step) along x, along z or
+/// down along y.
+fn thin_strips(rng: &mut Rng, vertices: &mut Vec<Vec3>, triangles: &mut Vec<[u32; 3]>) {
+    let centre = [rng.range(-500.0, 500.0), 1.0, rng.range(-500.0, 500.0)];
+    let at = |p: [f64; 3]| to_vec3([0, 1, 2].map(|i| centre[i] + p[i]));
+    let side = rng.log_range(4.0, 400.0);
+    let cells = rng.below(1, 9) as u32;
+    let rows = cells + 1;
+    for k in 0..rows {
+        for i in 0..rows {
+            let (x, z) = (
+                f64::from(i) / f64::from(cells) - 0.5,
+                f64::from(k) / f64::from(cells) - 0.5,
+            );
+            vertices.push(at([x * side, 0.0, z * side]));
+        }
+    }
+    for k in 0..cells {
+        for i in 0..cells {
+            let v = k * rows + i;
+            triangles.extend([[v, v + rows, v + rows + 1], [v, v + rows + 1, v + 1]]);
+        }
+    }
+    for _ in 0..rng.below(1, 100) {
+        let start = [
+            rng.range(-2.0, 2.0),
+            rng.range(1.0e-4, 2.0e-3),
+            rng.range(-0.5, 0.5),
+        ];
+        let (length, width) = (rng.log_range(0.05, 2.0), rng.log_range(1.0e-6, 1.0e-2));
+        let yaw = rng.range(0.0, std::f64::consts::TAU);
+        let (cos, sin) = (yaw.cos(), yaw.sin());
+        let base = vertices.len() as u32;
+        vertices.extend(
+            [
+                start,
+                [start[0] + cos * length, start[1], start[2] + sin * length],
+                [start[0] - sin * width, start[1], start[2] + cos * width],
+            ]
+            .map(at),
+        );
+        // Counter-clockwise seen from above.
+        triangles.push([base, base + 2, base + 1]);
+    }
+    let far: &[[f64; 3]] = match rng.below(0, 4) {
+        0 => &[],
+        1 => &[[1000.0, 0.0, 0.0], [-1000.0, 0.0, 0.0]],
+        2 => &[[0.0, 0.0, 1000.0], [0.0, 0.0, -1000.0]],
+        _ => &[[0.0, -1000.0, 0.0]],
+    };
+    for offset in far {
+        let base = vertices.len() as u32;
+        vertices.extend(
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]
+                .map(|p| at([0, 1, 2].map(|i| offset[i] + p[i]))),
+        );
+        triangles.push([base, base + 1, base + 2]);
+    }
 }
 
 const MESH_CASES: usize = 600;
@@ -635,6 +706,7 @@ fn mesh_family(arena: &mut Arena) {
         .collect();
     let refs: Vec<&PhysicsMaterial> = materials.iter().collect();
     let mut accepted = 0;
+    let (mut strips, mut dropped_strips) = (0, 0);
     for index in 0..MESH_CASES {
         announce("mesh", index);
         let kind = SOUPS[index % SOUPS.len()];
@@ -651,6 +723,10 @@ fn mesh_family(arena: &mut Arena) {
         };
         let what = format!("mesh {index} ({kind:?}, {} triangles)", triangles.len());
         let result = Shape::new_mesh_with_settings(&vertices, &triangles, &settings);
+        if let (Soup::Thin, Ok((_, dropped))) = (kind, &result) {
+            strips += triangles.len() - dropped.count();
+            dropped_strips += dropped.count();
+        }
         if let Soup::Degenerate = kind {
             assert!(
                 matches!(result, Err(ShapeError::Mesh(MeshError::NoTriangles))),
@@ -659,23 +735,24 @@ fn mesh_family(arena: &mut Arena) {
             );
             continue;
         }
-        if let Soup::Collapsing = kind {
-            // The large triangle always survives Jolt's clean-up.
+        if let Soup::Collapsing | Soup::Thin = kind {
+            // The large triangles always survive.
             assert!(result.is_ok(), "{what}: {:?}", result.err());
         }
         let shape = match result {
-            Ok(shape) => shape,
+            Ok((shape, _)) => shape,
             Err(error) => {
                 eprintln!("{what}: {error}");
                 continue;
             }
         };
         accepted += 1;
-        if accepted % 4 == 0 {
+        if accepted % 4 == 0 || matches!(kind, Soup::Thin) {
             arena.drop_probes_on(&shape, Extent::of(&vertices), 40, &what);
         }
     }
     eprintln!("mesh: {accepted} of {MESH_CASES} accepted");
+    eprintln!("thin: {strips} triangles kept, {dropped_strips} dropped");
     assert!(
         accepted > MESH_CASES / 2,
         "only {accepted} meshes were accepted"

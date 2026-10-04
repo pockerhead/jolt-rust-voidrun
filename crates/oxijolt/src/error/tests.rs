@@ -111,7 +111,7 @@ fn shape_error_variants_display_their_payload() {
     );
     assert_eq!(
         ShapeError::Mesh(MeshError::NoTriangles).to_string(),
-        "invalid triangle mesh: no triangle is left after removing degenerate and duplicate ones"
+        "invalid triangle mesh: no triangle is left after dropping small, thin, degenerate and duplicate ones"
     );
     let message = JoltMessage::from_c_buffer(b"Too few points\0garbage");
     assert_eq!(

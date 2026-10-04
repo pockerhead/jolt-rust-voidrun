@@ -15,22 +15,28 @@ fn quad() -> (Vec<Vec3>, Vec<[u32; 3]>) {
     )
 }
 
-fn invalid_settings(result: Result<Shape, ShapeError>) -> bool {
+fn invalid_settings<T>(result: Result<T, ShapeError>) -> bool {
     matches!(result, Err(ShapeError::InvalidSettings(_)))
 }
 
-fn invalid_dimensions(result: Result<Shape, ShapeError>) -> bool {
+fn invalid_dimensions<T>(result: Result<T, ShapeError>) -> bool {
     matches!(result, Err(ShapeError::InvalidDimensions(_)))
 }
 
-fn no_triangles(result: Result<Shape, ShapeError>) -> bool {
+fn no_triangles<T>(result: Result<T, ShapeError>) -> bool {
     matches!(result, Err(ShapeError::Mesh(MeshError::NoTriangles)))
+}
+
+/// The input indices of the triangles `collidable_triangles` keeps.
+fn kept(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Vec<usize> {
+    collidable_triangles(vertices, triangles).0
 }
 
 #[test]
 fn unit_quad_builds_a_mesh() {
     let (vertices, triangles) = quad();
-    let mesh = Shape::new_mesh(&vertices, &triangles).unwrap();
+    let (mesh, dropped) = Shape::new_mesh(&vertices, &triangles).unwrap();
+    assert!(dropped.is_empty());
     assert_eq!(mesh.sub_type(), JPH_ShapeSubType_Mesh);
     assert!(mesh.must_be_static());
 }
@@ -161,12 +167,13 @@ fn triangles_carry_their_materials() {
         &triangles,
         &MeshSettings::default().materials(&[&a, &b], &[1, 0]),
     )
-    .unwrap();
+    .unwrap()
+    .0;
     drop((a, b));
     // Triangle [0, 1, 2] covers x < z, triangle [0, 2, 3] covers x > z.
     assert_eq!(material_under(&mesh, 0.2, 0.8), Some(6));
     assert_eq!(material_under(&mesh, 0.8, 0.2), Some(5));
-    let plain = Shape::new_mesh(&vertices, &triangles).unwrap();
+    let (plain, _) = Shape::new_mesh(&vertices, &triangles).unwrap();
     assert_eq!(material_under(&plain, 0.2, 0.8), None);
 }
 
@@ -184,8 +191,8 @@ fn meshes_without_usable_triangles_are_refused() {
     ];
     assert!(no_triangles(Shape::new_mesh(&collinear, &[[0, 1, 2]])));
 
-    // Two slivers 1000 m apart: each has a 2e-4 m edge, below the 21-bit quantization step of
-    // the mesh's 1000 m bounds, while its area is above Jolt's float degeneracy test.
+    // Two 0.2 mm by 10 cm slivers, one at the origin and one 1000 m out on every axis, where
+    // the rounding of its coordinates alone is wider than the sliver.
     let sliver = |at: f32| {
         [
             Vec3::new(at, at, at),
@@ -194,23 +201,28 @@ fn meshes_without_usable_triangles_are_refused() {
         ]
     };
     let vertices: Vec<Vec3> = sliver(0.0).into_iter().chain(sliver(1000.0)).collect();
-    let slivers = [[0, 1, 2], [3, 4, 5]];
-    assert!(no_triangles(Shape::new_mesh(&vertices, &slivers)));
+    assert!(no_triangles(Shape::new_mesh(&vertices, &[[3, 4, 5]])));
+    // The far sliver does not widen the bounds, so the near one keeps a fine quantization.
+    let (_, dropped) = Shape::new_mesh(&vertices, &[[0, 1, 2], [3, 4, 5]]).unwrap();
+    assert_eq!(dropped.indices(), [1]);
 
-    // A large triangle keeps the mesh alive next to a collapsing sliver.
+    // A 1000 m floor makes the x quantization step 0.5 mm, which collapses the near sliver's
+    // 0.2 mm edge.
     let mut with_floor = vertices.clone();
     with_floor.extend([
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 0.0, 1000.0),
         Vec3::new(1000.0, 0.0, 0.0),
     ]);
-    assert!(Shape::new_mesh(&with_floor, &[[0, 1, 2], [6, 7, 8]]).is_ok());
+    let (_, dropped) = Shape::new_mesh(&with_floor, &[[0, 1, 2], [6, 7, 8]]).unwrap();
+    assert_eq!(dropped.indices(), [0]);
 }
 
 #[test]
 fn duplicate_triangles_build() {
     let (vertices, _) = quad();
-    assert!(Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 1, 2], [1, 2, 0]]).is_ok());
+    let (_, dropped) = Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 1, 2], [1, 2, 0]]).unwrap();
+    assert!(dropped.is_empty(), "Jolt keeps one copy; nothing is lost");
 }
 
 #[test]
@@ -264,7 +276,7 @@ fn child(shape: &Shape, x: f32) -> CompoundChild<'_> {
 #[test]
 fn kinematic_eligibility_looks_through_compounds_and_decorators() {
     let (vertices, triangles) = quad();
-    let mesh = Shape::new_mesh(&vertices, &triangles).unwrap();
+    let (mesh, _) = Shape::new_mesh(&vertices, &triangles).unwrap();
     let block = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
     let field = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
     let offset_mesh = Shape::new_offset_center_of_mass(&mesh, Vec3::new(0.1, 0.0, 0.0)).unwrap();
@@ -287,11 +299,11 @@ fn kinematic_eligibility_looks_through_compounds_and_decorators() {
 
 #[test]
 fn slivers_that_collapse_under_quantization_are_dropped() {
-    // The repeated-index triangle widens the bounds of Jolt's first clean-up pass to x = -1000.
-    // Within those bounds the sliver's 3e-4 m edge spans two quantization cells; once the
-    // degenerate triangle is gone the bounds start at x = 0 and the edge collapses, which
-    // Jolt's shape constructor refused ("Triangle 1 is degenerate!") before slivers were
-    // dropped in Rust.
+    // Without the Rust filter, the repeated-index triangle widens the bounds of Jolt's first
+    // clean-up pass to x = -1000, where the sliver's 3e-4 m edge spans two quantization cells;
+    // once the degenerate triangle is gone the bounds start at x = 0, the edge collapses and
+    // Jolt's shape constructor refuses the mesh ("Triangle 1 is degenerate!"). The filter
+    // drops both: the sliver is thinner than the rounding of its 640 m distance.
     let x = f32::from_bits(0x43c8_0055);
     let vertices = [
         Vec3::new(0.0, 0.0, 0.0),
@@ -303,8 +315,9 @@ fn slivers_that_collapse_under_quantization_are_dropped() {
         Vec3::new(x, 0.6, 500.0),
     ];
     let triangles = [[0, 1, 2], [3, 3, 0], [4, 5, 6]];
-    assert_eq!(collidable_triangles(&vertices, &triangles), [0]);
-    assert!(Shape::new_mesh(&vertices, &triangles).is_ok());
+    assert_eq!(kept(&vertices, &triangles), [0]);
+    let (_, dropped) = Shape::new_mesh(&vertices, &triangles).unwrap();
+    assert_eq!(dropped.indices(), [1, 2]);
 }
 
 #[test]
@@ -318,24 +331,105 @@ fn small_and_thin_triangles_are_dropped() {
             Vec3::new(leg, 0.0, 0.0),
         ]
     };
-    assert_eq!(collidable_triangles(&triangle(0.0032), &[[0, 1, 2]]), [0]);
-    assert!(collidable_triangles(&triangle(0.0031), &[[0, 1, 2]]).is_empty());
+    assert_eq!(kept(&triangle(0.0032), &[[0, 1, 2]]), [0]);
+    assert!(kept(&triangle(0.0031), &[[0, 1, 2]]).is_empty());
     assert!(no_triangles(Shape::new_mesh(
         &triangle(0.0031),
         &[[0, 1, 2]]
     )));
-    // A 10 m sliver 1e-5 m wide has a cross product of 1e-4, above the floor, but its margin
-    // for a 10 m mesh is 8 * (10 / 2^21 + rounding) * 10, about 4e-4.
+    // A 10 m sliver 1e-5 m wide has a cross product of 1e-4, above the floor, but each corner
+    // can move by about 5e-6 m across it (rounding of 10 m coordinates), which changes the
+    // cross product by up to 10 m times the width change: about 1.4e-4, doubled.
     let sliver = [
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(10.0, 0.0, 0.0),
         Vec3::new(5.0, 0.0, 1.0e-5),
     ];
-    assert!(collidable_triangles(&sliver, &[[0, 1, 2]]).is_empty());
+    assert!(kept(&sliver, &[[0, 1, 2]]).is_empty());
     let wide = [
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(10.0, 0.0, 0.0),
         Vec3::new(5.0, 0.0, 1.0e-3),
     ];
-    assert_eq!(collidable_triangles(&wide, &[[0, 1, 2]]), [0]);
+    assert_eq!(kept(&wide, &[[0, 1, 2]]), [0]);
+}
+
+/// A 1 m by 1 cm patch at the origin and a 10 m triangle 1500 m out along x: the mixed scales of
+/// a level mesh. The far triangle makes the x quantization step 0.7 mm and the z step 5 um.
+fn patch_and_far_triangle() -> Vec<Vec3> {
+    vec![
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 0.01),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(1500.0, 0.0, 0.0),
+        Vec3::new(1500.0, 0.0, 10.0),
+        Vec3::new(1510.0, 0.0, 0.0),
+    ]
+}
+
+#[test]
+fn thin_patches_survive_far_geometry() {
+    let vertices = patch_and_far_triangle();
+    // Each axis has its own step: the patch's 1 cm lies along z, where the step is fine.
+    let (_, dropped) = Shape::new_mesh(&vertices, &[[0, 1, 2], [3, 4, 5]]).unwrap();
+    assert!(dropped.is_empty());
+    // A degenerate far triangle does not widen the bounds.
+    let (_, dropped) = Shape::new_mesh(&vertices, &[[0, 1, 2], [3, 3, 3]]).unwrap();
+    assert_eq!(dropped.indices(), [1]);
+    // A 2 mm wide patch spans 400 steps of z but under 3 of x (0.7 mm): kept along z, dropped
+    // when turned across x.
+    let mut narrow = vertices.clone();
+    narrow[1] = Vec3::new(0.0, 0.0, 0.002);
+    let (_, dropped) = Shape::new_mesh(&narrow, &[[0, 1, 2], [3, 4, 5]]).unwrap();
+    assert!(dropped.is_empty());
+    narrow[1] = Vec3::new(0.002, 0.0, 0.0);
+    narrow[2] = Vec3::new(0.0, 0.0, 1.0);
+    let (_, dropped) = Shape::new_mesh(&narrow, &[[0, 2, 1], [3, 4, 5]]).unwrap();
+    assert_eq!(dropped.indices(), [0]);
+}
+
+#[test]
+fn dropped_triangles_are_reported_with_their_area() {
+    let (mut vertices, _) = quad();
+    // A right triangle with 3 mm legs: twice its area, 9e-6 m², is below the 1e-5 floor.
+    vertices.extend([
+        Vec3::new(2.0, 0.0, 0.0),
+        Vec3::new(2.0, 0.0, 0.003),
+        Vec3::new(2.003, 0.0, 0.0),
+    ]);
+    let triangles = [[0, 1, 2], [0, 0, 3], [4, 5, 6], [0, 2, 3]];
+    let (_, dropped) = Shape::new_mesh(&vertices, &triangles).unwrap();
+    assert_eq!(dropped.count(), 2);
+    assert_eq!(dropped.indices(), [1, 2]);
+    assert!(
+        (dropped.area() - 4.5e-6).abs() < 1.0e-9,
+        "{}",
+        dropped.area()
+    );
+    assert!(!dropped.is_empty());
+}
+
+#[test]
+fn materials_follow_the_input_triangles_past_dropped_ones() {
+    let list: Vec<PhysicsMaterial> = (0..3)
+        .map(|i| PhysicsMaterial::new(20 + i).unwrap())
+        .collect();
+    let refs: Vec<&PhysicsMaterial> = list.iter().collect();
+    let (vertices, _) = quad();
+    // The repeated-index triangle in the middle carries its own material and is dropped.
+    let triangles = [[0, 1, 2], [1, 1, 3], [0, 2, 3]];
+    let settings = MeshSettings::default().materials(&refs, &[1, 2, 0]);
+    let (mesh, dropped) = Shape::new_mesh_with_settings(&vertices, &triangles, &settings).unwrap();
+    assert_eq!(dropped.indices(), [1]);
+    assert_eq!(material_under(&mesh, 0.2, 0.8), Some(21));
+    assert_eq!(material_under(&mesh, 0.8, 0.2), Some(20));
+
+    // The mixed-scale patch keeps its material next to the far triangle.
+    let vertices = patch_and_far_triangle();
+    let settings = MeshSettings::default().materials(&refs, &[2, 1]);
+    let (mesh, dropped) =
+        Shape::new_mesh_with_settings(&vertices, &[[0, 1, 2], [3, 4, 5]], &settings).unwrap();
+    assert!(dropped.is_empty());
+    assert_eq!(material_under(&mesh, 0.5, 0.002), Some(22));
+    assert_eq!(material_under(&mesh, 1501.0, 1.0), Some(21));
 }

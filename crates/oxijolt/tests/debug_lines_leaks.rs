@@ -26,7 +26,7 @@ fn debug_lines_do_not_leak() {
     let mut scene = wireframe_scene();
     // A static mesh near the origin: Jolt builds its debug geometry once, on the first draw.
     let (vertices, triangles) = common::meshes::grid(8, 1.0, |x, z| 0.1 * (x + z).sin());
-    let mesh = Shape::new_mesh(&vertices, &triangles).unwrap();
+    let (mesh, _) = Shape::new_mesh(&vertices, &triangles).unwrap();
     scene
         .world
         .create_body(

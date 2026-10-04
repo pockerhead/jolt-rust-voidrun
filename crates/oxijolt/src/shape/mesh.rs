@@ -4,7 +4,7 @@ use std::ptr::null;
 
 use oxijolt_sys::*;
 
-use super::geometry::{cross, length_sq, sub, v3, V3};
+use super::geometry::{cross, length, length_sq, sub, v3, V3};
 use super::{initialize, Shape, ShapeSettings};
 use crate::{limits, MeshError, PhysicsMaterial, ShapeError, Vec3};
 
@@ -16,9 +16,12 @@ const MAX_TRIANGLES_PER_LEAF: u32 = 8;
 /// times the cross product below which Jolt's collision detection asserts on a triangle
 /// (`EPAPenetrationDepth::GetPenetrationDepthStepGJK`, `IsNearZero` at 1e-12 squared).
 const MIN_TRIANGLE_CROSS: f64 = 1.0e-5;
-/// How many vertex displacements times the longest edge a triangle's cross product must keep
-/// above [`MIN_TRIANGLE_CROSS`]; see [`collidable_triangles`].
-const CROSS_ROUNDING_FACTOR: f64 = 8.0;
+/// How many times the largest change Jolt's rounding can make to a triangle's cross product the
+/// cross product must keep above [`MIN_TRIANGLE_CROSS`]; see [`is_collidable`].
+const CROSS_ERROR_MARGIN: f64 = 2.0;
+/// Steps of Jolt's 21-bit vertex quantization across a mesh's bounds on each axis
+/// (`TriangleCodecIndexed8BitPackSOA4Flags::COMPONENT_MASK`).
+const QUANTIZATION_STEPS: f64 = ((1u32 << 21) - 1) as f64;
 
 /// How Jolt builds a mesh's bounding volume tree (Jolt `MeshShapeSettings::EBuildQuality`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -164,24 +167,75 @@ fn validate_geometry(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Result<(), Sh
     Ok(())
 }
 
+/// The triangles [`Shape::new_mesh`] left out because they are too small or too thin for Jolt to
+/// collide with reliably (degenerate triangles among them).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DroppedTriangles {
+    indices: Vec<usize>,
+    area: f64,
+}
+
+impl DroppedTriangles {
+    /// How many triangles were dropped.
+    pub fn count(&self) -> usize {
+        self.indices.len()
+    }
+
+    /// Whether every triangle was kept.
+    pub fn is_empty(&self) -> bool {
+        self.indices.is_empty()
+    }
+
+    /// The positions of the dropped triangles in the `triangles` given to the constructor, in
+    /// ascending order.
+    pub fn indices(&self) -> &[usize] {
+        &self.indices
+    }
+
+    /// The total area of the dropped triangles, m².
+    pub fn area(&self) -> f32 {
+        self.area as f32
+    }
+
+    fn push(&mut self, index: usize, [a, b, c]: [V3; 3]) {
+        self.indices.push(index);
+        self.area += 0.5 * length(cross(sub(b, a), sub(c, a)));
+    }
+}
+
 impl Shape {
     /// A triangle mesh of `vertices` (shape space, metres) and `triangles` (three indices into
-    /// `vertices` each) with [`MeshSettings::default`]; see
+    /// `vertices` each) with [`MeshSettings::default`], and the triangles it dropped; see
     /// [`new_mesh_with_settings`](Self::new_mesh_with_settings).
-    pub fn new_mesh(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Result<Self, ShapeError> {
+    pub fn new_mesh(
+        vertices: &[Vec3],
+        triangles: &[[u32; 3]],
+    ) -> Result<(Self, DroppedTriangles), ShapeError> {
         Self::new_mesh_with_settings(vertices, triangles, &MeshSettings::default())
     }
 
     /// A triangle mesh of `vertices` (shape space, metres) and `triangles` (three indices into
-    /// `vertices` each).
+    /// `vertices` each), and the triangles it dropped.
     ///
     /// A triangle's front face is the side from which its vertices run counter-clockwise.
-    /// Triangles too small or too thin for Jolt to collide with reliably are dropped: twice
-    /// their area must be at least 1e-5 m² plus a margin for Jolt's 21-bit vertex quantization
-    /// and `f32` rounding, which grows with the mesh's size and distance from the shape origin
-    /// ([docs/limits.md#triangle-meshes]). Jolt itself drops degenerate triangles (also those
-    /// that become degenerate under its quantization) and duplicates, and reorders the rest,
-    /// so sub-shape ids do not follow the input order. Closest-hit rays hit back faces too.
+    /// Triangles too small or too thin for Jolt to collide with reliably are dropped and
+    /// reported in [`DroppedTriangles`]: twice a triangle's area must be at least 1e-5 m² plus
+    /// twice the largest change Jolt's 21-bit vertex quantization and `f32` rounding can make
+    /// to it. That margin follows the triangle's own shape and distance from the shape origin
+    /// and the quantization step of the mesh's bounds on each axis
+    /// ([docs/limits.md#triangle-meshes]). Jolt itself keeps one copy of duplicate triangles
+    /// and reorders the rest, so sub-shape ids do not follow the input order. Closest-hit rays
+    /// hit back faces too.
+    ///
+    /// ```
+    /// # use oxijolt::{Shape, Vec3};
+    /// let vertices = [Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0)];
+    /// // The second triangle repeats a vertex.
+    /// let (mesh, dropped) = Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 0, 1]])?;
+    /// assert_eq!(dropped.indices(), [1]);
+    /// # drop(mesh);
+    /// # Ok::<(), oxijolt::ShapeError>(())
+    /// ```
     ///
     /// Meshes have no volume. They suit static bodies, and kinematic bodies with an explicit
     /// [`BodySettings::mass`](crate::BodySettings::mass);
@@ -206,11 +260,11 @@ impl Shape {
         vertices: &[Vec3],
         triangles: &[[u32; 3]],
         settings: &MeshSettings<'_>,
-    ) -> Result<Self, ShapeError> {
+    ) -> Result<(Self, DroppedTriangles), ShapeError> {
         validate_geometry(vertices, triangles)?;
         settings.validate(triangles.len())?;
         initialize()?;
-        let kept = collidable_triangles(vertices, triangles);
+        let (kept, dropped) = collidable_triangles(vertices, triangles);
         if kept.is_empty() {
             return Err(ShapeError::Mesh(MeshError::NoTriangles));
         }
@@ -222,62 +276,94 @@ impl Shape {
         if unsafe { JPH_MeshShapeSettings_GetTriangleCount(mesh) } == 0 {
             return Err(ShapeError::Mesh(MeshError::NoTriangles));
         }
-        jolt_settings.create()?.within_extent_bounds()
+        let shape = jolt_settings.create()?.within_extent_bounds()?;
+        Ok((shape, dropped))
     }
 }
 
-/// The indices of the triangles Jolt can collide with reliably, in input order.
+/// The indices of the triangles Jolt can collide with reliably, in input order, and the rest.
 ///
-/// Jolt stores vertices quantized to 21 bits over the mesh's bounds and transforms them into
-/// the other shape's space in `f32` when it collides, so each vertex can move by about one
-/// quantization step plus a few `f32` roundings of the largest coordinate. A triangle whose
-/// cross product could shrink below Jolt's collision threshold under such moves is dropped like
-/// a degenerate one: it is too small or too thin to collide with. See
-/// [docs/limits.md#triangle-meshes].
+/// Jolt stores vertices quantized to 21 bits over the bounds of the triangles it keeps, one step
+/// per axis. A triangle that fails [`is_collidable`] without quantization fails with any, so the
+/// bounds leave it out; the triangles kept then lie within bounds no larger than those Jolt
+/// quantizes over. See [docs/limits.md#triangle-meshes].
 ///
 /// [docs/limits.md#triangle-meshes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#triangle-meshes
-fn collidable_triangles(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Vec<usize> {
-    let corner = |index: u32| v3(vertices[index as usize]);
-    let mut low = [f64::INFINITY; 3];
-    let mut high = [f64::NEG_INFINITY; 3];
-    for &index in triangles.iter().flatten() {
-        let v = corner(index);
-        for axis in 0..3 {
-            low[axis] = low[axis].min(v[axis]);
-            high[axis] = high[axis].max(v[axis]);
+fn collidable_triangles(
+    vertices: &[Vec3],
+    triangles: &[[u32; 3]],
+) -> (Vec<usize>, DroppedTriangles) {
+    let corners = |triangle: &[u32; 3]| triangle.map(|index| v3(vertices[index as usize]));
+    let candidates = triangles
+        .iter()
+        .map(corners)
+        .filter(|&corners| is_collidable(corners, [0.0; 3]));
+    let step = quantization_step(candidates);
+    let mut kept = Vec::new();
+    let mut dropped = DroppedTriangles::default();
+    for (index, triangle) in triangles.iter().enumerate() {
+        let corners = corners(triangle);
+        if is_collidable(corners, step) {
+            kept.push(index);
+        } else {
+            dropped.push(index, corners);
         }
     }
-    let step = (0..3)
-        .map(|axis| (high[axis] - low[axis]) / f64::from((1u32 << 21) - 1))
-        .fold(0.0, f64::max);
-    let largest = (0..3)
-        .map(|axis| low[axis].abs().max(high[axis].abs()))
-        .fold(0.0, f64::max);
-    let displacement = step + rounding_displacement(largest);
-    triangles
-        .iter()
-        .enumerate()
-        .filter(|(_, triangle)| is_collidable(triangle.map(corner), displacement))
-        .map(|(index, _)| index)
-        .collect()
+    (kept, dropped)
 }
 
-/// How far Jolt's `f32` transform into another shape's space can move a vertex of a shape
-/// whose largest absolute coordinate is `largest`, metres.
-pub(super) fn rounding_displacement(largest: f64) -> f64 {
-    4.0 * f64::from(f32::EPSILON) * largest
+/// The step of Jolt's vertex quantization on each axis over the bounds of `triangles`; zero for
+/// none.
+fn quantization_step(triangles: impl Iterator<Item = [V3; 3]>) -> V3 {
+    let mut low = [f64::INFINITY; 3];
+    let mut high = [f64::NEG_INFINITY; 3];
+    for vertex in triangles.flatten() {
+        for axis in 0..3 {
+            low[axis] = low[axis].min(vertex[axis]);
+            high[axis] = high[axis].max(vertex[axis]);
+        }
+    }
+    [0, 1, 2].map(|axis| ((high[axis] - low[axis]) / QUANTIZATION_STEPS).max(0.0))
 }
 
-/// Whether a triangle with `corners` keeps a cross product above [`MIN_TRIANGLE_CROSS`] when each
-/// corner moves by up to `displacement` metres, with a factor [`CROSS_ROUNDING_FACTOR`] of margin.
-pub(super) fn is_collidable([a, b, c]: [V3; 3], displacement: f64) -> bool {
-    let (ab, ac, bc) = (sub(b, a), sub(c, a), sub(c, b));
-    let longest = [ab, ac, bc]
-        .map(|edge| length_sq(edge).sqrt())
-        .into_iter()
-        .fold(0.0, f64::max);
-    length_sq(cross(ab, ac)).sqrt()
-        >= MIN_TRIANGLE_CROSS + CROSS_ROUNDING_FACTOR * displacement * longest
+/// How far Jolt's `f32` transform into another shape's space can move a vertex at `distance`
+/// metres from the origin of the coordinates it transforms.
+fn rounding_displacement(distance: f64) -> f64 {
+    4.0 * f64::from(f32::EPSILON) * distance
+}
+
+/// Whether the triangle with `corners` keeps a cross product above [`MIN_TRIANGLE_CROSS`] under
+/// Jolt's rounding, with a factor [`CROSS_ERROR_MARGIN`] to spare.
+///
+/// Each corner can move by up to `step[axis]` on each axis (the quantization of a mesh being
+/// built, zero for triangles Jolt has stored) plus [`rounding_displacement`] of the triangle's
+/// distance from the origin; an edge moves by the difference of two corner moves. With edges
+/// `ab`, `ac` moved by `e1`, `e2`, the cross product changes by `ab × e2 + e1 × ac + e1 × e2`. Its
+/// length is at least its component along the unit normal `n`, which changes by
+/// `e2 · (n × ab) + e1 · (ac × n) + n · (e1 × e2)`: moves within the triangle's plane across an
+/// edge shrink it, moves out of the plane do not. Jolt's `f32` cross product rounds it once more.
+pub(super) fn is_collidable(corners: [V3; 3], step: V3) -> bool {
+    let [a, b, c] = corners;
+    let (ab, ac) = (sub(b, a), sub(c, a));
+    let normal = cross(ab, ac);
+    let twice_area = length(normal);
+    if twice_area < MIN_TRIANGLE_CROSS {
+        return false;
+    }
+    let unit = normal.map(|component| component / twice_area);
+    let distance = corners.map(length).into_iter().fold(0.0, f64::max);
+    let rounding = rounding_displacement(distance);
+    let edge_move = step.map(|axis_step| 2.0 * (axis_step + rounding));
+    let change = reach(cross(unit, ab), edge_move)
+        + reach(cross(ac, unit), edge_move)
+        + length_sq(edge_move)
+        + 2.0 * f64::from(f32::EPSILON) * length(ab) * length(ac);
+    twice_area >= MIN_TRIANGLE_CROSS + CROSS_ERROR_MARGIN * change
+}
+
+/// The largest `|e · direction|` over every `e` with `|e[axis]| <= bound[axis]`.
+fn reach(direction: V3, bound: V3) -> f64 {
+    (0..3).map(|axis| bound[axis] * direction[axis].abs()).sum()
 }
 
 /// Jolt mesh settings holding the validated geometry, of the triangles `kept`, and `settings`.

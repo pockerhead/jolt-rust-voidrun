@@ -42,7 +42,7 @@ impl Scene {
         let (vertices, triangles) = grid(24, 1.0, |x, z| 0.3 * (0.4 * x).sin() * (0.3 * z).cos());
         let indices: Vec<u8> = (0..triangles.len()).map(|i| (i / 2 % 2) as u8).collect();
         let list = [&materials[0], &materials[1]];
-        let ground_shape = Shape::new_mesh_with_settings(
+        let (ground_shape, _) = Shape::new_mesh_with_settings(
             &vertices,
             &triangles,
             &MeshSettings::default().materials(&list, &indices),

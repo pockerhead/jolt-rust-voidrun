@@ -68,24 +68,40 @@ index against the vertex count, because Jolt's clean-up reads `vertices[index]` 
 are at most `i32::MAX`, the index type of Jolt's clean-up and edge search. A mesh's local bounds
 are those of its referenced vertices, so the extent bound applies to the vertices themselves.
 
-Jolt stores the vertices quantized to 21 bits over the mesh's bounds
-(`TriangleCodecIndexed8BitPackSOA4Flags`) and, when it collides a triangle, transforms it into the
-other shape's space in `f32`. Its collision then asserts when the triangle's cross product
-`(v1 - v0) × (v2 - v0)` is shorter than 1e-6 (`IsNearZero` in
-`Geometry/EPAPenetrationDepth.h:113`; Jolt's comment there blames slivers). The constructor
-therefore drops, like Jolt's degenerate triangles, every triangle whose cross product is below
-`1e-5 + 8 · d · e`, where `e` is its longest edge and `d` the distance a vertex can move: one
-quantization step (the largest side of the bounds over `2^21 - 1`) plus `4 · FLT_EPSILON` times the
-largest coordinate. A right triangle with legs of 3.2 mm near the origin is kept and one with legs
-of 3.1 mm dropped; a sliver 10 m long near the origin must be about 0.08 mm wide. The seeded stress runs that found
-`EPAPenetrationDepth.h:113` with sliver soups (third vertices 1e-7 to 1e-3 of the mesh size from
-the first) dropped four probes on every fourth accepted mesh without an assertion afterwards,
-over four seeds of 1500 meshes each.
+Jolt stores the vertices quantized to 21 bits over the bounds of the triangles it keeps, with one
+step per axis (`TriangleCodecIndexed8BitPackSOA4Flags`), and, when it collides a triangle, scales it
+and transforms it into the other shape's space in `f32` (`CollideConvexVsTriangles::Collide`). Its
+collision then asserts when the triangle's cross product `(v1 - v0) × (v2 - v0)` is shorter than
+1e-6 (`IsNearZero` in `Geometry/EPAPenetrationDepth.h:113`; Jolt's comment there blames slivers).
+The constructor therefore drops a triangle, and reports it in `DroppedTriangles`, unless twice its
+area is at least `1e-5 + 2 · Δ`, where `Δ` bounds how much the cross product can shrink:
 
-Once these triangles are gone, Jolt's own clean-up can only drop duplicates. One clean-up pass
-alone is not enough without the margin: removing triangles shrinks the bounds and moves the
-quantization grid, so a sliver that survived the pass can collapse in the shape constructor, which
-then refuses the mesh (`MeshShape.cpp:133-143`).
+- each corner can move by the quantization step on each axis (the bounds' side on that axis over
+  `2^21 - 1`) plus `4 · FLT_EPSILON` times the triangle's largest distance from the shape origin,
+  the `f32` rounding of the transform; an edge moves by twice that;
+- with edges `ab`, `ac` moved by `e1`, `e2`, the cross product's length is at least its component
+  along the unmoved unit normal `n`, which changes by `e2 · (n × ab) + e1 · (ac × n) + n · (e1 ×
+  e2)`. The first two terms are bounded per axis, the third by `|e1| |e2|`; Jolt's `f32` cross
+  product adds `2 · FLT_EPSILON · |ab| |ac|`.
+
+Moves within the triangle's plane across an edge shrink it; moves along an edge or out of the plane
+do not, so a thin strip keeps its width wherever the quantization along its narrow direction is
+fine. A right triangle with legs of 3.2 mm near the origin is kept and one with legs of 3.1 mm
+dropped; a strip 10 m long near the origin must be about 0.03 mm wide. In a level mesh with one
+triangle 1500 m out along x, the x step is 0.7 mm and the z step 5 µm: a 1 m by 2 mm strip is kept
+when its 2 mm lie along z and dropped when they lie along x. Triangles that fail the rule without any
+quantization are left out of the bounds first; they are dropped either way, and a far degenerate
+triangle then does not coarsen the grid for the others.
+
+Every triangle that survives keeps the same rule under Jolt's actual bounds, which are those of the
+surviving triangles and so no larger, so Jolt's own clean-up only drops duplicates (keeping one
+copy). The seeded stress (`tests/shape_stress.rs`), which found `EPAPenetrationDepth.h:113` with
+sliver soups, includes level-like grids carrying strips 1 µm to 1 cm wide next to far triangles
+along x, along z or below, and drops its probes onto every such mesh. Under Jolt's asserts it passed
+at ten times its size for three more seeds (about 220 000 triangles of these meshes kept, 150 000
+dropped). With the margin set to 0 the
+stress fails on a collapsing sliver that Jolt refuses, and with the floor at 1e-9 as well it hits
+the assertion.
 
 ## Scaled shapes
 
@@ -99,8 +115,15 @@ infinity through, so the constructor checks that the components are finite first
 What the scale can break is checked on the result: the scaled bounds against `MAX_SHAPE_EXTENT`,
 the scaled centre of mass (bounds are relative to it, and a compound's centre of mass moves with the
 scale) against the same bound, and every stored triangle of a mesh or heightfield inside the shape
-against the triangle floor of [Triangle meshes](#triangle-meshes), with the rounding of the scaled
-coordinates. Mass and inertia scale with the shape and go through the mass range and the
+against the triangle rule of [Triangle meshes](#triangle-meshes) without its quantization term (the
+stored triangles are quantized already). The coordinates checked are the ones Jolt rounds: a mesh's
+own stored coordinates times the scale accumulated above it, turned by the rotations above it. Jolt
+folds compound child positions, rotated-translated positions and centre-of-mass offsets into the
+transform it applies afterwards (`ScaledShape`, `RotatedTranslatedShape`, `OffsetCenterOfMassShape`
+and `CompoundShape` collision dispatch), so they move a triangle without changing its rounding: a
+mesh built 1000 m from its own origin keeps the rounding of 1000 m coordinates however far an offset
+moves its centre of mass, and a small mesh at its origin keeps its precision when the centre of mass
+is far away. Mass and inertia scale with the shape and go through the mass range and the
 [rigid body inertia](#rigid-body-inertia) floor when a moving body is created; a static body
 computes no mass. A diagonal inertia must have positive moments: Jolt's `MassProperties::Scale`
 rebuilds the diagonal from differences that can round below zero for thin shapes.

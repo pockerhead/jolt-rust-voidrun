@@ -210,8 +210,8 @@ pub use ragdoll::{
     RagdollSettings, SettleDetector, Skeleton, SkeletonJoint, SkeletonPose,
 };
 pub use shape::{
-    CompoundChild, CompoundSubShape, HeightFieldSettings, MeshBuildQuality, MeshSettings, Shape,
-    SubShapeId,
+    CompoundChild, CompoundSubShape, DroppedTriangles, HeightFieldSettings, MeshBuildQuality,
+    MeshSettings, Shape, SubShapeId,
 };
 pub use soft_body::{
     LongRangeAttachment, SoftBodyBendType, SoftBodyDihedralBend, SoftBodyEdge, SoftBodyMut,

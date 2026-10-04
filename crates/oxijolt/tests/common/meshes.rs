@@ -30,7 +30,9 @@ pub fn grid(cells: u32, cell: f32, height: impl Fn(f32, f32) -> f32) -> (Vec<Vec
 /// A flat grid mesh at y = 0, `cells` x `cells` cells of `cell` metres.
 pub fn flat_grid(cells: u32, cell: f32) -> Shape {
     let (vertices, triangles) = grid(cells, cell, |_, _| 0.0);
-    Shape::new_mesh(&vertices, &triangles).unwrap()
+    let (mesh, dropped) = Shape::new_mesh(&vertices, &triangles).unwrap();
+    assert!(dropped.is_empty());
+    mesh
 }
 
 /// The eight corners of a box with the given half extents.

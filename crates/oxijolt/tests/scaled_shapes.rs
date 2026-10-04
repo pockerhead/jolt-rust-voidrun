@@ -51,6 +51,27 @@ fn non_uniformly_scaled_hull_and_box_rest_on_a_mesh() {
 }
 
 #[test]
+fn scaled_mesh_with_a_far_centre_of_mass_carries_a_cube() {
+    // A small mesh whose centre of mass sits 1950 m away once scaled: Jolt collides the mesh's
+    // own coordinates and folds the offset into the transform, so the triangles keep their
+    // precision and a cube rests on them as on the plain mesh.
+    let (vertices, triangles) = grid(4, 0.5, |_, _| 0.0);
+    let (mesh, _) = Shape::new_mesh(&vertices, &triangles).unwrap();
+    let away = Shape::new_offset_center_of_mass(&mesh, Vec3::new(-1300.0, 0.0, 0.0)).unwrap();
+    let ground = Shape::scaled(&away, Vec3::new(1.5, 1.0, 1.5)).unwrap();
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    world
+        .create_body(&ground, &BodySettings::new_static())
+        .unwrap();
+    let cube = add_cube(&mut world, RVec3::new(0.2, 1.0, -0.1));
+    step(&mut world, 180);
+    let body = world.body(cube).unwrap();
+    assert!(is_calm(&body));
+    let y = f32_of(body.position().y);
+    assert!((0.4799..0.51).contains(&y), "{y}");
+}
+
+#[test]
 fn mirrored_mesh_faces_the_other_way() {
     let mirrored = Shape::scaled(&flat_grid(4, 1.0), Vec3::new(1.0, -1.0, 1.0)).unwrap();
     let mut world = world(Vec3::ZERO, 1);

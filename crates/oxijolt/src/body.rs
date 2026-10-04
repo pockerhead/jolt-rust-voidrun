@@ -312,7 +312,8 @@ impl BodySettings {
     /// `EOverrideMassProperties::CalculateInertia`).
     /// By default Jolt computes mass and inertia from the shape with a density of 1000 kg/m³.
     /// A kinematic body whose shape contains a mesh needs this override: Jolt computes no mass
-    /// for a mesh. Its inertia stays zero, and Jolt uses that of a unit sphere instead.
+    /// for a mesh. A body of a mesh alone has zero inertia, for which Jolt uses that of a unit
+    /// sphere; a compound keeps the inertia of its other children.
     ///
     /// [`PhysicsWorld::create_body`]: crate::PhysicsWorld::create_body
     #[must_use]

@@ -579,7 +579,9 @@ fn square_mesh() -> Shape {
         Vec3::new(1.0, 0.0, 1.0),
         Vec3::new(1.0, 0.0, 0.0),
     ];
-    Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 2, 3]]).unwrap()
+    Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 2, 3]])
+        .unwrap()
+        .0
 }
 
 /// Line count Jolt's debug renderer gives a two-triangle mesh: measured once and pinned.

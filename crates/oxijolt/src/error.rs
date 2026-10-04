@@ -103,14 +103,16 @@ impl std::error::Error for HullError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MeshError {
-    /// Every triangle was degenerate (also after Jolt's vertex quantization) or a duplicate.
+    /// Every triangle was too small, too thin or degenerate to collide with, or a duplicate.
     NoTriangles,
 }
 
 impl fmt::Display for MeshError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::NoTriangles => "no triangle is left after removing degenerate and duplicate ones",
+            Self::NoTriangles => {
+                "no triangle is left after dropping small, thin, degenerate and duplicate ones"
+            }
         })
     }
 }

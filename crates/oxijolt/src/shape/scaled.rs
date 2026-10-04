@@ -4,8 +4,8 @@ use std::ptr::{null, null_mut};
 
 use oxijolt_sys::*;
 
-use super::geometry::{add, diagonal, mul, mul_vec, rotation, v3, M3, V3};
-use super::mesh::{is_collidable, rounding_displacement};
+use super::geometry::{diagonal, mul, mul_vec, rotation, v3, M3, V3};
+use super::mesh::is_collidable;
 use super::{initialize, Shape, ShapeSettings};
 use crate::{limits, ShapeError, Vec3};
 
@@ -21,10 +21,11 @@ impl Shape {
     /// shape; a mirrored mesh's front faces follow the mirrored winding.
     ///
     /// Meshes and heightfields inside the shape must stay collidable: each stored triangle,
-    /// scaled, must keep twice its area above the floor [`Shape::new_mesh`] applies, so
-    /// shrinking a mesh far below the size it was built at is refused
-    /// ([`ShapeError::InvalidSettings`]; [docs/limits.md#scaled-shapes]). The check reads every
-    /// stored triangle once.
+    /// scaled, must pass the rule [`Shape::new_mesh`] applies (without its quantization term,
+    /// the stored triangles are quantized already), so shrinking a mesh far below the size it
+    /// was built at, or flattening it, is refused ([`ShapeError::InvalidSettings`];
+    /// [docs/limits.md#scaled-shapes]). The check reads every stored triangle back from Jolt, so
+    /// its cost grows with the triangle count.
     ///
     /// The scaled shape's local bounds must lie within [`limits::MAX_SHAPE_EXTENT`] on every
     /// axis, and so must its centre of mass, which moves with the scale
@@ -75,36 +76,39 @@ impl Shape {
     }
 }
 
-/// Where a shape inside a scaled shape lies: the linear map and offset from its centre of mass
-/// space to the scaled shape's.
-#[derive(Clone, Copy)]
-struct Placement {
-    linear: M3,
-    offset: V3,
-}
-
-impl Placement {
-    fn apply(&self, v: V3) -> V3 {
-        add(mul_vec(&self.linear, v), self.offset)
-    }
-
-    /// The placement of a part at `position` with `rotation` (as a quaternion) in this one.
-    fn then(&self, position: V3, rotation_xyzw: [f64; 4]) -> Self {
-        Self {
-            linear: mul(&self.linear, &rotation(rotation_xyzw)),
-            offset: self.apply(position),
-        }
-    }
-}
+/// The linear map from the coordinates of a shape inside a scaled shape to those Jolt rounds
+/// when it collides that shape: the scales above it, turned by the rotations between them.
+///
+/// Jolt hands a mesh or heightfield its own stored coordinates times the accumulated scale and
+/// folds every rotation and translation above it (compound child poses, rotated-translated
+/// shapes, centre-of-mass offsets) into the transform it applies afterwards
+/// (`CollisionDispatch::sCollideShapeVsShape` through `ScaledShape`, `RotatedTranslatedShape`,
+/// `OffsetCenterOfMassShape` and `CompoundShape`). A translation moves a triangle without
+/// changing its cross product, and a rotation changes neither its cross product nor its
+/// distance from the origin, so the map leaves translations out.
+type Placement = M3;
 
 /// Whether every stored triangle of the meshes and heightfields in `shape` stays collidable once
-/// scaled by `scale` ([`is_collidable`], with the rounding of the scaled coordinates).
+/// scaled by `scale` ([`is_collidable`] with no quantization: the stored triangles are already
+/// quantized).
 fn triangles_stay_collidable(shape: &Shape, scale: Vec3) -> bool {
-    let root = Placement {
-        linear: diagonal(v3(scale)),
-        offset: [0.0; 3],
+    let Some(leaves) = triangle_leaves(shape, scale) else {
+        return false;
     };
-    let mut pending = vec![(shape.as_ptr(), root)];
+    leaves.iter().all(|&(leaf, placement)| {
+        // SAFETY: `leaf` is a live mesh or heightfield part of `shape` (see `triangle_leaves`).
+        unsafe { placed_triangles(leaf, &placement) }
+            .into_iter()
+            .all(|corners| is_collidable(corners, [0.0; 3]))
+    })
+}
+
+/// The meshes and heightfields in `shape` scaled by `scale`, with their placements; `None` when a
+/// static-only part is of a kind whose triangles this walk cannot reach. The parts are kept alive
+/// by `shape`.
+fn triangle_leaves(shape: &Shape, scale: Vec3) -> Option<Vec<(*const JPH_Shape, Placement)>> {
+    let mut leaves = Vec::new();
+    let mut pending = vec![(shape.as_ptr(), diagonal(v3(scale)))];
     while let Some((part, placement)) = pending.pop() {
         // SAFETY: `part` is `shape`, kept alive by the borrow, or a part of a live shape below,
         // which its parent keeps alive; the getters only read it.
@@ -116,19 +120,16 @@ fn triangles_stay_collidable(shape: &Shape, scale: Vec3) -> bool {
             continue;
         }
         if sub_type == JPH_ShapeSubType_Mesh || sub_type == JPH_ShapeSubType_HeightField {
-            // SAFETY: `part` is live (see above).
-            if !unsafe { stored_triangles_collidable(part, &placement) } {
-                return false;
-            }
+            leaves.push((part, placement));
         } else {
             // SAFETY: `part` is live (see above) and of `sub_type`.
             let known = unsafe { push_parts(part, sub_type, &placement, &mut pending) };
             if !known {
-                return false;
+                return None;
             }
         }
     }
-    true
+    Some(leaves)
 }
 
 /// Pushes the parts of the compound or decorated shape `shape` with their placements; `false`
@@ -142,8 +143,7 @@ unsafe fn push_parts(
     placement: &Placement,
     pending: &mut Vec<(*const JPH_Shape, Placement)>,
 ) -> bool {
-    let quat = |q: JPH_Quat| [q.x, q.y, q.z, q.w].map(f64::from);
-    let mut position = Vec3::ZERO.to_jph();
+    let turned = |q: JPH_Quat| mul(placement, &rotation([q.x, q.y, q.z, q.w].map(f64::from)));
     let mut turn = JPH_Quat {
         x: 0.0,
         y: 0.0,
@@ -156,20 +156,19 @@ unsafe fn push_parts(
         let count = unsafe { JPH_CompoundShape_GetNumSubShapes(compound) };
         for index in 0..count {
             let mut child = null();
-            // SAFETY: as above, `index < count`, and every output is a live local; the child is
-            // kept alive by the compound.
+            // SAFETY: as above, `index < count`, and every output is a live local or null; the
+            // child is kept alive by the compound.
             unsafe {
                 JPH_CompoundShape_GetSubShape(
                     compound,
                     index,
                     &mut child,
-                    &mut position,
+                    null_mut(),
                     &mut turn,
                     null_mut(),
                 );
             }
-            let child_placement = placement.then(v3(Vec3::from_jph(position)), quat(turn));
-            pending.push((child, child_placement));
+            pending.push((child, turned(turn)));
         }
         return true;
     }
@@ -189,56 +188,34 @@ unsafe fn push_parts(
         let mut inner_scale = Vec3::ZERO.to_jph();
         // SAFETY: `shape` is a live scaled shape; `inner_scale` is a live local.
         unsafe { JPH_ScaledShape_GetScale(shape.cast(), &mut inner_scale) };
-        Placement {
-            linear: mul(
-                &placement.linear,
-                &diagonal(v3(Vec3::from_jph(inner_scale))),
-            ),
-            offset: placement.offset,
-        }
+        mul(placement, &diagonal(v3(Vec3::from_jph(inner_scale))))
     } else if sub_type == JPH_ShapeSubType_RotatedTranslated {
-        let rotated: *const JPH_RotatedTranslatedShape = shape.cast();
-        // SAFETY: `shape` is a live rotated-translated shape; the outputs are live locals.
-        unsafe {
-            JPH_RotatedTranslatedShape_GetPosition(rotated, &mut position);
-            JPH_RotatedTranslatedShape_GetRotation(rotated, &mut turn);
-        }
-        placement.then(v3(Vec3::from_jph(position)), quat(turn))
+        // SAFETY: `shape` is a live rotated-translated shape; `turn` is a live local.
+        unsafe { JPH_RotatedTranslatedShape_GetRotation(shape.cast(), &mut turn) };
+        turned(turn)
     } else {
-        // An offset centre of mass moves only the centre of mass; the inner surface stays put.
+        // A centre-of-mass offset only translates.
         *placement
     };
     pending.push((inner, inner_placement));
     true
 }
 
-/// Whether every stored triangle of the mesh or heightfield `shape`, placed by `placement`,
-/// stays collidable.
+/// The stored triangles of the mesh or heightfield `shape`, placed by `placement`.
 ///
 /// # Safety
 /// `shape` is a live mesh or heightfield.
-unsafe fn stored_triangles_collidable(shape: *const JPH_Shape, placement: &Placement) -> bool {
-    // SAFETY: `shape` is live (contract); a null buffer with capacity 0 only counts.
+unsafe fn placed_triangles(shape: *const JPH_Shape, placement: &Placement) -> Vec<[V3; 3]> {
+    // SAFETY: `shape` is a live leaf (contract); a null buffer with capacity 0 only counts.
     let count = unsafe { JPH_Shape_GetTriangles(shape, null_mut(), 0) };
     let mut vertices = vec![Vec3::ZERO.to_jph(); 3 * count as usize];
     // SAFETY: as above; `vertices` holds 3 * count vertices.
     unsafe { JPH_Shape_GetTriangles(shape, vertices.as_mut_ptr(), count) };
     let placed: Vec<V3> = vertices
         .iter()
-        .map(|&vertex| placement.apply(v3(Vec3::from_jph(vertex))))
+        .map(|&vertex| mul_vec(placement, v3(Vec3::from_jph(vertex))))
         .collect();
-    let largest = placed
-        .iter()
-        .flatten()
-        .fold(0.0, |largest: f64, coordinate| {
-            largest.max(coordinate.abs())
-        });
-    let displacement = rounding_displacement(largest);
-    placed
-        .as_chunks::<3>()
-        .0
-        .iter()
-        .all(|&corners| is_collidable(corners, displacement))
+    placed.as_chunks::<3>().0.to_vec()
 }
 
 #[cfg(test)]

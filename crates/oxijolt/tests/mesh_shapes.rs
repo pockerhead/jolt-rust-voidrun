@@ -39,7 +39,9 @@ fn f32_of(value: Real) -> f32 {
 
 fn bumpy_mesh() -> Shape {
     let (vertices, triangles) = grid(CELLS, CELL, bump);
-    Shape::new_mesh(&vertices, &triangles).unwrap()
+    let (mesh, dropped) = Shape::new_mesh(&vertices, &triangles).unwrap();
+    assert!(dropped.is_empty());
+    mesh
 }
 
 fn add_static(world: &mut PhysicsWorld, shape: &Shape) -> BodyId {
@@ -176,7 +178,7 @@ fn contacts_report_the_triangle_material() {
         .collect();
     let refs = [&left, &right];
     let settings = MeshSettings::default().materials(&refs, &indices);
-    let ground = Shape::new_mesh_with_settings(&vertices, &triangles, &settings).unwrap();
+    let (ground, _) = Shape::new_mesh_with_settings(&vertices, &triangles, &settings).unwrap();
     drop(left);
     drop(right);
 
@@ -200,6 +202,79 @@ fn contacts_report_the_triangle_material() {
     assert!(seen.contains(&(east, Some(RIGHT))), "{seen:?}");
     assert!(!seen.contains(&(west, Some(RIGHT))), "{seen:?}");
     assert!(!seen.contains(&(east, Some(LEFT))), "{seen:?}");
+}
+
+#[test]
+fn thin_strips_of_a_wide_level_mesh_carry_a_cube() {
+    const STRIP: u64 = 81;
+    const FAR: u64 = 82;
+    // A 2 m floor of 2 m by 1 cm strips at the origin and a 10 m triangle 1500 m out along x:
+    // the far triangle makes the x quantization step 0.7 mm, while each strip is 1 cm wide
+    // along z, where the step is 5 um.
+    let mut vertices = Vec::new();
+    let mut triangles = Vec::new();
+    for k in 0..200 {
+        let z = k as f32 * 0.01 - 1.0;
+        let base = vertices.len() as u32;
+        vertices.extend([
+            Vec3::new(-1.0, 0.0, z),
+            Vec3::new(-1.0, 0.0, z + 0.01),
+            Vec3::new(1.0, 0.0, z + 0.01),
+            Vec3::new(1.0, 0.0, z),
+        ]);
+        triangles.extend([[base, base + 1, base + 2], [base, base + 2, base + 3]]);
+    }
+    let far = vertices.len() as u32;
+    vertices.extend([
+        Vec3::new(1500.0, 0.0, -5.0),
+        Vec3::new(1500.0, 0.0, 5.0),
+        Vec3::new(1510.0, 0.0, 0.0),
+    ]);
+    triangles.push([far, far + 1, far + 2]);
+    let (strip, far_material) = (
+        PhysicsMaterial::new(STRIP).unwrap(),
+        PhysicsMaterial::new(FAR).unwrap(),
+    );
+    let mut indices = vec![0; triangles.len()];
+    indices[triangles.len() - 1] = 1;
+    let refs = [&strip, &far_material];
+    let settings = MeshSettings::default().materials(&refs, &indices);
+    let (ground, dropped) =
+        Shape::new_mesh_with_settings(&vertices, &triangles, &settings).unwrap();
+    assert!(dropped.is_empty(), "{dropped:?}");
+
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    world.set_event_settings(EventSettings::default().contacts(true));
+    let floor = add_static(&mut world, &ground);
+    for (x, z) in [(0.0, 0.0), (-0.73, 0.4049), (0.9, -0.9951), (1505.0, 0.0)] {
+        let ray = RayCast::new(
+            RVec3::new(x as Real, 1.0, z as Real),
+            Vec3::new(0.0, -2.0, 0.0),
+        );
+        let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap().unwrap();
+        assert_eq!(hit.body, floor);
+        assert!(
+            f32_of(ray.point_at(hit.fraction).y).abs() < 1.0e-4,
+            "({x}, {z})"
+        );
+    }
+    let cube = add_cube(&mut world, RVec3::new(0.1, 0.8, -0.2));
+    let mut materials = Vec::new();
+    for _ in 0..120 {
+        assert!(world.step(DT).unwrap().is_complete());
+        for event in world.take_events().contacts {
+            if let ContactEvent::Added { manifold, .. } = event {
+                assert_eq!(manifold.pair.body1, floor, "the floor has the lower id");
+                materials.push(manifold.materials[0]);
+            }
+        }
+    }
+    let body = world.body(cube).unwrap();
+    assert!(is_calm(&body));
+    let y = f32_of(body.position().y);
+    assert!((0.4799..0.51).contains(&y), "{y}");
+    assert!(!materials.is_empty());
+    assert!(materials.iter().all(|&m| m == Some(STRIP)), "{materials:?}");
 }
 
 /// A kinematic flat mesh platform, 4 m wide, with a mass so a kinematic body may use it.
