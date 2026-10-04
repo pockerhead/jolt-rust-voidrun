@@ -9,7 +9,10 @@ in a table row. Line numbers refer to the vendored Jolt 5.6 sources
 
 A `ContactListener` may change the settings Jolt resolves a contact with. Every setter of
 `ContactSettings` and `SoftBodyContactSettings` checks its value and refuses one outside its
-range with a `ContactSettingsError`, leaving the settings unchanged.
+range with a `ContactSettingsError`, leaving the settings unchanged. The rules below that depend
+on the contact (sensor bodies, the lever `R`) are checked again on the value a listener returns,
+against the contact it was called for, because a listener can assign a value kept from another
+contact; `docs/events.md` ("Panics") says what happens to a value that fails.
 
 ### Friction and restitution
 

@@ -436,6 +436,7 @@
 //! | `ContactSettings::set_combined_friction` (in a `ContactListener`) | `0..=`[`MAX_FRICTION`] | new: `contact_settings_setters_accept_their_range_and_refuse_beyond` |
 //! | `ContactSettings::set_combined_restitution`, `set_inv_mass_scale1`, `set_inv_mass_scale2`, `set_inv_inertia_scale1`, `set_inv_inertia_scale2`; the `SoftBodyContactSettings` scales | `0..=1` (why: `docs/limits.md`, Contact settings) | new: `contact_settings_setters_accept_their_range_and_refuse_beyond`, `soft_body_contact_settings_setters_keep_scales_in_range` |
 //! | `ContactSettings::set_is_sensor` | stays `true` for a contact with a sensor body, as Jolt asserts | new: `a_contact_with_a_sensor_body_stays_a_sensor_contact` |
+//! | `ContactSettings` returned by a `ContactListener` | every rule above, checked again against the contact the listener was called for; a failing value is not applied | new: `settings_are_checked_again_against_the_contact_that_takes_them`, `settings_moved_to_a_contact_they_do_not_fit_are_rejected` |
 //! | `ContactSettings::set_relative_linear_surface_velocity`, `set_relative_angular_surface_velocity` | [`MAX_LINEAR_VELOCITY`], [`MAX_ANGULAR_VELOCITY`], and `len(v) + len(ω) · R <=` [`MAX_LINEAR_VELOCITY`] (why: `docs/limits.md`, Contact settings) | new: `surface_velocities_are_bounded_alone_and_together`, `a_conveyor_moves_a_resting_cube` |
 //! | `DebugLineSettings` (feature `debug-renderer`) | centre within [`MAX_POSITION`], radius at most twice it | new: `center_and_radius_are_bounded_by_the_frame` |
 //!

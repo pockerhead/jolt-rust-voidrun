@@ -10,7 +10,7 @@ use super::{
     ActivationEvent, ContactEvent, ContactManifold, ContactSettings, SoftBodyContactSettings,
     SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation, SubShapeIdPair,
 };
-use crate::{RVec3, Vec3};
+use crate::{RVec3, Real, Vec3};
 
 pub(super) fn sort_contacts(events: &mut [ContactEvent]) {
     events.sort_by(compare_contacts);
@@ -92,11 +92,9 @@ fn vec3_bits(v: Vec3) -> [u32; 3] {
     [v.x, v.y, v.z].map(f32::to_bits)
 }
 
-/// The bits of a position, widened to `f64` so that one function serves both precisions; the
-/// widening is exact and keeps `-0.0` apart from `0.0`.
-#[allow(clippy::unnecessary_cast)] // `Real` is `f32` without the `double-precision` feature.
-fn rvec3_bits(v: RVec3) -> [u64; 3] {
-    [v.x as f64, v.y as f64, v.z as f64].map(f64::to_bits)
+/// The bits of a position, in either precision.
+fn rvec3_bits(v: RVec3) -> [impl Ord; 3] {
+    [v.x, v.y, v.z].map(Real::to_bits)
 }
 
 fn settings_bits(s: &ContactSettings) -> [u32; 13] {
@@ -129,15 +127,13 @@ fn compare_manifolds(a: &ContactManifold, b: &ContactManifold) -> Ordering {
                 .cmp(&b.penetration_depth.to_bits())
         })
         .then_with(|| a.points.len().cmp(&b.points.len()))
-        .then_with(|| {
-            let bits = |m: &ContactManifold| {
-                m.points
-                    .iter()
-                    .map(|p| (rvec3_bits(p.on1), rvec3_bits(p.on2)))
-                    .collect::<Vec<_>>()
-            };
-            bits(a).cmp(&bits(b))
-        })
+        .then_with(|| point_bits(a).cmp(point_bits(b)))
+}
+
+fn point_bits(m: &ContactManifold) -> impl Iterator<Item = impl Ord> + '_ {
+    m.points
+        .iter()
+        .map(|p| (rvec3_bits(p.on1), rvec3_bits(p.on2)))
 }
 
 fn result_rank(result: SoftBodyValidateResult) -> u8 {
@@ -157,24 +153,24 @@ fn soft_settings_bits(s: &SoftBodyContactSettings) -> [u32; 4] {
 }
 
 fn compare_soft_payload(a: &SoftBodyContacts, b: &SoftBodyContacts) -> Ordering {
-    let vertex_bits = |c: &SoftBodyContacts| {
-        c.vertices
-            .iter()
-            .map(|v| {
-                (
-                    v.vertex,
-                    v.body.to_raw(),
-                    rvec3_bits(v.position),
-                    vec3_bits(v.normal),
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-    let sensor_ids =
-        |c: &SoftBodyContacts| c.sensors.iter().map(|s| s.to_raw()).collect::<Vec<_>>();
     vertex_bits(a)
-        .cmp(&vertex_bits(b))
-        .then_with(|| sensor_ids(a).cmp(&sensor_ids(b)))
+        .cmp(vertex_bits(b))
+        .then_with(|| sensor_ids(a).cmp(sensor_ids(b)))
+}
+
+fn vertex_bits(c: &SoftBodyContacts) -> impl Iterator<Item = impl Ord> + '_ {
+    c.vertices.iter().map(|v| {
+        (
+            v.vertex,
+            v.body.to_raw(),
+            rvec3_bits(v.position),
+            vec3_bits(v.normal),
+        )
+    })
+}
+
+fn sensor_ids(c: &SoftBodyContacts) -> impl Iterator<Item = u32> + '_ {
+    c.sensors.iter().map(|s| s.to_raw())
 }
 
 #[cfg(test)]
@@ -182,6 +178,7 @@ mod tests {
     use joltphysics_sys::{JPH_ContactSettings, JPH_SoftBodyContactSettings};
 
     use super::*;
+    use crate::listener::contact::ContactFacts;
     use crate::listener::ContactPoint;
     use crate::world::WorldTag;
     use crate::{BodyId, SubShapeId};
@@ -216,7 +213,11 @@ mod tests {
             relativeAngularSurfaceVelocity: Vec3::ZERO.to_jph(),
         };
         change(&mut settings);
-        ContactSettings::new(&settings, false, 0.0)
+        let facts = ContactFacts {
+            sensor_body: false,
+            lever_arm: 0.0,
+        };
+        ContactSettings::new(&settings, facts)
     }
 
     fn manifold(pair: SubShapeIdPair, depth: f32) -> ContactManifold {
@@ -335,6 +336,20 @@ mod tests {
             base.clone(),
             settings_with(|s| s.relativeAngularSurfaceVelocity.y = -0.0),
         ));
+        let mut m = base.clone();
+        m.points[0].on1.x = -0.0;
+        variants.push(event(m, settings()));
+        let changes: [fn(&mut JPH_ContactSettings); 6] = [
+            |s| s.combinedRestitution = 0.5,
+            |s| s.invMassScale1 = 0.5,
+            |s| s.invInertiaScale1 = 0.5,
+            |s| s.invMassScale2 = 0.5,
+            |s| s.invInertiaScale2 = 0.5,
+            |s| s.relativeLinearSurfaceVelocity.x = -0.0,
+        ];
+        for change in changes {
+            variants.push(event(base.clone(), settings_with(change)));
+        }
         for variant in variants {
             assert_ne!(
                 compare_contacts(&reference, &variant),
@@ -346,6 +361,31 @@ mod tests {
                 compare_contacts(&variant, &reference).reverse()
             );
         }
+    }
+
+    #[test]
+    fn nan_payloads_separate_contacts() {
+        let world = tag();
+        let quiet = f32::from_bits(0x7fc0_0000);
+        let other = f32::from_bits(0x7fc0_0001);
+        let with = |depth: f32, z: crate::Real| {
+            let mut m = manifold(pair(world, 1, 2), depth);
+            m.points[0].on1.z = z;
+            ContactEvent::Added {
+                manifold: m,
+                settings: settings(),
+            }
+        };
+        let real_nan =
+            |bits_offset| crate::Real::from_bits(crate::Real::NAN.to_bits() + bits_offset);
+        assert_ne!(
+            compare_contacts(&with(quiet, 0.0), &with(other, 0.0)),
+            Ordering::Equal
+        );
+        assert_ne!(
+            compare_contacts(&with(0.0, real_nan(0)), &with(0.0, real_nan(1))),
+            Ordering::Equal
+        );
     }
 
     #[test]

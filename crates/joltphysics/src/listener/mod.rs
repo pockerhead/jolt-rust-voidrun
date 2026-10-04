@@ -43,8 +43,15 @@ pub use soft_body::{
 /// for the step; a mutex makes shared state safe to use here, not deterministic.
 ///
 /// A panic in a method is resumed by `step` after the update. Jolt then keeps its own settings
-/// for that contact, the listener is not called again until the panic is resumed, and the step
-/// that panicked has advanced the world: it is outside the replay guarantee.
+/// for that contact, and calls that start after the panic skip the listener until the panic is
+/// resumed; calls already running on other threads finish. The step that panicked has advanced
+/// the world: it is outside the replay guarantee.
+///
+/// Settings a method leaves invalid for its contact (a value of another contact assigned over
+/// them, see [`ContactSettings`]) are handled like a panic: Jolt keeps its own settings for
+/// that contact, and `step` panics with a message that names the [`ContactSettingsError`].
+///
+/// [`ContactSettingsError`]: crate::ContactSettingsError
 pub trait ContactListener: Send + Sync + 'static {
     /// A rigid contact appeared; `settings` may be changed for it.
     fn contact_added(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
@@ -171,7 +178,8 @@ impl EventSettings {
 /// [`PhysicsWorld::take_events`].
 ///
 /// Within the events of one step, each list is in a canonical order: contacts by their
-/// [`SubShapeIdPair`] (body ids first) and then by kind, Added before Persisted before Removed;
+/// [`SubShapeIdPair`] as `(body1, sub_shape1, body2, sub_shape2)` and then by kind, Added before
+/// Persisted before Removed;
 /// activations by body id; soft body events by soft body id. Equal keys keep every event, so a
 /// pair can appear twice in one step (a [`MotionQuality::LinearCast`](crate::MotionQuality)
 /// body's discrete and continuous contact). Events of different steps are not separated. The
@@ -336,6 +344,14 @@ impl ListenerContext {
                 None
             }
         }
+    }
+
+    /// Keeps the refusal of a listener's settings for the world to resume as a panic, and stops
+    /// calling the listener like a panic does.
+    fn reject(&self, error: crate::ContactSettingsError) {
+        self.panic.record(Box::new(format!(
+            "contact listener settings rejected: {error}"
+        )));
     }
 
     /// Runs a callback body; a panic is kept for the world to resume and `fallback` returned.
@@ -546,8 +562,8 @@ impl Listeners {
         first_payload(self.pending_panic.take(), context.panic.take())
     }
 
-    /// Takes the queue with the events recorded since the last step, or the first panic of a
-    /// callback since the last step, which then stays unresumed by nothing else.
+    /// Takes the queue with the events recorded since the last step, or, when a callback
+    /// panicked since then, that panic for the caller to resume, leaving the queue in place.
     fn take_events(&mut self) -> Result<WorldEvents, Box<dyn Any + Send>> {
         let payload = match &self.context {
             Some(context) => {

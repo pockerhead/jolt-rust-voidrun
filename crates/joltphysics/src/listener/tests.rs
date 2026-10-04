@@ -3,9 +3,11 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::Ordering;
+use std::sync::Mutex;
 
 use joltphysics_sys::{JPH_ContactSettings, JPH_SoftBodyContactSettings};
 
+use super::contact::ContactFacts;
 use super::*;
 use crate::{
     Activation, BodyId, BodySettings, CompoundChild, ContactSettingsError, PhysicsWorld, Quat,
@@ -174,6 +176,52 @@ fn a_panic_in_any_callback_during_a_step_is_resumed_by_step() {
     }
 }
 
+/// A ball dropped on a sleeping cube wakes it inside a step, on a worker thread.
+#[test]
+fn a_panic_in_body_activation_during_a_step_is_resumed_by_step() {
+    let mut world = PhysicsWorld::new(WorldSettings::default().worker_threads(4)).unwrap();
+    world.set_event_settings(EventSettings::default().body_activation(true));
+    let floor = Shape::new_box(Vec3::new(5.0, 0.5, 5.0)).unwrap();
+    world
+        .create_body(
+            &floor,
+            &BodySettings::new_static().position(RVec3::new(0.0, -0.5, 0.0)),
+        )
+        .unwrap();
+    let cube_shape = Shape::new_box(Vec3::new(0.25, 0.25, 0.25)).unwrap();
+    let cube = world
+        .create_body(
+            &cube_shape,
+            &BodySettings::new_dynamic().position(RVec3::new(0.0, 0.25, 0.0)),
+        )
+        .unwrap();
+    let asleep = (0..300).any(|_| {
+        assert!(world.step(DT).unwrap().is_complete());
+        world
+            .take_events()
+            .activations
+            .contains(&ActivationEvent::Deactivated(cube))
+    });
+    assert!(asleep, "the cube falls asleep");
+    let ball_shape = Shape::new_sphere(0.2).unwrap();
+    world
+        .create_body(
+            &ball_shape,
+            &BodySettings::new_dynamic().position(RVec3::new(0.0, 1.0, 0.0)),
+        )
+        .unwrap();
+    world.take_events();
+
+    set_panic(&world, Callback::BodyActivated as u8);
+    let payload = (0..120)
+        .find_map(|_| catch_unwind(AssertUnwindSafe(|| world.step(DT))).err())
+        .expect("waking the cube panics");
+    assert_eq!(message(&*payload), "listener test panic in BodyActivated");
+    set_panic(&world, NO_PANIC);
+    assert!(world.step(DT).unwrap().is_complete());
+    world.take_events();
+}
+
 #[test]
 fn a_panic_outside_a_step_is_resumed_by_take_events() {
     let (mut world, scene) = scene();
@@ -273,7 +321,13 @@ fn contact_settings(sensor_body: bool, lever_arm: f64) -> ContactSettings {
         relativeLinearSurfaceVelocity: Vec3::ZERO.to_jph(),
         relativeAngularSurfaceVelocity: Vec3::ZERO.to_jph(),
     };
-    ContactSettings::new(&settings, sensor_body, lever_arm)
+    ContactSettings::new(
+        &settings,
+        ContactFacts {
+            sensor_body,
+            lever_arm,
+        },
+    )
 }
 
 /// The next `f32` above `value`.
@@ -442,4 +496,178 @@ fn soft_body_contact_settings_setters_keep_scales_in_range() {
     }
     settings.set_is_sensor(true);
     assert!(settings.is_sensor());
+}
+
+#[test]
+fn settings_are_checked_again_against_the_contact_that_takes_them() {
+    let ordinary = ContactFacts {
+        sensor_body: false,
+        lever_arm: 0.5,
+    };
+    let sensor = ContactFacts {
+        sensor_body: true,
+        ..ordinary
+    };
+    let long_lever = ContactFacts {
+        lever_arm: 60.0,
+        ..ordinary
+    };
+    let mut kept = contact_settings(false, ordinary.lever_arm);
+    kept.set_relative_angular_surface_velocity(Vec3::new(0.0, 20.0, 0.0))
+        .unwrap();
+    assert_eq!(kept.checked_for(ordinary), Ok(kept));
+    assert_eq!(
+        kept.checked_for(sensor),
+        Err(ContactSettingsError::SensorBody)
+    );
+    assert_eq!(
+        kept.checked_for(long_lever),
+        Err(ContactSettingsError::SurfaceVelocity)
+    );
+    // An accepted value takes the facts of its new contact, so its setters check against them.
+    let mut moved = contact_settings(false, 0.0)
+        .checked_for(long_lever)
+        .unwrap();
+    assert_eq!(
+        moved.set_relative_angular_surface_velocity(Vec3::new(0.0, 20.0, 0.0)),
+        Err(ContactSettingsError::SurfaceVelocity)
+    );
+    let sensor_contact = contact_settings(true, 0.0).checked_for(sensor).unwrap();
+    assert!(sensor_contact.checked_for(ordinary).is_ok());
+}
+
+/// Keeps the settings of the donor's first contact, spun by `spin`, and assigns them over the
+/// settings of every other contact in Added or in Persisted calls.
+struct Transplant {
+    donor: BodyId,
+    spin: Vec3,
+    in_persisted: bool,
+    kept: Mutex<Option<ContactSettings>>,
+}
+
+impl Transplant {
+    fn call(&self, persisted: bool, manifold: &ContactManifold, settings: &mut ContactSettings) {
+        let pair = manifold.pair;
+        let mut kept = self.kept.lock().unwrap();
+        if pair.body1 == self.donor || pair.body2 == self.donor {
+            if kept.is_none() {
+                settings
+                    .set_relative_angular_surface_velocity(self.spin)
+                    .unwrap();
+                *kept = Some(*settings);
+            }
+        } else if persisted == self.in_persisted {
+            if let Some(kept) = *kept {
+                *settings = kept;
+            }
+        }
+    }
+}
+
+impl ContactListener for Transplant {
+    fn contact_added(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
+        self.call(false, manifold, settings);
+    }
+
+    fn contact_persisted(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
+        self.call(true, manifold, settings);
+    }
+}
+
+/// The settings of the contact between `a` and `b` recorded by Added (or Persisted) events.
+fn recorded_settings(
+    events: WorldEvents,
+    persisted: bool,
+    a: BodyId,
+    b: BodyId,
+) -> Option<ContactSettings> {
+    events.contacts.into_iter().find_map(|event| {
+        let (manifold, settings) = match event {
+            ContactEvent::Added { manifold, settings } if !persisted => (manifold, settings),
+            ContactEvent::Persisted { manifold, settings } if persisted => (manifold, settings),
+            _ => return None,
+        };
+        let pair = manifold.pair;
+        let bodies = [pair.body1, pair.body2];
+        (bodies == [a, b] || bodies == [b, a]).then_some(settings)
+    })
+}
+
+/// A listener assigns settings kept from an ordinary contact near the floor's centre to a
+/// contact with a sensor body, or to a contact 60 m from the floor's centre, whose lever turns
+/// the kept 20 rad/s into 1 200 m/s. Jolt keeps its own settings, so an asserts build does not
+/// reach Jolt's sensor assertion, and the step panics with the refusal.
+#[test]
+fn settings_moved_to_a_contact_they_do_not_fit_are_rejected() {
+    let cases = [
+        (
+            RVec3::new(5.0, 1.5, 0.0),
+            Vec3::ZERO,
+            ContactSettingsError::SensorBody,
+        ),
+        (
+            RVec3::new(60.0, 0.3, 0.0),
+            Vec3::new(0.0, 20.0, 0.0),
+            ContactSettingsError::SurfaceVelocity,
+        ),
+    ];
+    for (recipient_at, spin, error) in cases {
+        for in_persisted in [false, true] {
+            let mut world = PhysicsWorld::new(WorldSettings::default().worker_threads(1)).unwrap();
+            world.set_event_settings(EventSettings::default().persisted_contacts(true));
+            let at = |x, y| BodySettings::new_static().position(RVec3::new(x, y, 0.0));
+            let floor_shape = Shape::new_box(Vec3::new(100.0, 0.5, 100.0)).unwrap();
+            let floor = world.create_body(&floor_shape, &at(0.0, -0.5)).unwrap();
+            let sensor_shape = Shape::new_box(Vec3::new(1.0, 1.0, 1.0)).unwrap();
+            let sensor = world.create_body(&sensor_shape, &at(5.0, 1.0)).unwrap();
+            // SAFETY: the body interface is the live world's, and no step runs.
+            unsafe {
+                joltphysics_sys::JPH_BodyInterface_SetIsSensor(
+                    world.body_interface.as_ptr(),
+                    sensor.to_raw(),
+                    true,
+                );
+            }
+            let cube = Shape::new_box(Vec3::new(0.25, 0.25, 0.25)).unwrap();
+            let dynamic = |position| BodySettings::new_dynamic().position(position);
+            let donor = world
+                .create_body(&cube, &dynamic(RVec3::new(0.0, 0.3, 0.0)))
+                .unwrap();
+            let listener = Arc::new(Transplant {
+                donor,
+                spin,
+                in_persisted,
+                kept: Mutex::default(),
+            });
+            world.set_contact_listener(Some(listener.clone()));
+            for _ in 0..30 {
+                assert!(world.step(DT).unwrap().is_complete());
+            }
+            assert!(listener.kept.lock().unwrap().is_some());
+            world.take_events();
+
+            let recipient = world.create_body(&cube, &dynamic(recipient_at)).unwrap();
+            let wanted = format!("contact listener settings rejected: {error}");
+            let mut rejected = None;
+            for _ in 0..10 {
+                if let Err(payload) = catch_unwind(AssertUnwindSafe(|| world.step(DT))) {
+                    rejected = Some(message(&*payload));
+                    break;
+                }
+            }
+            assert_eq!(rejected, Some(wanted), "persisted: {in_persisted}");
+            let target = match error {
+                ContactSettingsError::SensorBody => sensor,
+                _ => floor,
+            };
+            let recorded = recorded_settings(world.take_events(), in_persisted, target, recipient)
+                .expect("the contact is recorded");
+            assert_eq!(
+                recorded.is_sensor(),
+                target == sensor,
+                "Jolt's own settings"
+            );
+            assert_eq!(recorded.relative_angular_surface_velocity(), Vec3::ZERO);
+        }
+    }
 }

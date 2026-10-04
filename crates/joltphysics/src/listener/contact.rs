@@ -53,7 +53,10 @@ pub struct ContactManifold {
 ///
 /// A [`ContactListener`](crate::ContactListener) may change them through the setters, which
 /// refuse values outside the ranges they state; `docs/limits.md` (section "Contact settings")
-/// says why.
+/// says why. The setters check against the contact the value was read for. A listener that
+/// replaces the whole value, for example with settings kept from another contact, gets it
+/// checked again against the contact it is called for; see
+/// [`ContactListener`](crate::ContactListener) for what happens when that check fails.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContactSettings {
     combined_friction: f32,
@@ -65,16 +68,24 @@ pub struct ContactSettings {
     is_sensor: bool,
     relative_linear_surface_velocity: Vec3,
     relative_angular_surface_velocity: Vec3,
+    /// The facts of the contact the value was read for, which the setters check against.
+    facts: ContactFacts,
+}
+
+/// What a contact's settings are checked against: facts of the contact, which a listener cannot
+/// change.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ContactFacts {
     /// Whether either body is a sensor, which keeps the contact a sensor contact.
-    sensor_body: bool,
+    pub(super) sensor_body: bool,
     /// The largest distance from body 1's centre of mass to a contact point, in metres: the
     /// lever of the angular surface velocity.
-    lever_arm: f64,
+    pub(super) lever_arm: f64,
 }
 
 impl ContactSettings {
-    /// Jolt's settings of a contact, with the facts the setters check against.
-    pub(super) fn new(settings: &JPH_ContactSettings, sensor_body: bool, lever_arm: f64) -> Self {
+    /// Jolt's settings of a contact with that contact's facts.
+    pub(super) fn new(settings: &JPH_ContactSettings, facts: ContactFacts) -> Self {
         Self {
             combined_friction: settings.combinedFriction,
             combined_restitution: settings.combinedRestitution,
@@ -89,9 +100,47 @@ impl ContactSettings {
             relative_angular_surface_velocity: Vec3::from_jph(
                 settings.relativeAngularSurfaceVelocity,
             ),
-            sensor_body,
-            lever_arm,
+            facts,
         }
+    }
+
+    /// These settings for the contact with `facts`, or why that contact cannot take them.
+    ///
+    /// Checks every value as its setter would for that contact, so a value moved over from
+    /// another contact is held to this one's sensor bodies and lever.
+    pub(super) fn checked_for(mut self, facts: ContactFacts) -> Result<Self, ContactSettingsError> {
+        self.facts = facts;
+        check(
+            limits::is_friction(self.combined_friction),
+            ContactSettingsError::Friction,
+        )?;
+        check(
+            is_unit_interval(self.combined_restitution),
+            ContactSettingsError::Restitution,
+        )?;
+        check(
+            is_unit_interval(self.inv_mass_scale1) && is_unit_interval(self.inv_mass_scale2),
+            ContactSettingsError::InverseMassScale,
+        )?;
+        check(
+            is_unit_interval(self.inv_inertia_scale1) && is_unit_interval(self.inv_inertia_scale2),
+            ContactSettingsError::InverseInertiaScale,
+        )?;
+        check(
+            self.is_sensor || !facts.sensor_body,
+            ContactSettingsError::SensorBody,
+        )?;
+        let (linear, angular) = (
+            self.relative_linear_surface_velocity,
+            self.relative_angular_surface_velocity,
+        );
+        check(
+            limits::is_linear_velocity(linear)
+                && limits::is_angular_velocity(angular)
+                && self.is_surface_velocity(linear, angular),
+            ContactSettingsError::SurfaceVelocity,
+        )?;
+        Ok(self)
     }
 
     /// Writes every value back to joltc's copy, which joltc then copies to Jolt.
@@ -109,7 +158,7 @@ impl ContactSettings {
 
     /// The setter facts as bits, for the canonical order.
     pub(super) fn rule_bits(&self) -> (bool, u64) {
-        (self.sensor_body, self.lever_arm.to_bits())
+        (self.facts.sensor_body, self.facts.lever_arm.to_bits())
     }
 
     /// The friction of the contact, by default Jolt's `sqrt(friction1 * friction2)` of the two
@@ -207,7 +256,10 @@ impl ContactSettings {
     /// Makes the contact a sensor contact or an ordinary one. A contact with a sensor body
     /// stays a sensor contact ([`ContactSettingsError::SensorBody`]), as Jolt requires.
     pub fn set_is_sensor(&mut self, value: bool) -> Result<(), ContactSettingsError> {
-        check(value || !self.sensor_body, ContactSettingsError::SensorBody)?;
+        check(
+            value || !self.facts.sensor_body,
+            ContactSettingsError::SensorBody,
+        )?;
         self.is_sensor = value;
         Ok(())
     }
@@ -261,7 +313,8 @@ impl ContactSettings {
             let [x, y, z] = [v.x, v.y, v.z].map(f64::from);
             (x * x + y * y + z * z).sqrt()
         };
-        length(linear) + length(angular) * self.lever_arm <= f64::from(limits::MAX_LINEAR_VELOCITY)
+        length(linear) + length(angular) * self.facts.lever_arm
+            <= f64::from(limits::MAX_LINEAR_VELOCITY)
     }
 }
 
@@ -410,23 +463,29 @@ unsafe fn on_manifold(
     }
     // SAFETY: the arguments are live for the callback (contract); `settings` is joltc's local
     // copy, which joltc copies back to Jolt after the callback.
-    let (manifold, mut contact_settings, settings) = unsafe {
+    let (manifold, facts, settings) = unsafe {
         let manifold = read_manifold(context.world, body1, body2, manifold);
-        let sensor_body = JPH_Body_IsSensor(body1) || JPH_Body_IsSensor(body2);
-        let lever_arm = lever_arm(body1, &manifold);
-        let settings = &mut *settings;
-        let contact_settings = ContactSettings::new(settings, sensor_body, lever_arm);
-        (manifold, contact_settings, settings)
+        let facts = ContactFacts {
+            sensor_body: JPH_Body_IsSensor(body1) || JPH_Body_IsSensor(body2),
+            lever_arm: lever_arm(body1, &manifold),
+        };
+        (manifold, facts, &mut *settings)
     };
+    let mut contact_settings = ContactSettings::new(settings, facts);
     if let Some(listener) = &context.listener {
         let mut changed = contact_settings;
         let returned = context.call_listener(|| match kind {
             Kind::Added => listener.contact_added(&manifold, &mut changed),
             Kind::Persisted => listener.contact_persisted(&manifold, &mut changed),
         });
-        if returned.is_some() {
-            changed.write_to(settings);
-            contact_settings = changed;
+        if returned.is_some() && changed != contact_settings {
+            match changed.checked_for(facts) {
+                Ok(accepted) => {
+                    accepted.write_to(settings);
+                    contact_settings = accepted;
+                }
+                Err(error) => context.reject(error),
+            }
         }
     }
     if wanted {
