@@ -10,7 +10,7 @@ use super::lever::check_spring;
 use super::world::{sealed, ConstraintSettings};
 use super::{
     constraint_base, non_negative, point_anchors, validate_hinge_limits, validate_point, within,
-    ConstraintSpace, MotorSettings, SpringSettings,
+    ConstraintSpace, MotorSettings, SpringSettings, FRAME_AXES_RULE, FRICTION_RULE,
 };
 use crate::limits;
 use crate::math::is_unit;
@@ -31,9 +31,7 @@ pub(crate) fn check_friction(value: f32) -> Result<(), ConstraintError> {
     if non_negative(value) {
         Ok(())
     } else {
-        Err(ConstraintError::InvalidValue(
-            "friction must be finite and not negative",
-        ))
+        Err(ConstraintError::InvalidValue(FRICTION_RULE))
     }
 }
 
@@ -347,7 +345,7 @@ impl sealed::Settings for ConeConstraintSettings {
         validate_point(self.point1)?;
         validate_point(self.point2)?;
         if !(is_unit(self.twist_axis1) && is_unit(self.twist_axis2)) {
-            return Err("constraint frame axes must be unit vectors");
+            return Err(FRAME_AXES_RULE);
         }
         validate_half_cone_angle(self.half_cone_angle)
     }

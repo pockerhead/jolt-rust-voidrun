@@ -263,7 +263,7 @@ impl<'a> CharacterSettings<'a> {
     pub(crate) fn validate(&self, object_layer_count: u32) -> Result<(), CharacterError> {
         let invalid = |what| Err(CharacterError::InvalidValue(what));
         if !is_unit(self.up) {
-            return invalid("up must be a finite unit vector");
+            return invalid(UP_RULE);
         }
         if !is_unit(self.supporting_volume_normal) {
             return invalid("supporting volume normal must be a finite unit vector");
@@ -372,6 +372,9 @@ impl<'a> CharacterSettings<'a> {
         }
     }
 }
+
+/// What a character's up must satisfy ([`is_unit`]).
+pub(super) const UP_RULE: &str = "up must be a finite unit vector";
 
 /// Whether `v` is finite and of unit length within Jolt's `Vec3::IsNormalized` tolerance
 /// (`|length² − 1| <= 1e-5`).

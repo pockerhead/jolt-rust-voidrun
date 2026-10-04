@@ -309,6 +309,9 @@ pub struct RagdollMut<'w> {
     structure_epoch: &'w mut u64,
 }
 
+/// What the motion type of a ragdoll part must satisfy: not static.
+const PART_MOTION_RULE: &str = "ragdoll parts are dynamic or kinematic";
+
 impl RagdollMut<'_> {
     fn interface(&self) -> *mut JPH_BodyInterface {
         self.body_interface.as_ptr()
@@ -525,9 +528,7 @@ impl RagdollMut<'_> {
         activation: Activation,
     ) -> Result<(), RagdollError> {
         if motion_type == MotionType::Static {
-            return Err(RagdollError::InvalidValue(
-                "ragdoll parts are dynamic or kinematic",
-            ));
+            return Err(RagdollError::InvalidValue(PART_MOTION_RULE));
         }
         // Jolt does not save motion types.
         advance_structure_epoch(self.structure_epoch);

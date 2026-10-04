@@ -5,7 +5,7 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
-use super::settings::is_unit;
+use super::settings::{is_unit, UP_RULE};
 use super::{CharacterContact, CharacterId, CharacterState, GroundState, INVALID_ID};
 use crate::limits::{self, LINEAR_VELOCITY_RULE, POSITION_RULE};
 use crate::math::ROTATION_RULE;
@@ -246,9 +246,7 @@ impl CharacterMut<'_> {
     /// Sets the up direction, a finite unit vector, for the next updates.
     pub fn set_up(&mut self, up: Vec3) -> Result<(), CharacterError> {
         if !is_unit(up) {
-            return Err(CharacterError::InvalidValue(
-                "up must be a finite unit vector",
-            ));
+            return Err(CharacterError::InvalidValue(UP_RULE));
         }
         let up = up.to_jph();
         // SAFETY: as in `set_position`; the setter writes a member.

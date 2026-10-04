@@ -304,10 +304,20 @@ impl MotorSettings {
     }
 }
 
+/// What a constraint's friction force must satisfy ([`non_negative`]).
+const FRICTION_RULE: &str = "friction must be finite and not negative";
+
+/// What a constraint's friction torque must satisfy ([`non_negative`]).
+const FRICTION_TORQUE_RULE: &str = "friction torque must be finite and not negative";
+
 /// Whether `value` is finite and not negative.
 fn non_negative(value: f32) -> bool {
     value.is_finite() && value >= 0.0
 }
+
+/// What a linear motor's target velocity must satisfy ([`within`] `±MAX_LINEAR_VELOCITY`).
+const TARGET_VELOCITY_RULE: &str =
+    "target velocity must be finite and at most limits::MAX_LINEAR_VELOCITY";
 
 /// Whether `value` is finite and in `[min, max]`.
 fn within(value: f32, min: f32, max: f32) -> bool {
@@ -341,11 +351,14 @@ fn point_anchors(
     })
 }
 
+/// What the axes of a constraint frame must satisfy ([`is_unit`]).
+const FRAME_AXES_RULE: &str = "constraint frame axes must be unit vectors";
+
 /// Checks one frame: a finite point and two perpendicular unit axes.
 fn validate_frame(point: RVec3, axis_a: Vec3, axis_b: Vec3) -> Result<(), &'static str> {
     validate_point(point)?;
     if !(is_unit(axis_a) && is_unit(axis_b)) {
-        return Err("constraint frame axes must be unit vectors");
+        return Err(FRAME_AXES_RULE);
     }
     if axis_a.dot(axis_b).abs() > PERPENDICULAR_TOLERANCE {
         return Err("the two axes of a constraint frame must be perpendicular");
@@ -498,7 +511,7 @@ impl SwingTwistConstraintSettings {
             return Err("swing-twist twist limits must be between -pi and pi with min <= max");
         }
         if !non_negative(self.max_friction_torque) {
-            return Err("friction torque must be finite and not negative");
+            return Err(FRICTION_TORQUE_RULE);
         }
         self.swing_motor.validate()?;
         self.twist_motor.validate()
@@ -644,7 +657,7 @@ impl HingeConstraintSettings {
         self.limits_spring.validate()?;
         validate_hinge_limits(self.limits_min, self.limits_max, self.limits_spring)?;
         if !non_negative(self.max_friction_torque) {
-            return Err("friction torque must be finite and not negative");
+            return Err(FRICTION_TORQUE_RULE);
         }
         self.motor.validate()
     }
@@ -908,7 +921,7 @@ impl SixDofConstraintSettings {
                 }
             }
             if !non_negative(self.max_friction[i]) {
-                return Err("friction must be finite and not negative");
+                return Err(FRICTION_RULE);
             }
             let spring = self.limits_springs[i];
             spring.validate()?;

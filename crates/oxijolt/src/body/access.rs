@@ -10,7 +10,7 @@ use oxijolt_sys::*;
 
 use super::{
     has_finite_inverse, mass_properties, with_locked_body, BodyId, BodyMut, BodyRef, BodySettings,
-    CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID,
+    CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID, STATIC_SHAPE_RULE,
 };
 use crate::limits::{is_mass, MASS_RULE};
 use crate::owned::Owned;
@@ -41,9 +41,7 @@ impl PhysicsWorld {
             // SAFETY: `shape` is live for the call; the getter only reads it.
             && unsafe { JPH_Shape_MustBeStatic(shape.as_ptr()) }
         {
-            return Err(BodyError::InvalidValue(
-                "this shape can only be used by static bodies",
-            ));
+            return Err(BodyError::InvalidValue(STATIC_SHAPE_RULE));
         }
         // Jolt computes mass properties for every body that is not static
         // (`BodyCreationSettings::HasMassProperties`).

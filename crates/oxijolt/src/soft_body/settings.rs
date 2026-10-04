@@ -3,7 +3,7 @@
 use oxijolt_sys::*;
 
 use super::SoftBodySharedSettings;
-use crate::body::Activation;
+use crate::body::{Activation, LINEAR_DAMPING_RULE, RESTITUTION_RULE};
 use crate::limits::{self, is_friction, is_gravity_factor, is_in_frame, is_local_distance};
 use crate::math::{is_finite_non_negative, ROTATION_RULE};
 use crate::owned::{JoltObject, Owned};
@@ -215,17 +215,14 @@ impl SoftBodySettings {
         )?;
         check(
             is_finite_non_negative(self.linear_damping),
-            "linear damping must be finite and not negative",
+            LINEAR_DAMPING_RULE,
         )?;
         check(
             self.max_linear_velocity > 0.0
                 && self.max_linear_velocity <= limits::MAX_LINEAR_VELOCITY,
             "max linear velocity must be above 0 and at most limits::MAX_LINEAR_VELOCITY",
         )?;
-        check(
-            (0.0..=1.0).contains(&self.restitution),
-            "restitution must be between 0 and 1",
-        )?;
+        check((0.0..=1.0).contains(&self.restitution), RESTITUTION_RULE)?;
         check(is_friction(self.friction), limits::FRICTION_RULE)?;
         check(
             (0.0..=limits::MAX_SOFT_BODY_PRESSURE).contains(&self.pressure),

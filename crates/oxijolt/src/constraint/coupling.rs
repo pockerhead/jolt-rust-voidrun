@@ -7,7 +7,7 @@ use oxijolt_sys::*;
 
 use super::world::sealed::{self, ReferencedConstraint};
 use super::world::ConstraintSettings;
-use super::{constraint_base, ConstraintSpace, SpringSettings};
+use super::{constraint_base, ConstraintSpace, SpringSettings, FRAME_AXES_RULE};
 use crate::limits;
 use crate::math::is_unit;
 use crate::{
@@ -177,7 +177,7 @@ impl sealed::Settings for GearConstraintSettings {
 
     fn validate(&self) -> Result<(), &'static str> {
         if !(is_unit(self.hinge_axis1) && is_unit(self.hinge_axis2)) {
-            return Err("constraint frame axes must be unit vectors");
+            return Err(FRAME_AXES_RULE);
         }
         if !(1.0..=limits::MAX_GEAR_RATIO).contains(&self.ratio) {
             return Err(GEAR_RATIO_RULE);
@@ -346,7 +346,7 @@ impl sealed::Settings for RackAndPinionConstraintSettings {
 
     fn validate(&self) -> Result<(), &'static str> {
         if !(is_unit(self.hinge_axis) && is_unit(self.slider_axis)) {
-            return Err("constraint frame axes must be unit vectors");
+            return Err(FRAME_AXES_RULE);
         }
         if !limits::is_ratio(self.ratio) {
             return Err(RATIO_RULE);

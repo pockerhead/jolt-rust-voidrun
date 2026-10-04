@@ -6,7 +6,10 @@ use std::ffi::CString;
 
 use oxijolt_sys::*;
 
-use crate::body::{has_finite_inverse, mass_properties, CreationSettings, INERTIA_RULE};
+use super::PART_MOTION_RULE;
+use crate::body::{
+    has_finite_inverse, mass_properties, CreationSettings, INERTIA_RULE, STATIC_SHAPE_RULE,
+};
 use crate::limits::{self, MASS_RULE};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
@@ -430,11 +433,11 @@ fn validate_parts(skeleton: &Skeleton, parts: &[RagdollPart<'_>]) -> Result<(), 
             error => RagdollError::Body(error),
         })?;
         if part.body.motion_type == MotionType::Static {
-            return invalid("ragdoll parts are dynamic or kinematic");
+            return invalid(PART_MOTION_RULE);
         }
         // SAFETY: the shape is live for the call; the getter only reads it.
         if unsafe { JPH_Shape_MustBeStatic(part.shape.as_ptr()) } {
-            return invalid("this shape can only be used by static bodies");
+            return invalid(STATIC_SHAPE_RULE);
         }
         let properties = mass_properties(part.shape, part.body.mass);
         if !has_finite_inverse(&properties) {

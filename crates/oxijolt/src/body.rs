@@ -193,6 +193,15 @@ impl Default for BodySettings {
     }
 }
 
+/// What a restitution must satisfy: `0..=1`.
+pub(crate) const RESTITUTION_RULE: &str = "restitution must be between 0 and 1";
+
+/// What a linear damping must satisfy ([`is_finite_non_negative`]).
+pub(crate) const LINEAR_DAMPING_RULE: &str = "linear damping must be finite and not negative";
+
+/// What Jolt asks of a shape that `Shape::MustBeStatic` reports.
+pub(crate) const STATIC_SHAPE_RULE: &str = "this shape can only be used by static bodies";
+
 impl BodySettings {
     /// A dynamic body in [`ObjectLayer::MOVING`]; the same as [`Default`].
     pub fn new_dynamic() -> Self {
@@ -362,10 +371,10 @@ impl BodySettings {
             return invalid(limits::FRICTION_RULE);
         }
         if !(0.0..=1.0).contains(&self.restitution) {
-            return invalid("restitution must be between 0 and 1");
+            return invalid(RESTITUTION_RULE);
         }
         if !is_finite_non_negative(self.linear_damping) {
-            return invalid("linear damping must be finite and not negative");
+            return invalid(LINEAR_DAMPING_RULE);
         }
         if !is_finite_non_negative(self.angular_damping) {
             return invalid("angular damping must be finite and not negative");

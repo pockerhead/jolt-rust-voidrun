@@ -152,10 +152,10 @@ impl VehicleSettings {
             return invalid("vehicle up and forward must be perpendicular");
         }
         if !(is_finite_non_negative(self.max_pitch_roll_angle) && self.max_pitch_roll_angle <= PI) {
-            return invalid("max pitch roll angle must be between 0 and pi");
+            return invalid(MAX_PITCH_ROLL_RULE);
         }
         if !is_limited_slip_ratio(self.differential_limited_slip_ratio) {
-            return invalid("differential limited slip ratio must be finite and above 1");
+            return invalid(LIMITED_SLIP_RULE);
         }
         for wheel in &self.wheels {
             wheel.validate()?;
@@ -363,6 +363,12 @@ const PERPENDICULAR_TOLERANCE: f32 = 1.0e-3;
 
 /// Tolerance of the engine torque ratio sum, `|sum − 1|` below this, half of Jolt's 1e-6.
 const SUM_TOLERANCE: f32 = 5.0e-7;
+
+/// What a vehicle's max pitch/roll angle must satisfy: finite, `0..=pi`.
+pub(super) const MAX_PITCH_ROLL_RULE: &str = "max pitch roll angle must be between 0 and pi";
+
+/// What a differential's limited slip ratio must satisfy ([`is_limited_slip_ratio`]).
+const LIMITED_SLIP_RULE: &str = "differential limited slip ratio must be finite and above 1";
 
 /// Whether `value` is a valid limited slip ratio: finite and above 1 (`f32::MAX` is open).
 fn is_limited_slip_ratio(value: f32) -> bool {

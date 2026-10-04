@@ -2,7 +2,7 @@
 
 use oxijolt_sys::*;
 
-use super::{is_curve, is_limited_slip_ratio, DEFAULT_NORMALIZED_TORQUE};
+use super::{is_curve, is_limited_slip_ratio, DEFAULT_NORMALIZED_TORQUE, LIMITED_SLIP_RULE};
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::VehicleError;
@@ -342,7 +342,7 @@ impl VehicleDifferentialSettings {
             return invalid("differential left right split must be between 0 and 1");
         }
         if !is_limited_slip_ratio(self.limited_slip_ratio) {
-            return invalid("differential limited slip ratio must be finite and above 1");
+            return invalid(LIMITED_SLIP_RULE);
         }
         if !is_finite_non_negative(self.engine_torque_ratio) {
             return invalid("differential engine torque ratio must be finite and not negative");
