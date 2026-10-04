@@ -82,7 +82,8 @@ One cargo process at a time on shared machines: the C++ build is heavy.
 A change to `joltc.h`, `joltc_ext.h`, `build/bindgen_options.rs` or `build/targets.rs` regenerates the
 bindings in the same commit; the build script refuses bindings whose recorded inputs differ. The canonical
 bytes are those of CI's `Committed bindings` job (LLVM 18 on ubuntu-24.04). When that job disagrees with a
-local regeneration (another libclang), commit the files it uploads.
+local regeneration (another libclang) only in formatting, commit the files it uploads; a changed type,
+signature or layout is a real difference in the inputs and is investigated first.
 
 ## Releases
 The owner cuts a release: set the same `version` in both crates' `Cargo.toml`, commit, and push the tag
