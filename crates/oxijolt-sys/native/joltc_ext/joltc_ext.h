@@ -302,11 +302,13 @@ JPH_CAPI uint32_t JPH_MeshShapeSettings_GetTriangleCount(const JPH_MeshShapeSett
 JPH_CAPI JPH_Shape* JPH_ShapeSettings_CreateShapeWithError(const JPH_ShapeSettings* settings, char* error, uint32_t errorCapacity);
 
 /* Shape */
-/* The triangles of the shape's surface (Jolt's GetTrianglesStart/Next over everything, unscaled), in
-   the shape's centre of mass space, three vertices each. Returns the triangle count; writes the first
-   min(count, maxTriangles) triangles to vertices, which holds 3 * maxTriangles vertices and may be
-   null when maxTriangles is 0. Meshes and heightfields give their stored (quantized) triangles;
-   convex shapes give a triangulation of their surface. */
+/* The triangles of a leaf shape's surface (Jolt's GetTrianglesStart/Next over everything, unscaled),
+   in the shape's centre of mass space, three vertices each. Returns the triangle count; writes the
+   first min(count, maxTriangles) triangles to vertices, which holds 3 * maxTriangles vertices and may
+   be null when maxTriangles is 0. Meshes and heightfields give their stored (quantized) triangles;
+   convex shapes give a triangulation of their surface. Compound and decorated shapes (scaled,
+   rotated-translated, offset centre of mass) return 0 without reading their parts: Jolt reaches their
+   leaves through CollectTransformedShapes, and their GetTrianglesStart asserts. */
 JPH_CAPI uint32_t JPH_Shape_GetTriangles(const JPH_Shape* shape, JPH_Vec3* vertices, uint32_t maxTriangles);
 
 /* SubShapeIDPair */

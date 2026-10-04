@@ -46,6 +46,11 @@ JPH_Shape* JPH_ShapeSettings_CreateShapeWithError(const JPH_ShapeSettings* setti
 uint32_t JPH_Shape_GetTriangles(const JPH_Shape* shape, JPH_Vec3* vertices, uint32_t maxTriangles)
 {
 	const JPH::Shape* joltShape = reinterpret_cast<const JPH::Shape*>(shape);
+	const JPH::EShapeType type = joltShape->GetType();
+	if (type == JPH::EShapeType::Compound || type == JPH::EShapeType::Decorated)
+	{
+		return 0;
+	}
 	JPH::Shape::GetTrianglesContext context;
 	joltShape->GetTrianglesStart(context, JPH::AABox::sBiggest(), JPH::Vec3::sZero(), JPH::Quat::sIdentity(), JPH::Vec3::sOne());
 	constexpr int batchSize = JPH::Shape::cGetTrianglesMinTrianglesRequested;
