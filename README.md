@@ -83,7 +83,7 @@ The full list of what works today, with links to the guides, is in
 - [ ] Tracked vehicles and motorcycles
 - [ ] Playground: an example with a window that shows every feature, and GIFs for this README
 - [ ] Comparison with Rapier and Avian
-- [ ] Bevy integration crate
+- [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
 - [ ] Rollback helpers: reusable state buffer, filtered restore
 - [ ] Same results across operating systems, checked in CI
