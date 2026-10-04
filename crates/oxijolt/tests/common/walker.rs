@@ -243,7 +243,12 @@ pub fn position_for(origin: V3, up: V3) -> RVec3 {
 
 /// The body origin of the walker now.
 pub fn origin(world: &PhysicsWorld, walker: &Walker) -> V3 {
-    let character = world.character(walker.id).unwrap();
+    character_origin(world, walker.id)
+}
+
+/// The body origin of character `id` now.
+pub fn character_origin(world: &PhysicsWorld, id: CharacterId) -> V3 {
+    let character = world.character(id).unwrap();
     add(
         v3(character.position()),
         scale(f3(character.up()), f64::from(ORIGIN_ABOVE_POSITION)),
@@ -348,12 +353,13 @@ pub fn controller_filter<'a>(walker: &Walker, layers: &'a [ObjectLayer]) -> Quer
 }
 
 /// The underground recovery (D.2 rule 1): when the terrain surface lies more than
-/// `RECOVERY_THRESHOLD` above the feet, the walker is put on it. Returns the surface point.
-fn buried_under(world: &PhysicsWorld, walker: &Walker, origin: V3, up: V3) -> Option<V3> {
+/// `RECOVERY_THRESHOLD` above the feet, the walker is put on it. Returns the surface point of
+/// the terrain in object layer `terrain` that buries a walker with body origin `origin`.
+pub fn buried_under(world: &PhysicsWorld, terrain: ObjectLayer, origin: V3, up: V3) -> Option<V3> {
     let feet = sub(origin, scale(up, f64::from(RADIUS)));
     let start = add(feet, scale(up, 50.0));
     let ball = Shape::new_sphere(0.05).unwrap();
-    let terrain = [walker.layers.terrain];
+    let terrain = [terrain];
     let cast = ShapeCast::new(&ball, rvec3(start), Quat::IDENTITY, vec3(scale(up, -50.0)));
     let hit = world
         .cast_shape(&cast, &QueryFilter::new().object_layers(&terrain))
@@ -388,7 +394,7 @@ pub fn near_step(world: &mut PhysicsWorld, walker: &Walker, input: NearInput) ->
     // 1. Underground recovery.
     let mut recovered = false;
     let mut old = start;
-    if let Some(surface) = buried_under(world, walker, start, up) {
+    if let Some(surface) = buried_under(world, walker.layers.terrain, start, up) {
         old = add(surface, scale(up, f64::from(REST_HEIGHT)));
         world
             .character_mut(walker.id)
@@ -537,10 +543,35 @@ fn autostep(
     start: V3,
     contacts: &[CharacterContact],
 ) -> bool {
+    autostep_character(
+        world,
+        walker.id,
+        walker.step_height,
+        filter,
+        up,
+        desired,
+        start,
+        contacts,
+    )
+}
+
+/// The autostep of character `id` for a step of at most `step_height` above the feet, after a
+/// move from body origin `start` that wanted `desired` and ended with `contacts`.
+#[allow(clippy::too_many_arguments)]
+pub fn autostep_character(
+    world: &mut PhysicsWorld,
+    id: CharacterId,
+    step_height: f32,
+    filter: &QueryFilter<'_>,
+    up: V3,
+    desired: V3,
+    start: V3,
+    contacts: &[CharacterContact],
+) -> bool {
     let cos_45 = std::f64::consts::FRAC_1_SQRT_2;
     let wanted = norm(desired);
     let along = scale(desired, 1.0 / wanted);
-    let here = origin(world, walker);
+    let here = character_origin(world, id);
     let achieved = dot(sub(here, start), along).max(0.0);
     if achieved + 1e-4 >= wanted {
         return false;
@@ -590,7 +621,7 @@ fn autostep(
     // Lifted so that the padded capsule's bottom, at the ground when resting, clears a top
     // `step_height` above the feet. The head room is tested with the bare capsule, which keeps
     // its padding from the walls beside it.
-    let lift = f64::from(walker.step_height + PADDING);
+    let lift = f64::from(step_height + PADDING);
     if cast(here, scale(up, lift + f64::from(PADDING)), false).is_some() {
         return false;
     }
@@ -613,11 +644,11 @@ fn autostep(
         return false;
     }
     world
-        .character_mut(walker.id)
+        .character_mut(id)
         .unwrap()
         .set_position(position_for(landed, up))
         .unwrap();
-    world.refresh_character_contacts(walker.id, filter).unwrap();
+    world.refresh_character_contacts(id, filter).unwrap();
     true
 }
 
