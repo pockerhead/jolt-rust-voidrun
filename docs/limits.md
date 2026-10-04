@@ -68,20 +68,24 @@ therefore still aborts on some clouds that pass them, all with many nearly copla
 
 - faces sampled densely and moved a few coplanar distances off their planes, as scanned or
   decimated geometry is: about one in 1000 such boxes with `t / c` between 200 and 1000 asserted,
-  none of 92 000 above 2000;
+  none of 92 000 above 2000, and 1 of 2953 sized like the cones below, at 210;
 - dense flat cones and domes, a rim of hundreds of points a few coplanar distances off its plane
-  under an apex: about 0.7 % of them asserted, and 1.1 % of far cones moved to the origin by the
-  caller, at `t / c` from about 6 000 up to 100 000.
+  under an apex. Sized across 200 to 6000 coplanar distances, 40 of 2958 such caps and domes
+  (1.4 %) asserted, at `t / c` from about 350 to 10 000, and 64 of 2997 far cones moved to the
+  origin by the caller (2.1 %), from about 280 to 7700.
 
 They abort at `ConvexHullBuilder.cpp:1220`
-(`e->mNeighbourEdge->mFace != other_edge->mNeighbourEdge->mFace`), `:779` (`IsFacing`) or `:858`. No slab bound separates them from good clouds: one above `1e5 · c` would refuse a 2 m plank
-thinner than 7 cm near the origin. This is a limit of the `asserts` feature. Without it Jolt refuses
-such clouds itself with "Hull building failed" (`ShapeError::Rejected`), as it does for six of them
-in `hull_shapes.rs`, or builds a hull. The seeded
-stress, which runs with asserts too, draws sparse clouds only. Recentring a far cloud does not move
-it out of the second group: the cloud keeps the rounding of its far coordinates, about a twentieth
-of its coplanar distance there, and at the origin that rounding is several coplanar distances of the
-moved cloud.
+(`e->mNeighbourEdge->mFace != other_edge->mNeighbourEdge->mFace`), `:779` (`IsFacing`) or `:858`,
+from `t / c` of about 210. No slab bound separates them from good clouds: one above `1e5 · c` would
+refuse a 2 m plank thinner than 7 cm near the origin. This is a limit of the `asserts` feature.
+
+Without it Jolt refuses most of these clouds itself with "Hull building failed"
+(`ShapeError::Rejected`) and builds a hull from the rest: of the 105 clouds that asserted in the
+sizing run above, 92 were refused and 13 built. `hull_shapes.rs` checks six refused and two
+built ones. The seeded stress, which runs with asserts too, draws sparse clouds only.
+Recentring a far cloud does not move it out of the second group: the cloud keeps the rounding of
+its far coordinates, about a twentieth of its coplanar distance there, and at the origin that
+rounding is several coplanar distances of the moved cloud.
 
 Jolt also refuses, in every build, about one cloud in eight of densely sampled boxes whose faces are
 noisy by up to 10 coplanar distances, with "Hull building failed": thin out scanned or decimated
@@ -90,6 +94,14 @@ clouds, or snap their faces.
 Jolt keeps at most 256 vertices of a hull (`cMaxPointsInHull`) and drops the points inside it. It
 reduces the convex radius until twice the radius fits the hull's thinnest direction and its
 sharpest edges (`ConvexHullShape.cpp:269-345`).
+
+### Thin dynamic hulls on a floor
+
+Observed, under investigation: flat cones 0.4 to 7 cm thick of the families in
+[Clouds the hull builder asserts on](#clouds-the-hull-builder-asserts-on), built without asserts,
+do not come to rest as dynamic bodies dropped onto a box floor, whether or not they assert with
+asserts. After 2 s they still sink at about 0.3 to 0.6 m/s, with their origin about 7 cm below the floor's
+top (1.4 m in one case).
 
 ## Triangle meshes
 
@@ -181,9 +193,12 @@ In an asserts build the thinnest sliver the rule keeps (to 1 %) rests under boxe
 300 and 1100 m with the default and 1500 and 2000 m with an extent of 2000 m, queried in three
 orientations and as a heavy body (`the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent`).
 With the convex term scaled by 0.25 or 0.1 Jolt finds no contact with the sliver in that test, and
-at 0 it asserts. In a seeded sweep of the thinnest kept slivers lying along a convex shape's axes,
-about 11 700 cases at the extent and about 5 800 each with convex shapes two, five and ten times
-larger asserted nothing; with thirty times larger, one of about 5 800 did.
+at 0 it asserts. In seeded sweeps of the thinnest kept slivers lying along a convex shape's axes,
+about 35 000 cases with convex shapes as large as the 1100 m default and 1.8 and 3 times larger
+asserted nothing. With a mesh built for 110 m, convex shapes 2, 3, 5 and 7 times larger asserted
+nothing in 10 000 cases each, and 10 times larger asserted in 9 of 10 seeds of 2000 cases: the
+margin is about 7. At the default no factor above about 3.6 can be built: a convex shape's extent
+stops at 2000 m plus a separation distance of at most 2000 m.
 
 ## Scaled shapes
 

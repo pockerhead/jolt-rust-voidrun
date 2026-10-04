@@ -18,9 +18,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   triangle's corners. `Shape::scaled` checks a mesh inside it for the extent the mesh was built
   with and refuses a scale that leaves its triangles too thin with `ShapeError::ThinTriangles`
   (`ThinTrianglesError`: the scale and the extent).
-- With the `asserts` feature Jolt's hull builder can abort on rare point clouds with many nearly
-  coplanar faces (densely sampled noisy faces, dense flat cones and domes) that pass the hull
-  rules; without it Jolt refuses them as `ShapeError::Rejected`. See `docs/limits.md`. The
+- With the `asserts` feature Jolt's hull builder can abort on point clouds with many nearly
+  coplanar faces that pass the hull rules: about one densely sampled noisy box in 1000 and 1 to 2 %
+  of dense flat cones and domes; without it Jolt refuses most of them as `ShapeError::Rejected`
+  and builds the rest. See `docs/limits.md`. The
   `HullError::Coplanar` message suggests thickening the cloud or centring it on the shape origin.
 - joltc extension: `JPH_ShapeSettings_CreateShapeWithError`, `JPH_MeshShapeSettings_Create3`
   (materials), `JPH_MeshShapeSettings_GetTriangleCount` and `JPH_Shape_GetTriangles`.

@@ -21,8 +21,8 @@ const MIN_NEEDLE_LEVER: f64 = 0.25;
 /// Smallest distance of the farthest point from the initial triangle's plane, in Jolt's coplanar
 /// distances, of a cloud Jolt's hull builder is given. Jolt itself treats up to 6 as flat
 /// (`cCoplanarSlopFactor`); measured: thin slabs asserted up to 10.9 and a small sphere of
-/// points far from the origin at 60, so the bound keeps a factor of about 3. Clouds with many
-/// nearly coplanar faces can trip the builder above it; see [docs/limits.md#convex-hulls].
+/// points far from the origin at 60. Clouds with many nearly coplanar faces still trip the
+/// builder from about 210; see [docs/limits.md#convex-hulls].
 ///
 /// [docs/limits.md#convex-hulls]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-hulls
 const MIN_SLAB_THICKNESS: f64 = 200.0;
@@ -41,10 +41,10 @@ impl Shape {
     /// mesh, a capsule or a thin box instead. Whatever else Jolt's hull builder refuses comes
     /// back as [`ShapeError::Rejected`].
     ///
-    /// With the `asserts` feature Jolt's hull builder can abort the process on rare clouds with
+    /// With the `asserts` feature Jolt's hull builder can abort the process on some clouds with
     /// many nearly coplanar faces: densely sampled faces a few coplanar distances off their
-    /// planes, dense flat cones and domes. Without it Jolt refuses them
-    /// ([`ShapeError::Rejected`]) or builds a hull; see
+    /// planes, dense flat cones and domes. Without it Jolt refuses most of them
+    /// ([`ShapeError::Rejected`]) and builds a hull from the rest; see
     /// [docs/limits.md#clouds-the-hull-builder-asserts-on].
     ///
     /// Jolt keeps at most 256 vertices of the hull and drops the points inside it. It shrinks the
