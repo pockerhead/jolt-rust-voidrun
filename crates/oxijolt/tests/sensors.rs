@@ -289,3 +289,29 @@ fn a_soft_body_reports_a_sensor() {
     // The cloth fell through the sensor.
     assert!(world.body(cloth).unwrap().position().y < -1.0);
 }
+
+#[test]
+fn a_deactivated_sensor_detects_nothing() {
+    let mut world = world(GRAVITY, 1);
+    world.set_event_settings(EventSettings::default().contacts(true));
+    add_floor(&mut world);
+    let cube = add_cube(&mut world, RVec3::new(0.0, 0.5, 0.0));
+    fall_asleep(&mut world, cube);
+    let sensor = world
+        .create_body(
+            &Shape::new_box(Vec3::new(1.0, 1.0, 1.0)).unwrap(),
+            &BodySettings::new_kinematic()
+                .position(RVec3::new(0.0, 1.0, 0.0))
+                .sensor(true),
+        )
+        .unwrap();
+    world.body_mut(sensor).unwrap().deactivate().unwrap();
+    world.take_events();
+    let events = contact_events(&mut world, 30);
+    assert!(sensor_contacts(&events, sensor, cube).is_empty());
+    assert!(world.body(sensor).unwrap().is_sleeping());
+    // Woken by hand, it detects the sleeping cube.
+    world.body_mut(sensor).unwrap().activate();
+    let events = contact_events(&mut world, 2);
+    assert_eq!(contact_kinds(&events, sensor, cube), "a");
+}

@@ -22,7 +22,7 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
-use crate::body::{kinematic_velocities, with_locked_body};
+use crate::body::{corners, kinematic_velocities, with_locked_body};
 use crate::constraint::SixDofConstraintAxis;
 use crate::limits::{self, ANGULAR_VELOCITY_RULE, LINEAR_VELOCITY_RULE};
 use crate::owned::{JoltObject, Owned};
@@ -732,7 +732,8 @@ impl PhysicsWorld {
         }
         self.unregister_ragdoll(entry);
         for bounds in &bounds {
-            self.wake_bodies_overlapping(bounds);
+            let (min, max) = corners(bounds);
+            self.wake_bodies_overlapping(min, max, None);
         }
         Ok(())
     }

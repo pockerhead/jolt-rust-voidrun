@@ -1,4 +1,4 @@
-//! Momentary inputs to bodies: impulses and kinematic moves.
+//! Momentary inputs to bodies: impulses, kinematic moves and activation on demand.
 
 mod common;
 
@@ -457,4 +457,282 @@ fn kinematic_moves_are_bounded_by_the_velocities_they_imply() {
         Err(BodyError::SoftBody(cloth))
     );
     step(&mut world, 1);
+}
+
+/// A world without gravity that records activation events.
+fn activation_world() -> PhysicsWorld {
+    let mut world = world(Vec3::ZERO, 1);
+    world.set_event_settings(EventSettings::default().body_activation(true));
+    world
+}
+
+/// The activation events recorded since the last call.
+fn activations(world: &mut PhysicsWorld) -> Vec<ActivationEvent> {
+    world.take_events().activations
+}
+
+#[test]
+fn deactivate_zeroes_velocities_and_reports_an_event() {
+    let mut world = activation_world();
+    let cube = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_dynamic()
+                .linear_velocity(Vec3::new(1.0, 2.0, 3.0))
+                .angular_velocity(Vec3::new(0.5, 0.0, 0.0)),
+        )
+        .unwrap();
+    activations(&mut world);
+    let mut body = world.body_mut(cube).unwrap();
+    body.deactivate().unwrap();
+    assert!(body.is_sleeping());
+    assert_eq!(body.linear_velocity(), Vec3::ZERO);
+    assert_eq!(body.angular_velocity(), Vec3::ZERO);
+    assert_eq!(
+        activations(&mut world),
+        [ActivationEvent::Deactivated(cube)]
+    );
+    step(&mut world, 10);
+    assert_eq!(world.body(cube).unwrap().position(), RVec3::ZERO);
+}
+
+#[test]
+fn deactivate_zeroes_the_velocities_of_a_body_already_asleep() {
+    let mut world = activation_world();
+    let cube = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_dynamic()
+                .linear_velocity(Vec3::new(4.0, 0.0, 0.0))
+                .activation(Activation::DontActivate),
+        )
+        .unwrap();
+    assert_eq!(
+        world.body(cube).unwrap().linear_velocity(),
+        Vec3::new(4.0, 0.0, 0.0)
+    );
+    let mut body = world.body_mut(cube).unwrap();
+    body.deactivate().unwrap();
+    assert_eq!(body.linear_velocity(), Vec3::ZERO);
+    assert!(body.is_sleeping());
+    assert!(activations(&mut world).is_empty());
+    // Waking it does not bring the velocity back.
+    world.body_mut(cube).unwrap().activate();
+    step(&mut world, 5);
+    assert_eq!(world.body(cube).unwrap().position(), RVec3::ZERO);
+}
+
+#[test]
+fn repeated_deactivation_reports_once() {
+    let mut world = activation_world();
+    let cube = add_cube(&mut world, RVec3::ZERO);
+    let fixed = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_static().position(RVec3::new(5.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    activations(&mut world);
+    for _ in 0..3 {
+        world.body_mut(cube).unwrap().deactivate().unwrap();
+        world.body_mut(fixed).unwrap().deactivate().unwrap();
+    }
+    assert_eq!(
+        activations(&mut world),
+        [ActivationEvent::Deactivated(cube)]
+    );
+}
+
+#[test]
+fn activate_wakes_a_sleeping_body_and_reports_it() {
+    let mut world = activation_world();
+    let cube = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_dynamic().activation(Activation::DontActivate),
+        )
+        .unwrap();
+    let fixed = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_static().position(RVec3::new(5.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    assert!(world.body(cube).unwrap().is_sleeping());
+    world.body_mut(cube).unwrap().activate();
+    world.body_mut(cube).unwrap().activate();
+    world.body_mut(fixed).unwrap().activate();
+    assert!(world.body(cube).unwrap().is_active());
+    assert!(!world.body(fixed).unwrap().is_active());
+    assert_eq!(activations(&mut world), [ActivationEvent::Activated(cube)]);
+}
+
+#[test]
+fn deactivate_refuses_soft_bodies() {
+    let mut world = activation_world();
+    let cloth = add_cloth(&mut world, RVec3::new(0.0, 5.0, 0.0), Quat::IDENTITY);
+    activations(&mut world);
+    assert_eq!(
+        world.body_mut(cloth).unwrap().deactivate(),
+        Err(BodyError::SoftBody(cloth))
+    );
+    assert!(world.body(cloth).unwrap().is_active());
+    assert!(activations(&mut world).is_empty());
+}
+
+/// Bodies around a box from (0, 0, 0) to (2, 2, 2), all asleep: one inside, one touching its
+/// +x face, one 1 mm beyond it, a static one inside, and one moved away from inside, whose
+/// broad-phase bounds Jolt has widened over both places.
+struct BoxScene {
+    world: PhysicsWorld,
+    inside: BodyId,
+    touching: BodyId,
+    beyond: BodyId,
+    moved: BodyId,
+}
+
+fn box_scene(optimize: bool) -> BoxScene {
+    let mut world = activation_world();
+    let asleep = |x: Real| {
+        BodySettings::new_dynamic()
+            .position(RVec3::new(x, 1.0, 1.0))
+            .activation(Activation::DontActivate)
+    };
+    // Created in an order that differs from body-id order of the result: ids follow creation.
+    let moved = world.create_body(&cube_shape(), &asleep(1.0)).unwrap();
+    let beyond = world.create_body(&cube_shape(), &asleep(2.501)).unwrap();
+    let touching = world.create_body(&cube_shape(), &asleep(2.5)).unwrap();
+    let inside = world.create_body(&cube_shape(), &asleep(0.5)).unwrap();
+    world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_static().position(RVec3::new(1.5, 1.0, 1.0)),
+        )
+        .unwrap();
+    world
+        .body_mut(moved)
+        .unwrap()
+        .set_position(RVec3::new(10.0, 1.0, 1.0), Activation::DontActivate)
+        .unwrap();
+    if optimize {
+        world.optimize_broad_phase();
+    }
+    activations(&mut world);
+    BoxScene {
+        world,
+        inside,
+        touching,
+        beyond,
+        moved,
+    }
+}
+
+#[test]
+fn activate_bodies_in_box_wakes_exact_overlaps_in_body_id_order() {
+    for optimize in [false, true] {
+        let mut scene = box_scene(optimize);
+        let world = &mut scene.world;
+        world
+            .activate_bodies_in_box(RVec3::ZERO, RVec3::new(2.0, 2.0, 2.0))
+            .unwrap();
+        let woken = activations(world);
+        // Body-id order: `touching` was created before `inside`.
+        assert_eq!(
+            woken,
+            [
+                ActivationEvent::Activated(scene.touching),
+                ActivationEvent::Activated(scene.inside)
+            ],
+            "optimize: {optimize}"
+        );
+        for id in [scene.beyond, scene.moved] {
+            assert!(
+                world.body(id).unwrap().is_sleeping(),
+                "optimize: {optimize}"
+            );
+        }
+
+        // A degenerate box, a point on the face the moved body left.
+        let mut scene = box_scene(optimize);
+        let world = &mut scene.world;
+        let point = RVec3::new(1.5, 1.0, 1.0);
+        world.activate_bodies_in_box(point, point).unwrap();
+        assert!(activations(world).is_empty(), "optimize: {optimize}");
+        let face = RVec3::new(1.0, 1.0, 1.0);
+        world.activate_bodies_in_box(face, face).unwrap();
+        assert_eq!(
+            activations(world),
+            [ActivationEvent::Activated(scene.inside)]
+        );
+    }
+}
+
+#[test]
+fn activation_box_is_validated() {
+    let mut scene = box_scene(false);
+    let world = &mut scene.world;
+    let far = limits::MAX_POSITION.next_up();
+    for (min, max) in [
+        (RVec3::new(2.0, 0.0, 0.0), RVec3::new(0.0, 2.0, 2.0)),
+        (RVec3::ZERO, RVec3::new(far, 2.0, 2.0)),
+        (RVec3::new(-far, 0.0, 0.0), RVec3::new(2.0, 2.0, 2.0)),
+        (RVec3::new(Real::NAN, 0.0, 0.0), RVec3::new(2.0, 2.0, 2.0)),
+    ] {
+        assert!(invalid(world.activate_bodies_in_box(min, max)));
+    }
+    assert!(activations(world).is_empty());
+    assert!(world.body(scene.inside).unwrap().is_sleeping());
+}
+
+#[test]
+fn box_activation_compares_in_caller_precision() {
+    // Only `f64` positions can name a box edge between two `f32` values.
+    if std::mem::size_of::<Real>() != 8 {
+        return;
+    }
+    let mut world = activation_world();
+    // A cube whose bounds end exactly at x = 1 and start exactly at x = -1.
+    let cube = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(0.5, 0.0, 0.0))
+                .activation(Activation::DontActivate),
+        )
+        .unwrap();
+    let other = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(-0.5, 0.0, 3.0))
+                .activation(Activation::DontActivate),
+        )
+        .unwrap();
+    let just_beyond = 1.0 + 1.0e-8;
+    world
+        .activate_bodies_in_box(
+            RVec3::new(just_beyond, -1.0, -1.0),
+            RVec3::new(2.0, 1.0, 1.0),
+        )
+        .unwrap();
+    world
+        .activate_bodies_in_box(
+            RVec3::new(-2.0, -1.0, 2.0),
+            RVec3::new(-just_beyond, 1.0, 4.0),
+        )
+        .unwrap();
+    assert!(activations(&mut world).is_empty());
+    world
+        .activate_bodies_in_box(RVec3::new(1.0, -1.0, -1.0), RVec3::new(2.0, 1.0, 1.0))
+        .unwrap();
+    world
+        .activate_bodies_in_box(RVec3::new(-2.0, -1.0, 2.0), RVec3::new(-1.0, 1.0, 4.0))
+        .unwrap();
+    assert_eq!(
+        activations(&mut world),
+        [
+            ActivationEvent::Activated(cube),
+            ActivationEvent::Activated(other)
+        ]
+    );
 }

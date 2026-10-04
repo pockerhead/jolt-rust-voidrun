@@ -1,9 +1,9 @@
-//! Momentary inputs to one body: impulses and kinematic moves.
+//! Momentary inputs to one body: impulses, kinematic moves and activation.
 
 use oxijolt_sys::*;
 
 use super::load::{point_torque, read_load, require, Load, LoadState};
-use super::{kinematic_velocities, with_read_locked_body, MotionType};
+use super::{kinematic_velocities, with_locked_body, with_read_locked_body, MotionType};
 use crate::limits::{
     is_angular_velocity, is_angular_velocity_change, is_in_frame, is_linear_velocity,
     is_velocity_change, ANGULAR_VELOCITY_CHANGE_RULE, POSITION_RULE, VELOCITY_CHANGE_RULE,
@@ -193,6 +193,51 @@ impl BodyMut<'_> {
             )
         };
         Ok(())
+    }
+
+    /// Wakes the body (Jolt `BodyInterface::ActivateBody`); an awake body restarts its sleep
+    /// timer. Records [`ActivationEvent::Activated`] for a body that was asleep. Static bodies
+    /// ignore it.
+    ///
+    /// [`ActivationEvent::Activated`]: crate::ActivationEvent::Activated
+    pub fn activate(&mut self) {
+        // SAFETY: the world is borrowed mutably through this view and holds the body; this
+        // thread holds no body lock.
+        unsafe { JPH_BodyInterface_ActivateBody(self.interface(), self.id.raw) };
+    }
+
+    /// Puts the body to sleep now (Jolt `BodyInterface::DeactivateBody`) and zeroes its linear
+    /// and angular velocity, also when it was asleep already.
+    ///
+    /// Only a body that was awake records [`ActivationEvent::Deactivated`]. Forces added since
+    /// the last step stay until the body wakes and steps. The body stays asleep until something
+    /// wakes it (a contact with an awake body, a setter that activates, [`activate`](Self::activate)),
+    /// also when it may not fall asleep on its own; a sensor detects nothing meanwhile.
+    /// [`PhysicsWorld::restore_state`] puts bodies back to sleep or wakes them without
+    /// activation events. Static bodies ignore it; fails with [`BodyError::SoftBody`] for a soft
+    /// body.
+    ///
+    /// [`ActivationEvent::Deactivated`]: crate::ActivationEvent::Deactivated
+    /// [`PhysicsWorld::restore_state`]: crate::PhysicsWorld::restore_state
+    pub fn deactivate(&mut self) -> Result<(), BodyError> {
+        self.reject_soft_body()?;
+        // SAFETY: as in `activate`.
+        unsafe { JPH_BodyInterface_DeactivateBody(self.interface(), self.id.raw) };
+        // Jolt zeroes the velocities of an awake body it deactivates and leaves those of a
+        // sleeping one, which a body created asleep may still have.
+        let zero = Vec3::ZERO.to_jph();
+        with_locked_body(self.inner.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for writing for the duration of the closure, and the
+            // clamped setters, which never wake the body, run only on a body that is not static,
+            // as they assert. `zero` is a live local.
+            unsafe {
+                if !JPH_Body_IsStatic(body.as_ptr()) {
+                    JPH_Body_SetLinearVelocityClamped(body.as_ptr(), &zero);
+                    JPH_Body_SetAngularVelocityClamped(body.as_ptr(), &zero);
+                }
+            }
+        })
+        .ok_or(BodyError::NotFound(self.id))
     }
 
     /// What bounds an impulse on this body when it is a dynamic rigid body; `None` for static

@@ -14,9 +14,9 @@ use super::{
     KINEMATIC_MESH_MASS_RULE, MESH_DYNAMIC_RULE, SENSOR_SHAPE_RULE, STATIC_DOFS_RULE,
     STATIC_SHAPE_RULE,
 };
-use crate::limits::{is_mass, MASS_RULE};
+use crate::limits::{is_in_frame, is_mass, MASS_RULE};
 use crate::owned::Owned;
-use crate::{BodyError, PhysicsWorld, Shape, Vec3};
+use crate::{BodyError, PhysicsWorld, RVec3, Real, Shape, Vec3};
 
 /// Whether a body that is not static may use `shape`, which Jolt allows only on static bodies
 /// (Jolt itself never checks this when creating a body).
@@ -188,7 +188,8 @@ impl PhysicsWorld {
         // keeps anyone else from removing it in between, so the body is removed exactly once
         // (Jolt does not validate ids in `DestroyBody`). This thread holds no body lock.
         unsafe { JPH_BodyInterface_RemoveAndDestroyBody(self.body_interface.as_ptr(), id.raw) };
-        self.wake_bodies_overlapping(&bounds);
+        let (min, max) = corners(&bounds);
+        self.wake_bodies_overlapping(min, max, None);
         Ok(())
     }
 
@@ -220,6 +221,27 @@ impl PhysicsWorld {
         Ok(())
     }
 
+    /// Wakes every non-static body whose current bounds overlap or touch the box from `min` to
+    /// `max` (world space, metres), in body-id order, recording an
+    /// [`ActivationEvent::Activated`](crate::ActivationEvent::Activated) for each that was
+    /// asleep.
+    ///
+    /// The bodies are found by their exact bounds now, compared in the precision of [`Real`],
+    /// so the result does not depend on the broad phase's history or on worker threads; Jolt's
+    /// own `ActivateBodiesInAABox` does depend on them and is not used. Both corners must lie
+    /// within [`limits::MAX_POSITION`](crate::limits::MAX_POSITION) with `min <= max` on every
+    /// axis, otherwise [`BodyError::InvalidValue`] is returned and nothing wakes.
+    pub fn activate_bodies_in_box(&mut self, min: RVec3, max: RVec3) -> Result<(), BodyError> {
+        let ordered = min.x <= max.x && min.y <= max.y && min.z <= max.z;
+        if !(is_in_frame(min) && is_in_frame(max) && ordered) {
+            return Err(BodyError::InvalidValue(
+                "box corners must be within limits::MAX_POSITION with min <= max",
+            ));
+        }
+        self.wake_bodies_overlapping(min, max, None);
+        Ok(())
+    }
+
     /// Whether bodies `a` and `b` touched in the last [`step`](Self::step) (Jolt
     /// `PhysicsSystem::WereBodiesInContact`).
     ///
@@ -239,14 +261,24 @@ impl PhysicsWorld {
         Ok(unsafe { JPH_PhysicsSystem_WereBodiesInContact(self.system.as_ptr(), a.raw, b.raw) })
     }
 
-    /// Wakes every non-static body whose world bounds overlap `bounds`, in body-id order.
+    /// Wakes every non-static body other than `except` whose world bounds overlap or touch the
+    /// box from `min` to `max`, in body-id order.
     ///
     /// Jolt's broad phase keeps widened bounds for moved bodies until its next maintenance, so
     /// which bodies it reports depends on that history (Jolt docs, "Deterministic Simulation").
-    /// Here it only proposes candidates; each is kept only when its exact bounds overlap.
-    pub(crate) fn wake_bodies_overlapping(&mut self, bounds: &JPH_AABox) {
-        let candidates = self.broad_phase_bodies(bounds);
-        let woken = self.overlapping_movable_bodies(bounds, &candidates);
+    /// Here it only proposes candidates, from the box rounded outward to `f32`; each is kept only
+    /// when its exact bounds overlap the box in the caller's precision.
+    pub(crate) fn wake_bodies_overlapping(
+        &mut self,
+        min: RVec3,
+        max: RVec3,
+        except: Option<BodyId>,
+    ) {
+        let candidates = self.broad_phase_bodies(&outward_box(min, max));
+        let mut woken = self.overlapping_movable_bodies(min, max, &candidates);
+        if let Some(except) = except {
+            woken.retain(|&raw| raw != except.raw);
+        }
         if woken.is_empty() {
             return;
         }
@@ -295,11 +327,12 @@ impl PhysicsWorld {
     }
 
     /// Those of the sorted `candidates` that are non-static bodies whose world bounds overlap
-    /// `bounds`, in the same order. Locks all candidates at once and releases them before
-    /// returning.
+    /// the box from `min` to `max`, in the same order. Locks all candidates at once and releases
+    /// them before returning.
     fn overlapping_movable_bodies(
         &self,
-        bounds: &JPH_AABox,
+        min: RVec3,
+        max: RVec3,
         candidates: &[JPH_BodyID],
     ) -> Vec<JPH_BodyID> {
         let mut woken = Vec::new();
@@ -336,7 +369,7 @@ impl PhysicsWorld {
                 JPH_Body_GetWorldSpaceBounds(body.as_ptr(), &mut candidate_bounds);
                 JPH_Body_IsStatic(body.as_ptr())
             };
-            if !is_static && bounds_overlap(bounds, &candidate_bounds) {
+            if !is_static && bounds_overlap(min, max, &candidate_bounds) {
                 woken.push(candidate);
             }
         }
@@ -383,10 +416,50 @@ unsafe extern "C" fn collect_broad_phase_hit(user_data: *mut c_void, body: JPH_B
     }
 }
 
-/// Whether two boxes overlap, touching included (Jolt `AABox::Overlaps`).
-pub(super) fn bounds_overlap(a: &JPH_AABox, b: &JPH_AABox) -> bool {
-    let axis = |a_min: f32, a_max: f32, b_min: f32, b_max: f32| a_min <= b_max && b_min <= a_max;
-    axis(a.min.x, a.max.x, b.min.x, b.max.x)
-        && axis(a.min.y, a.max.y, b.min.y, b.max.y)
-        && axis(a.min.z, a.max.z, b.min.z, b.max.z)
+/// The corners of `bounds`, widened to [`Real`].
+pub(crate) fn corners(bounds: &JPH_AABox) -> (RVec3, RVec3) {
+    let widen = |v: JPH_Vec3| RVec3::new(Real::from(v.x), Real::from(v.y), Real::from(v.z));
+    (widen(bounds.min), widen(bounds.max))
+}
+
+/// `value` as `f32`, rounded down for `up == false` and up otherwise, so that the result
+/// encloses `value` on that side.
+// `Real` is `f32` without the `double-precision` feature, so the cast is a no-op there.
+#[allow(clippy::unnecessary_cast)]
+fn rounded_outward(value: Real, up: bool) -> f32 {
+    let rounded = value as f32;
+    if up && Real::from(rounded) < value {
+        rounded.next_up()
+    } else if !up && Real::from(rounded) > value {
+        rounded.next_down()
+    } else {
+        rounded
+    }
+}
+
+/// The smallest `f32` box that contains the box from `min` to `max`.
+pub(super) fn outward_box(min: RVec3, max: RVec3) -> JPH_AABox {
+    let side = |v: RVec3, up| {
+        Vec3::new(
+            rounded_outward(v.x, up),
+            rounded_outward(v.y, up),
+            rounded_outward(v.z, up),
+        )
+        .to_jph()
+    };
+    JPH_AABox {
+        min: side(min, false),
+        max: side(max, true),
+    }
+}
+
+/// Whether `bounds` overlaps the box from `min` to `max`, touching included (Jolt
+/// `AABox::Overlaps`), compared in [`Real`].
+pub(super) fn bounds_overlap(min: RVec3, max: RVec3, bounds: &JPH_AABox) -> bool {
+    let (other_min, other_max) = corners(bounds);
+    let axis =
+        |a_min: Real, a_max: Real, b_min: Real, b_max: Real| a_min <= b_max && b_min <= a_max;
+    axis(min.x, max.x, other_min.x, other_max.x)
+        && axis(min.y, max.y, other_min.y, other_max.y)
+        && axis(min.z, max.z, other_min.z, other_max.z)
 }

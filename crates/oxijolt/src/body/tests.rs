@@ -1,4 +1,4 @@
-use super::access::bounds_overlap;
+use super::access::{bounds_overlap, corners, outward_box};
 use super::load::point_torque;
 use super::*;
 use crate::world::ensure_initialized;
@@ -238,16 +238,19 @@ fn aabox(min: [f32; 3], max: [f32; 3]) -> JPH_AABox {
     }
 }
 
+/// Whether `a` and `b` overlap, `a` taken in caller precision.
+fn overlap(a: &JPH_AABox, b: &JPH_AABox) -> bool {
+    let (min, max) = corners(a);
+    bounds_overlap(min, max, b)
+}
+
 #[test]
 fn bounds_overlap_counts_touching_and_containment() {
     let unit = aabox([0.0; 3], [1.0; 3]);
-    assert!(bounds_overlap(&unit, &aabox([0.5; 3], [2.0; 3])));
-    assert!(bounds_overlap(
-        &unit,
-        &aabox([1.0, 0.0, 0.0], [2.0, 1.0, 1.0])
-    ));
-    assert!(bounds_overlap(&unit, &aabox([0.25; 3], [0.75; 3])));
-    assert!(bounds_overlap(&aabox([0.25; 3], [0.75; 3]), &unit));
+    assert!(overlap(&unit, &aabox([0.5; 3], [2.0; 3])));
+    assert!(overlap(&unit, &aabox([1.0, 0.0, 0.0], [2.0, 1.0, 1.0])));
+    assert!(overlap(&unit, &aabox([0.25; 3], [0.75; 3])));
+    assert!(overlap(&aabox([0.25; 3], [0.75; 3]), &unit));
 }
 
 #[test]
@@ -259,8 +262,31 @@ fn bounds_separated_on_any_axis_do_not_overlap() {
         min[axis] = 1.5;
         max[axis] = 2.5;
         let apart = aabox(min, max);
-        assert!(!bounds_overlap(&unit, &apart), "axis {axis}");
-        assert!(!bounds_overlap(&apart, &unit), "axis {axis}");
+        assert!(!overlap(&unit, &apart), "axis {axis}");
+        assert!(!overlap(&apart, &unit), "axis {axis}");
+    }
+}
+
+#[test]
+fn the_broad_phase_box_encloses_the_callers_box() {
+    // 0.1 and 0.3 have no exact `f32`; with `Real = f64` the nearest `f32` lies on one side.
+    let min = RVec3::new(0.1, -0.1, 0.3);
+    let max = RVec3::new(0.3, 0.1, 0.7);
+    let outer = outward_box(min, max);
+    let (outer_min, outer_max) = corners(&outer);
+    for (inner, outer) in [
+        (min.x, outer_min.x),
+        (min.y, outer_min.y),
+        (min.z, outer_min.z),
+    ] {
+        assert!(outer <= inner, "{outer} {inner}");
+    }
+    for (inner, outer) in [
+        (max.x, outer_max.x),
+        (max.y, outer_max.y),
+        (max.z, outer_max.z),
+    ] {
+        assert!(outer >= inner, "{outer} {inner}");
     }
 }
 
