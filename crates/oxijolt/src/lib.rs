@@ -204,9 +204,10 @@ pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use listener::{
-    ActivationEvent, ContactEvent, ContactListener, ContactManifold, ContactPoint, ContactSettings,
-    ContactSettingsRejection, EventSettings, SoftBodyContactSettings, SoftBodyContacts,
-    SoftBodyValidateResult, SoftBodyValidation, SoftBodyVertexContact, SubShapeIdPair, WorldEvents,
+    ActivationEvent, ContactCandidate, ContactEvent, ContactListener, ContactManifold,
+    ContactPoint, ContactSettings, ContactSettingsRejection, EventSettings,
+    SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
+    SoftBodyVertexContact, SubShapeIdPair, ValidateResult, WorldEvents,
 };
 pub use material::PhysicsMaterial;
 pub use math::{Quat, RVec3, Real, Vec3};

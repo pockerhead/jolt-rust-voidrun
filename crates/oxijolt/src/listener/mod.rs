@@ -12,6 +12,7 @@ mod activation;
 mod contact;
 mod order;
 mod soft_body;
+mod validate;
 
 use std::any::Any;
 use std::ffi::c_void;
@@ -36,6 +37,7 @@ pub use soft_body::{
     SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
     SoftBodyVertexContact,
 };
+pub use validate::{ContactCandidate, ValidateResult};
 
 /// Changes how Jolt resolves contacts while a world steps; see
 /// [`PhysicsWorld::set_contact_listener`].
@@ -43,10 +45,12 @@ pub use soft_body::{
 /// Jolt calls the methods on its worker threads during [`PhysicsWorld::step`], concurrently and
 /// in no fixed order, while it holds every body: a method must not touch the world. For a
 /// deterministic simulation its decision must depend only on its arguments and on data fixed
-/// for the step; a mutex makes shared state safe to use here, not deterministic.
+/// for the step; a mutex makes shared state safe to use here, not deterministic. Jolt may call
+/// [`contact_validate`](Self::contact_validate) any number of times per pair and step; only
+/// the added and persisted calls follow the contacts.
 ///
 /// A panic in a method is resumed by `step` after the update. Jolt then keeps its own settings
-/// for that contact, and calls that start after the panic skip the listener until the panic is
+/// for that contact (or accepts the hit, for a validation), and calls that start after the panic skip the listener until the panic is
 /// resumed; calls already running on other threads finish. The step that panicked has advanced
 /// the world: it is outside the replay guarantee.
 ///
@@ -57,6 +61,29 @@ pub use soft_body::{
 /// [`StepReport::rejected_contact_settings`](crate::StepReport::rejected_contact_settings),
 /// and the listener is still called for every other contact.
 pub trait ContactListener: Send + Sync + 'static {
+    /// Whether Jolt keeps a hit between two rigid bodies, before it becomes a contact. The
+    /// default accepts every hit, as Jolt does without a listener.
+    ///
+    /// Jolt asks during the step's collision passes, on worker threads and concurrently for
+    /// different pairs (one pair at a time), while it holds both bodies. The body order is the
+    /// one [`ContactCandidate`] states. Jolt may ask any number of times per pair and step, in
+    /// no fixed order, also for hits it then drops; [`AcceptContact`] and [`RejectContact`] ask
+    /// again for the pair's next hit, the two "all" answers end the asking for that pair in
+    /// that collision pass.
+    ///
+    /// A pair whose contact cache Jolt reuses (the bodies barely moved relative to each other)
+    /// is not asked again and keeps its last answer, "no contact" included, until the bodies
+    /// move enough relative to each other. Soft body pairs go to [`soft_body_contact_validate`](Self::soft_body_contact_validate)
+    /// instead, and character movement does not call it. `docs/events.md` (section
+    /// "Validating contacts") has the details.
+    ///
+    /// [`AcceptContact`]: ValidateResult::AcceptContact
+    /// [`RejectContact`]: ValidateResult::RejectContact
+    fn contact_validate(&self, contact: &ContactCandidate) -> ValidateResult {
+        let _ = contact;
+        ValidateResult::AcceptAllContactsForThisBodyPair
+    }
+
     /// A rigid contact appeared; `settings` may be changed for it.
     fn contact_added(&self, manifold: &ContactManifold, settings: &mut ContactSettings) {
         let _ = (manifold, settings);
@@ -383,7 +410,8 @@ impl ListenerContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(not(test), allow(dead_code))]
 enum Callback {
-    ContactAdded = 1,
+    ContactValidate = 1,
+    ContactAdded,
     ContactPersisted,
     ContactRemoved,
     BodyActivated,
@@ -392,12 +420,12 @@ enum Callback {
     SoftBodyAdded,
 }
 
-/// A native contact listener, owned by the world.
-impl JoltObject for JPH_ContactListener {
+/// A native contact listener of the extension, owned by the world.
+impl JoltObject for JPH_ContactListener2 {
     unsafe fn destroy(ptr: *mut Self) {
         // SAFETY: the owner owns the listener (trait contract) and detached it from its system
         // first, so nothing calls it any more.
-        unsafe { JPH_ContactListener_Destroy(ptr) };
+        unsafe { JPH_ContactListener2_Destroy(ptr) };
     }
 }
 
@@ -418,8 +446,7 @@ impl JoltObject for JPH_SoftBodyContactListener {
 }
 
 static CONTACT_PROCS: JPH_ContactListener_Procs = JPH_ContactListener_Procs {
-    // Left unset: joltc then accepts every contact, as Jolt does without a listener.
-    OnContactValidate: None,
+    OnContactValidate: Some(validate::on_contact_validate),
     OnContactAdded: Some(contact::on_contact_added),
     OnContactPersisted: Some(contact::on_contact_persisted),
     OnContactRemoved: Some(contact::on_contact_removed),
@@ -446,7 +473,7 @@ fn install_procs() {
         // it. oxijolt never calls `SetProcs` again, and the raw-API contract of
         // `oxijolt-sys` forbids other code to.
         unsafe {
-            JPH_ContactListener_SetProcs(&CONTACT_PROCS);
+            JPH_ContactListener2_SetProcs(&CONTACT_PROCS);
             JPH_BodyActivationListener_SetProcs(&ACTIVATION_PROCS);
             JPH_SoftBodyContactListener_SetProcs(&SOFT_BODY_PROCS);
         }
@@ -458,7 +485,7 @@ fn install_procs() {
 #[derive(Default)]
 pub(crate) struct Listeners {
     // The native listeners are destroyed before the context they point to (field order).
-    contact: Option<Owned<JPH_ContactListener>>,
+    contact: Option<Owned<JPH_ContactListener2>>,
     activation: Option<Owned<JPH_BodyActivationListener>>,
     soft_body: Option<Owned<JPH_SoftBodyContactListener>>,
     context: Option<Arc<ListenerContext>>,
@@ -516,7 +543,7 @@ impl Listeners {
         // listener means joltc could not allocate it, which leaves its events unrecorded.
         unsafe {
             if settings.needs_contact_listener() || user {
-                self.contact = Owned::from_raw(JPH_ContactListener_Create(user_data));
+                self.contact = Owned::from_raw(JPH_ContactListener2_Create(user_data));
             }
             if settings.body_activation {
                 self.activation = Owned::from_raw(JPH_BodyActivationListener_Create(user_data));
@@ -529,7 +556,7 @@ impl Listeners {
         // SAFETY: the system is live and no step runs (contract); the listeners stay alive and
         // attached until `detach`.
         unsafe {
-            JPH_PhysicsSystem_SetContactListener(system, raw(&self.contact));
+            JPH_PhysicsSystem_SetContactListener2(system, raw(&self.contact));
             JPH_PhysicsSystem_SetBodyActivationListener(system, raw(&self.activation));
             JPH_PhysicsSystem_SetSoftBodyContactListener(system, raw(&self.soft_body));
         }
@@ -542,7 +569,7 @@ impl Listeners {
     pub(crate) unsafe fn detach(&mut self, system: *mut JPH_PhysicsSystem) {
         // SAFETY: the system is live and no step runs (contract); null detaches.
         unsafe {
-            JPH_PhysicsSystem_SetContactListener(system, null_mut());
+            JPH_PhysicsSystem_SetContactListener2(system, null_mut());
             JPH_PhysicsSystem_SetBodyActivationListener(system, null_mut());
             JPH_PhysicsSystem_SetSoftBodyContactListener(system, null_mut());
         }
