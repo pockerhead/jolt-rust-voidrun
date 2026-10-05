@@ -24,8 +24,10 @@ part of the state. So are rebases, `optimize_broad_phase`, forces and velocity w
   character id comes from a process-wide counter and orders contacts between characters, so the
   world passes its own. A character's contacts come in a deterministic order while
   `max_hits_exceeded` is false.
-- **Removal.** `remove_body` wakes the bodies whose exact bounds overlap the removed one, in id
-  order, so it adds no hidden state; `remove_ragdoll` does the same for each part.
+- **Removal and waking.** `remove_body` wakes the bodies whose exact bounds overlap the removed
+  one, in id order, so it adds no hidden state; `remove_ragdoll` does the same for each part,
+  `BodyMut::set_shape` for the body's old and new bounds, and `activate_bodies_in_box` for a box.
+  The broad phase only proposes candidates; the exact bounds decide, in the caller's precision.
 - **Vehicles** run as Jolt step listeners. A fleet of 40 is spread over a different number of
   listener jobs with 1 and 4 workers.
 - **Ragdolls.** A pile of 16 ragdolls forms islands of 128 or more joints and contacts, and Jolt
@@ -86,6 +88,9 @@ Other gates of the same kind:
   listener simulates bit for bit like the same scene with nothing installed.
 - `tests/state.rs` replays a rollback in two processes with 1 and 4 workers
   (`rollback_replay_is_identical_across_processes`).
+- `tests/body_controls_determinism.rs` runs a scene that uses every body control at fixed ticks
+  (impulses, kinematic moves, sensors, deactivation and activation, box activation, a shape and a
+  motion type change, a `PLANE_2D` body) with 1 and 4 workers, in one process and in two.
 - `tests/body_poses.rs` compares `PhysicsWorld::active_body_poses`, which returns the awake bodies
   in ascending `BodyId` order, for 1 and 4 workers and for caller job systems while a grid of
   cubes wakes and falls asleep again.
