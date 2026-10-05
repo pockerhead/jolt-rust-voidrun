@@ -14,6 +14,7 @@ use crate::{PhysicsWorld, Vec3, VehicleError, VehicleType};
 
 mod collision_tester;
 mod drivetrain;
+mod motorcycle;
 mod tracked;
 mod wheel;
 
@@ -21,6 +22,7 @@ pub use collision_tester::VehicleCollisionTester;
 pub use drivetrain::{
     VehicleDifferentialSettings, VehicleEngineSettings, VehicleTransmissionSettings,
 };
+pub use motorcycle::MotorcycleSettings;
 pub use tracked::{TrackedVehicleSettings, TrackedWheelSettings, VehicleTrackSettings};
 pub(crate) use wheel::WheelGeometry;
 pub use wheel::{SuspensionSpring, VehicleAntiRollBar, WheelSettings};
@@ -409,6 +411,8 @@ pub(crate) enum ControllerGuard {
     Wheeled(Owned<JPH_WheeledVehicleControllerSettings>),
     /// A tracked vehicle's controller.
     Tracked(Owned<JPH_TrackedVehicleControllerSettings>),
+    /// A motorcycle's controller.
+    Motorcycle(Owned<JPH_MotorcycleControllerSettings>),
 }
 
 impl ControllerGuard {
@@ -419,6 +423,7 @@ impl ControllerGuard {
             // inheritance.
             Self::Wheeled(controller) => controller.as_ptr().cast(),
             Self::Tracked(controller) => controller.as_ptr().cast(),
+            Self::Motorcycle(controller) => controller.as_ptr().cast(),
         }
     }
 
@@ -427,6 +432,7 @@ impl ControllerGuard {
         match self {
             Self::Wheeled(_) => VehicleType::Wheeled,
             Self::Tracked(_) => VehicleType::Tracked,
+            Self::Motorcycle(_) => VehicleType::Motorcycle,
         }
     }
 }

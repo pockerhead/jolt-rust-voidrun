@@ -453,6 +453,11 @@ pub enum VehicleError {
     AlreadyHasVehicle(BodyId),
     /// The world has given out every vehicle id.
     TooManyVehicles,
+    /// A motorcycle's lean spring integration coefficient is not 0. Jolt's state does not hold
+    /// the integrated lean angle, so a restored [`WorldState`](crate::WorldState) would not
+    /// replay the same steps; see
+    /// [`MotorcycleSettings::lean_spring_integration_coefficient`](crate::MotorcycleSettings::lean_spring_integration_coefficient).
+    LeanSpringIntegrationNotSaved,
 }
 
 impl fmt::Display for VehicleError {
@@ -465,6 +470,9 @@ impl fmt::Display for VehicleError {
             Self::NotDynamic(id) => write!(f, "chassis body {id:?} is not dynamic"),
             Self::AlreadyHasVehicle(id) => write!(f, "body {id:?} already carries a vehicle"),
             Self::TooManyVehicles => f.write_str("the world has no vehicle ids left"),
+            Self::LeanSpringIntegrationNotSaved => f.write_str(
+                "a motorcycle's lean spring integration coefficient must be 0: Jolt does not save the integrated lean angle",
+            ),
         }
     }
 }

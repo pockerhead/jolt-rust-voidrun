@@ -592,6 +592,23 @@ pub(crate) fn is_angular_velocity_change(
         <= f64::from(MAX_ANGULAR_VELOCITY_CHANGE)
 }
 
+/// What a motorcycle's lean spring must satisfy on its chassis ([`is_lean_spring`]).
+pub(crate) const LEAN_SPRING_RULE: &str =
+    "lean spring would exceed limits::MAX_ANGULAR_ACCELERATION for this chassis";
+
+/// Whether a motorcycle lean spring of `constant` (N·m/rad) and `damping` (N·m·s/rad) keeps
+/// the angular acceleration it gives a chassis whose largest principal inverse inertia is
+/// `largest_inverse_inertia` within [`MAX_ANGULAR_ACCELERATION`], computed in `f64`: the
+/// torque at a lean error of π and an angular velocity about forward of
+/// [`MAX_ANGULAR_VELOCITY_CHANGE`], with headroom for a forward axis that is unit only within
+/// `math::UNIT_TOLERANCE`. See docs/limits.md#motorcycle-lean.
+pub(crate) fn is_lean_spring(constant: f32, damping: f32, largest_inverse_inertia: f32) -> bool {
+    let torque = f64::from(constant) * std::f64::consts::PI
+        + f64::from(damping) * f64::from(MAX_ANGULAR_VELOCITY_CHANGE);
+    let headroom = 1.0 + 4.0 * f64::from(crate::math::UNIT_TOLERANCE);
+    torque * f64::from(largest_inverse_inertia) * headroom <= f64::from(MAX_ANGULAR_ACCELERATION)
+}
+
 /// What a dynamic body's mass must satisfy ([`is_mass`]).
 pub(crate) const MASS_RULE: &str = "mass must be between limits::MIN_MASS and limits::MAX_MASS";
 

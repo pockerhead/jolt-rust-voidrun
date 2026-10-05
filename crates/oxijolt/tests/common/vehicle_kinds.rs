@@ -1,4 +1,5 @@
-//! Test fixtures of the other vehicle kinds, shaped like Jolt's `TankTest` sample.
+//! Test fixtures of the other vehicle kinds, shaped like Jolt's `TankTest` and `MotorcycleTest`
+//! samples; the motorcycle is described at [`bike_vehicle_settings`].
 //!
 //! The tank: a box chassis with half extents (1.7, 0.5, 3.2), its centre of mass 0.5 below the
 //! box centre, 4000 kg; nine wheels per track at x = ±1.7 (left track +X) and z from 2.95 to
@@ -104,5 +105,104 @@ pub fn tracks(forward: f32, left: f32, right: f32) -> TrackedDriverInput {
         left_ratio: left,
         right_ratio: right,
         brake: 0.0,
+    }
+}
+
+/// The motorcycle's chassis shape: a box with half extents (0.2, 0.3, 0.4), its centre of mass
+/// 0.3 below the box centre.
+pub fn bike_chassis_shape() -> Shape {
+    let frame = Shape::new_box(Vec3::new(0.2, 0.3, 0.4)).unwrap();
+    Shape::new_offset_center_of_mass(&frame, Vec3::new(0.0, -0.3, 0.0)).unwrap()
+}
+
+/// Mass of the motorcycle's chassis, kg.
+pub const BIKE_MASS: f32 = 240.0;
+
+/// The motorcycle of Jolt's `MotorcycleTest` sample with `tester`: wheels of radius 0.31 at
+/// z = ±0.75, the front one steering up to 30° about an axis raked 30° (caster), the rear one
+/// driven through a differential of ratio 4.825; a 150 N·m engine up to 10000 rpm, six gears;
+/// a pitch and roll limit of 60°.
+pub fn bike_vehicle_settings(tester: VehicleCollisionTester) -> VehicleSettings {
+    let rake = 30.0_f32.to_radians().tan();
+    let length = (1.0 + rake * rake).sqrt();
+    let suspension = Vec3::new(0.0, -1.0 / length, rake / length);
+    let wheel = |z: f32, frequency: f32, brake: f32| {
+        WheelSettings::new(Vec3::new(0.0, -0.27, z))
+            .radius(0.31)
+            .width(0.05)
+            .suspension_min_length(0.3)
+            .suspension_max_length(0.5)
+            .suspension_spring(SuspensionSpring::FrequencyAndDamping {
+                frequency,
+                damping: 0.5,
+            })
+            .max_brake_torque(brake)
+    };
+    let front = wheel(0.75, 1.5, 500.0)
+        .max_steer_angle(30.0_f32.to_radians())
+        .suspension_direction(suspension)
+        .steering_axis(Vec3::new(0.0, 1.0 / length, -rake / length));
+    let rear = wheel(-0.75, 2.0, 250.0).max_steer_angle(0.0);
+    VehicleSettings::new(
+        vec![front, rear],
+        vec![VehicleDifferentialSettings::new(None, Some(1)).differential_ratio(1.93 * 40.0 / 16.0)],
+        tester,
+    )
+    .max_pitch_roll_angle(60.0_f32.to_radians())
+    .engine(
+        VehicleEngineSettings::default()
+            .max_torque(150.0)
+            .min_rpm(1000.0)
+            .max_rpm(10000.0),
+    )
+    .transmission(
+        VehicleTransmissionSettings::default()
+            .gear_ratios(vec![2.27, 1.63, 1.3, 1.09, 0.96, 0.88])
+            .reverse_gear_ratios(vec![-4.0])
+            .shift_down_rpm(2000.0)
+            .shift_up_rpm(8000.0)
+            .clutch_strength(2.0),
+    )
+}
+
+/// The cylinder tester of the motorcycle sample: convex radius fraction 1.
+pub fn bike_tester(layers: &CarLayers) -> VehicleCollisionTester {
+    VehicleCollisionTester::CastCylinder {
+        object_layer: layers.probe,
+        convex_radius_fraction: 1.0,
+    }
+}
+
+/// Creates a motorcycle chassis from `body` and attaches a motorcycle of `settings` to it.
+pub fn add_bike_with(
+    world: &mut PhysicsWorld,
+    body: &BodySettings,
+    settings: &MotorcycleSettings,
+) -> (BodyId, VehicleId<Motorcycle>) {
+    let chassis = world.create_body(&bike_chassis_shape(), body).unwrap();
+    let bike = world.create_motorcycle(chassis, settings).unwrap();
+    (chassis, bike)
+}
+
+/// The sample motorcycle under the world's gravity at a pose.
+pub fn add_bike(
+    world: &mut PhysicsWorld,
+    layers: &CarLayers,
+    position: RVec3,
+    rotation: Quat,
+) -> (BodyId, VehicleId<Motorcycle>) {
+    add_bike_with(
+        world,
+        &behaviour_chassis(layers, BIKE_MASS, position, rotation),
+        &MotorcycleSettings::new(bike_vehicle_settings(bike_tester(layers))),
+    )
+}
+
+/// The motorcycle input with `forward` throttle and `right` steering.
+pub fn ride(forward: f32, right: f32) -> DriverInput {
+    DriverInput {
+        forward,
+        right,
+        ..DriverInput::default()
     }
 }

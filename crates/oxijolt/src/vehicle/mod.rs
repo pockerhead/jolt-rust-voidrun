@@ -1,4 +1,4 @@
-//! Vehicles: Jolt's `VehicleConstraint` with the wheeled or the tracked controller, owned by a
+//! Vehicles: Jolt's `VehicleConstraint` with the wheeled, tracked or motorcycle controller, owned by a
 //! [`PhysicsWorld`] and attached to a dynamic chassis body the caller created. The kind of a
 //! vehicle is part of its id ([`VehicleId<K>`](VehicleId)).
 //!
@@ -18,6 +18,7 @@
 
 mod control;
 mod id;
+mod motorcycle;
 mod readout;
 mod settings;
 mod tracked;
@@ -37,13 +38,14 @@ pub use control::{DriverInput, VehicleMut};
 pub use id::{
     AnyVehicleId, Motorcycle, TrackedVehicle, VehicleId, VehicleKind, VehicleType, WheeledVehicle,
 };
+pub use motorcycle::MotorcycleLean;
 pub use readout::{VehicleRef, WheelContact, WheelState};
 use settings::{BuiltSettings, WheelGeometry};
 pub use settings::{
-    SuspensionSpring, TrackedVehicleSettings, TrackedWheelSettings, VehicleAntiRollBar,
-    VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings, VehicleSettings,
-    VehicleTrackSettings, VehicleTransmissionSettings, WheelSettings, DEFAULT_LATERAL_FRICTION,
-    DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
+    MotorcycleSettings, SuspensionSpring, TrackedVehicleSettings, TrackedWheelSettings,
+    VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings,
+    VehicleSettings, VehicleTrackSettings, VehicleTransmissionSettings, WheelSettings,
+    DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
 };
 pub use tracked::{TrackSide, TrackState, TrackedDriverInput};
 
@@ -441,17 +443,18 @@ impl PhysicsWorld {
     }
 }
 
-/// A vehicle's gravity override and collision tester in the new frame of a rotating
-/// [`PhysicsWorld::rebase`], computed before the rebase writes anything.
+/// A vehicle's gravity override, collision tester and, for a motorcycle, target lean in the new
+/// frame of a rotating [`PhysicsWorld::rebase`], computed before the rebase writes anything.
 pub(crate) struct VehicleRebase {
     raw: u32,
     gravity: Option<Vec3>,
     collision_tester: VehicleCollisionTester,
+    target_lean: Option<Vec3>,
 }
 
 impl PhysicsWorld {
-    /// Every vehicle's gravity override and tester rotated by `rotate`, in id order; an error
-    /// names the value that would not be valid in the new frame.
+    /// Every vehicle's gravity override, tester and motorcycle target lean rotated by `rotate`, in
+    /// id order; an error names the value that would not be valid in the new frame.
     pub(crate) fn rotated_vehicles(
         &self,
         rotate: impl Fn(Vec3) -> Vec3,
@@ -470,10 +473,20 @@ impl PhysicsWorld {
                 }
                 None => entry.collision_tester,
             };
+            // The target lean is a world-space direction; Jolt normalises it when it next uses
+            // it, so the rotation's rounding needs no renormalising here.
+            let target_lean = (entry.kind == VehicleType::Motorcycle).then(|| {
+                // SAFETY: the world borrowed here owns the constraint; the getter returns a
+                // member.
+                let controller =
+                    unsafe { JPH_VehicleConstraint_GetController(entry.constraint.as_ptr()) };
+                rotate(motorcycle::target_lean(controller))
+            });
             rebased.push(VehicleRebase {
                 raw,
                 gravity,
                 collision_tester,
+                target_lean,
             });
         }
         Ok(rebased)
@@ -496,6 +509,14 @@ impl PhysicsWorld {
             }
             if vehicle.collision_tester != entry.collision_tester {
                 install_tester(entry, vehicle.collision_tester);
+            }
+            if let Some(target_lean) = vehicle.target_lean {
+                // SAFETY: the entry is a motorcycle's (the lean was read only for one), whose
+                // controller its constraint owns; the world is borrowed mutably and no step runs.
+                unsafe {
+                    let controller = JPH_VehicleConstraint_GetController(entry.constraint.as_ptr());
+                    motorcycle::set_target_lean(controller, target_lean);
+                }
             }
         }
     }
