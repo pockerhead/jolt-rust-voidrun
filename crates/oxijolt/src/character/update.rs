@@ -244,7 +244,9 @@ impl PhysicsWorld {
     /// # Panics
     /// A panic in a filter or listener callback is caught inside the update and resumed after
     /// joltc has returned. From the first one on, the filters of that update reject and the
-    /// listener keeps Jolt's values; the update's removals are not delivered.
+    /// listener keeps Jolt's values; the update's removals are not delivered. A panic in
+    /// [`contact_removed`](crate::CharacterContactListener::contact_removed) is not caught: the
+    /// removals before it have been delivered, the rest are lost.
     ///
     /// # Example
     /// ```

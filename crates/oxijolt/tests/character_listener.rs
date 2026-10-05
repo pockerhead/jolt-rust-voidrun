@@ -389,29 +389,67 @@ fn a_rejected_body_contact_lets_the_character_walk_through() {
     assert!(through > 2.9, "{through}");
 }
 
-/// Two characters that collide with characters, one walking 3 m into the other; its final x.
-fn walk_into_character(listener: Option<Arc<Recorder>>) -> Real {
+/// How close two blocking characters' centres come: both capsules and both paddings (Jolt's
+/// default padding, 0.02 m).
+const CLOSEST: f32 = 2.0 * (RADIUS + 0.02);
+
+/// Where a walk into another character ended.
+#[derive(Debug, PartialEq)]
+struct Passage {
+    walker: RVec3,
+    other: RVec3,
+    /// The smallest `other.x - walker.x` after any update.
+    closest: Real,
+    /// Whether an update of the walker collided with the other character.
+    touched: bool,
+}
+
+/// Two characters that collide with characters, one walking 3 m along x into the other.
+fn walk_into_character(listener: Option<Arc<Recorder>>) -> Passage {
     let mut world = world_with(listener);
     add_ground(&mut world, 0);
     let walker = add_character(&mut world, RVec3::ZERO, true);
     let other = add_character(&mut world, RVec3::new(2.0, 0.0, 0.0), true);
+    let (mut closest, mut touched) = (Real::MAX, false);
     for _ in 0..90 {
         walk(&mut world, walker, Vec3::new(2.0, 0.0, 0.0));
+        closest = closest.min(position(&world, other).x - position(&world, walker).x);
+        touched |= world
+            .character(walker)
+            .unwrap()
+            .active_contacts()
+            .iter()
+            .any(|contact| contact.character == Some(other) && contact.had_collision);
         walk(&mut world, other, Vec3::ZERO);
+        closest = closest.min(position(&world, other).x - position(&world, walker).x);
     }
-    position(&world, walker).x
+    Passage {
+        walker: position(&world, walker),
+        other: position(&world, other),
+        closest,
+        touched,
+    }
 }
 
+/// Blocking is judged by the gap, not by where the walker stops: whether a character standing on
+/// the floor is pushed along by one walking into it is a float tie with its floor contact
+/// (pushed in double precision, not in single precision in this scene).
 #[test]
 fn a_rejected_character_contact_lets_two_characters_pass() {
     let blocked = walk_into_character(None);
-    assert!(blocked < 2.0, "{blocked}");
+    assert!(blocked.closest >= real(CLOSEST) - 1e-4, "{blocked:?}");
+    assert!(blocked.touched, "{blocked:?}");
+    let listened = walk_into_character(Some(Arc::new(Recorder::default())));
+    assert_eq!(listened, blocked, "a listener that changes nothing");
+
     let listener = Arc::new(Recorder {
         ignore_characters: true,
         ..Recorder::default()
     });
     let through = walk_into_character(Some(listener));
-    assert!(through > 2.9, "{through}");
+    assert!(through.walker.x > 2.9, "{through:?}");
+    assert_eq!(through.other.x, 2.0, "not pushed: {through:?}");
+    assert!(!through.touched, "{through:?}");
 }
 
 /// A character walking into a 1 kg box for a second; how far the box moved along x.
@@ -488,6 +526,39 @@ fn a_moving_wall_that_cannot_push_does_not_push_the_character() {
     assert!(resisted < pushed - 0.2, "{resisted} vs {pushed}");
 }
 
+/// A character standing 1 cm from another whose velocity is 3 m/s toward it, updated once (the
+/// other is not updated); how far the standing one moved along x.
+fn pushed_by_a_character(can_push_character: bool) -> Real {
+    let listener = Arc::new(Recorder {
+        settings: Some(CharacterContactSettings {
+            can_push_character,
+            can_receive_impulses: true,
+        }),
+        ..Recorder::default()
+    });
+    let mut world = world_with(Some(listener));
+    add_ground(&mut world, 0);
+    let standing = add_character(&mut world, RVec3::ZERO, true);
+    let pusher = add_character(&mut world, RVec3::new(-0.81, 0.0, 0.0), true);
+    world
+        .character_mut(pusher)
+        .unwrap()
+        .set_linear_velocity(Vec3::new(3.0, 0.0, 0.0))
+        .unwrap();
+    walk(&mut world, standing, Vec3::ZERO);
+    position(&world, standing).x
+}
+
+/// Jolt gives a character contact the other character's velocity; `can_push_character` decides
+/// whether it moves this one.
+#[test]
+fn a_moving_character_that_cannot_push_does_not_push_the_character() {
+    let pushed = pushed_by_a_character(true);
+    let resisted = pushed_by_a_character(false);
+    assert!(pushed > 0.05, "{pushed}");
+    assert!(resisted.abs() < 1e-6, "{resisted}");
+}
+
 /// Keys of the contact events of `events` by kind.
 fn keys(
     events: &[Event],
@@ -517,15 +588,17 @@ fn removed(event: &Event) -> Option<CharacterContactKey> {
     }
 }
 
+/// The raw values of a key, which removals are sorted by; "none" is `u32::MAX`.
+fn raw(key: &CharacterContactKey) -> (u32, u32, u32) {
+    (
+        key.body.map_or(u32::MAX, BodyId::to_raw),
+        key.character.map_or(u32::MAX, CharacterId::to_raw),
+        key.sub_shape_id.to_raw(),
+    )
+}
+
 /// Whether `keys` are in delivery order: body, character, sub-shape by raw value, none last.
 fn in_delivery_order(keys: &[CharacterContactKey]) -> bool {
-    let raw = |key: &CharacterContactKey| {
-        (
-            key.body.map_or(u32::MAX, BodyId::to_raw),
-            key.character.map_or(u32::MAX, CharacterId::to_raw),
-            key.sub_shape_id.to_raw(),
-        )
-    };
     keys.windows(2).all(|pair| raw(&pair[0]) <= raw(&pair[1]))
 }
 
@@ -599,6 +672,151 @@ fn added_persisted_removed_follow_a_walk_across_two_boxes() {
         "{gone:?}"
     );
     assert!(in_delivery_order(&gone), "{gone:?}");
+}
+
+/// Records removals and panics on the second one.
+#[derive(Default)]
+struct PanicsOnSecondRemoval {
+    removed: Mutex<Vec<CharacterContactKey>>,
+}
+
+impl CharacterContactListener for PanicsOnSecondRemoval {
+    fn contact_removed(&self, _: CharacterId, contact: CharacterContactKey) {
+        let mut removed = self.removed.lock().unwrap();
+        removed.push(contact);
+        if removed.len() == 2 {
+            drop(removed);
+            panic!("second removal");
+        }
+    }
+}
+
+/// A walker touching the floor, a wall and a neighbour, then moved away from all of them and
+/// updated once; the world and the walker.
+fn leave_three_contacts(
+    listener: Arc<dyn CharacterContactListener>,
+) -> (PhysicsWorld, CharacterId) {
+    let mut world = world(GRAVITY, 1);
+    world.set_character_contact_listener(Some(listener));
+    add_ground(&mut world, 0);
+    add_static(
+        &mut world,
+        Vec3::new(2.0, 1.0, 0.5),
+        RVec3::new(0.0, 1.0, -1.2),
+        0,
+    );
+    let walker = add_character(&mut world, RVec3::ZERO, true);
+    let neighbour = add_character(&mut world, RVec3::new(-1.0, 0.0, 0.0), true);
+    for _ in 0..30 {
+        walk(&mut world, walker, Vec3::new(-1.0, 0.0, -1.0));
+        walk(&mut world, neighbour, Vec3::ZERO);
+    }
+    world
+        .character_mut(walker)
+        .unwrap()
+        .set_position(RVec3::new(10.0, 3.0, 10.0))
+        .unwrap();
+    (world, walker)
+}
+
+/// `contact_removed` runs after Jolt returned and is not caught: the removals before a panicking
+/// one have been delivered, the rest of that update's are lost, and the world goes on.
+#[test]
+fn a_panic_in_contact_removed_keeps_the_delivered_prefix() {
+    let recorder = Arc::new(Recorder::default());
+    let (mut world, walker) = leave_three_contacts(recorder.clone());
+    recorder.take();
+    walk(&mut world, walker, Vec3::ZERO);
+    let all = keys(&of(walker, &recorder.take()), removed);
+    assert!(all.len() >= 3, "{all:?}");
+
+    let panicking = Arc::new(PanicsOnSecondRemoval::default());
+    let (mut world, walker) = leave_three_contacts(panicking.clone());
+    panicking.removed.lock().unwrap().clear();
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        walk(&mut world, walker, Vec3::ZERO)
+    }))
+    .unwrap_err();
+    assert_eq!(payload.downcast_ref::<&str>(), Some(&"second removal"));
+    let delivered: Vec<_> = panicking.removed.lock().unwrap().iter().map(raw).collect();
+    let expected: Vec<_> = all[..2].iter().map(raw).collect();
+    assert_eq!(delivered, expected, "two worlds: compared by raw ids");
+    assert!(position(&world, walker).y < 3.0, "the update itself moved");
+
+    walk(&mut world, walker, Vec3::ZERO);
+    assert_eq!(
+        panicking.removed.lock().unwrap().len(),
+        2,
+        "the rest is lost"
+    );
+}
+
+/// `count` static spheres around a character standing at `at` with its centre line, at `height`,
+/// each touching the capsule's padding.
+fn add_ring(world: &mut PhysicsWorld, at: RVec3, height: f32, count: usize) {
+    let shape = Shape::new_sphere(0.05).unwrap();
+    let distance = RADIUS + 0.02 + 0.05;
+    for i in 0..count {
+        let (sin, cos) = (std::f32::consts::TAU * i as f32 / count as f32).sin_cos();
+        let position = RVec3::new(
+            at.x + real(distance * cos),
+            at.y + real(height),
+            at.z + real(distance * sin),
+        );
+        world
+            .create_body(&shape, &BodySettings::new_static().position(position))
+            .unwrap();
+    }
+}
+
+/// Moves `id` to `at` and refreshes its contacts; the removals that reported.
+fn refresh_at(
+    world: &mut PhysicsWorld,
+    listener: &Recorder,
+    id: CharacterId,
+    at: RVec3,
+) -> Vec<CharacterContactKey> {
+    listener.take();
+    world.character_mut(id).unwrap().set_position(at).unwrap();
+    world
+        .refresh_character_contacts(id, &QueryFilter::new())
+        .unwrap();
+    keys(&listener.take(), removed)
+}
+
+/// Jolt reports removals in the order of a hash map that keeps the capacity of earlier updates;
+/// delivered removals are sorted, also after a detour through more contacts grew that map.
+#[test]
+fn removals_arrive_sorted_after_the_contact_map_grew() {
+    let listener = Arc::new(Recorder::default());
+    let mut world = world_with(Some(listener.clone()));
+    add_ground(&mut world, 0);
+    let (small, large, open) = (
+        RVec3::ZERO,
+        RVec3::new(10.0, 0.0, 0.0),
+        RVec3::new(5.0, 0.0, 0.0),
+    );
+    add_ring(&mut world, small, 1.1, 12);
+    add_ring(&mut world, large, 0.8, 24);
+    add_ring(&mut world, large, 1.4, 24);
+    let id = add_character(&mut world, small, false);
+
+    let first = refresh_at(&mut world, &listener, id, open);
+    assert_eq!(first.len(), 12, "{first:?}");
+    assert!(in_delivery_order(&first), "{first:?}");
+
+    refresh_at(&mut world, &listener, id, large);
+    let detour = refresh_at(&mut world, &listener, id, small);
+    assert_eq!(detour.len(), 48, "{detour:?}");
+    assert!(in_delivery_order(&detour), "{detour:?}");
+
+    let after = refresh_at(&mut world, &listener, id, open);
+    let raw_keys = |keys: &[CharacterContactKey]| keys.iter().map(raw).collect::<Vec<_>>();
+    assert_eq!(
+        raw_keys(&after),
+        raw_keys(&first),
+        "the same removals, in the same order"
+    );
 }
 
 #[test]

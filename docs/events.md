@@ -411,12 +411,16 @@ How it runs:
   sub-shape raw id ("none" last). Jolt reports them in the bucket order of a hash map whose capacity
   depends on earlier updates, which would make the order depend on history. The body or character
   of a removal may no longer exist.
-- Two characters that collide with each other stop at each other's padding, so the velocity of a
-  walking character reaches the other one's update only within that gap: in the tests a character
-  walking at 2 m/s into a standing one did not push it, whatever `can_push_character` said.
-- A panic in a method is caught; Jolt keeps its own value for that call, the rest of the update
-  skips the methods (and its query filters reject), the update resumes the panic after joltc
-  returned, and that update's removals are not delivered.
+- Jolt gives a contact with another character that character's velocity
+  (`CharacterVirtual.cpp:243`), so `can_push_character` decides whether a character moving into this
+  one pushes it. Two characters that collide with each other stop at each other's padding; whether
+  one standing on the floor is then pushed along by a walker depends on a float tie with its floor
+  contact and differed between single and double precision in the tests.
+- A panic in a method Jolt calls is caught; Jolt keeps its own value for that call, the rest of the
+  update skips the methods (and its query filters reject), the update resumes the panic after joltc
+  returned, and that update's removals are not delivered. `contact_removed` is called from Rust
+  after joltc returned and is not caught: its panic leaves the update at once, the removals sorted
+  before it have been delivered and the rest are lost.
 - Jolt's solve callbacks (`OnContactSolve`, `OnCharacterContactSolve`) are not installed.
 
 ## Lifetimes and the queue

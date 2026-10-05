@@ -41,10 +41,13 @@ use crate::{BodyId, CharacterError, PhysicsWorld, SubShapeId, Vec3};
 /// character touched it at the end of its previous update or refresh, also when no listener was
 /// set then. Removals arrive after the update, sorted by [`CharacterContactKey`].
 ///
-/// A panic in a method is caught; Jolt then keeps its own value for that call, the methods of the
-/// rest of that update are skipped (as are the query filter's, which reject), and the update
-/// resumes the panic after Jolt returned. Removals of that update are not delivered. An update
-/// that panicked is outside the replay guarantee.
+/// A panic in a method that Jolt calls is caught; Jolt then keeps its own value for that call,
+/// the methods of the rest of that update are skipped (as are the query filter's, which reject),
+/// and the update resumes the panic after Jolt returned. Removals of that update are not
+/// delivered. [`contact_removed`](Self::contact_removed) runs after Jolt returned and is not
+/// caught: its panic leaves the update at once, the removals sorted before it have been
+/// delivered and the rest of that update's removals are lost. An update that panicked is outside
+/// the replay guarantee.
 pub trait CharacterContactListener: Send + Sync + 'static {
     /// The velocity of `body` as `character` sees it: what the character stands on moves it
     /// along (moving platforms, conveyors). Jolt passes the body's own velocity, zero for a static
