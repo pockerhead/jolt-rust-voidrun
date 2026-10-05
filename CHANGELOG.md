@@ -8,8 +8,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   `TrackedVehicleSettings`, two `VehicleTrackSettings` that own their `TrackedWheelSettings`, and
   Jolt's tracked engine and transmission defaults. `TrackedDriverInput` sets throttle, brake and a
   speed ratio per track, at least `1/limits::MAX_RATIO` in magnitude; `VehicleRef::tracks`,
-  `track`, `track_wheels` (`TrackState`, `TrackSide`) read them back. The settings are checked for
-  the terms the tracked controller forms from them (`docs/limits.md`, Tracked step coefficients).
+  `track`, `track_wheels` (`TrackState`, `TrackSide`) read them back. A track's inertia is within
+  `limits::MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA` and its wheel radii within a factor
+  `limits::MAX_RATIO` of its driven wheel's, and the track speeds the drivetrain can reach must
+  keep the tracked step finite (`docs/limits.md`, Track drive envelope).
 - Motorcycles: `PhysicsWorld::create_motorcycle` with `MotorcycleSettings`, which wraps a
   two-wheeled `VehicleSettings` and adds the lean controller: max lean angle up to
   `MotorcycleSettings::MAX_LEAN_ANGLE` (80°), a lean spring bounded against the chassis' inertia,
@@ -20,6 +22,11 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   angle, so a nonzero lean spring integration coefficient is refused.
 - joltc extension: `JPH_MotorcycleController_GetTargetLean` and `_SetTargetLean`, which check the
   controller's kind.
+- Changed (breaking): an engine's torque curve (`VehicleEngineSettings::normalized_torque`, for
+  every vehicle kind) needs x within `0..=1`, at least `limits::MIN_TORQUE_CURVE_SPACING` apart,
+  and y within `0..=limits::MAX_NORMALIZED_TORQUE`. Any finite points with increasing x were
+  accepted before, and wide spans overflowed Jolt's interpolation (`docs/limits.md`, Torque
+  curves).
 - Changed (breaking): vehicle ids are typed by kind. `VehicleId` is now `VehicleId<K>` with `K`
   `WheeledVehicle` (the default), `TrackedVehicle` or `Motorcycle`, and `VehicleRef` and
   `VehicleMut` take the same parameter. `vehicle_ids` and `vehicle_of_body` return `AnyVehicleId`

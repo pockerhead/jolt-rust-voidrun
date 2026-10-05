@@ -541,57 +541,118 @@ effective mass that is at most each body's own along the axis. With
 `VehicleAntiRollBar::MAX_STIFFNESS` and wheel lengths at most `MAX_SHAPE_EXTENT`, `b` is at most
 5e14 m/s, so the velocity change along the suspension axis stays finite and squares finitely.
 
+## Torque curves
+
+Jolt reads an engine's torque curve at the current rpm over the max rpm
+(`VehicleEngine::GetTorque`, `VehicleEngine.h:63`), and the rpm stays within `min_rpm..=max_rpm`
+(`ClampRPM`), so it reads x between `min_rpm / max_rpm` and 1. `LinearCurve::GetValue`
+(`Core/LinearCurve.cpp:25-39`) interpolates between the points around x as
+`y1 + (x − x1)·(y2 − y1) / (x2 − x1)`. With any finite points that overflows: in probes through the
+safe API, `(−1e30, 0), (1e30, 1e30)` read at 0.125, `(−1e38, 0), (1e38, 10)` and
+`(0, −3e38), (1, 3e38)` gave NaN wheel or track speeds within two steps for wheeled vehicles,
+motorcycles and tracked vehicles, with and without Jolt's assertions.
+
+Every vehicle kind's engine therefore takes a curve with x within `0..=1`, neighbouring x at least
+`MIN_TORQUE_CURVE_SPACING` (1e-3) apart in `f32`, and y within `0..=MAX_NORMALIZED_TORQUE` (10).
+Then `x − x1` is at most `x2 − x1` (rounding is monotonic), both are at most 1, the divisor is a
+normal `f32`, and the result lies between the two y up to rounding, at most `y_max·(1 + 8·2⁻²⁴)`
+with `y_max` the largest y. The engine's largest torque is `max_torque · y_max · (1 + 8·2⁻²⁴)`.
+Removing the x or the y range lets the curves above through again. The spacing keeps the divisor
+away from subnormal values, where rounding `(x − x1)·(y2 − y1)` to a subnormal adds up to half a
+unit to the result instead of a relative error: policy for this bound, not a NaN guard. Wheel
+friction curves keep their own rule (finite points, increasing x), because their x is a slip ratio
+or a slip angle in degrees.
+
 ## Track ratios
 
 Jolt keeps a tracked vehicle's two tracks in step after the engine torque and after the
 longitudinal impulse of each unbraked wheel (`TrackedVehicleController.cpp:188-208, 291, 406`). With track ratios `L` and `R` of the
 same sign (`L·R > 0`, `:194`) it divides `L·ω_r − R·ω_l` by `L·I_r + R·I_l`, otherwise by
 `R·I_l − L·I_r`, where `I` are the track inertias. In both cases the two terms of the divisor have
-the same sign, so its magnitude is at least the smaller ratio times the smaller inertia.
+the same sign, so its magnitude is at least the smaller ratio times the sum of the inertias.
 
 `TrackedDriverInput` keeps both ratios within `1/MAX_RATIO..=1` in magnitude, and
-`TrackedVehicleSettings` refuses a track inertia below `f32::MIN_POSITIVE · MAX_RATIO`. Then
-`L·R` is at least 1e-8, far from underflow, and each divisor term stays a normal `f32`. Without the
-floor, equal ratios of 1e-30 make `L·R` underflow to 0, Jolt takes the second branch, and with equal
-inertias the divisor is 0: in a probe both track speeds were NaN after the first step, with and
-without Jolt's assertions. The upper bound 1 is what the [tracked step
-coefficients](#tracked-step-coefficients) assume for the torque a track receives.
+`TrackedVehicleSettings` keeps a track inertia within `MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA`. Then
+`L·R` is at least 1e-8, far from underflow, and each divisor term is at least 1e-7. Without a
+floor on the ratios, equal ratios of 1e-30 make `L·R` underflow to 0, Jolt takes the second branch,
+and with equal inertias the divisor is 0: in a probe both track speeds were NaN after the first
+step, with and without Jolt's assertions. The upper bound 1 is what the [track drive
+envelope](#track-drive-envelope) assumes for the torque a track receives.
 
-## Tracked step coefficients
+## Track drive envelope
 
-`TrackedVehicleSettings` checks the terms below, which the tracked controller forms from the
-settings alone, each in `f32` in Jolt's order, at the largest step `MAX_DELTA_TIME` unless noted. `T` is the
-engine's largest torque, `max_torque` times the largest `|y|` of its torque curve, times
-`1 + 8·2⁻²⁴` because `LinearCurve::GetValue` interpolates (`Core/LinearCurve.cpp:25-39`) and may
-round above its largest point. `g_max` and `g_min` are the largest and smallest gear ratio in
-magnitude, forward and reverse.
+The tracked controller turns the engine's torque into track speeds, keeps the two tracks in step
+and turns every wheel at its track's speed (`TrackedVehicleController.cpp`). Settings that are each
+in range overflowed those steps in probes through the safe API: track inertias of 1e-30 and 2e-30
+under a 500 N·m engine gave track speeds of 2e32 and 1e32 rad/s on the second step, and the
+synchronisation quotient `(1e32 − 2e32) / 3e-30` made both infinite; a 1e-36 m wheel on a track
+driven at a 0.3 m wheel turned at `1200 · 0.3 / 1e-36` rad/s, infinite, and its rotation angle
+became NaN. Every term of the settings alone was finite in both.
 
-- The engine's own terms, as for wheeled vehicles (`VehicleEngine::ApplyTorque`).
-- The torque the transmission gives the differentials (`TrackedVehicleController.cpp:266`): the
-  clutch friction, at most 1 (`VehicleTransmission.cpp:106-123`), times the gear ratio times the
-  engine torque, so at most `g_max·T`.
-- For each track: the differential torque `differential ratio · track ratio · transmission torque`
-  (`:282`), at most `differential ratio · g_max·T`; that torque times the step, and divided by the
-  track inertia (`:286`).
-- The brake (`:297-337`): `max brake torque · dt / inertia` (`:311`); the torque that locks the
-  track, `|ω| · inertia / dt`, per rad/s at the smallest step `MIN_DELTA_TIME` (`:301`); the brake
-  torque over the smallest wheel radius of the track, and that times the step (`:329-336`).
-- The synchronisation of the tracks: see [track ratios](#track-ratios); the sum of both
-  inertias must be finite too.
-- For each wheel of a track: the driven wheel's radius over the wheel's radius (`:63`), the track
-  inertia over the wheel's radius (`:395`) and the wheel's radius over the track inertia (`:405`).
-- The track's speed limit at the engine's rpm (`:279`), `rpm / (gear ratio · differential ratio ·
-  track ratio · 60/2π) · 1.001`: its divisor at its smallest, `g_min · differential ratio ·
-  (1/MAX_RATIO) · 60/2π`, must be at least `f32::MIN_POSITIVE`, and `max_rpm` over it, times 1.001,
-  finite. This check is policy: Jolt only compares the limit with the track speed, and an infinite
-  limit lets the torque through.
+`TrackedVehicleSettings` keeps the inputs in physical ranges first: track inertia within
+`MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA` (1e-3 to 1e6 kg·m²), every wheel's radius within a factor
+`MAX_RATIO` of its track's driven wheel, the torque curve as in [torque curves](#torque-curves).
+It then bounds how fast the drivetrain can spin each track and every term the step forms from
+that speed.
 
-Values valid one by one can fail together: a torque curve of 1e15, a max torque of 1e20, an engine
-inertia of 1e36 and gear and differential ratios of 100 pass the engine's checks, but the
-differential torque overflows. In a probe with this check removed, Jolt's clutch, which engages
-from 0, let only finite torques through, and the tracks reached 4.6e32 rad/s within 300 steps.
-What the step computes from the vehicle's state (track and wheel speeds, ground velocities, the
-relative velocity at a contact, `:394`) is not bounded here.
+Notation: `r = 1/MAX_RATIO`, the smallest track ratio; `I_l`, `I_r` the track inertias; `d` a
+track's differential ratio; `g_min`, `g_max` the smallest and largest gear ratio in magnitude,
+forward and reverse; `N` the max rpm; `T` the engine's largest torque; `h` = `MAX_DELTA_TIME`;
+`K = 60/2π`. What changes a track's speed `ω` in a step:
+
+- Damping (`:184-185`) and the brakes (`:294-313`) never raise `|ω|`.
+- The drive (`:264-287`) adds `d·L·c·g·torque·dt / I` to a track, `c` the clutch friction (at most
+  1, `VehicleTransmission.cpp:106-123`), only while the track turns slower than its speed limit
+  `rpm / (g·d·L·K) · 1.001` or against it. The rpm is at most `N` and `|L|` at least `r`, and the
+  limit is tested before the torque is added. So the drive leaves `|ω|` at most its value before or
+  the track's target `τ = λ + Δ`, with the speed limit `λ = 1.001·N / (g_min·d·r·K)` and one
+  torque step `Δ = d·g_max·T·h / I`, the overshoot.
+- The synchronisation (`:188-208`) keeps `ω_l/I_l + ω_r/I_r` when `L·R > 0`, otherwise
+  `ω_l/I_l − ω_r/I_r`, and leaves the speeds in the ratio `L : R`. The weighted speed
+  `B = |ω_l|/I_l + |ω_r|/I_r` then equals the magnitude of the kept sum, so it never grows in the
+  synchronisation, and right after it
+  `|ω_i| = B·|L_i| / (|L_l|/I_l + |L_r|/I_r)`, that is `|ω_j|/I_j ≤ κ_j·B` with
+  `κ_j = (1/I_j) / (1/I_j + r/I_i) < 1`.
+- Ground contact (`:351-407`) moves a track towards the ground's speed under a wheel over that
+  wheel's radius, as far as the friction impulse allows. Body velocities and contact impulses
+  bound it, not the settings; it is not part of the envelope.
+
+A step that drives only track `i` thus gives `B' ≤ τ_i/I_i + κ_j·B`, one that drives both
+`B' ≤ τ_l/I_l + τ_r/I_r`, one that drives neither `B' ≤ B`. The tracks start at rest, and the
+fixed point of the first is `τ_i·(1/I_i + 1/(r·I_j))`, so `B` never exceeds
+
+```text
+β = max(τ_l/I_l + τ_r/I_r,  τ_l·(1/I_l + 1/(r·I_r)),  τ_r·(1/I_r + 1/(r·I_l)))
+```
+
+and track `i` never turns faster than `Ω_i = β·min(I_i, I_j/r)`, which also covers its target.
+`TrackedVehicleSettings` computes these in `f64` and refuses settings for which any of the
+following exceeds 1e30, 2²⁸ below `f32::MAX`; Jolt computes them in `f32`, and the headroom covers
+the rounding the real-arithmetic bound leaves out.
+
+- The synchronisation quotient (`:197, 204`), at most `(Ω_l + Ω_r) / (r·(I_l + I_r))`, and that
+  times the larger inertia (`:198-206`).
+- Each `Ω`, and the torque that locks the track, `Ω·I / MIN_DELTA_TIME` (`:301`).
+- Each wheel's speed, `Ω` times the driven wheel's radius over the wheel's (`:63`), and its
+  rotation over `h` (`:71`).
+- Terms of the settings alone: the transmission torque `g_max·T` (`:266`), each differential
+  torque `d·g_max·T` and its impulse over `h` (`:282-286`), the brake impulse over the inertia
+  (`:311`), the brake torque over the track's smallest wheel radius and its impulse (`:329-336`),
+  and per wheel the inertia over the radius and the radius over the inertia (`:395, 405`).
+
+The divisor of the speed limit, `g_min·d·r·K` in `f32`, must also be a normal `f32`, so that Jolt's
+limit is the `λ` above; were it 0, the limit would be infinite and the drive would never stop.
+
+For Jolt's tracked defaults on the test tank `λ` is 7.0e5 rad/s, `Ω` 7.0e9 rad/s and the largest
+term, the lock torque, 7e16. The tests find the largest accepted max torque by bisection (8.3e14
+N·m on tracks of `MIN_TRACK_INERTIA` and twice that, 4.2e18 N·m with a wheel radius ratio of
+`MAX_RATIO`, 4.2e17 N·m on the widest torque curve) and drive those vehicles straight, with one
+track at `1/MAX_RATIO`, pivoting, backwards and idle, at 1/60 s and at `MAX_DELTA_TIME`, in the air
+and on the ground: the tracks reached 2e19 rad/s, the wheels 1e23 rad/s, every value finite. With
+the envelope check removed, a 1e34 N·m engine on the light tracks and a 1e37 N·m engine on the
+wide-ratio tracks gave NaN on the second step, in the default and the asserts build. With the
+inertia range or the radius ratio removed instead, the envelope refuses the two probes above by
+itself: those ranges keep its inputs physical.
 
 ## Motorcycle lean
 

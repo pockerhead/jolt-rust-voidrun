@@ -558,6 +558,35 @@ fn engine_values_are_validated() {
 }
 
 #[test]
+fn engine_torque_curves_stay_in_their_domain() {
+    let curve = |points: Vec<(f32, f32)>| {
+        car().engine(VehicleEngineSettings::default().normalized_torque(points))
+    };
+    let refused = |points: Vec<(f32, f32)>| match curve(points.clone()).validate(LAYERS) {
+        Err(VehicleError::InvalidValue(what)) => assert_eq!(what, limits::TORQUE_CURVE_RULE),
+        other => panic!("{points:?} gave {other:?}"),
+    };
+    let spacing = limits::MIN_TORQUE_CURVE_SPACING;
+    let top = limits::MAX_NORMALIZED_TORQUE;
+    // The widest curve: both ends of x, the closest spacing, y from 0 to the top.
+    assert_eq!(
+        curve(vec![(0.0, 0.0), (spacing, top), (1.0, top)]).validate(LAYERS),
+        Ok(())
+    );
+    refused(vec![(-f32::EPSILON, 1.0)]);
+    refused(vec![(0.5, 1.0), (1.0 + f32::EPSILON, 1.0)]);
+    refused(vec![(0.5, -f32::MIN_POSITIVE)]);
+    refused(vec![(0.5, f32::from_bits(top.to_bits() + 1))]);
+    refused(vec![(0.5, f32::NAN)]);
+    refused(vec![(0.5, 1.0), (0.5 + 0.99 * spacing, 1.0)]);
+    // Curves whose interpolation overflows in Jolt: a wide x span with a huge y, a wide x span
+    // alone, a wide y span alone.
+    refused(vec![(-1.0e30, 0.0), (1.0e30, 1.0e30)]);
+    refused(vec![(-1.0e38, 0.0), (1.0e38, top)]);
+    refused(vec![(0.0, -3.0e38), (1.0, 3.0e38)]);
+}
+
+#[test]
 fn engine_inertia_must_be_positive() {
     assert_rejected(car().engine(VehicleEngineSettings::default().inertia(0.0)));
 }

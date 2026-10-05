@@ -233,11 +233,14 @@ fn tracked_settings_are_validated() {
         }),
         "driven wheel",
     );
-    for inertia in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+    let below_min = f32::from_bits(limits::MIN_TRACK_INERTIA.to_bits() - 1);
+    let above_max = f32::from_bits(limits::MAX_TRACK_INERTIA.to_bits() + 1);
+    for inertia in [0.0, -1.0, f32::NAN, f32::INFINITY, below_min, above_max] {
         assert_refused(with_left(|t| t.inertia(inertia)), "track inertia");
     }
-    // Positive and finite, but too small to synchronise the tracks without underflow.
-    assert_refused(with_left(|t| t.inertia(1.0e-40)), "synchronise");
+    for inertia in [limits::MIN_TRACK_INERTIA, limits::MAX_TRACK_INERTIA] {
+        assert_eq!(with_left(|t| t.inertia(inertia)).validate(LAYERS), Ok(()));
+    }
     assert_refused(with_left(|t| t.angular_damping(-0.1)), "angular damping");
     assert_refused(
         with_left(|t| t.max_brake_torque(f32::NAN)),
@@ -320,64 +323,65 @@ fn tracked_wheels_share_the_wheel_rules() {
 }
 
 #[test]
-fn tracked_step_coefficients_follow_jolts_intermediates() {
-    const STEP: &str = "step coefficient";
+fn track_wheel_radii_stay_within_max_ratio_of_the_driven_wheel() {
+    const RULE: &str = "wheel radii";
+    let radii = |driven: f32, other: f32| {
+        let mut settings = tank();
+        settings.left.wheels[0] = settings.left.wheels[0].clone().radius(driven);
+        settings.left.wheels[2] = settings.left.wheels[2].clone().radius(other);
+        settings
+    };
+    assert_eq!(radii(1.0, 1.0e-4).validate(LAYERS), Ok(()));
+    assert_refused(radii(1.0, 0.99e-4), RULE);
+    assert_eq!(radii(1.0e-3, 10.0).validate(LAYERS), Ok(()));
+    assert_refused(radii(1.0e-3, 10.1), RULE);
+    // The review's counter-example: a 1e-36 m wheel next to a 0.3 m driven wheel would turn at
+    // 1200 rad/s · 0.3 / 1e-36, which overflows.
+    assert_refused(radii(0.3, 1.0e-36), RULE);
+}
+
+#[test]
+fn tracked_drive_envelope_bounds_the_drivetrain() {
+    const ENVELOPE: &str = "drive envelope";
     let engine = TrackedVehicleSettings::default_engine;
     let transmission = TrackedVehicleSettings::default_transmission;
-    // Valid one by one: a huge torque curve and max torque, a heavy engine, gear and
-    // differential ratios of 100. The differential torque overflows.
-    let counter_example = with_left(|t| t.inertia(1.0e6).differential_ratio(100.0))
-        .engine(
-            engine()
-                .max_torque(1.0e20)
-                .normalized_torque(vec![(0.0, 1.0e15)])
-                .inertia(1.0e36),
-        )
-        .transmission(transmission().gear_ratios(vec![100.0]));
-    assert_refused(counter_example, STEP);
-
-    // The transmission torque: largest gear times the engine's largest torque.
     let torque = |value: f32| engine().max_torque(value);
-    assert_eq!(tank().engine(torque(1.0e37)).validate(LAYERS), Ok(()));
+    // Valid one by one: a huge max torque, a heavy track, gear and differential ratios of 100.
+    let counter_example = with_left(|t| t.inertia(1.0e6).differential_ratio(100.0))
+        .engine(torque(1.0e20).normalized_torque(vec![(0.0, limits::MAX_NORMALIZED_TORQUE)]))
+        .transmission(transmission().gear_ratios(vec![100.0]));
+    assert_refused(counter_example, ENVELOPE);
+
+    // Each factor alone, a decade inside and a decade outside.
+    assert_eq!(tank().engine(torque(1.0e18)).validate(LAYERS), Ok(()));
+    assert_refused(tank().engine(torque(1.0e19)), ENVELOPE);
+    let tenfold = vec![(0.0, limits::MAX_NORMALIZED_TORQUE)];
     assert_refused(
+        tank().engine(torque(1.0e18).normalized_torque(tenfold)),
+        ENVELOPE,
+    );
+    let gear = |ratio: f32| transmission().gear_ratios(vec![ratio, 1.0]);
+    assert_eq!(
         tank()
-            .engine(torque(1.0e37))
-            .transmission(transmission().gear_ratios(vec![100.0])),
-        STEP,
+            .engine(torque(1.0e17))
+            .transmission(gear(100.0))
+            .validate(LAYERS),
+        Ok(())
+    );
+    assert_refused(
+        tank().engine(torque(1.0e18)).transmission(gear(100.0)),
+        ENVELOPE,
     );
     // A reverse gear counts as much as a forward one.
     assert_refused(
         tank()
-            .engine(torque(1.0e37))
+            .engine(torque(1.0e18))
             .transmission(transmission().reverse_gear_ratios(vec![-100.0])),
-        STEP,
+        ENVELOPE,
     );
-    // The differential torque, then its impulse over the track inertia, of either track.
-    assert_refused(
-        with_left(|t| t.differential_ratio(1.0e5))
-            .engine(torque(1.0e30))
-            .transmission(transmission().gear_ratios(vec![1.0e4])),
-        STEP,
-    );
-    let mut unequal = tank().engine(torque(1.0e36));
-    unequal.right = unequal.right.clone().inertia(1.0e-3);
-    assert_eq!(
-        tank().engine(torque(1.0e36)).validate(LAYERS),
-        Ok(()),
-        "the left track alone is fine"
-    );
-    assert_refused(unequal, STEP);
-    // The brake: its impulse over the inertia, the lock torque at the smallest step, and the
-    // torque per wheel radius.
-    assert_refused(with_left(|t| t.max_brake_torque(3.0e38).inertia(0.5)), STEP);
-    assert_eq!(with_left(|t| t.inertia(1.0e30)).validate(LAYERS), Ok(()));
-    assert_refused(with_left(|t| t.inertia(1.0e33)), STEP);
-    let mut small_wheel = with_left(|t| t.max_brake_torque(1.0e36).inertia(1.0e30));
-    assert_eq!(small_wheel.validate(LAYERS), Ok(()));
-    small_wheel.left.wheels[2] = small_wheel.left.wheels[2].clone().radius(1.0e-3);
-    assert_refused(small_wheel, STEP);
-    // The speed limit at the engine's rpm: its divisor must not underflow, its value must not
-    // overflow.
+    // The speed limit grows as the smallest gear shrinks.
+    assert_eq!(tank().transmission(gear(1.0e-13)).validate(LAYERS), Ok(()));
+    assert_refused(tank().transmission(gear(1.0e-14)), ENVELOPE);
     assert_refused(
         tank().transmission(
             transmission()
@@ -386,19 +390,29 @@ fn tracked_step_coefficients_follow_jolts_intermediates() {
         ),
         "underflows",
     );
+    // Two light tracks of unequal inertia: the synchronisation bounds the torque.
+    let light = |torque_value: f32| {
+        let mut settings = tank().engine(torque(torque_value));
+        settings.left = settings.left.clone().inertia(limits::MIN_TRACK_INERTIA);
+        settings.right = settings
+            .right
+            .clone()
+            .inertia(2.0 * limits::MIN_TRACK_INERTIA);
+        settings
+    };
+    assert_eq!(light(1.0e11).validate(LAYERS), Ok(()));
+    assert_refused(light(1.0e34), ENVELOPE);
+    // The brake: its impulse over the inertia and its torque over the smallest wheel radius.
     assert_eq!(
-        tank()
-            .transmission(transmission().gear_ratios(vec![1.0e-30, 1.0]))
-            .validate(LAYERS),
+        with_left(|t| t.max_brake_torque(1.0e29)).validate(LAYERS),
         Ok(())
     );
-    assert_refused(
-        tank().transmission(transmission().gear_ratios(vec![1.0e-33, 1.0])),
-        STEP,
-    );
-    // A wheel much smaller than the driven wheel turns too fast.
-    let mut tiny = with_left(|t| t.max_brake_torque(0.0));
-    tiny.left.wheels[0] = tiny.left.wheels[0].clone().radius(limits::MAX_SHAPE_EXTENT);
-    tiny.left.wheels[1] = tiny.left.wheels[1].clone().radius(1.0e-36);
-    assert_refused(tiny, STEP);
+    assert_refused(with_left(|t| t.max_brake_torque(1.0e30)), ENVELOPE);
+    let mut small_wheel = with_left(|t| t.max_brake_torque(1.0e25));
+    small_wheel.left.wheels[2] = small_wheel.left.wheels[2].clone().radius(3.1e-5);
+    assert_eq!(small_wheel.validate(LAYERS), Ok(()));
+    small_wheel.left.max_brake_torque = 1.0e26;
+    assert_refused(small_wheel, ENVELOPE);
+    // The max rpm sets the speed limit too.
+    assert_refused(tank().engine(engine().max_rpm(1.0e20)), ENVELOPE);
 }

@@ -161,6 +161,37 @@ pub const MAX_RATIO: f32 = 1.0e4;
 /// [docs/limits.md#coupling-ratios]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#coupling-ratios
 pub const MAX_GEAR_RATIO: f32 = 10.0;
 
+/// Largest torque fraction of a vehicle engine's torque curve
+/// ([`VehicleEngineSettings::normalized_torque`](crate::VehicleEngineSettings::normalized_torque)):
+/// every point's y is within `0..=MAX_NORMALIZED_TORQUE`.
+///
+/// See [docs/limits.md#torque-curves].
+///
+/// [docs/limits.md#torque-curves]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#torque-curves
+pub const MAX_NORMALIZED_TORQUE: f32 = 10.0;
+
+/// Smallest x distance between neighbouring points of a vehicle engine's torque curve, whose x
+/// are within `0..=1`.
+///
+/// See [docs/limits.md#torque-curves].
+///
+/// [docs/limits.md#torque-curves]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#torque-curves
+pub const MIN_TORQUE_CURVE_SPACING: f32 = 1.0e-3;
+
+/// Smallest moment of inertia of a tracked vehicle's track, kg·m².
+///
+/// See [docs/limits.md#track-drive-envelope].
+///
+/// [docs/limits.md#track-drive-envelope]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-drive-envelope
+pub const MIN_TRACK_INERTIA: f32 = 1.0e-3;
+
+/// Largest moment of inertia of a tracked vehicle's track, kg·m².
+///
+/// See [docs/limits.md#track-drive-envelope].
+///
+/// [docs/limits.md#track-drive-envelope]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-drive-envelope
+pub const MAX_TRACK_INERTIA: f32 = 1.0e6;
+
 /// Largest lever-arm ratio a world constraint may give a dynamic body: how far the point where
 /// the constraint holds the body lies from its centre of mass, measured against the body's own
 /// size.
@@ -631,6 +662,28 @@ pub(crate) fn is_compliance(compliance: f32) -> bool {
 /// Whether `ratio` is finite and its magnitude within `1 / MAX_RATIO..=MAX_RATIO`.
 pub(crate) fn is_ratio(ratio: f32) -> bool {
     (1.0 / MAX_RATIO..=MAX_RATIO).contains(&ratio.abs())
+}
+
+/// What an engine's torque curve must satisfy ([`is_torque_curve`]).
+pub(crate) const TORQUE_CURVE_RULE: &str = "engine torque curve needs x in 0..=1, \
+     limits::MIN_TORQUE_CURVE_SPACING apart, and y in 0..=limits::MAX_NORMALIZED_TORQUE";
+
+/// Whether `points` make an engine torque curve: at least one point, x within `0..=1` and
+/// increasing by at least [`MIN_TORQUE_CURVE_SPACING`] (computed in `f32`, as Jolt does), y
+/// within `0..=MAX_NORMALIZED_TORQUE`.
+pub(crate) fn is_torque_curve(points: &[(f32, f32)]) -> bool {
+    !points.is_empty()
+        && points
+            .iter()
+            .all(|&(x, y)| (0.0..=1.0).contains(&x) && (0.0..=MAX_NORMALIZED_TORQUE).contains(&y))
+        && points
+            .windows(2)
+            .all(|pair| pair[1].0 - pair[0].0 >= MIN_TORQUE_CURVE_SPACING)
+}
+
+/// Whether `inertia` is within `MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA`.
+pub(crate) fn is_track_inertia(inertia: f32) -> bool {
+    (MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA).contains(&inertia)
 }
 
 /// The lever-arm ratio (see [`MAX_LEVER_ARM_RATIO`]) of a dynamic body with `inverse_mass` and

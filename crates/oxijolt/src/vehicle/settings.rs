@@ -470,15 +470,17 @@ fn is_limited_slip_ratio(value: f32) -> bool {
     value.is_finite() && value > 1.0
 }
 
-/// Whether `points` make a valid Jolt `LinearCurve`: at least one point, finite, with strictly
-/// increasing x.
+/// Whether `points` make a valid Jolt `LinearCurve` for a wheel's friction: at least one point,
+/// finite, with strictly increasing x. Engine torque curves have their own domain
+/// ([`limits::is_torque_curve`](crate::limits::is_torque_curve)).
 fn is_curve(points: &[(f32, f32)]) -> bool {
     !points.is_empty()
         && points.iter().all(|(x, y)| x.is_finite() && y.is_finite())
         && points.windows(2).all(|pair| pair[0].0 < pair[1].0)
 }
 
-/// A joltc linear curve holding `points`, which [`is_curve`] accepted.
+/// A joltc linear curve holding `points`, which [`is_curve`] or
+/// [`limits::is_torque_curve`](crate::limits::is_torque_curve) accepted.
 fn create_curve(points: &[(f32, f32)]) -> Owned<JPH_LinearCurve> {
     // SAFETY: Jolt is initialised. joltc `new`s the curve, which the guard owns whole.
     let curve = unsafe { Owned::from_raw(JPH_LinearCurve_Create()) }

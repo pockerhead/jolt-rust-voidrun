@@ -172,7 +172,8 @@ pub struct VehicleTrackSettings {
 impl VehicleTrackSettings {
     /// A track over `wheels` (at least one), driven by the engine at `driven_wheel`, an index
     /// into `wheels`. The track's speed is the driven wheel's: every other wheel turns at the
-    /// track speed over its own radius.
+    /// track speed over its own radius, so every radius must be within a factor
+    /// [`limits::MAX_RATIO`] of the driven wheel's.
     pub fn new(wheels: Vec<TrackedWheelSettings>, driven_wheel: u32) -> Self {
         Self {
             wheels,
@@ -184,8 +185,8 @@ impl VehicleTrackSettings {
         }
     }
 
-    /// Moment of inertia of the track and its wheels about the driven wheel's axle, kg·m²,
-    /// positive. Default 10.
+    /// Moment of inertia of the track and its wheels about the driven wheel's axle, kg·m², within
+    /// [`limits::MIN_TRACK_INERTIA`]`..=`[`limits::MAX_TRACK_INERTIA`]. Default 10.
     #[must_use]
     pub fn inertia(mut self, value: f32) -> Self {
         self.inertia = value;
@@ -223,8 +224,10 @@ impl VehicleTrackSettings {
         }
         // Jolt asserts only `>= 0` but divides by the inertia
         // (`TrackedVehicleController::PostCollide`).
-        if !is_finite_positive(self.inertia) {
-            return invalid("track inertia must be finite and positive");
+        if !limits::is_track_inertia(self.inertia) {
+            return invalid(
+                "track inertia must be within limits::MIN_TRACK_INERTIA..=limits::MAX_TRACK_INERTIA",
+            );
         }
         if !(is_finite_non_negative(self.angular_damping)
             && is_finite_non_negative(self.max_brake_torque))
@@ -238,6 +241,16 @@ impl VehicleTrackSettings {
         }
         for wheel in &self.wheels {
             wheel.validate()?;
+        }
+        let driven_radius = self.driven_radius();
+        if !self
+            .wheels
+            .iter()
+            .all(|wheel| limits::is_ratio(driven_radius / wheel.base.radius))
+        {
+            return invalid(
+                "a track's wheel radii must be within a factor limits::MAX_RATIO of its driven wheel's",
+            );
         }
         Ok(())
     }
@@ -359,8 +372,8 @@ impl TrackedVehicleSettings {
         [0..left, left..left + right]
     }
 
-    /// Checks every value Jolt asserts on, indexes with or divides by, and the coefficients
-    /// [`validate_step_coefficients`](Self::validate_step_coefficients) derives.
+    /// Checks every value Jolt asserts on, indexes with or divides by, and the
+    /// [drive envelope](Self::validate_drive_envelope).
     pub(crate) fn validate(&self, object_layer_count: u32) -> Result<(), VehicleError> {
         self.frame.validate()?;
         for track in self.tracks() {
@@ -374,81 +387,114 @@ impl TrackedVehicleSettings {
         )?;
         self.engine.validate()?;
         self.transmission.validate(&self.engine)?;
-        self.validate_step_coefficients()?;
+        self.engine.validate_step_coefficients()?;
+        self.validate_drive_envelope()?;
         self.collision_tester
             .validate(object_layer_count, self.wheel_geometry().into_iter())
     }
 
-    /// Checks that the terms `TrackedVehicleController::PostCollide`,
-    /// `SolveLongitudinalAndLateralConstraints` and `SyncLeftRightTracks` form from the settings
-    /// alone are finite at every step [`PhysicsWorld::step`] accepts, each formed in `f32` in
-    /// Jolt's order; see [docs/limits.md#tracked-step-coefficients]. Terms of the vehicle's
-    /// state (track and wheel speeds, ground velocities) are not bounded here.
-    ///
-    /// [docs/limits.md#tracked-step-coefficients]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#tracked-step-coefficients
-    fn validate_step_coefficients(&self) -> Result<(), VehicleError> {
+    /// Checks that each track's speed limit at the engine's rpm keeps its `f32` divisor normal,
+    /// and that every term of the [`drive_envelope`](Self::drive_envelope) is at most
+    /// [`ENVELOPE_CEILING`].
+    fn validate_drive_envelope(&self) -> Result<(), VehicleError> {
         let invalid = |what| Err(VehicleError::InvalidValue(what));
-        let dt = PhysicsWorld::MAX_DELTA_TIME;
-        // The torque curve's interpolation may round above its largest point.
-        let torque = self.engine.validate_step_coefficients()? * CURVE_ROUNDING;
-        let gears = || {
-            let transmission = &self.transmission;
-            transmission
-                .gear_ratios
-                .iter()
-                .chain(&transmission.reverse_gear_ratios)
-                .map(|ratio| ratio.abs())
-        };
-        let largest_gear = gears().fold(0.0, f32::max);
-        let smallest_gear = gears().fold(f32::INFINITY, f32::min);
-        let smallest_ratio = 1.0 / limits::MAX_RATIO;
-        // The clutch friction is at most 1, a track ratio at most 1 in magnitude.
-        let transmission_torque = largest_gear * torque;
-        let mut terms = vec![transmission_torque, self.left.inertia + self.right.inertia];
+        let (smallest_gear, _) = self.gear_range();
         for track in self.tracks() {
-            let differential_torque = track.differential_ratio * transmission_torque;
-            let impulse = differential_torque * dt;
-            let brake_per_radius = track.max_brake_torque / track.smallest_radius();
-            terms.extend([
-                differential_torque,
-                impulse,
-                impulse / track.inertia,
-                largest_gear * track.differential_ratio * ANGULAR_VELOCITY_TO_RPM,
-                track.max_brake_torque * dt / track.inertia,
-                track.inertia / PhysicsWorld::MIN_DELTA_TIME,
-                brake_per_radius,
-                brake_per_radius * dt,
-            ]);
-            // The divisor of the track's speed limit at the engine's rpm, at its smallest.
-            let slowest =
-                smallest_gear * track.differential_ratio * smallest_ratio * ANGULAR_VELOCITY_TO_RPM;
-            if slowest < f32::MIN_POSITIVE {
+            // The divisor of the speed limit, in Jolt's order (`TrackedVehicleController.cpp:279`).
+            let divisor = smallest_gear as f32
+                * track.differential_ratio
+                * (1.0 / limits::MAX_RATIO)
+                * ANGULAR_VELOCITY_TO_RPM;
+            if divisor < f32::MIN_POSITIVE {
                 return invalid(
                     "gear and track differential ratios give an engine speed limit that underflows",
                 );
             }
-            let speed_limit = self.engine.max_rpm / slowest;
-            terms.extend([speed_limit, speed_limit * 1.001]);
-            // The divisor of the left-right synchronisation, at its smallest.
-            if smallest_ratio * track.inertia < f32::MIN_POSITIVE {
-                return invalid("track inertia is too small to synchronise the tracks");
-            }
-            let driven_radius = track.driven_radius();
+        }
+        if !self
+            .drive_envelope()
+            .into_iter()
+            .all(|term| term <= ENVELOPE_CEILING)
+        {
+            return invalid("tracked drivetrain exceeds the track drive envelope");
+        }
+        Ok(())
+    }
+
+    /// The smallest and the largest gear ratio in magnitude, forward and reverse.
+    fn gear_range(&self) -> (f64, f64) {
+        let transmission = &self.transmission;
+        let gears = || {
+            transmission
+                .gear_ratios
+                .iter()
+                .chain(&transmission.reverse_gear_ratios)
+                .map(|ratio| f64::from(ratio.abs()))
+        };
+        (
+            gears().fold(f64::INFINITY, f64::min),
+            gears().fold(0.0, f64::max),
+        )
+    }
+
+    /// The terms the tracked controller's step forms from the settings and from the track
+    /// speeds the drivetrain can reach, in real arithmetic: the drive envelope derived in
+    /// [docs/limits.md#track-drive-envelope].
+    ///
+    /// [docs/limits.md#track-drive-envelope]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-drive-envelope
+    fn drive_envelope(&self) -> Vec<f64> {
+        let smallest_ratio = 1.0 / f64::from(limits::MAX_RATIO);
+        let dt = f64::from(PhysicsWorld::MAX_DELTA_TIME);
+        let rpm_per_rad = f64::from(ANGULAR_VELOCITY_TO_RPM);
+        let (smallest_gear, largest_gear) = self.gear_range();
+        let transmission_torque = largest_gear * f64::from(self.engine.largest_torque());
+        let tracks = self.tracks();
+        let inertia = tracks.map(|track| f64::from(track.inertia));
+        // How fast the drivetrain alone takes a track: its speed limit at the max rpm and the
+        // smallest gear and track ratio, plus one torque step.
+        let target = tracks.map(|track| {
+            let differential = f64::from(track.differential_ratio);
+            let limit = 1.001 * f64::from(self.engine.max_rpm)
+                / (smallest_gear * differential * smallest_ratio * rpm_per_rad);
+            limit + differential * transmission_torque * dt / f64::from(track.inertia)
+        });
+        // The largest `|ω_l| / I_l + |ω_r| / I_r`, which the synchronisation, damping and
+        // brakes never raise.
+        let weighted = (target[0] / inertia[0] + target[1] / inertia[1])
+            .max(target[0] * (1.0 / inertia[0] + 1.0 / (smallest_ratio * inertia[1])))
+            .max(target[1] * (1.0 / inertia[1] + 1.0 / (smallest_ratio * inertia[0])));
+        let speed = [
+            weighted * inertia[0].min(inertia[1] / smallest_ratio),
+            weighted * inertia[1].min(inertia[0] / smallest_ratio),
+        ];
+        let sync = (speed[0] + speed[1]) / (smallest_ratio * (inertia[0] + inertia[1]));
+        let mut terms = vec![transmission_torque, sync, sync * inertia[0].max(inertia[1])];
+        for (side, track) in tracks.into_iter().enumerate() {
+            let differential_torque = f64::from(track.differential_ratio) * transmission_torque;
+            let brake = f64::from(track.max_brake_torque);
+            let brake_per_radius = brake / f64::from(track.smallest_radius());
+            terms.extend([
+                speed[side],
+                speed[side] * inertia[side] / f64::from(PhysicsWorld::MIN_DELTA_TIME),
+                differential_torque,
+                differential_torque * dt,
+                brake * dt / inertia[side],
+                brake_per_radius,
+                brake_per_radius * dt,
+            ]);
+            let driven_radius = f64::from(track.driven_radius());
             for wheel in &track.wheels {
-                let radius = wheel.base.radius;
+                let radius = f64::from(wheel.base.radius);
+                let wheel_speed = speed[side] * driven_radius / radius;
                 terms.extend([
-                    driven_radius / radius,
-                    track.inertia / radius,
-                    radius / track.inertia,
+                    wheel_speed,
+                    wheel_speed * dt,
+                    inertia[side] / radius,
+                    radius / inertia[side],
                 ]);
             }
         }
-        if !terms.iter().all(|term| term.is_finite()) {
-            return invalid(
-                "engine torque, ratios, track inertia and brake torque give a non-finite step coefficient",
-            );
-        }
-        Ok(())
+        terms
     }
 
     fn wheel_geometry(&self) -> Vec<WheelGeometry> {
@@ -520,9 +566,12 @@ impl TrackedVehicleSettings {
     }
 }
 
-/// How far above its largest point Jolt's `LinearCurve::GetValue` may round when it
-/// interpolates: `1 + 8·2⁻²⁴`.
-const CURVE_ROUNDING: f32 = 1.0 + 4.0 * f32::EPSILON;
+/// Largest value a term of the [drive envelope](TrackedVehicleSettings::drive_envelope) may
+/// reach, 2²⁸ below `f32::MAX`: Jolt forms the terms in `f32`, the envelope in real arithmetic,
+/// and the headroom covers the difference. See [docs/limits.md#track-drive-envelope].
+///
+/// [docs/limits.md#track-drive-envelope]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-drive-envelope
+const ENVELOPE_CEILING: f64 = 1.0e30;
 
 /// Tracked wheel settings, of which the owner holds the one reference
 /// `JPH_WheelSettingsTV_Create` returns; each wheel of a vehicle keeps its own.

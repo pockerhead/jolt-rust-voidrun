@@ -168,10 +168,10 @@ impl PhysicsWorld {
     ///
     /// The chassis works as for [`create_vehicle`](Self::create_vehicle): it stays an ordinary
     /// body the vehicle is a constraint and step listener on, and the same chassis rules and
-    /// errors apply. The settings are checked as their setters state, plus the step coefficients
-    /// of [docs/limits.md#tracked-step-coefficients]. Nothing is created on failure.
+    /// errors apply. The settings are checked as their setters state, plus the track drive
+    /// envelope of [docs/limits.md#track-drive-envelope]. Nothing is created on failure.
     ///
-    /// [docs/limits.md#tracked-step-coefficients]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#tracked-step-coefficients
+    /// [docs/limits.md#track-drive-envelope]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-drive-envelope
     ///
     /// # Example
     /// A tank with five wheels per track turns in place.
