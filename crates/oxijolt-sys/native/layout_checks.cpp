@@ -486,6 +486,22 @@ OXIJOLT_SYS_ASSERT_LAYOUT(JobSystemThreadPoolConfig, 12, 4);
 OXIJOLT_SYS_ASSERT_OFFSET(JobSystemThreadPoolConfig, numThreads, 8);
 
 #if UINTPTR_MAX == UINT64_MAX
+// JPH_EstimateCollisionResponse fills JPH_CollisionEstimationResult field by
+// field (it is not a mirror of Jolt's SIMD struct), and oxijolt passes it by
+// pointer and frees it with JPH_CollisionEstimationResult_FreeMembers.
+OXIJOLT_SYS_ASSERT_LAYOUT(JPH_CollisionEstimationResult, 112, 8);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, linearVelocity1, 0);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, angularVelocity1, 12);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, linearVelocity2, 24);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, angularVelocity2, 36);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, frictionPoint, 48);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, tangent1, 60);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, tangent2, 72);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, frictionImpulse1, 84);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, frictionImpulse2, 88);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, angularFrictionImpulse, 92);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, contactImpulseCount, 96);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollisionEstimationResult, contactImpulses, 104);
 OXIJOLT_SYS_ASSERT_LAYOUT(JPH_PhysicsSystemSettings, 48, 8);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, maxContactConstraints, 12);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_PhysicsSystemSettings, broadPhaseLayerInterface, 24);

@@ -1,6 +1,7 @@
 //! Determinism of the physics helpers: bodies floating in a pool on a plane floor, with
-//! buoyancy under a radial gravity and point queries every tick, run bit for bit the same with 1
-//! and 4 worker threads, in one process and in two, and after a rollback with a detour.
+//! buoyancy under a radial gravity, point queries every tick, and collision estimates of a rod
+//! and a fast ball thrown at the floor, run bit for bit the same with 1 and 4 worker threads, in
+//! one process and in two, and after a rollback with a detour.
 
 mod common;
 
@@ -11,14 +12,22 @@ use oxijolt::*;
 const GRAVITY: Vec3 = Vec3::new(0.0, -9.81, 0.0);
 const TICKS: usize = 240;
 
-/// A plane floor flooded by a shallow pool, a grid of mixed bodies dropped into it, and a cube
-/// asleep on the floor beside them.
+/// A plane floor flooded by a shallow pool, a grid of mixed bodies dropped into it, a cube
+/// asleep on the floor beside them, and a rod and a ball with continuous collision detection.
 struct Scene {
     world: PhysicsWorld,
-    /// Every body, in creation order: the floor, the grid, the sleeper.
+    /// Every body, in creation order: the floor, the grid, the sleeper, the rod, the ball.
     bodies: Vec<BodyId>,
     grid: Vec<BodyId>,
     sleeper: BodyId,
+    rod: BodyId,
+    ball: BodyId,
+    /// Whether the ball was thrown in the step about to be recorded.
+    ball_thrown: bool,
+    /// Added contacts of the rod with an estimate.
+    rod_estimates: usize,
+    /// Added contacts of a thrown ball with an estimate, which only the continuous stage finds.
+    continuous_estimates: usize,
     /// The pool's buoyancy factor.
     buoyancy: f32,
     /// How many point query hits the run recorded.
@@ -75,6 +84,7 @@ fn mixed_shapes() -> Vec<Shape> {
 impl Scene {
     fn new(threads: u32) -> Self {
         let mut world = world(GRAVITY, threads);
+        world.set_event_settings(EventSettings::default().collision_estimates(true));
         let floor = world
             .create_body(
                 &Shape::new_plane(Vec3::new(0.0, 1.0, 0.0), 0.0, 30.0).unwrap(),
@@ -111,21 +121,79 @@ impl Scene {
                     .activation(Activation::DontActivate),
             )
             .unwrap();
+        let fast = |position| {
+            BodySettings::new_dynamic()
+                .position(position)
+                .motion_quality(MotionQuality::LinearCast)
+        };
+        let rod = world
+            .create_body(
+                &Shape::new_box(Vec3::new(0.5, 0.05, 0.05)).unwrap(),
+                &fast(RVec3::new(-8.0, 0.05, -8.0)),
+            )
+            .unwrap();
+        let ball = world
+            .create_body(
+                &Shape::new_sphere(0.05).unwrap(),
+                &fast(RVec3::new(8.0, 0.05, -8.0)),
+            )
+            .unwrap();
         bodies.extend(&grid);
-        bodies.push(sleeper);
+        bodies.extend([sleeper, rod, ball]);
         Self {
             world,
             bodies,
             grid,
             sleeper,
+            rod,
+            ball,
+            ball_thrown: false,
+            rod_estimates: 0,
+            continuous_estimates: 0,
             buoyancy: 1.5,
             point_hits: 0,
             submerged: 0,
         }
     }
 
+    /// Throws the rod tilted from 1 mm above the floor at 30 m/s (its lower end touches in the
+    /// discrete stage), or the ball from 2 m above it at 200 m/s (only the continuous stage
+    /// finds it), at fixed ticks.
+    fn throw(&mut self, tick: usize) {
+        let tilt: f32 = 20.0_f32.to_radians();
+        let (body, position, rotation, speed) = match tick % 120 {
+            30 => {
+                let lowest = 0.5 * tilt.sin() + 0.05 * tilt.cos();
+                let at = RVec3::new(-8.0, Real::from(lowest) + 0.001, -8.0);
+                (
+                    self.rod,
+                    at,
+                    quat_about(Vec3::new(0.0, 0.0, 1.0), tilt),
+                    30.0,
+                )
+            }
+            40 => {
+                self.ball_thrown = true;
+                (self.ball, RVec3::new(8.0, 2.0, -8.0), Quat::IDENTITY, 200.0)
+            }
+            _ => return,
+        };
+        let mut body = self.world.body_mut(body).unwrap();
+        body.set_position_and_rotation(position, rotation, Activation::Activate)
+            .unwrap();
+        body.set_angular_velocity(Vec3::ZERO).unwrap();
+        body.set_linear_velocity(Vec3::new(0.0, -speed, 0.0))
+            .unwrap();
+    }
+
+    /// The throws of `tick`, then [`float`](Self::float).
+    fn tick(&mut self, tick: usize) {
+        self.throw(tick);
+        self.float();
+    }
+
     /// Buoyancy on every grid body with the gravity at its position, then one step.
-    fn tick(&mut self) {
+    fn float(&mut self) {
         let pool = BuoyancySettings::default()
             .surface(RVec3::new(0.0, POOL_SURFACE, 0.0), Vec3::new(0.0, 1.0, 0.0))
             .buoyancy(self.buoyancy)
@@ -155,7 +223,8 @@ impl Scene {
         if tick == 50 {
             self.world.body_mut(self.sleeper).unwrap().activate();
         }
-        self.tick();
+        self.float();
+        self.world.take_events();
     }
 
     fn record(&mut self, digest: &mut Digest) {
@@ -163,6 +232,20 @@ impl Scene {
         for &id in &self.bodies {
             record_body(&self.world, id, &mut tick.state);
         }
+        // Contact events print floats in their shortest exact form.
+        for event in self.world.take_events().contacts {
+            if let ContactEvent::Added {
+                estimate: Some(_), ..
+            } = &event
+            {
+                let bodies = [event.pair().body1, event.pair().body2];
+                self.rod_estimates += usize::from(bodies.contains(&self.rod));
+                self.continuous_estimates +=
+                    usize::from(self.ball_thrown && bodies.contains(&self.ball));
+            }
+            tick.state.extend(format!("{event:?}").bytes());
+        }
+        self.ball_thrown = false;
         // Points where the first two grid rows land, and the last one below the floor.
         for i in 0..8 {
             let y = if i == 7 { -0.5 } else { 0.15 };
@@ -186,19 +269,23 @@ impl Scene {
 struct Counts {
     point_hits: usize,
     submerged: usize,
+    rod_estimates: usize,
+    continuous_estimates: usize,
 }
 
 /// The scene run for [`TICKS`] ticks with `threads` workers.
 fn run(threads: u32) -> (Digest, Counts) {
     let mut scene = Scene::new(threads);
     let mut digest = Digest::new();
-    for _ in 0..TICKS {
-        scene.tick();
+    for tick in 0..TICKS {
+        scene.tick(tick);
         scene.record(&mut digest);
     }
     let counts = Counts {
         point_hits: scene.point_hits,
         submerged: scene.submerged,
+        rod_estimates: scene.rod_estimates,
+        continuous_estimates: scene.continuous_estimates,
     };
     (digest, counts)
 }
@@ -213,8 +300,8 @@ fn replayed(threads: u32) -> Digest {
     const SAVE_TICK: usize = 60;
     let mut scene = Scene::new(threads);
     let mut digest = Digest::new();
-    for _ in 0..SAVE_TICK {
-        scene.tick();
+    for tick in 0..SAVE_TICK {
+        scene.tick(tick);
         scene.record(&mut digest);
     }
     let saved = scene.world.save_state();
@@ -233,8 +320,8 @@ fn replayed(threads: u32) -> Digest {
     scene.world.restore_state(&saved).unwrap();
     assert_ne!(positions(&scene.world), detoured);
     scene.buoyancy = 1.5;
-    for _ in SAVE_TICK..TICKS {
-        scene.tick();
+    for tick in SAVE_TICK..TICKS {
+        scene.tick(tick);
         scene.record(&mut digest);
     }
     digest
@@ -260,10 +347,13 @@ fn helpers_match_with_1_and_4_workers() {
     assert!(counts.point_hits > TICKS, "{}", counts.point_hits);
     // Most grid bodies float in the pool most of the time.
     assert!(counts.submerged > 8 * TICKS, "{}", counts.submerged);
+    // Both throws of each body are estimated.
+    assert!(counts.rod_estimates >= 2, "{}", counts.rod_estimates);
+    assert_eq!(counts.continuous_estimates, 2);
 }
 
 #[test]
-fn a_rollback_replays_buoyancy_and_queries_exactly() {
+fn a_rollback_replays_buoyancy_queries_and_estimates_exactly() {
     for threads in [1, 4] {
         assert_same(
             "straight run vs rollback and replay",

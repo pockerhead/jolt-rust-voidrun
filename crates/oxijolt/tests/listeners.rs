@@ -31,7 +31,10 @@ fn contacts_are_added_persisted_and_removed_with_their_sub_shapes() {
         let events = world.take_events();
         kinds_seen.extend(kinds(&events));
         for event in &events.contacts {
-            if let ContactEvent::Added { manifold, settings } = event {
+            if let ContactEvent::Added {
+                manifold, settings, ..
+            } = event
+            {
                 added = Some(manifold.clone());
                 assert!(!settings.is_sensor());
             }

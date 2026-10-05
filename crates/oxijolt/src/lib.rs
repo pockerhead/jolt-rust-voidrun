@@ -207,8 +207,8 @@ pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use listener::{
-    ActivationEvent, ContactCandidate, ContactEvent, ContactListener, ContactManifold,
-    ContactPoint, ContactSettings, ContactSettingsRejection, EventSettings,
+    ActivationEvent, CollisionEstimate, ContactCandidate, ContactEvent, ContactListener,
+    ContactManifold, ContactPoint, ContactSettings, ContactSettingsRejection, EventSettings,
     SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
     SoftBodyVertexContact, SubShapeIdPair, ValidateResult, WorldEvents,
 };

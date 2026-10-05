@@ -531,6 +531,21 @@ const _: () = {
 
 #[cfg(target_pointer_width = "64")]
 const _: () = {
+    assert!(size_of::<JPH_CollisionEstimationResult>() == 112);
+    assert!(align_of::<JPH_CollisionEstimationResult>() == 8);
+    assert!(offset_of!(JPH_CollisionEstimationResult, linearVelocity1) == 0);
+    assert!(offset_of!(JPH_CollisionEstimationResult, angularVelocity1) == 12);
+    assert!(offset_of!(JPH_CollisionEstimationResult, linearVelocity2) == 24);
+    assert!(offset_of!(JPH_CollisionEstimationResult, angularVelocity2) == 36);
+    assert!(offset_of!(JPH_CollisionEstimationResult, frictionPoint) == 48);
+    assert!(offset_of!(JPH_CollisionEstimationResult, tangent1) == 60);
+    assert!(offset_of!(JPH_CollisionEstimationResult, tangent2) == 72);
+    assert!(offset_of!(JPH_CollisionEstimationResult, frictionImpulse1) == 84);
+    assert!(offset_of!(JPH_CollisionEstimationResult, frictionImpulse2) == 88);
+    assert!(offset_of!(JPH_CollisionEstimationResult, angularFrictionImpulse) == 92);
+    assert!(offset_of!(JPH_CollisionEstimationResult, contactImpulseCount) == 96);
+    assert!(offset_of!(JPH_CollisionEstimationResult, contactImpulses) == 104);
+
     assert!(size_of::<JPH_PhysicsSystemSettings>() == 48);
     assert!(align_of::<JPH_PhysicsSystemSettings>() == 8);
     assert!(offset_of!(JPH_PhysicsSystemSettings, maxContactConstraints) == 12);

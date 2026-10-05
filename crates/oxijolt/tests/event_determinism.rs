@@ -8,6 +8,7 @@
 //! contact listener sets the friction by material, halves the other body's inverse mass for
 //! the cloth's contacts with even-indexed bodies, and gives every fourth body's contacts a
 //! settings value kept from a contact with a short lever, which their longer levers reject.
+//! Every added contact carries Jolt's collision estimate.
 //!
 //! Each run happens in its own child process (this test binary, running the ignored
 //! `event_determinism_child` test); see `common::determinism`.
@@ -115,6 +116,7 @@ impl ContactListener for NoOp {}
 fn configure(world: &mut PhysicsWorld, variant: &str) {
     let every_event = EventSettings::default()
         .persisted_contacts(true)
+        .collision_estimates(true)
         .body_activation(true)
         .soft_body_contacts(true)
         .soft_body_validations(true);
@@ -245,7 +247,7 @@ fn add_cloth(world: &mut PhysicsWorld) -> BodyId {
 
 /// Every event of a step, each written with `Debug`, which prints floats in their shortest
 /// exact form (so equal text means equal bits, `-0.0` apart from `0.0`). `Debug` prints every
-/// NaN alike, so no event may hold one.
+/// NaN alike, so no event may hold one, nor an infinity.
 fn record_events(events: &WorldEvents, out: &mut Vec<u8>) {
     let lines = events
         .contacts
@@ -266,7 +268,7 @@ fn record_events(events: &WorldEvents, out: &mut Vec<u8>) {
                 .map(|e| format!("{e:?}")),
         );
     for line in lines {
-        assert!(!line.contains("NaN"), "{line}");
+        assert!(!line.contains("NaN") && !line.contains("inf"), "{line}");
         out.extend_from_slice(line.as_bytes());
         out.push(b'\n');
     }
@@ -299,6 +301,7 @@ fn run_events(threads: u32, variant: &str) -> Digest {
 
     let mut digest = Digest::new();
     let mut repeated_pair = false;
+    let mut rod_estimated = false;
     let mut rejections = 0;
     for tick in 0..TICKS {
         if tick % 40 == 10 {
@@ -319,6 +322,15 @@ fn run_events(threads: u32, variant: &str) -> Digest {
         assert!(report.is_complete(), "tick {tick}: {report:?}");
         let events = world.take_events();
         repeated_pair |= has_repeated_pair(&events.contacts);
+        rod_estimated |= events.contacts.iter().any(|event| {
+            matches!(
+                event,
+                ContactEvent::Added {
+                    estimate: Some(_),
+                    ..
+                }
+            ) && [event.pair().body1, event.pair().body2].contains(&rod)
+        });
         rejections += events.rejected_contact_settings.len();
         let record = digest.push();
         record_events(&events, &mut record.shape);
@@ -336,6 +348,7 @@ fn run_events(threads: u32, variant: &str) -> Digest {
             repeated_pair,
             "the rod should touch the floor in one step both discretely and continuously"
         );
+        assert!(rod_estimated, "the rod's impacts should be estimated");
     }
     if variant == "events" {
         assert!(

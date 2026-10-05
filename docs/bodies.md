@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for _ in 0..60 {
         assert!(world.step(1.0 / 60.0)?.is_complete());
         for event in world.take_events().contacts {
-            if let ContactEvent::Added { manifold, settings } = event {
+            if let ContactEvent::Added { manifold, settings, .. } = event {
                 let bodies = [manifold.pair.body1, manifold.pair.body2];
                 entered |= settings.is_sensor() && bodies.contains(&trigger);
             }

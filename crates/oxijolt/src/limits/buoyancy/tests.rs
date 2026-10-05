@@ -254,7 +254,11 @@ impl SplitMix64 {
     /// A magnitude spread log-uniformly over `10^low..10^high`, but over `10^low..10^extreme`
     /// one time in eight and 0 one time in sixteen.
     fn magnitude(&mut self, low: f64, high: f64, extreme: f64) -> f32 {
-        let top = if self.next().is_multiple_of(8) { extreme } else { high };
+        let top = if self.next().is_multiple_of(8) {
+            extreme
+        } else {
+            high
+        };
         if self.next().is_multiple_of(16) {
             0.0
         } else {

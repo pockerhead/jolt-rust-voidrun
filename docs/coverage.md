@@ -358,6 +358,12 @@ scenes with inputs at their bounds; no derivation backs them:
 
 ## Not covered
 
+- Collision estimates are Jolt's estimate for an isolated pair. More than two bodies in contact,
+  the contact's mass and inertia scales, surface velocities, locked axes and the speed limits are
+  not part of them; a speculative contact is estimated as touching, and a contact the continuous
+  stage finds is estimated from velocities after the solve. The tests pin these limits
+  (`locked_axes_are_not_part_of_the_estimate`, `estimates_use_the_settings_jolt_resolves_the_contact_with`,
+  `a_contact_found_by_the_continuous_stage_is_estimated`) rather than bound them.
 - The spin a buoyancy impulse gives through the lever of its centre of buoyancy is clamped to
   `MAX_ANGULAR_VELOCITY` right after the call, not refused (see [limits.md](limits.md#buoyancy)).
 - State the simulation produces itself is not an input and is not checked again: a body Jolt carries
