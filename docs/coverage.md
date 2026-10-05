@@ -274,6 +274,8 @@ check it at its boundary.
 | `RayCast` direction | finite, not zero | `invalid_rays_are_rejected`, `a_ray_with_a_huge_finite_direction_is_cast` |
 | `ShapeCast`, `CollideShape` position | `MAX_POSITION` | `query_inputs_are_bounded_by_the_frame` |
 | `ShapeCast` direction | `2 *` `MAX_POSITION` per axis | `query_inputs_are_bounded_by_the_frame` |
+| `PhysicsWorld::collide_point` point | `MAX_POSITION`; filter valid for the world | `invalid_points_and_filters_are_rejected` |
+| `Shape::collide_point` point | each component within `MAX_SHAPE_EXTENT` | `invalid_points_and_filters_are_rejected` |
 | `ShapeCast::target_distance` | `ShapeCast::MAX_TARGET_DISTANCE` | `target_distance_at_the_bound_gives_a_finite_depth` |
 | `CollideShape::max_separation_distance` | `0..=MAX_SHAPE_EXTENT` | `query_inputs_are_bounded_by_the_frame` |
 | `SoftBodySharedSettingsBuilder::build` vertices | at least one; position within `MAX_SHAPE_EXTENT` per axis; velocity within `MAX_LINEAR_VELOCITY`; inverse mass 0 or the inverse of a mass within `MIN_MASS..=MAX_MASS` | `soft_body_shared_settings_are_bounded`, `invalid_vertices_are_rejected` |

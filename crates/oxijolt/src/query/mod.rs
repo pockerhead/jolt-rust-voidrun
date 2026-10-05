@@ -1,4 +1,4 @@
-//! Scene queries: ray casts, shape casts and collide-shape queries.
+//! Scene queries: ray casts, shape casts, collide-shape and point queries.
 //!
 //! Queries take `&PhysicsWorld` and may run on many threads at once while nobody steps the
 //! world. They see bodies created, moved and removed through this API immediately, without a
@@ -27,9 +27,11 @@ use crate::{
 
 mod cast;
 mod collide;
+mod point;
 
 pub use cast::{ShapeCast, ShapeCastHit};
 pub use collide::{CollideShape, CollideShapeHit};
+pub use point::PointHit;
 
 /// A ray from `origin` along `direction`. The direction's length is the ray's length; hits
 /// report the fraction along it, in `[0, 1]`.

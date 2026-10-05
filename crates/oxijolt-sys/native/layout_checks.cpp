@@ -84,6 +84,11 @@ OXIJOLT_SYS_ASSERT_LAYOUT(JPH_RayCastResult, 12, 4);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_RayCastResult, bodyID, 0);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_RayCastResult, fraction, 4);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_RayCastResult, subShapeID2, 8);
+// JPH_Shape_CollidePoint2 and JPH_NarrowPhaseQuery_CollidePoint2 fill a local
+// JPH_CollidePointResult field by field and pass oxijolt a pointer to it.
+OXIJOLT_SYS_ASSERT_LAYOUT(JPH_CollidePointResult, 8, 4);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollidePointResult, bodyID, 0);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CollidePointResult, subShapeID2, 4);
 
 // Mesh triangles. joltc and the extension copy JPH_IndexedTriangle field by field
 // (JPH_MeshShapeSettings_Create2/_Create3), so only the C ABI is pinned here.

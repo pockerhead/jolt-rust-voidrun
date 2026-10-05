@@ -1,5 +1,5 @@
-//! Determinism of the physics helpers: a scene on a plane floor runs bit for bit the same with 1
-//! and 4 worker threads, in one process and in two.
+//! Determinism of the physics helpers: a scene on a plane floor, with point queries every tick,
+//! runs bit for bit the same with 1 and 4 worker threads, in one process and in two.
 
 mod common;
 
@@ -14,6 +14,8 @@ const TICKS: usize = 240;
 struct Scene {
     world: PhysicsWorld,
     bodies: Vec<BodyId>,
+    /// How many point query hits the run recorded.
+    point_hits: usize,
 }
 
 /// The shapes the grid cycles through: box, sphere, hull and compound.
@@ -78,7 +80,11 @@ impl Scene {
                     .unwrap(),
             );
         }
-        Self { world, bodies }
+        Self {
+            world,
+            bodies,
+            point_hits: 0,
+        }
     }
 
     fn tick(&mut self) {
@@ -90,18 +96,38 @@ impl Scene {
         for &id in &self.bodies {
             record_body(&self.world, id, &mut tick.state);
         }
+        // Points where the first two grid rows land, and the last one below the floor.
+        for i in 0..8 {
+            let y = if i == 7 { -0.5 } else { 0.15 };
+            let point = RVec3::new(1.2 * (i % 4) as Real - 1.8, y, 1.2 * (i / 4) as Real - 1.8);
+            let hits = self
+                .world
+                .collide_point(point, &QueryFilter::new())
+                .unwrap();
+            self.point_hits += hits.len();
+            for hit in hits {
+                tick.state.extend(
+                    format!("{}:{};", hit.body.to_raw(), hit.sub_shape_id.to_raw()).bytes(),
+                );
+            }
+            tick.state.push(b'|');
+        }
     }
 }
 
-/// The scene run for [`TICKS`] ticks with `threads` workers.
-fn helpers(threads: u32) -> Digest {
+/// The scene run for [`TICKS`] ticks with `threads` workers, and the point query hits it saw.
+fn run(threads: u32) -> (Digest, usize) {
     let mut scene = Scene::new(threads);
     let mut digest = Digest::new();
     for _ in 0..TICKS {
         scene.tick();
         scene.record(&mut digest);
     }
-    digest
+    (digest, scene.point_hits)
+}
+
+fn helpers(threads: u32) -> Digest {
+    run(threads).0
 }
 
 #[test]
@@ -116,10 +142,12 @@ fn helpers_determinism_child() {
 
 #[test]
 fn helpers_match_with_1_and_4_workers() {
-    let one = helpers(1);
+    let (one, point_hits) = run(1);
     assert_eq!(one.ticks.len(), TICKS);
     assert_same("1 vs 4 workers in one process", &one, &helpers(4));
     assert_ne!(one.ticks[0].state, one.ticks[TICKS - 1].state);
+    // More than the floor below every tick: the points find landed bodies too.
+    assert!(point_hits > TICKS, "{point_hits}");
 }
 
 #[test]

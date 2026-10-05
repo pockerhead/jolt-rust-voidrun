@@ -1,5 +1,5 @@
 //! A leak gate for the physics helpers: plane shapes with and without a material on a static
-//! body, round after round in one world.
+//! body and filtered point queries, round after round in one world.
 //!
 //! It measures the private bytes of the process (Windows `K32GetProcessMemoryInfo`), because
 //! shapes and Jolt's body data are allocated by C++, which a Rust global allocator does not see.
@@ -27,22 +27,38 @@ const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 struct Scene {
     world: PhysicsWorld,
     material: PhysicsMaterial,
+    cube: BodyId,
+    other: BodyId,
     round: usize,
 }
 
 impl Scene {
     fn new() -> Self {
         let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
-        add_cube(&mut world, RVec3::new(0.0, 0.5, 0.0));
+        let cube = add_cube(&mut world, RVec3::new(0.0, 0.5, 0.0));
+        let half = cube_shape();
+        let compound = Shape::new_compound(&[
+            child(&half, Vec3::ZERO, 1),
+            child(&half, Vec3::new(0.2, 0.0, 0.0), 2),
+        ])
+        .unwrap();
+        let other = world
+            .create_body(
+                &compound,
+                &BodySettings::new_static().position(RVec3::new(0.0, 0.5, 3.0)),
+            )
+            .unwrap();
         Self {
             world,
             material: PhysicsMaterial::new(5).unwrap(),
+            cube,
+            other,
             round: 0,
         }
     }
 
     /// One round: a new plane, with a material every other round, on a static body for one
-    /// step, then removed.
+    /// step, then removed; point queries with every filter part.
     fn round(&mut self) {
         self.round += 1;
         let plane = if self.round.is_multiple_of(2) {
@@ -57,6 +73,15 @@ impl Scene {
         drop(plane);
         step(&mut self.world, 1);
         self.world.remove_body(floor).unwrap();
+        let layers = [ObjectLayer::NON_MOVING, ObjectLayer::MOVING];
+        let filter = QueryFilter::new()
+            .object_layers(&layers)
+            .child_groups(1 << 2)
+            .exclude_body(self.cube);
+        for point in [RVec3::new(0.1, 0.5, 3.0), RVec3::new(0.0, 0.5, 0.0)] {
+            let hits = self.world.collide_point(point, &filter).unwrap();
+            assert!(hits.iter().all(|hit| hit.body == self.other));
+        }
     }
 }
 

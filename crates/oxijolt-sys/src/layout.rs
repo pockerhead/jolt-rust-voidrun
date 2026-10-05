@@ -40,6 +40,11 @@ const _: () = {
     assert!(offset_of!(JPH_RayCastResult, fraction) == 4);
     assert!(offset_of!(JPH_RayCastResult, subShapeID2) == 8);
 
+    assert!(size_of::<JPH_CollidePointResult>() == 8);
+    assert!(align_of::<JPH_CollidePointResult>() == 4);
+    assert!(offset_of!(JPH_CollidePointResult, bodyID) == 0);
+    assert!(offset_of!(JPH_CollidePointResult, subShapeID2) == 4);
+
     assert!(size_of::<JPH_IndexedTriangle>() == 20);
     assert!(align_of::<JPH_IndexedTriangle>() == 4);
     assert!(offset_of!(JPH_IndexedTriangle, i1) == 0);
