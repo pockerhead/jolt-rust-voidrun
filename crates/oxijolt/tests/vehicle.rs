@@ -465,7 +465,7 @@ fn chassis_cannot_be_removed_while_a_vehicle_uses_it() {
         world.remove_body(chassis),
         Err(BodyError::UsedByVehicle(chassis))
     );
-    assert_eq!(world.vehicle_of_body(chassis), Some(car));
+    assert_eq!(world.vehicle_of_body(chassis), Some(car.into()));
     world.remove_vehicle(car).unwrap();
     assert_eq!(world.vehicle_of_body(chassis), None);
     assert!(matches!(world.vehicle(car), Err(VehicleError::NotFound(_))));
@@ -555,7 +555,7 @@ fn invalid_vehicles_create_nothing() {
         world.create_vehicle(chassis, &settings),
         Err(VehicleError::AlreadyHasVehicle(chassis))
     );
-    assert_eq!(world.vehicle_ids().collect::<Vec<_>>(), vec![car]);
+    assert_eq!(world.vehicle_ids().collect::<Vec<_>>(), vec![car.into()]);
 
     let other_car = {
         let (mut other_world, other_layers) = car_world(Vec3::ZERO, 1);
@@ -603,7 +603,10 @@ fn vehicle_ids_are_sequential_and_never_reused() {
         [1, 2, 3]
     );
     world.remove_vehicle(ids[1]).unwrap();
-    assert_eq!(world.vehicle_ids().collect::<Vec<_>>(), [ids[0], ids[2]]);
+    assert_eq!(
+        world.vehicle_ids().collect::<Vec<_>>(),
+        [ids[0].into(), ids[2].into()]
+    );
     let (_, fourth) = add_car(
         &mut world,
         &layers,

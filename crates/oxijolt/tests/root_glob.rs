@@ -44,3 +44,17 @@ fn the_crate_wide_result_is_named_by_the_error_module() -> oxijolt::error::Resul
     );
     Ok(())
 }
+
+#[test]
+fn the_vehicle_kinds_are_named_at_the_root() {
+    let kinds: [(Option<VehicleId<WheeledVehicle>>, VehicleType); 3] = [
+        (None, VehicleType::Wheeled),
+        (None, VehicleType::Tracked),
+        (None, VehicleType::Motorcycle),
+    ];
+    let typed: [Option<VehicleId<TrackedVehicle>>; 1] = [None];
+    let any: Option<AnyVehicleId> = typed[0].map(AnyVehicleId::from);
+    assert!(any.is_none());
+    assert_eq!(kinds.len(), 3);
+    let _: Option<VehicleId<Motorcycle>> = any.and_then(AnyVehicleId::downcast);
+}

@@ -9,7 +9,7 @@
 
 use std::fmt;
 
-use crate::{AnyConstraintId, BodyId, CharacterId, ObjectLayer, RagdollId, Vec3, VehicleId};
+use crate::{AnyConstraintId, AnyVehicleId, BodyId, CharacterId, ObjectLayer, RagdollId, Vec3};
 
 /// Why a [`PhysicsWorld`](crate::PhysicsWorld) could not be created or changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -439,9 +439,9 @@ impl std::error::Error for CharacterError {}
 #[non_exhaustive]
 pub enum VehicleError {
     /// The id names no vehicle in this world: it was removed.
-    NotFound(VehicleId),
+    NotFound(AnyVehicleId),
     /// The id belongs to another world.
-    WrongWorld(VehicleId),
+    WrongWorld(AnyVehicleId),
     /// A setting or input is out of range; the payload names it.
     InvalidValue(&'static str),
     /// The chassis body is not usable: not in this world, the inner body of a character or a

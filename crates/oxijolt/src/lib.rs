@@ -224,10 +224,11 @@ pub use soft_body::{
 };
 pub use state::WorldState;
 pub use vehicle::{
-    DriverInput, SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester,
-    VehicleDifferentialSettings, VehicleEngineSettings, VehicleId, VehicleMut, VehicleRef,
-    VehicleSettings, VehicleTransmissionSettings, WheelContact, WheelSettings, WheelState,
-    DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
+    AnyVehicleId, DriverInput, Motorcycle, SuspensionSpring, TrackedVehicle, VehicleAntiRollBar,
+    VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings, VehicleId,
+    VehicleKind, VehicleMut, VehicleRef, VehicleSettings, VehicleTransmissionSettings, VehicleType,
+    WheelContact, WheelSettings, WheelState, WheeledVehicle, DEFAULT_LATERAL_FRICTION,
+    DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
 };
 pub use world::{PhysicsWorld, StepReport, WorldSettings};
 

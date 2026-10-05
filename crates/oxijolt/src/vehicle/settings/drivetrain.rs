@@ -2,10 +2,13 @@
 
 use oxijolt_sys::*;
 
-use super::{is_curve, is_limited_slip_ratio, DEFAULT_NORMALIZED_TORQUE, LIMITED_SLIP_RULE};
+use super::{
+    create_curve, is_curve, is_limited_slip_ratio, ANGULAR_VELOCITY_TO_RPM,
+    DEFAULT_NORMALIZED_TORQUE, LIMITED_SLIP_RULE,
+};
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
-use crate::VehicleError;
+use crate::{PhysicsWorld, VehicleError};
 
 /// The engine of a wheeled vehicle (Jolt `VehicleEngineSettings`). The defaults are Jolt's.
 #[derive(Clone, Debug, PartialEq)]
@@ -101,6 +104,47 @@ impl VehicleEngineSettings {
             );
         }
         Ok(())
+    }
+
+    /// Checks that the coefficients `VehicleEngine::ApplyTorque` forms from these validated
+    /// settings are finite at the largest step, and returns the largest torque the engine can
+    /// deliver, N·m: the max torque times the largest torque fraction of the curve.
+    pub(super) fn validate_step_coefficients(&self) -> Result<f32, VehicleError> {
+        let dt = PhysicsWorld::MAX_DELTA_TIME;
+        let dt_div_ie = dt / self.inertia;
+        let largest_torque_fraction = self
+            .normalized_torque
+            .iter()
+            .map(|(_, fraction)| fraction.abs())
+            .fold(0.0, f32::max);
+        let torque = self.max_torque * largest_torque_fraction;
+        let coefficients = [
+            dt_div_ie,
+            torque,
+            dt_div_ie * torque,
+            ANGULAR_VELOCITY_TO_RPM * torque * dt / self.inertia,
+        ];
+        if coefficients.iter().all(|value| value.is_finite()) {
+            Ok(torque)
+        } else {
+            Err(VehicleError::InvalidValue(
+                "engine inertia and torque give a non-finite step coefficient",
+            ))
+        }
+    }
+
+    /// Calls `f` with the joltc engine settings of these validated settings; their torque curve
+    /// lives for the call.
+    pub(super) fn with_jph<R>(&self, f: impl FnOnce(&JPH_VehicleEngineSettings) -> R) -> R {
+        let torque_curve = create_curve(&self.normalized_torque);
+        f(&JPH_VehicleEngineSettings {
+            maxTorque: self.max_torque,
+            minRPM: self.min_rpm,
+            maxRPM: self.max_rpm,
+            normalizedTorque: torque_curve.as_ptr(),
+            inertia: self.inertia,
+            angularDamping: self.angular_damping,
+        })
     }
 }
 

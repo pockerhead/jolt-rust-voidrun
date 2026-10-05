@@ -42,26 +42,26 @@ fn wheel_defaults_are_jolts() {
     // settings, read while the guard keeps them alive. Every output is a live local.
     unsafe {
         let direction = jolt_vec(|v| JPH_WheelSettings_GetSuspensionDirection(base, v));
-        assert_eq!(bits3(direction), bits3(ours.suspension_direction));
+        assert_eq!(bits3(direction), bits3(ours.base.suspension_direction));
         let axis = jolt_vec(|v| JPH_WheelSettings_GetSteeringAxis(base, v));
-        assert_eq!(bits3(axis), bits3(ours.steering_axis));
+        assert_eq!(bits3(axis), bits3(ours.base.steering_axis));
         let up = jolt_vec(|v| JPH_WheelSettings_GetWheelUp(base, v));
-        assert_eq!(bits3(up), bits3(ours.wheel_up));
+        assert_eq!(bits3(up), bits3(ours.base.wheel_up));
         let forward = jolt_vec(|v| JPH_WheelSettings_GetWheelForward(base, v));
-        assert_eq!(bits3(forward), bits3(ours.wheel_forward));
+        assert_eq!(bits3(forward), bits3(ours.base.wheel_forward));
         assert!(!JPH_WheelSettings_GetEnableSuspensionForcePoint(base));
-        assert_eq!(ours.suspension_force_point, None);
+        assert_eq!(ours.base.suspension_force_point, None);
         assert_eq!(
             JPH_WheelSettings_GetSuspensionMinLength(base),
-            ours.suspension_min_length
+            ours.base.suspension_min_length
         );
         assert_eq!(
             JPH_WheelSettings_GetSuspensionMaxLength(base),
-            ours.suspension_max_length
+            ours.base.suspension_max_length
         );
         assert_eq!(
             JPH_WheelSettings_GetSuspensionPreloadLength(base),
-            ours.suspension_preload_length
+            ours.base.suspension_preload_length
         );
         let mut spring = JPH_SpringSettings {
             mode: JPH_SpringMode_StiffnessAndDamping,
@@ -69,12 +69,12 @@ fn wheel_defaults_are_jolts() {
             damping: 0.0,
         };
         JPH_WheelSettings_GetSuspensionSpring(base, &mut spring);
-        let expected = ours.suspension_spring.to_jph();
+        let expected = ours.base.suspension_spring.to_jph();
         assert_eq!(spring.mode, expected.mode);
         assert_eq!(spring.frequencyOrStiffness, expected.frequencyOrStiffness);
         assert_eq!(spring.damping, expected.damping);
-        assert_eq!(JPH_WheelSettings_GetRadius(base), ours.radius);
-        assert_eq!(JPH_WheelSettings_GetWidth(base), ours.width);
+        assert_eq!(JPH_WheelSettings_GetRadius(base), ours.base.radius);
+        assert_eq!(JPH_WheelSettings_GetWidth(base), ours.base.width);
         assert_eq!(JPH_WheelSettingsWV_GetInertia(wv), ours.inertia);
         assert_eq!(
             JPH_WheelSettingsWV_GetAngularDamping(wv),
@@ -190,12 +190,18 @@ fn constraint_differential_and_anti_roll_bar_defaults_are_jolts() {
         JPH_VehicleAntiRollBar_Init(&mut bar);
         (constraint, differential, bar)
     };
-    assert_eq!(bits3(Vec3::from_jph(constraint.up)), bits3(vehicle.up));
+    assert_eq!(
+        bits3(Vec3::from_jph(constraint.up)),
+        bits3(vehicle.frame.up)
+    );
     assert_eq!(
         bits3(Vec3::from_jph(constraint.forward)),
-        bits3(vehicle.forward)
+        bits3(vehicle.frame.forward)
     );
-    assert_eq!(constraint.maxPitchRollAngle, vehicle.max_pitch_roll_angle);
+    assert_eq!(
+        constraint.maxPitchRollAngle,
+        vehicle.frame.max_pitch_roll_angle
+    );
 
     let ours = VehicleDifferentialSettings::new(None, None).to_jph();
     assert_eq!(ours.leftWheel, differential.leftWheel);
@@ -231,7 +237,7 @@ fn built_settings_reach_jolt() {
     // SAFETY: the settings are live and only read; outputs are live locals.
     unsafe {
         let position = jolt_vec(|v| JPH_WheelSettings_GetPosition(base, v));
-        assert_eq!(bits3(position), bits3(wheel.position));
+        assert_eq!(bits3(position), bits3(wheel.base.position));
         assert!(JPH_WheelSettings_GetEnableSuspensionForcePoint(base));
         assert_eq!(JPH_WheelSettings_GetRadius(base), 0.35);
         assert_eq!(JPH_WheelSettings_GetWidth(base), 0.2);
