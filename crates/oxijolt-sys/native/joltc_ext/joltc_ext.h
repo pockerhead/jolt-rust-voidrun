@@ -330,6 +330,22 @@ JPH_CAPI JPH_SubShapeID JPH_SubShapeIDPair_GetSubShapeID1(const JPH_SubShapeIDPa
 JPH_CAPI JPH_BodyID JPH_SubShapeIDPair_GetBody2ID(const JPH_SubShapeIDPair* pair);
 JPH_CAPI JPH_SubShapeID JPH_SubShapeIDPair_GetSubShapeID2(const JPH_SubShapeIDPair* pair);
 
+/* ContactListener2 */
+/* A JPH::ContactListener calling one process-global table of joltc's JPH_ContactListener_Procs.
+   OnContactValidate receives a JPH_CollideShapeResult filled field by field without faces
+   (shape1FaceCount and shape2FaceCount 0, shape1Faces and shape2Faces null): nothing is allocated
+   per call. A null proc accepts (AcceptAllContactsForThisBodyPair) or does nothing. Added and
+   persisted copy JPH::ContactSettings field by field as joltc does; the manifold and the removed pair
+   are the Jolt objects cast, read with joltc's JPH_ContactManifold_* and the JPH_SubShapeIDPair_*
+   getters above. Not ref-counted: detach it, then delete it with JPH_ContactListener2_Destroy. */
+typedef struct JPH_ContactListener2 JPH_ContactListener2;
+
+JPH_CAPI void JPH_ContactListener2_SetProcs(const JPH_ContactListener_Procs* procs);
+JPH_CAPI JPH_ContactListener2* JPH_ContactListener2_Create(void* userData);
+JPH_CAPI void JPH_ContactListener2_Destroy(JPH_ContactListener2* listener);
+/* listener may be null; the system does not own it. */
+JPH_CAPI void JPH_PhysicsSystem_SetContactListener2(JPH_PhysicsSystem* system, JPH_ContactListener2* listener);
+
 /* SoftBodyContactListener */
 typedef enum JPH_SoftBodyValidateResult {
 	JPH_SoftBodyValidateResult_AcceptContact = 0,

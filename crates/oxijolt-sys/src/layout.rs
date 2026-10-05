@@ -71,6 +71,11 @@ const _: () = {
 
     assert!(size_of::<JPH_ContactSettings>() == 52);
     assert!(align_of::<JPH_ContactSettings>() == 4);
+
+    assert!(size_of::<JPH_CharacterContactSettings>() == 2);
+    assert!(align_of::<JPH_CharacterContactSettings>() == 1);
+    assert!(offset_of!(JPH_CharacterContactSettings, canPushCharacter) == 0);
+    assert!(offset_of!(JPH_CharacterContactSettings, canReceiveImpulses) == 1);
     assert!(offset_of!(JPH_ContactSettings, combinedFriction) == 0);
     assert!(offset_of!(JPH_ContactSettings, combinedRestitution) == 4);
     assert!(offset_of!(JPH_ContactSettings, invMassScale1) == 8);
@@ -646,6 +651,12 @@ const _: () = {
     assert!(offset_of!(JPH_VehicleTrackSettings, angularDamping) == 24);
     assert!(offset_of!(JPH_VehicleTrackSettings, maxBrakeTorque) == 28);
     assert!(offset_of!(JPH_VehicleTrackSettings, differentialRatio) == 32);
+
+    assert!(size_of::<JPH_CollisionGroup>() == 16);
+    assert!(align_of::<JPH_CollisionGroup>() == 8);
+    assert!(offset_of!(JPH_CollisionGroup, groupFilter) == 0);
+    assert!(offset_of!(JPH_CollisionGroup, groupID) == 8);
+    assert!(offset_of!(JPH_CollisionGroup, subGroupID) == 12);
 
     assert!(align_of::<JPH_CharacterContact>() == 8);
     assert!(offset_of!(JPH_CharacterContact, hash) == 0);
