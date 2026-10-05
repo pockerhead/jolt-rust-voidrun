@@ -244,7 +244,7 @@ fn a_static_body_may_change_to_a_plane() {
 
     // A refused replacement keeps an earlier state restorable.
     let saved = world.save_state();
-    let plane = Shape::new_plane(UP, -0.5, 20.0).unwrap();
+    let plane = Shape::new_plane(UP, -0.51, 20.0).unwrap();
     assert!(world
         .body_mut(cubes[0])
         .unwrap()
@@ -252,7 +252,8 @@ fn a_static_body_may_change_to_a_plane() {
         .is_err());
     world.restore_state(&saved).unwrap();
 
-    // The plane's surface sits where the slab's top was (y = 0 in the world).
+    // The plane's surface sits 1 cm above the slab's top (y = 0.01 in the world), so its bounds
+    // hold the resting cubes whether they rest slightly in or on the slab.
     world
         .body_mut(floor)
         .unwrap()
@@ -267,7 +268,7 @@ fn a_static_body_may_change_to_a_plane() {
     step(&mut world, 60);
     for id in cubes {
         let y = world.body(id).unwrap().position().y;
-        assert!((0.48..=0.501).contains(&y), "{y}");
+        assert!((0.49..=0.511).contains(&y), "{y}");
     }
 }
 
