@@ -321,9 +321,10 @@ long and 0.2 nm thick, the impulse (0, 7e8, 7e8) N·s at the lever (0, 7000, 700
 angular impulse of 0, while Jolt's is 157696 N·m·s (the rounding of `7000 · 7e8`); times the needle's inverse
 inertia of about 1.5e14 it overflowed the squared angular speed (`MotionProperties.inl:38`), and
 needles 20 nm and 2 µm thick spun up to the clamp. With the bound, the largest accepted impulse
-along the lever changed the angular velocity by at most 15.3 rad/s on needles from 0.2 nm to 0.2 m
-thick and from `MIN_MASS` to `MAX_MASS`, below a quarter of `MAX_ANGULAR_VELOCITY_CHANGE`, as one
-product's rounding is at most `u · S / 2`. The margin is at most `3u · S`, about 2e-7 of the
+exactly along the lever changed the angular velocity by at most 15.3 rad/s on needles from 0.2 nm
+to 0.2 m thick and from `MIN_MASS` to `MAX_MASS`, as one product's rounding is at most `u · S / 2`;
+an impulse parallel only up to the rounding of its components reached 35 to 38 rad/s. Both stay
+below `MAX_ANGULAR_VELOCITY_CHANGE`. The margin is at most `3u · S`, about 2e-7 of the
 products, so it changes the outcome only where `|lever| · |J|` times the largest inverse inertia
 is above about 1e8: a lever many orders longer than the body's radius of gyration about the axis
 the impulse turns it.
