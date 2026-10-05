@@ -69,7 +69,8 @@ target_sources(${JOLTC_TARGET} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext_listener.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext_material.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext_shape.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext_shape.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext/joltc_ext_vehicle.cpp)
 target_include_directories(${JOLTC_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/joltc_ext ${CMAKE_CURRENT_BINARY_DIR}/joltc_ext_generated)
 
 # Compile-time checks that joltc's C mirrors match Jolt's C++ types. Linking the
