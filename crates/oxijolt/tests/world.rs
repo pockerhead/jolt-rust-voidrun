@@ -18,6 +18,15 @@ fn world_and_shape_are_send_and_sync() {
     assert_send_sync::<SubShapeId>();
     assert_send_sync::<CompoundSubShape>();
     assert_send_sync::<HeightFieldSettings>();
+    assert_send_sync::<BodySettings>();
+    assert_send_sync::<SoftBodySettings>();
+    assert_send_sync::<CollisionGroup>();
+    assert_send_sync::<GroupFilterTable>();
+    assert_send_sync::<ContactCandidate>();
+    assert_send_sync::<BodyVelocity>();
+    assert_send_sync::<CharacterContactKey>();
+    fn assert_send<T: Send>() {}
+    assert_send::<GroupFilterTableBuilder>();
 }
 
 #[test]

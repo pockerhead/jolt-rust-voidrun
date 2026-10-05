@@ -14,9 +14,10 @@ const RAGDOLL: RagdollError = RagdollError::TooManyRagdolls;
 const CONSTRAINT: ConstraintError = ConstraintError::TooManyConstraints;
 const SOFT_BODY: SoftBodyError = SoftBodyError::InitFailed;
 const STATE: StateError = StateError::WrongWorld;
+const COLLISION_GROUP: CollisionGroupError = CollisionGroupError::SameSubGroup(3);
 
 /// One error of every area, converted, with the wrapped error's `Display` and `source`.
-fn every_area() -> [(Error, String, bool); 12] {
+fn every_area() -> [(Error, String, bool); 13] {
     fn entry<E: std::error::Error + Into<Error>>(error: E) -> (Error, String, bool) {
         let (text, has_source) = (error.to_string(), error.source().is_some());
         (error.into(), text, has_source)
@@ -34,6 +35,7 @@ fn every_area() -> [(Error, String, bool); 12] {
         entry(CONSTRAINT),
         entry(SOFT_BODY),
         entry(STATE),
+        entry(COLLISION_GROUP),
     ]
 }
 
@@ -54,6 +56,10 @@ fn every_area_error_converts_into_its_variant() {
     assert_eq!(Error::from(CONSTRAINT), Error::Constraint(CONSTRAINT));
     assert_eq!(Error::from(SOFT_BODY), Error::SoftBody(SOFT_BODY));
     assert_eq!(Error::from(STATE), Error::State(STATE));
+    assert_eq!(
+        Error::from(COLLISION_GROUP),
+        Error::CollisionGroup(COLLISION_GROUP)
+    );
 }
 
 #[test]

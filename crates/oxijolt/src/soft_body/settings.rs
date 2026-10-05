@@ -7,7 +7,7 @@ use crate::body::{Activation, LINEAR_DAMPING_RULE, RESTITUTION_RULE};
 use crate::limits::{self, is_friction, is_gravity_factor, is_in_frame, is_local_distance};
 use crate::math::{is_finite_non_negative, ROTATION_RULE};
 use crate::owned::{JoltObject, Owned};
-use crate::{BodyError, ObjectLayer, Quat, RVec3};
+use crate::{BodyError, CollisionGroup, ObjectLayer, Quat, RVec3};
 
 /// How to create a soft body from [`SoftBodySharedSettings`].
 ///
@@ -31,6 +31,7 @@ pub struct SoftBodySettings {
     pub(super) allow_sleeping: bool,
     pub(super) faces_double_sided: bool,
     pub(super) activation: Activation,
+    pub(super) collision_group: Option<CollisionGroup>,
 }
 
 impl Default for SoftBodySettings {
@@ -52,6 +53,7 @@ impl Default for SoftBodySettings {
             allow_sleeping: true,
             faces_double_sided: false,
             activation: Activation::Activate,
+            collision_group: None,
         }
     }
 }
@@ -197,6 +199,15 @@ impl SoftBodySettings {
         self
     }
 
+    /// The soft body's collision group, fixed for its life, as for a rigid body
+    /// ([`BodySettings::collision_group`](crate::BodySettings::collision_group)): Jolt checks
+    /// it against each rigid body the soft body touches. Default none.
+    #[must_use]
+    pub fn collision_group(mut self, value: CollisionGroup) -> Self {
+        self.collision_group = Some(value);
+        self
+    }
+
     pub(super) fn validate(&self, object_layer_count: u32) -> Result<(), BodyError> {
         if self.object_layer.get() >= object_layer_count {
             return Err(BodyError::UnknownObjectLayer(self.object_layer));
@@ -284,6 +295,12 @@ pub(super) fn creation_settings(
         JPH_SoftBodyCreationSettings_SetMakeRotationIdentity(ptr, settings.make_rotation_identity);
         JPH_SoftBodyCreationSettings_SetAllowSleeping(ptr, settings.allow_sleeping);
         JPH_SoftBodyCreationSettings_SetFacesDoubleSided(ptr, settings.faces_double_sided);
+    }
+    if let Some(group) = &settings.collision_group {
+        let group = group.to_jph();
+        // SAFETY: `ptr` is live; the table behind `group` is live for the call, and the settings
+        // take their own reference to it (Jolt's `RefConst<GroupFilter>`).
+        unsafe { JPH_SoftBodyCreationSettings_SetCollisionGroup(ptr, &group) };
     }
     Ok(creation)
 }

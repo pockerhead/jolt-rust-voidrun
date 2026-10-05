@@ -35,7 +35,9 @@ use crate::{BodyId, ObjectLayer, PhysicsWorld, QueryError, SubShapeId};
 /// For collision groups that are per body, give each group its own object layer and select
 /// layers; for groups that share one body (the children of a chunk compound), store the group
 /// as child user data and select it with a group mask. oxijolt stores no mapping from layers
-/// to groups: the caller knows which layer holds which group.
+/// to groups: the caller knows which layer holds which group. These are not the bodies'
+/// [`CollisionGroup`](crate::CollisionGroup)s, which filter what the solver collides and which
+/// queries ignore.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct QueryFilter<'a> {
     object_layers: Option<&'a [ObjectLayer]>,
