@@ -171,7 +171,7 @@ pub const MAX_GEAR_RATIO: f32 = 10.0;
 pub const MAX_NORMALIZED_TORQUE: f32 = 10.0;
 
 /// Smallest x distance between neighbouring points of a vehicle engine's torque curve, whose x
-/// are within `0..=1`.
+/// are within `0..=1`, up to rounding x to `f32`.
 ///
 /// See [docs/limits.md#torque-curves].
 ///
@@ -669,16 +669,19 @@ pub(crate) const TORQUE_CURVE_RULE: &str = "engine torque curve needs x in 0..=1
      limits::MIN_TORQUE_CURVE_SPACING apart, and y in 0..=limits::MAX_NORMALIZED_TORQUE";
 
 /// Whether `points` make an engine torque curve: at least one point, x within `0..=1` and
-/// increasing by at least [`MIN_TORQUE_CURVE_SPACING`] (computed in `f32`, as Jolt does), y
-/// within `0..=MAX_NORMALIZED_TORQUE`.
+/// increasing by at least [`MIN_TORQUE_CURVE_SPACING`], y within `0..=MAX_NORMALIZED_TORQUE`.
+///
+/// The spacing is measured on the exact values of the `f32` coordinates and may fall short by
+/// one `f32` epsilon, which covers rounding x within `0..=1` to `f32`: points at `i / 1000` pass.
 pub(crate) fn is_torque_curve(points: &[(f32, f32)]) -> bool {
+    let spacing = f64::from(MIN_TORQUE_CURVE_SPACING) - f64::from(f32::EPSILON);
     !points.is_empty()
         && points
             .iter()
             .all(|&(x, y)| (0.0..=1.0).contains(&x) && (0.0..=MAX_NORMALIZED_TORQUE).contains(&y))
         && points
             .windows(2)
-            .all(|pair| pair[1].0 - pair[0].0 >= MIN_TORQUE_CURVE_SPACING)
+            .all(|pair| f64::from(pair[1].0) - f64::from(pair[0].0) >= spacing)
 }
 
 /// Whether `inertia` is within `MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA`.

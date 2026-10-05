@@ -553,7 +553,10 @@ safe API, `(−1e30, 0), (1e30, 1e30)` read at 0.125, `(−1e38, 0), (1e38, 10)`
 motorcycles and tracked vehicles, with and without Jolt's assertions.
 
 Every vehicle kind's engine therefore takes a curve with x within `0..=1`, neighbouring x at least
-`MIN_TORQUE_CURVE_SPACING` (1e-3) apart in `f32`, and y within `0..=MAX_NORMALIZED_TORQUE` (10).
+`MIN_TORQUE_CURVE_SPACING` (1e-3) apart, and y within `0..=MAX_NORMALIZED_TORQUE` (10). The
+spacing is measured on the exact values of the `f32` coordinates and may fall short by one `f32`
+epsilon (2⁻²³), which covers rounding x within `0..=1` to `f32`: a curve sampled at `i / 1000`
+passes.
 Then `x − x1` is at most `x2 − x1` (rounding is monotonic), both are at most 1, the divisor is a
 normal `f32`, and the result lies between the two y up to rounding, at most `y_max·(1 + 8·2⁻²⁴)`
 with `y_max` the largest y. The engine's largest torque is `max_torque · y_max · (1 + 8·2⁻²⁴)`.

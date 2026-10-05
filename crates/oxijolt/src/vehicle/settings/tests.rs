@@ -579,6 +579,19 @@ fn engine_torque_curves_stay_in_their_domain() {
     refused(vec![(0.5, f32::from_bits(top.to_bits() + 1))]);
     refused(vec![(0.5, f32::NAN)]);
     refused(vec![(0.5, 1.0), (0.5 + 0.99 * spacing, 1.0)]);
+    // Rounding x to `f32` may take up to one epsilon off the spacing: a curve sampled at
+    // `i / 1000` passes, and above 0.5 the closest accepted neighbour is one ulp from refused.
+    let sampled = (0..=1000).map(|i| (i as f32 / 1000.0, 1.0)).collect();
+    assert_eq!(curve(sampled).validate(LAYERS), Ok(()));
+    let closest = 0.500_999_9_f32;
+    assert_eq!(
+        curve(vec![(0.5, 1.0), (closest, 1.0)]).validate(LAYERS),
+        Ok(())
+    );
+    refused(vec![
+        (0.5, 1.0),
+        (f32::from_bits(closest.to_bits() - 1), 1.0),
+    ]);
     // Curves whose interpolation overflows in Jolt: a wide x span with a huge y, a wide x span
     // alone, a wide y span alone.
     refused(vec![(-1.0e30, 0.0), (1.0e30, 1.0e30)]);

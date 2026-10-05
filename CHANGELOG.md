@@ -23,10 +23,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - joltc extension: `JPH_MotorcycleController_GetTargetLean` and `_SetTargetLean`, which check the
   controller's kind.
 - Changed (breaking): an engine's torque curve (`VehicleEngineSettings::normalized_torque`, for
-  every vehicle kind) needs x within `0..=1`, at least `limits::MIN_TORQUE_CURVE_SPACING` apart,
-  and y within `0..=limits::MAX_NORMALIZED_TORQUE`. Any finite points with increasing x were
-  accepted before, and wide spans overflowed Jolt's interpolation (`docs/limits.md`, Torque
-  curves).
+  every vehicle kind) needs x within `0..=1`, at least `limits::MIN_TORQUE_CURVE_SPACING` apart
+  up to rounding x to `f32` (points at `i / 1000` pass), and y within
+  `0..=limits::MAX_NORMALIZED_TORQUE`. Any finite points with increasing x were accepted before,
+  and wide spans overflowed Jolt's interpolation (`docs/limits.md`, Torque curves).
 - Changed (breaking): vehicle ids are typed by kind. `VehicleId` is now `VehicleId<K>` with `K`
   `WheeledVehicle` (the default), `TrackedVehicle` or `Motorcycle`, and `VehicleRef` and
   `VehicleMut` take the same parameter. `vehicle_ids` and `vehicle_of_body` return `AnyVehicleId`
