@@ -10,7 +10,9 @@ use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::{PhysicsWorld, VehicleError};
 
-/// The engine of a wheeled vehicle (Jolt `VehicleEngineSettings`). The defaults are Jolt's.
+/// The engine of a vehicle (Jolt `VehicleEngineSettings`). The defaults are Jolt's wheeled
+/// vehicle defaults; [`TrackedVehicleSettings::default_engine`](crate::TrackedVehicleSettings::default_engine)
+/// gives the tracked ones.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VehicleEngineSettings {
     pub(super) max_torque: f32,
@@ -148,8 +150,11 @@ impl VehicleEngineSettings {
     }
 }
 
-/// The automatic transmission of a wheeled vehicle (Jolt `VehicleTransmissionSettings` in
-/// `ETransmissionMode::Auto`; the manual mode is not offered). The defaults are Jolt's.
+/// The automatic transmission of a vehicle (Jolt `VehicleTransmissionSettings` in
+/// `ETransmissionMode::Auto`; the manual mode is not offered). The defaults are Jolt's wheeled
+/// vehicle defaults;
+/// [`TrackedVehicleSettings::default_transmission`](crate::TrackedVehicleSettings::default_transmission)
+/// gives the tracked ones.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VehicleTransmissionSettings {
     pub(super) gear_ratios: Vec<f32>,

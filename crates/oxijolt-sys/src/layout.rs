@@ -637,6 +637,16 @@ const _: () = {
     assert!(offset_of!(JPH_VehicleEngineSettings, inertia) == 24);
     assert!(offset_of!(JPH_VehicleEngineSettings, angularDamping) == 28);
 
+    assert!(size_of::<JPH_VehicleTrackSettings>() == 40);
+    assert!(align_of::<JPH_VehicleTrackSettings>() == 8);
+    assert!(offset_of!(JPH_VehicleTrackSettings, drivenWheel) == 0);
+    assert!(offset_of!(JPH_VehicleTrackSettings, wheels) == 8);
+    assert!(offset_of!(JPH_VehicleTrackSettings, wheelsCount) == 16);
+    assert!(offset_of!(JPH_VehicleTrackSettings, inertia) == 20);
+    assert!(offset_of!(JPH_VehicleTrackSettings, angularDamping) == 24);
+    assert!(offset_of!(JPH_VehicleTrackSettings, maxBrakeTorque) == 28);
+    assert!(offset_of!(JPH_VehicleTrackSettings, differentialRatio) == 32);
+
     assert!(align_of::<JPH_CharacterContact>() == 8);
     assert!(offset_of!(JPH_CharacterContact, hash) == 0);
     assert!(offset_of!(JPH_CharacterContact, bodyB) == 8);

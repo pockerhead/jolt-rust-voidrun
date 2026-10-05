@@ -459,7 +459,7 @@ impl WheelSettings {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct WheelGeometry {
     pub(super) suspension_max_length: f32,
-    pub(super) radius: f32,
+    pub(crate) radius: f32,
     pub(super) width: f32,
 }
 

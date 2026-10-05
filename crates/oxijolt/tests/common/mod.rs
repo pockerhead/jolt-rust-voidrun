@@ -15,6 +15,7 @@ pub mod meshes;
 pub mod ragdoll;
 pub mod soft_body;
 pub mod vehicle;
+pub mod vehicle_kinds;
 pub mod walker;
 
 use oxijolt::*;

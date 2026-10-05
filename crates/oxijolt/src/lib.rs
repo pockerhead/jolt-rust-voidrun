@@ -41,7 +41,8 @@
 //! - Scene queries on `&PhysicsWorld`: [`PhysicsWorld::cast_ray`], [`PhysicsWorld::cast_shape`]
 //!   and [`PhysicsWorld::collide_shape`], filtered by [`QueryFilter`].
 //! - Virtual characters: [`PhysicsWorld::create_character`].
-//! - Wheeled vehicles on a chassis body: [`PhysicsWorld::create_vehicle`].
+//! - Wheeled and tracked vehicles on a chassis body: [`PhysicsWorld::create_vehicle`] and
+//!   [`PhysicsWorld::create_tracked_vehicle`].
 //! - Ragdolls: [`PhysicsWorld::create_ragdoll`].
 //! - Constraints of twelve kinds between two bodies: [`PhysicsWorld::create_constraint`]
 //!   ([constraints guide]).
@@ -224,11 +225,13 @@ pub use soft_body::{
 };
 pub use state::WorldState;
 pub use vehicle::{
-    AnyVehicleId, DriverInput, Motorcycle, SuspensionSpring, TrackedVehicle, VehicleAntiRollBar,
-    VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings, VehicleId,
-    VehicleKind, VehicleMut, VehicleRef, VehicleSettings, VehicleTransmissionSettings, VehicleType,
-    WheelContact, WheelSettings, WheelState, WheeledVehicle, DEFAULT_LATERAL_FRICTION,
-    DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
+    AnyVehicleId, DriverInput, Motorcycle, SuspensionSpring, TrackSide, TrackState,
+    TrackedDriverInput, TrackedVehicle, TrackedVehicleSettings, TrackedWheelSettings,
+    VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings,
+    VehicleId, VehicleKind, VehicleMut, VehicleRef, VehicleSettings, VehicleTrackSettings,
+    VehicleTransmissionSettings, VehicleType, WheelContact, WheelSettings, WheelState,
+    WheeledVehicle, DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION,
+    DEFAULT_NORMALIZED_TORQUE,
 };
 pub use world::{PhysicsWorld, StepReport, WorldSettings};
 

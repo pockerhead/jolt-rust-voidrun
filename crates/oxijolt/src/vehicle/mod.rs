@@ -1,5 +1,6 @@
-//! Wheeled vehicles: Jolt's `VehicleConstraint` with the wheeled controller, owned by a
-//! [`PhysicsWorld`] and attached to a dynamic chassis body the caller created.
+//! Vehicles: Jolt's `VehicleConstraint` with the wheeled or the tracked controller, owned by a
+//! [`PhysicsWorld`] and attached to a dynamic chassis body the caller created. The kind of a
+//! vehicle is part of its id ([`VehicleId<K>`](VehicleId)).
 //!
 //! # Vehicles and the step
 //! A vehicle is a constraint and a step listener of the world's Jolt system. During
@@ -19,8 +20,10 @@ mod control;
 mod id;
 mod readout;
 mod settings;
+mod tracked;
 
 use std::marker::PhantomData;
+use std::ops::Range;
 
 use oxijolt_sys::*;
 
@@ -37,10 +40,12 @@ pub use id::{
 pub use readout::{VehicleRef, WheelContact, WheelState};
 use settings::{BuiltSettings, WheelGeometry};
 pub use settings::{
-    SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings,
-    VehicleEngineSettings, VehicleSettings, VehicleTransmissionSettings, WheelSettings,
-    DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
+    SuspensionSpring, TrackedVehicleSettings, TrackedWheelSettings, VehicleAntiRollBar,
+    VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings, VehicleSettings,
+    VehicleTrackSettings, VehicleTransmissionSettings, WheelSettings, DEFAULT_LATERAL_FRICTION,
+    DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
 };
+pub use tracked::{TrackSide, TrackState, TrackedDriverInput};
 
 /// A vehicle constraint, of which the world holds the one reference
 /// `JPH_VehicleConstraint_Create` returns. The physics system holds another while the vehicle is
@@ -62,6 +67,8 @@ pub(crate) struct VehicleEntry {
     pub(crate) collision_tester: VehicleCollisionTester,
     wheels: Vec<WheelGeometry>,
     kind: VehicleType,
+    /// The vehicle wheel indices of a tracked vehicle's left and right track.
+    tracks: Option<[Range<u32>; 2]>,
 }
 
 /// The gravity override of the vehicle, or `None` while it uses the world's gravity.
@@ -97,7 +104,15 @@ fn engine_and_transmission(
                 JPH_WheeledVehicleController_GetTransmission(controller),
             )
         },
-        VehicleType::Tracked => unreachable!("no tracked vehicle is created yet"),
+        // SAFETY: a tracked vehicle's controller derives from `VehicleController` with single
+        // inheritance; the getters return members.
+        VehicleType::Tracked => unsafe {
+            let controller: *const JPH_TrackedVehicleController = controller.cast();
+            (
+                JPH_TrackedVehicleController_GetEngine(controller),
+                JPH_TrackedVehicleController_GetTransmission(controller),
+            )
+        },
     }
 }
 
@@ -277,6 +292,7 @@ impl PhysicsWorld {
             collision_tester: built.collision_tester,
             wheels: built.geometry,
             kind,
+            tracks: built.tracks,
         };
         install_tester(&mut entry, built.collision_tester);
         self.note_structure_change();

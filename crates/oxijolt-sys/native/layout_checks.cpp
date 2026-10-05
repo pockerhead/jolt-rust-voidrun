@@ -593,6 +593,14 @@ OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, maxRPM, 8);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, normalizedTorque, 16);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, inertia, 24);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleEngineSettings, angularDamping, 28);
+OXIJOLT_SYS_ASSERT_LAYOUT(JPH_VehicleTrackSettings, 40, 8);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleTrackSettings, drivenWheel, 0);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleTrackSettings, wheels, 8);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleTrackSettings, wheelsCount, 16);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleTrackSettings, inertia, 20);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleTrackSettings, angularDamping, 24);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleTrackSettings, maxBrakeTorque, 28);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_VehicleTrackSettings, differentialRatio, 32);
 
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_CharacterContact, hash, 0);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_CharacterContact, bodyB, 8);

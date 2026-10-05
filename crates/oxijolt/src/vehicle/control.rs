@@ -90,6 +90,26 @@ impl VehicleRef<'_, WheeledVehicle> {
 ///
 /// Read the vehicle through [`PhysicsWorld::vehicle`](crate::PhysicsWorld::vehicle) once this
 /// borrow ends.
+///
+/// The kind of the id selects the driver input: a wheeled vehicle takes a [`DriverInput`], a
+/// tracked vehicle a [`TrackedDriverInput`](crate::TrackedDriverInput), and the other one does
+/// not compile:
+///
+/// ```compile_fail,E0308
+/// use oxijolt::*;
+///
+/// fn drive(world: &mut PhysicsWorld, car: VehicleId) -> Result<(), VehicleError> {
+///     world.vehicle_mut(car)?.set_driver_input(TrackedDriverInput::default())
+/// }
+/// ```
+///
+/// ```compile_fail,E0308
+/// use oxijolt::*;
+///
+/// fn drive(world: &mut PhysicsWorld, tank: VehicleId<TrackedVehicle>) -> Result<(), VehicleError> {
+///     world.vehicle_mut(tank)?.set_driver_input(DriverInput::default())
+/// }
+/// ```
 pub struct VehicleMut<'w, K: VehicleKind = WheeledVehicle> {
     pub(super) entry: &'w mut VehicleEntry,
     pub(super) object_layer_count: u32,

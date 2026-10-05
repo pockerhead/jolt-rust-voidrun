@@ -1,11 +1,10 @@
-//! Settings of a wheeled vehicle, in Jolt's vocabulary, with Jolt's defaults.
+//! Settings of the vehicle kinds, in Jolt's vocabulary, with Jolt's defaults.
 //!
-//! The types here are plain Rust values. [`PhysicsWorld::create_vehicle`] validates them and
-//! builds the joltc settings objects from them, which it releases again once the vehicle exists.
-//!
-//! [`PhysicsWorld::create_vehicle`]: crate::PhysicsWorld::create_vehicle
+//! The types here are plain Rust values. The world's vehicle creators validate them and build
+//! the joltc settings objects from them, which they release again once the vehicle exists.
 
 use std::f32::consts::PI;
+use std::ops::Range;
 
 use oxijolt_sys::*;
 
@@ -15,12 +14,14 @@ use crate::{PhysicsWorld, Vec3, VehicleError, VehicleType};
 
 mod collision_tester;
 mod drivetrain;
+mod tracked;
 mod wheel;
 
 pub use collision_tester::VehicleCollisionTester;
 pub use drivetrain::{
     VehicleDifferentialSettings, VehicleEngineSettings, VehicleTransmissionSettings,
 };
+pub use tracked::{TrackedVehicleSettings, TrackedWheelSettings, VehicleTrackSettings};
 pub(crate) use wheel::WheelGeometry;
 pub use wheel::{SuspensionSpring, VehicleAntiRollBar, WheelSettings};
 /// Jolt's default longitudinal friction curve of a wheel (`WheelSettingsWV`): friction
@@ -276,6 +277,7 @@ impl VehicleSettings {
             frame: self.frame,
             collision_tester: self.collision_tester,
             geometry: self.wheels.iter().map(WheelGeometry::of).collect(),
+            tracks: None,
         }
     }
 
@@ -386,14 +388,17 @@ fn validate_wheel_count(count: usize) -> Result<(), VehicleError> {
 pub(crate) enum WheelGuard {
     /// The wheel of a wheeled vehicle or a motorcycle.
     Wheeled(Owned<JPH_WheelSettingsWV>),
+    /// The wheel of a tracked vehicle.
+    Tracked(Owned<JPH_WheelSettingsTV>),
 }
 
 impl WheelGuard {
     /// The settings as joltc's base wheel settings, still owned by the guard.
     pub(crate) fn as_base(&self) -> *mut JPH_WheelSettings {
         match self {
-            // A `WheelSettingsWV` is a `WheelSettings` with single inheritance.
+            // Both kinds are `WheelSettings` with single inheritance.
             Self::Wheeled(wheel) => wheel.as_ptr().cast(),
+            Self::Tracked(wheel) => wheel.as_ptr().cast(),
         }
     }
 }
@@ -402,6 +407,8 @@ impl WheelGuard {
 pub(crate) enum ControllerGuard {
     /// A wheeled vehicle's controller.
     Wheeled(Owned<JPH_WheeledVehicleControllerSettings>),
+    /// A tracked vehicle's controller.
+    Tracked(Owned<JPH_TrackedVehicleControllerSettings>),
 }
 
 impl ControllerGuard {
@@ -411,6 +418,7 @@ impl ControllerGuard {
             // Every controller's settings derive from `VehicleControllerSettings` with single
             // inheritance.
             Self::Wheeled(controller) => controller.as_ptr().cast(),
+            Self::Tracked(controller) => controller.as_ptr().cast(),
         }
     }
 
@@ -418,6 +426,7 @@ impl ControllerGuard {
     pub(crate) fn kind(&self) -> VehicleType {
         match self {
             Self::Wheeled(_) => VehicleType::Wheeled,
+            Self::Tracked(_) => VehicleType::Tracked,
         }
     }
 }
@@ -431,6 +440,8 @@ pub(crate) struct BuiltSettings {
     pub(crate) frame: VehicleFrame,
     pub(crate) collision_tester: VehicleCollisionTester,
     pub(crate) geometry: Vec<WheelGeometry>,
+    /// The vehicle wheel indices of a tracked vehicle's left and right track.
+    pub(crate) tracks: Option<[Range<u32>; 2]>,
 }
 
 /// Jolt's `VehicleEngine::cAngularVelocityToRPM`.

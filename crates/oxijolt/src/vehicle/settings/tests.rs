@@ -2,11 +2,11 @@ use super::*;
 use crate::world::ensure_initialized;
 use crate::{limits, ObjectLayer};
 
-fn bits3(v: Vec3) -> [u32; 3] {
+pub(super) fn bits3(v: Vec3) -> [u32; 3] {
     <[f32; 3]>::from(v).map(f32::to_bits)
 }
 
-fn jolt_vec(get: impl FnOnce(*mut JPH_Vec3)) -> Vec3 {
+pub(super) fn jolt_vec(get: impl FnOnce(*mut JPH_Vec3)) -> Vec3 {
     let mut value = Vec3::ZERO.to_jph();
     get(&mut value);
     Vec3::from_jph(value)
@@ -16,7 +16,7 @@ fn jolt_vec(get: impl FnOnce(*mut JPH_Vec3)) -> Vec3 {
 ///
 /// # Safety
 /// `curve` points to a live curve.
-unsafe fn curve_points(curve: *const JPH_LinearCurve) -> Vec<(f32, f32)> {
+pub(super) unsafe fn curve_points(curve: *const JPH_LinearCurve) -> Vec<(f32, f32)> {
     // SAFETY: the curve is live (caller contract); the getters only read it, with indices
     // below its point count.
     unsafe {
