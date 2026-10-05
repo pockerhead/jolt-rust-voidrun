@@ -235,8 +235,8 @@ impl PhysicsWorld {
         // SAFETY: the body interface belongs to this live world. joltc returns the pointer
         // after releasing the temporary `RefConst<Shape>` it got from `BodyInterface::GetShape`,
         // so only the body's own shape reference keeps the shape alive. The body cannot be
-        // removed (that needs `&mut self`) and its shape cannot be replaced while `&self` is
-        // borrowed. Adding a shape setter that works through `&self` requires revisiting this.
+        // removed and its shape cannot be replaced while `&self` is borrowed: `remove_body` and
+        // `BodyMut::set_shape` need `&mut PhysicsWorld`.
         let shape =
             unsafe { JPH_BodyInterface_GetShape(self.body_interface.as_ptr(), body.to_raw()) };
         let Some(shape) = NonNull::new(shape.cast_mut()) else {

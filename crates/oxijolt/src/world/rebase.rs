@@ -4,7 +4,7 @@ use oxijolt_sys::*;
 
 use crate::body::with_locked_body;
 use crate::limits;
-use crate::{BodyError, BodyId, MotionType, PhysicsWorld, Quat, RVec3, Vec3};
+use crate::{AllowedDofs, BodyError, BodyId, MotionType, PhysicsWorld, Quat, RVec3, Vec3};
 
 /// One body's pose and velocities in a frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -122,7 +122,9 @@ impl PhysicsWorld {
     /// returned. `rotation` must be a finite unit quaternion and `translation` finite with every
     /// component at most `2 *` [`limits::MAX_POSITION`] in absolute value, and no new pose or
     /// velocity may overflow; otherwise [`BodyError::InvalidValue`] is returned. The new positions
-    /// are only checked to be finite. Every check runs before the first write, so an error leaves
+    /// are only checked to be finite. A rotating rebase fails with [`BodyError::RestrictedDofs`]
+    /// for the first listed body with fewer than six degrees of freedom: Jolt locks world axes,
+    /// which a rotation would move. Every check runs before the first write, so an error leaves
     /// the world unchanged.
     ///
     /// No body is woken or put to sleep. An identity `rotation` leaves rotations, velocities
@@ -207,6 +209,16 @@ impl PhysicsWorld {
         } else {
             Vec::new()
         };
+
+        // Jolt's locked axes are world axes, so a rotation would turn a locked body out of its
+        // plane, and the clamped velocity setters below would mask the rotated velocities.
+        if frame.rotates() {
+            for (id, ..) in &changes {
+                if self.body(*id)?.allowed_dofs() != AllowedDofs::ALL {
+                    return Err(BodyError::RestrictedDofs(*id));
+                }
+            }
+        }
 
         // A rebase recreates pulleys, which a state saved before cannot match, and rotates the
         // vehicles' gravity overrides, which Jolt does not save.

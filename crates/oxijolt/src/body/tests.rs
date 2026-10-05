@@ -1,4 +1,4 @@
-use super::access::bounds_overlap;
+use super::access::{bounds_overlap, corners, outward_box};
 use super::load::point_torque;
 use super::*;
 use crate::world::ensure_initialized;
@@ -59,6 +59,12 @@ fn default_settings_match_jolt() {
             JPH_BodyCreationSettings_GetAngularDamping(ptr),
             ours.angular_damping
         );
+        assert_eq!(
+            AllowedDofs::from_jph(JPH_BodyCreationSettings_GetAllowedDOFs(ptr)),
+            ours.allowed_dofs
+        );
+        assert_eq!(JPH_BodyCreationSettings_GetIsSensor(ptr), ours.sensor);
+        assert_eq!(JPH_BodyCreationSettings_GetUserData(ptr), ours.user_data);
         assert!(ours.mass.is_none());
         // The one documented difference: Jolt's default layer is 0.
         assert_eq!(JPH_BodyCreationSettings_GetObjectLayer(ptr), 0);
@@ -86,7 +92,7 @@ fn velocity_limits_are_jolts_default_maxima() {
 fn point_torque_rejects_overflowing_products_even_when_they_cancel() {
     let center = RVec3::ZERO;
     let torque = point_torque(Vec3::new(0.0, 2.0, 0.0), RVec3::new(3.0, 0.0, 0.0), center);
-    assert_eq!(torque, Ok([0.0, 0.0, 6.0]));
+    assert_eq!(torque.map(|t| t.exact), Ok([0.0, 0.0, 6.0]));
     // Lever and force are parallel: the cross product is zero in f64, but Jolt's f32
     // products `lever_x * force_y` and `lever_y * force_x` are infinite.
     let parallel = point_torque(
@@ -102,6 +108,69 @@ fn point_torque_rejects_overflowing_products_even_when_they_cancel() {
         RVec3::new(-Real::MAX, 0.0, 0.0),
     );
     assert!(matches!(lever_overflows, Err(BodyError::InvalidValue(_))));
+}
+
+/// One way to evaluate `a * b - c * d` in `f32`.
+type DifferenceOfProducts = fn(f32, f32, f32, f32) -> f32;
+
+/// The three ways Jolt's `f32` cross product component `a * b - c * d` can be evaluated: both
+/// products rounded, or either product fused into the subtraction.
+fn f32_cross_components(lever: [f32; 3], force: [f32; 3]) -> [[f32; 3]; 3] {
+    let orders: [DifferenceOfProducts; 3] = [
+        |a, b, c, d| a * b - c * d,
+        |a, b, c, d| a.mul_add(b, -(c * d)),
+        |a, b, c, d| (-c).mul_add(d, a * b),
+    ];
+    orders.map(|order| {
+        std::array::from_fn(|i| {
+            let (a, b) = ((i + 1) % 3, (i + 2) % 3);
+            order(lever[a], force[b], lever[b], force[a])
+        })
+    })
+}
+
+#[test]
+fn point_torque_rounding_covers_every_f32_evaluation_order() {
+    let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        // A value with a random mantissa and sign between about 1e-6 and 1e6.
+        let mantissa = (state >> 40) as f32 / (1u64 << 24) as f32 + 0.5;
+        let exponent = ((state >> 8) % 40) as i32 - 20;
+        let sign = if state & 1 == 0 { 1.0 } else { -1.0 };
+        sign * mantissa * 2f32.powi(exponent)
+    };
+    let mut fused_rounding_seen = false;
+    for round in 0..20_000 {
+        let lever = [next(), next(), next()];
+        // Every fourth force is the lever scaled by a power of two: exactly parallel, so that
+        // the exact torque is 0.
+        let force = if round % 4 == 0 {
+            let k = 2f32.powi(round % 16 - 8);
+            lever.map(|c| c * k)
+        } else {
+            [next(), next(), next()]
+        };
+        // `Real` is `f32` without the `double-precision` feature.
+        #[allow(clippy::unnecessary_cast)]
+        let point = RVec3::new(lever[0] as Real, lever[1] as Real, lever[2] as Real);
+        let torque = point_torque(Vec3::from(force), point, RVec3::ZERO).unwrap();
+        for jolt in f32_cross_components(lever, force) {
+            for (i, &component) in jolt.iter().enumerate() {
+                let error = (f64::from(component) - torque.exact[i]).abs();
+                assert!(
+                    error <= torque.rounding[i],
+                    "{lever:?} x {force:?}, component {i}: {error} > {}",
+                    torque.rounding[i]
+                );
+                fused_rounding_seen |= torque.exact[i] == 0.0 && component != 0.0;
+            }
+        }
+    }
+    // Without the rounding bound a zero exact torque would not cover Jolt's fused result.
+    assert!(fused_rounding_seen);
 }
 
 #[test]
@@ -232,16 +301,19 @@ fn aabox(min: [f32; 3], max: [f32; 3]) -> JPH_AABox {
     }
 }
 
+/// Whether `a` and `b` overlap, `a` taken in caller precision.
+fn overlap(a: &JPH_AABox, b: &JPH_AABox) -> bool {
+    let (min, max) = corners(a);
+    bounds_overlap(min, max, b)
+}
+
 #[test]
 fn bounds_overlap_counts_touching_and_containment() {
     let unit = aabox([0.0; 3], [1.0; 3]);
-    assert!(bounds_overlap(&unit, &aabox([0.5; 3], [2.0; 3])));
-    assert!(bounds_overlap(
-        &unit,
-        &aabox([1.0, 0.0, 0.0], [2.0, 1.0, 1.0])
-    ));
-    assert!(bounds_overlap(&unit, &aabox([0.25; 3], [0.75; 3])));
-    assert!(bounds_overlap(&aabox([0.25; 3], [0.75; 3]), &unit));
+    assert!(overlap(&unit, &aabox([0.5; 3], [2.0; 3])));
+    assert!(overlap(&unit, &aabox([1.0, 0.0, 0.0], [2.0, 1.0, 1.0])));
+    assert!(overlap(&unit, &aabox([0.25; 3], [0.75; 3])));
+    assert!(overlap(&aabox([0.25; 3], [0.75; 3]), &unit));
 }
 
 #[test]
@@ -253,8 +325,31 @@ fn bounds_separated_on_any_axis_do_not_overlap() {
         min[axis] = 1.5;
         max[axis] = 2.5;
         let apart = aabox(min, max);
-        assert!(!bounds_overlap(&unit, &apart), "axis {axis}");
-        assert!(!bounds_overlap(&apart, &unit), "axis {axis}");
+        assert!(!overlap(&unit, &apart), "axis {axis}");
+        assert!(!overlap(&apart, &unit), "axis {axis}");
+    }
+}
+
+#[test]
+fn the_broad_phase_box_encloses_the_callers_box() {
+    // 0.1 and 0.3 have no exact `f32`; with `Real = f64` the nearest `f32` lies on one side.
+    let min = RVec3::new(0.1, -0.1, 0.3);
+    let max = RVec3::new(0.3, 0.1, 0.7);
+    let outer = outward_box(min, max);
+    let (outer_min, outer_max) = corners(&outer);
+    for (inner, outer) in [
+        (min.x, outer_min.x),
+        (min.y, outer_min.y),
+        (min.z, outer_min.z),
+    ] {
+        assert!(outer <= inner, "{outer} {inner}");
+    }
+    for (inner, outer) in [
+        (max.x, outer_max.x),
+        (max.y, outer_max.y),
+        (max.z, outer_max.z),
+    ] {
+        assert!(outer >= inner, "{outer} {inner}");
     }
 }
 
@@ -300,4 +395,44 @@ fn diagonal_inertia_must_be_positive_unless_near_zero() {
     assert!(!has_finite_inverse(&diagonal_inertia([0.0, 1.0, 1.0])));
     // All zero: Jolt uses the inertia of a unit sphere.
     assert!(has_finite_inverse(&diagonal_inertia([0.0, 0.0, 0.0])));
+}
+
+#[test]
+fn allowed_dofs_match_jolts_flags() {
+    for (ours, jolt) in [
+        (AllowedDofs::ALL, JPH_AllowedDOFs_All),
+        (AllowedDofs::TRANSLATION_X, JPH_AllowedDOFs_TranslationX),
+        (AllowedDofs::TRANSLATION_Y, JPH_AllowedDOFs_TranslationY),
+        (AllowedDofs::TRANSLATION_Z, JPH_AllowedDOFs_TranslationZ),
+        (AllowedDofs::ROTATION_X, JPH_AllowedDOFs_RotationX),
+        (AllowedDofs::ROTATION_Y, JPH_AllowedDOFs_RotationY),
+        (AllowedDofs::ROTATION_Z, JPH_AllowedDOFs_RotationZ),
+        (AllowedDofs::PLANE_2D, JPH_AllowedDOFs_Plane2D),
+    ] {
+        assert_eq!(ours.to_jph(), jolt);
+        assert_eq!(AllowedDofs::from_jph(jolt), ours);
+    }
+    let plane = AllowedDofs::TRANSLATION_X | AllowedDofs::TRANSLATION_Y | AllowedDofs::ROTATION_Z;
+    assert_eq!(plane, AllowedDofs::PLANE_2D);
+    assert!(AllowedDofs::ALL.contains(plane));
+    assert!(!plane.contains(AllowedDofs::TRANSLATION_Z));
+    assert_eq!(AllowedDofs::default(), AllowedDofs::ALL);
+}
+
+#[test]
+fn dofs_without_translation_are_refused() {
+    let rotation_only = AllowedDofs::ROTATION_X | AllowedDofs::ROTATION_Y | AllowedDofs::ROTATION_Z;
+    let settings = BodySettings::new_dynamic().allowed_dofs(rotation_only);
+    assert_eq!(
+        settings.validate_values(),
+        Err(BodyError::InvalidValue(DOFS_RULE))
+    );
+    for keeps_one in [
+        AllowedDofs::TRANSLATION_X,
+        AllowedDofs::TRANSLATION_Y | AllowedDofs::ROTATION_Y,
+        AllowedDofs::TRANSLATION_Z | rotation_only,
+    ] {
+        let settings = BodySettings::new_dynamic().allowed_dofs(keeps_one);
+        assert_eq!(settings.validate_values(), Ok(()));
+    }
 }

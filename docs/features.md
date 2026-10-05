@@ -7,7 +7,9 @@ what is planned next.
   cylinder (cones too), convex hull, triangle mesh (with a material per triangle and a report of
   the triangles too thin to collide with, for static and kinematic bodies), heightfield, compound
   and scaled shapes; physics materials with user data;
-  forces, sleeping, continuous collision.
+  forces, sleeping, continuous collision; impulses, kinematic moves, waking and sleeping on demand,
+  sensors, per-body user data, locked axes (allowed degrees of freedom), and shape and motion type
+  changes ([guide](bodies.md)).
 - Scene queries: ray casts, shape casts and collide-shape, filtered by layer, compound child
   group and body.
 - A character controller (Jolt's `CharacterVirtual`) with stair walking, floor sticking and an up

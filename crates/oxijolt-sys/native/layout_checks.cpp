@@ -10,6 +10,7 @@
 #include <Jolt/Jolt.h>
 
 #include <Jolt/Math/Mat44.h>
+#include <Jolt/Physics/Body/AllowedDOFs.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Body/MotionQuality.h>
@@ -672,6 +673,7 @@ static_assert(sizeof(JPH_SwingType) == 4, "JPH_SwingType: unexpected size");
 static_assert(sizeof(JPH_ConstraintSpace) == 4, "JPH_ConstraintSpace: unexpected size");
 static_assert(sizeof(JPH_SixDOFConstraintAxis) == 4, "JPH_SixDOFConstraintAxis: unexpected size");
 static_assert(sizeof(JPH_SoftBodyValidateResult) == 4, "JPH_SoftBodyValidateResult: unexpected size");
+static_assert(sizeof(JPH_AllowedDOFs) == 4, "JPH_AllowedDOFs: unexpected size");
 
 static_assert(int(JPH_MotionType_Static) == int(JPH::EMotionType::Static), "JPH_MotionType_Static");
 static_assert(int(JPH_MotionType_Kinematic) == int(JPH::EMotionType::Kinematic), "JPH_MotionType_Kinematic");
@@ -679,6 +681,15 @@ static_assert(int(JPH_MotionType_Dynamic) == int(JPH::EMotionType::Dynamic), "JP
 
 static_assert(int(JPH_Activation_Activate) == int(JPH::EActivation::Activate), "JPH_Activation_Activate");
 static_assert(int(JPH_Activation_DontActivate) == int(JPH::EActivation::DontActivate), "JPH_Activation_DontActivate");
+
+static_assert(int(JPH_AllowedDOFs_All) == int(JPH::EAllowedDOFs::All), "JPH_AllowedDOFs_All");
+static_assert(int(JPH_AllowedDOFs_TranslationX) == int(JPH::EAllowedDOFs::TranslationX), "JPH_AllowedDOFs_TranslationX");
+static_assert(int(JPH_AllowedDOFs_TranslationY) == int(JPH::EAllowedDOFs::TranslationY), "JPH_AllowedDOFs_TranslationY");
+static_assert(int(JPH_AllowedDOFs_TranslationZ) == int(JPH::EAllowedDOFs::TranslationZ), "JPH_AllowedDOFs_TranslationZ");
+static_assert(int(JPH_AllowedDOFs_RotationX) == int(JPH::EAllowedDOFs::RotationX), "JPH_AllowedDOFs_RotationX");
+static_assert(int(JPH_AllowedDOFs_RotationY) == int(JPH::EAllowedDOFs::RotationY), "JPH_AllowedDOFs_RotationY");
+static_assert(int(JPH_AllowedDOFs_RotationZ) == int(JPH::EAllowedDOFs::RotationZ), "JPH_AllowedDOFs_RotationZ");
+static_assert(int(JPH_AllowedDOFs_Plane2D) == int(JPH::EAllowedDOFs::Plane2D), "JPH_AllowedDOFs_Plane2D");
 
 static_assert(int(JPH_PhysicsUpdateError_None) == int(JPH::EPhysicsUpdateError::None), "JPH_PhysicsUpdateError_None");
 static_assert(int(JPH_PhysicsUpdateError_ManifoldCacheFull) == int(JPH::EPhysicsUpdateError::ManifoldCacheFull),

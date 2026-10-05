@@ -130,6 +130,9 @@ makes queries faster until the next step.
 Awake bodies restart Jolt's sleep timer, as for every pose change, so they may fall asleep later
 than without the rebase. New positions are only checked to be finite, not to lie within
 `limits::MAX_POSITION`: a body the simulation carried out of the frame does not block a rebase.
+A rotating rebase refuses a world with a body created with fewer than six degrees of freedom
+(`BodyError::RestrictedDofs`), because Jolt locks world axes and a rotation would turn the body out
+of them; a translation alone is accepted.
 
 The rest of the world moves along:
 - **Characters** move in id order after the bodies: position and rotation as for bodies, up and

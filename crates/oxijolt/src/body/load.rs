@@ -13,6 +13,10 @@ use crate::{BodyError, Quat, RVec3, Vec3};
 /// two products cancel.
 const F32_PRODUCT_HEADROOM: f64 = 1.0e37;
 
+/// Unit roundoff of `f32`, 2^-24: rounding a result to `f32` changes it by at most this
+/// fraction of it, or by at most `f32::MIN_POSITIVE` when it is that small.
+const F32_UNIT_ROUNDOFF: f64 = 1.0 / 16_777_216.0;
+
 /// What [`BodyMut::check_load`](crate::BodyMut::check_load) reads from a dynamic rigid body.
 pub(super) struct LoadState {
     pub(super) force: Vec3,
@@ -120,13 +124,32 @@ pub(super) fn soft_body_force(state: &SoftLoadState, force: Vec3) -> Result<Vec3
     Ok(local)
 }
 
-/// The torque, in `f64`, of `force` at `point` on a body whose centre of mass is
-/// `center_of_mass`; an error when Jolt's `f32` arithmetic for it could overflow.
+/// The torque of a force at a point: the exact value, and how far Jolt's `f32` cross product
+/// can be from it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct PointTorque {
+    /// `(point - centre_of_mass) × force`, exact for the `f32` lever and force.
+    pub(super) exact: [f64; 3],
+    /// Per component, the largest difference between Jolt's `f32` result and `exact`.
+    pub(super) rounding: [f64; 3],
+}
+
+impl PointTorque {
+    /// Per component, the largest magnitude that `base` plus the torque Jolt computes can have.
+    pub(super) fn largest_with(&self, base: [f64; 3]) -> [f64; 3] {
+        std::array::from_fn(|i| (base[i] + self.exact[i]).abs() + self.rounding[i])
+    }
+}
+
+/// The torque of `force` at `point` on a body whose centre of mass is `center_of_mass`; an
+/// error when Jolt's `f32` arithmetic for it could overflow. See [docs/limits.md#impulses].
+///
+/// [docs/limits.md#impulses]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#impulses
 pub(super) fn point_torque(
     force: Vec3,
     point: RVec3,
     center_of_mass: RVec3,
-) -> Result<[f64; 3], BodyError> {
+) -> Result<PointTorque, BodyError> {
     // Jolt converts the lever to `f32` (`Vec3(inPosition - mPosition)`). `Real` is `f32`
     // without the `double-precision` feature, so the casts are no-ops there.
     #[allow(clippy::unnecessary_cast)]
@@ -147,11 +170,34 @@ pub(super) fn point_torque(
         products_fit,
         "force at this point would overflow Jolt's torque arithmetic",
     )?;
-    Ok([
-        lever[1] * force[2] - lever[2] * force[1],
-        lever[2] * force[0] - lever[0] * force[2],
-        lever[0] * force[1] - lever[1] * force[0],
-    ])
+    // Component `i` is `lever[a] * force[b] - lever[b] * force[a]`; both products are exact in
+    // `f64`.
+    let products = |i: usize| {
+        let (a, b) = ((i + 1) % 3, (i + 2) % 3);
+        (lever[a] * force[b], lever[b] * force[a])
+    };
+    let exact = std::array::from_fn(|i| {
+        let (p, q) = products(i);
+        p - q
+    });
+    let rounding = std::array::from_fn(|i| {
+        let (p, q) = products(i);
+        cross_product_rounding(p, q)
+    });
+    Ok(PointTorque { exact, rounding })
+}
+
+/// How far Jolt's `f32` value of `p - q` can be from the exact one, for products `p` and `q` of
+/// `f32` numbers: `u · (|p - q| + 2 · (|p| + |q|)) + 4 · f32::MIN_POSITIVE`, `u` being
+/// [`F32_UNIT_ROUNDOFF`]. Jolt rounds both products and the difference, or, where the compiler
+/// fuses a product into the subtraction, one product and the fused result
+/// ([docs/limits.md#impulses]). For a lever parallel to the force `p - q` is 0 while Jolt's
+/// value is not.
+///
+/// [docs/limits.md#impulses]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#impulses
+fn cross_product_rounding(p: f64, q: f64) -> f64 {
+    F32_UNIT_ROUNDOFF * ((p - q).abs() + 2.0 * (p.abs() + q.abs()))
+        + 4.0 * f64::from(f32::MIN_POSITIVE)
 }
 
 pub(super) fn require(valid: bool, what: &'static str) -> Result<(), BodyError> {

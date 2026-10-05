@@ -8,47 +8,25 @@ use std::ptr::{null, NonNull};
 
 use oxijolt_sys::*;
 
+use super::structure::{check_shape_for, ShapeUse};
 use super::{
-    has_finite_inverse, mass_properties, with_locked_body, BodyId, BodyMut, BodyRef, BodySettings,
-    CreationSettings, MotionType, INERTIA_RULE, INVALID_BODY_ID, KINEMATIC_MESH_MASS_RULE,
-    MESH_DYNAMIC_RULE, STATIC_SHAPE_RULE,
+    with_locked_body, AllowedDofs, BodyId, BodyMut, BodyRef, BodySettings, CreationSettings,
+    INVALID_BODY_ID, STATIC_DOFS_RULE,
 };
-use crate::limits::{is_mass, MASS_RULE};
+use crate::limits::is_in_frame;
 use crate::owned::Owned;
-use crate::{BodyError, PhysicsWorld, Shape, Vec3};
-
-/// Whether a body that is not static may use `shape`, which Jolt allows only on static bodies
-/// (Jolt itself never checks this when creating a body).
-///
-/// A kinematic body may carry a shape whose static-only leaves are all meshes, given a mass.
-/// Jolt cannot collide a mesh with a mesh or a heightfield ("Unsupported shape pair" in
-/// `CollisionDispatch`), and such pairs stay out of reach: only kinematic bodies carry meshes,
-/// Jolt pairs a kinematic body with a static or kinematic one only with
-/// `mCollideKinematicVsNonDynamic` or a sensor (`Body::sFindCollidingPairsCanCollide`), which
-/// this crate does not expose, and query, character and ragdoll shapes refuse static-only
-/// shapes. Exposing either switch must revisit this rule.
-fn validate_static_only_shape(shape: &Shape, settings: &BodySettings) -> Result<(), BodyError> {
-    if !shape.static_only_leaves_are_meshes() {
-        return Err(BodyError::InvalidValue(STATIC_SHAPE_RULE));
-    }
-    if settings.motion_type == MotionType::Dynamic {
-        return Err(BodyError::InvalidValue(MESH_DYNAMIC_RULE));
-    }
-    if settings.mass.is_none() {
-        return Err(BodyError::InvalidValue(KINEMATIC_MESH_MASS_RULE));
-    }
-    Ok(())
-}
+use crate::{BodyError, PhysicsWorld, RVec3, Real, Shape, Vec3};
 
 impl PhysicsWorld {
     /// Creates a body from `shape` and adds it to the world. The body keeps its own reference
     /// to the shape, so `shape` may be dropped afterwards.
     ///
-    /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, and, for a dynamic
-    /// or kinematic body, when:
+    /// Fails with [`BodyError::InvalidValue`] when a setting is out of range, when a sensor's
+    /// shape is one that only static bodies may use, and, for a dynamic or kinematic body or a
+    /// static one that may move ([`BodySettings::allow_dynamic_or_kinematic`]), when:
     /// - the shape is one that only static bodies may use: a heightfield, or a compound or
     ///   decorated shape that contains one;
-    /// - the shape contains a mesh and the body is dynamic, or kinematic without
+    /// - the shape contains a mesh and the body is dynamic, or not dynamic without
     ///   [`BodySettings::mass`] (Jolt computes no mass for a mesh);
     /// - the mass or inertia (overridden, or computed from a tiny shape) has no finite inverse;
     /// - the inertia tensor is not diagonal (a rotated or offset compound child, an offset centre
@@ -68,20 +46,20 @@ impl PhysicsWorld {
         settings: &BodySettings,
     ) -> Result<BodyId, BodyError> {
         settings.validate(self.object_layer_count)?;
-        if settings.motion_type != MotionType::Static && shape.must_be_static() {
-            validate_static_only_shape(shape, settings)?;
+        if !settings.can_move() && settings.allowed_dofs != AllowedDofs::ALL {
+            return Err(BodyError::InvalidValue(STATIC_DOFS_RULE));
         }
-        // Jolt computes mass properties for every body that is not static
+        // Jolt computes mass properties for every body that can move
         // (`BodyCreationSettings::HasMassProperties`).
-        if settings.motion_type != MotionType::Static {
-            let properties = mass_properties(shape, settings.mass);
-            if !has_finite_inverse(&properties) {
-                return Err(BodyError::InvalidValue(INERTIA_RULE));
-            }
-            if settings.motion_type == MotionType::Dynamic && !is_mass(properties.mass) {
-                return Err(BodyError::InvalidValue(MASS_RULE));
-            }
-        }
+        check_shape_for(
+            shape,
+            ShapeUse {
+                motion_type: settings.motion_type,
+                can_move: settings.can_move(),
+                sensor: settings.sensor,
+                mass: settings.mass,
+            },
+        )?;
         let creation = CreationSettings::new(shape, settings)?;
         if !self.has_room_for_bodies(1) {
             return Err(BodyError::TooManyBodies);
@@ -142,7 +120,7 @@ impl PhysicsWorld {
                 id,
                 _world: PhantomData,
             },
-            _world: PhantomData,
+            world: self,
         })
     }
 
@@ -164,28 +142,7 @@ impl PhysicsWorld {
     /// [`remove_constraint`](Self::remove_constraint).
     pub fn remove_body(&mut self, id: BodyId) -> Result<(), BodyError> {
         self.check(id)?;
-        // The character's destructor destroys its inner body, and Jolt does not validate ids in
-        // `DestroyBody`: removing it here first would make that a double destroy. Any future
-        // API that destroys bodies needs the same check.
-        if self.is_inner_body(id) {
-            return Err(BodyError::OwnedByCharacter(id));
-        }
-        // A vehicle keeps a pointer to its chassis and dereferences it on every step. Any future
-        // API that destroys bodies or changes their motion type must consult the vehicle bodies
-        // the same way.
-        if self.is_vehicle_body(id) {
-            return Err(BodyError::UsedByVehicle(id));
-        }
-        // A ragdoll destroys its parts when it is released, and Jolt does not validate ids in
-        // `DestroyBody`, so removing a part here would make that a double destroy.
-        if self.is_ragdoll_body(id) {
-            return Err(BodyError::OwnedByRagdoll(id));
-        }
-        // A constraint keeps pointers to its bodies and dereferences them on every step. Any
-        // future API that destroys bodies must consult the constraint bodies the same way.
-        if self.is_constraint_body(id) {
-            return Err(BodyError::UsedByConstraint(id));
-        }
+        self.check_not_owned(id)?;
         let mut bounds = JPH_AABox {
             min: Vec3::ZERO.to_jph(),
             max: Vec3::ZERO.to_jph(),
@@ -201,7 +158,59 @@ impl PhysicsWorld {
         // keeps anyone else from removing it in between, so the body is removed exactly once
         // (Jolt does not validate ids in `DestroyBody`). This thread holds no body lock.
         unsafe { JPH_BodyInterface_RemoveAndDestroyBody(self.body_interface.as_ptr(), id.raw) };
-        self.wake_bodies_overlapping(&bounds);
+        let (min, max) = corners(&bounds);
+        self.wake_bodies_overlapping(min, max, None);
+        Ok(())
+    }
+
+    /// Refuses a body that a character, vehicle, ragdoll or constraint holds: removing it, or
+    /// changing its shape or motion type, would break what that owner relies on. Every API that
+    /// destroys a body or changes its shape or motion type calls this.
+    pub(crate) fn check_not_owned(&self, id: BodyId) -> Result<(), BodyError> {
+        // The character's destructor destroys its inner body, and Jolt does not validate ids in
+        // `DestroyBody`: removing it here first would make that a double destroy. The character
+        // also moves the body as a kinematic body of its own shape.
+        if self.is_inner_body(id) {
+            return Err(BodyError::OwnedByCharacter(id));
+        }
+        // A vehicle keeps a pointer to its chassis and dereferences it on every step, and its
+        // checks assume a dynamic chassis of the mass it was created with.
+        if self.is_vehicle_body(id) {
+            return Err(BodyError::UsedByVehicle(id));
+        }
+        // A ragdoll destroys its parts when it is released, and Jolt does not validate ids in
+        // `DestroyBody`, so removing a part here would make that a double destroy. Its joints
+        // were checked against the parts' shapes and masses.
+        if self.is_ragdoll_body(id) {
+            return Err(BodyError::OwnedByRagdoll(id));
+        }
+        // A constraint keeps pointers to its bodies and dereferences them on every step, and
+        // its lever-arm, spring and dynamic-body checks used the bodies' motion types, masses
+        // and inertias at creation.
+        if self.is_constraint_body(id) {
+            return Err(BodyError::UsedByConstraint(id));
+        }
+        Ok(())
+    }
+
+    /// Wakes every non-static body whose current bounds overlap or touch the box from `min` to
+    /// `max` (world space, metres), in body-id order, recording an
+    /// [`ActivationEvent::Activated`](crate::ActivationEvent::Activated) for each that was
+    /// asleep.
+    ///
+    /// The bodies are found by their exact bounds now, compared in the precision of [`Real`],
+    /// so the result does not depend on the broad phase's history or on worker threads; Jolt's
+    /// own `ActivateBodiesInAABox` does depend on them and is not used. Both corners must lie
+    /// within [`limits::MAX_POSITION`](crate::limits::MAX_POSITION) with `min <= max` on every
+    /// axis, otherwise [`BodyError::InvalidValue`] is returned and nothing wakes.
+    pub fn activate_bodies_in_box(&mut self, min: RVec3, max: RVec3) -> Result<(), BodyError> {
+        let ordered = min.x <= max.x && min.y <= max.y && min.z <= max.z;
+        if !(is_in_frame(min) && is_in_frame(max) && ordered) {
+            return Err(BodyError::InvalidValue(
+                "box corners must be within limits::MAX_POSITION with min <= max",
+            ));
+        }
+        self.wake_bodies_overlapping(min, max, None);
         Ok(())
     }
 
@@ -224,14 +233,24 @@ impl PhysicsWorld {
         Ok(unsafe { JPH_PhysicsSystem_WereBodiesInContact(self.system.as_ptr(), a.raw, b.raw) })
     }
 
-    /// Wakes every non-static body whose world bounds overlap `bounds`, in body-id order.
+    /// Wakes every non-static body other than `except` whose world bounds overlap or touch the
+    /// box from `min` to `max`, in body-id order.
     ///
     /// Jolt's broad phase keeps widened bounds for moved bodies until its next maintenance, so
     /// which bodies it reports depends on that history (Jolt docs, "Deterministic Simulation").
-    /// Here it only proposes candidates; each is kept only when its exact bounds overlap.
-    pub(crate) fn wake_bodies_overlapping(&mut self, bounds: &JPH_AABox) {
-        let candidates = self.broad_phase_bodies(bounds);
-        let woken = self.overlapping_movable_bodies(bounds, &candidates);
+    /// Here it only proposes candidates, from the box rounded outward to `f32`; each is kept only
+    /// when its exact bounds overlap the box in the caller's precision.
+    pub(crate) fn wake_bodies_overlapping(
+        &mut self,
+        min: RVec3,
+        max: RVec3,
+        except: Option<BodyId>,
+    ) {
+        let candidates = self.broad_phase_bodies(&outward_box(min, max));
+        let mut woken = self.overlapping_movable_bodies(min, max, &candidates);
+        if let Some(except) = except {
+            woken.retain(|&raw| raw != except.raw);
+        }
         if woken.is_empty() {
             return;
         }
@@ -280,11 +299,12 @@ impl PhysicsWorld {
     }
 
     /// Those of the sorted `candidates` that are non-static bodies whose world bounds overlap
-    /// `bounds`, in the same order. Locks all candidates at once and releases them before
-    /// returning.
+    /// the box from `min` to `max`, in the same order. Locks all candidates at once and releases
+    /// them before returning.
     fn overlapping_movable_bodies(
         &self,
-        bounds: &JPH_AABox,
+        min: RVec3,
+        max: RVec3,
         candidates: &[JPH_BodyID],
     ) -> Vec<JPH_BodyID> {
         let mut woken = Vec::new();
@@ -321,7 +341,7 @@ impl PhysicsWorld {
                 JPH_Body_GetWorldSpaceBounds(body.as_ptr(), &mut candidate_bounds);
                 JPH_Body_IsStatic(body.as_ptr())
             };
-            if !is_static && bounds_overlap(bounds, &candidate_bounds) {
+            if !is_static && bounds_overlap(min, max, &candidate_bounds) {
                 woken.push(candidate);
             }
         }
@@ -368,10 +388,50 @@ unsafe extern "C" fn collect_broad_phase_hit(user_data: *mut c_void, body: JPH_B
     }
 }
 
-/// Whether two boxes overlap, touching included (Jolt `AABox::Overlaps`).
-pub(super) fn bounds_overlap(a: &JPH_AABox, b: &JPH_AABox) -> bool {
-    let axis = |a_min: f32, a_max: f32, b_min: f32, b_max: f32| a_min <= b_max && b_min <= a_max;
-    axis(a.min.x, a.max.x, b.min.x, b.max.x)
-        && axis(a.min.y, a.max.y, b.min.y, b.max.y)
-        && axis(a.min.z, a.max.z, b.min.z, b.max.z)
+/// The corners of `bounds`, widened to [`Real`].
+pub(crate) fn corners(bounds: &JPH_AABox) -> (RVec3, RVec3) {
+    let widen = |v: JPH_Vec3| RVec3::new(Real::from(v.x), Real::from(v.y), Real::from(v.z));
+    (widen(bounds.min), widen(bounds.max))
+}
+
+/// `value` as `f32`, rounded down for `up == false` and up otherwise, so that the result
+/// encloses `value` on that side.
+// `Real` is `f32` without the `double-precision` feature, so the cast is a no-op there.
+#[allow(clippy::unnecessary_cast)]
+fn rounded_outward(value: Real, up: bool) -> f32 {
+    let rounded = value as f32;
+    if up && Real::from(rounded) < value {
+        rounded.next_up()
+    } else if !up && Real::from(rounded) > value {
+        rounded.next_down()
+    } else {
+        rounded
+    }
+}
+
+/// The smallest `f32` box that contains the box from `min` to `max`.
+pub(super) fn outward_box(min: RVec3, max: RVec3) -> JPH_AABox {
+    let side = |v: RVec3, up| {
+        Vec3::new(
+            rounded_outward(v.x, up),
+            rounded_outward(v.y, up),
+            rounded_outward(v.z, up),
+        )
+        .to_jph()
+    };
+    JPH_AABox {
+        min: side(min, false),
+        max: side(max, true),
+    }
+}
+
+/// Whether `bounds` overlaps the box from `min` to `max`, touching included (Jolt
+/// `AABox::Overlaps`), compared in [`Real`].
+pub(super) fn bounds_overlap(min: RVec3, max: RVec3, bounds: &JPH_AABox) -> bool {
+    let (other_min, other_max) = corners(bounds);
+    let axis =
+        |a_min: Real, a_max: Real, b_min: Real, b_max: Real| a_min <= b_max && b_min <= a_max;
+    axis(min.x, max.x, other_min.x, other_max.x)
+        && axis(min.y, max.y, other_min.y, other_max.y)
+        && axis(min.z, max.z, other_min.z, other_max.z)
 }

@@ -11,7 +11,9 @@ use super::lever::check_spring;
 use super::SpringSettings;
 use crate::body::with_locked_bodies;
 use crate::owned::{JoltObject, Owned};
-use crate::{BodyError, BodyId, ConstraintError, MotionType, PhysicsWorld, RVec3, Vec3};
+use crate::{
+    AllowedDofs, BodyError, BodyId, ConstraintError, MotionType, PhysicsWorld, RVec3, Vec3,
+};
 
 /// The kinds of constraint a world can hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -360,17 +362,19 @@ impl PhysicsWorld {
     ///
     /// Frames given in [`ConstraintSpace::WorldSpace`] are world space at the time the
     /// constraint is created; Jolt turns them into each body's own frame then. Both bodies must
-    /// be bodies of this world, different, and neither the inner body of a character nor a part
-    /// of a ragdoll ([`ConstraintError::Body`]). Except for a gear, a rack and pinion and a
+    /// be bodies of this world, different, neither the inner body of a character nor a part of
+    /// a ragdoll, and created with all six degrees of freedom ([`ConstraintError::Body`]). Except for a gear, a rack and pinion and a
     /// pulley, one of them may be static or kinematic, which anchors the constraint to the world
     /// or to the kinematic body. Those three need two dynamic bodies
     /// ([`ConstraintError::NotDynamic`]): Jolt's solver parts for them read both bodies' motion
     /// properties without checking, so a static body breaks them and a kinematic one gets
-    /// pushed. A pulley's fixed points already anchor its rope. The safe API cannot change a
-    /// body's motion type afterwards, so checking at creation is enough.
+    /// pushed. A pulley's fixed points already anchor its rope. While the constraint exists,
+    /// [`BodyMut::set_motion_type`](crate::BodyMut::set_motion_type) refuses its bodies, so
+    /// checking at creation is enough.
     ///
     /// Jolt still lets the two bodies collide with each other where their shapes touch. While
-    /// the constraint exists, [`remove_body`](Self::remove_body) refuses its bodies
+    /// the constraint exists, [`remove_body`](Self::remove_body) and the motion type and shape
+    /// changes of [`BodyMut`](crate::BodyMut) refuse its bodies
     /// ([`BodyError::UsedByConstraint`]).
     ///
     /// Each point where the constraint holds a dynamic body must have a lever-arm ratio of at
@@ -385,8 +389,9 @@ impl PhysicsWorld {
     /// Frequency-mode springs ([`SpringSettings::FrequencyAndDamping`]) become a stiffness and
     /// damping that grow with the bodies' effective mass, so they are checked against an upper
     /// bound of it, taken from the dynamic bodies' mass and inertia now: `max(mass, largest
-    /// principal moment)` of each. The API changes neither of those for the constraint's
-    /// bodies afterwards, so the bound holds for the constraint's life.
+    /// principal moment)` of each. While the constraint exists, the motion type and shape
+    /// changes of [`BodyMut`](crate::BodyMut) refuse its bodies, so the bound holds for the
+    /// constraint's life.
     ///
     /// Fails with [`ConstraintError::InvalidValue`] when a setting or a lever-arm ratio is out of
     /// range, with [`ConstraintError::NotDynamic`] as above, with
@@ -464,6 +469,14 @@ impl PhysicsWorld {
                 .is_soft_body()
             {
                 return Err(ConstraintError::Body(BodyError::SoftBody(body)));
+            }
+            // The lever-arm and spring checks below assume unmasked inverse mass and inertia.
+            let allowed_dofs = self
+                .body(body)
+                .map_err(ConstraintError::Body)?
+                .allowed_dofs();
+            if allowed_dofs != AllowedDofs::ALL {
+                return Err(ConstraintError::Body(BodyError::RestrictedDofs(body)));
             }
             if S::NEEDS_DYNAMIC_BODIES
                 && self

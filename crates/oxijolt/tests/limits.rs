@@ -7,6 +7,7 @@ mod common;
 
 use std::f32::consts::PI;
 
+use common::controls::largest_accepted;
 use common::math::{bits, f3, v3, wide};
 use common::vehicle::*;
 use common::*;
@@ -423,6 +424,41 @@ fn torques_are_bounded_by_the_angular_acceleration_they_give() {
     ));
     assert!(world.step(DT).unwrap().is_complete());
     assert_body_finite(&world, id, "after the bound torque");
+}
+
+#[test]
+fn point_forces_along_a_long_lever_count_jolt_rounding() {
+    // A needle of `MAX_MASS`, 2 km long and 0.2 nm thick along x, and a force at 7000 m exactly
+    // parallel to the lever: the exact torque is 0, but Jolt's `f32` cross product, with one
+    // product fused into the subtraction, keeps that product's rounding error.
+    let mut world = empty_world();
+    let shape =
+        Shape::new_box_with_convex_radius(Vec3::new(1000.0, 1.0e-10, 1.0e-10), 0.0).unwrap();
+    let id = world
+        .create_body(
+            &shape,
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(0.0, -3500.0, -3500.0))
+                .mass(limits::MAX_MASS),
+        )
+        .unwrap();
+    let point = RVec3::new(0.0, 3500.0, 3500.0);
+    let along = |size: f32| Vec3::new(0.0, size, size);
+    let mut body = world.body_mut(id).unwrap();
+    assert!(body_invalid(body.add_force_at_point(along(7.0e12), point)));
+    let largest = largest_accepted(7.0e12, |size| {
+        let accepted = body.add_force_at_point(along(size), point).is_ok();
+        body.reset_forces();
+        accepted
+    });
+    assert!(body_invalid(
+        body.add_force_at_point(along(largest.next_up()), point)
+    ));
+    body.add_force_at_point(along(largest), point).unwrap();
+    for _ in 0..3 {
+        assert!(world.step(DT).unwrap().is_complete());
+    }
+    assert_body_finite(&world, id, "after the largest force along the lever");
 }
 
 #[test]

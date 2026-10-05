@@ -54,8 +54,10 @@ bodies did not change since the save, for example static bodies the caller never
 
 A state restores only into the world that saved it (`StateError::WrongWorld`), and only while that
 world's structure is unchanged (`StateError::WorldChanged`). The structure changes when a body,
-character, vehicle, ragdoll or constraint is created or removed, when a ragdoll's motion type is
-set, and when a rebase moves anything. Calls that fail their checks change nothing and keep states
+character, vehicle, ragdoll or constraint is created or removed, when a body's or a ragdoll's
+motion type is changed (`BodyMut::set_motion_type`, `RagdollMut::set_motion_type`), when a body's
+shape is set (`BodyMut::set_shape`, also with the body's current shape), and when a rebase moves
+anything. Calls that fail their checks change nothing and keep states
 restorable. In both refusals the world is unchanged.
 
 Jolt saves neither which objects exist nor its body id allocator, so rolling back across a creation
@@ -83,7 +85,11 @@ documentation asks for body friction. These setters change such configuration:
 - soft body: `set_vertex_inverse_mass` (a restore keeps the inverse masses set last).
 
 Body properties set at creation (shape, mass, friction, layers) are not saved either; the body
-setters change only poses and velocities, which are saved. A target changed after a save, such as a
+setters change only poses and velocities, which are saved, and the shape and motion type changes
+count as structural changes. The sensor flag, user data, allowed degrees of freedom and movement
+capability of `BodySettings` are fixed at creation, so no restore can find them changed.
+Impulses, kinematic moves, activation and deactivation change only velocities and sleep state,
+which are saved. A target changed after a save, such as a
 hinge's target angle, is part of the saved state and is undone.
 
 A setting the caller applies again before every step, such as a vehicle's gravity on a planet,
@@ -120,3 +126,7 @@ supported.
 inner body and a ragdoll, runs on, restores and replays every tick bit for bit, with 1 and 4
 workers, in one process and across two. Further tests cover a detour with different inputs before
 the restore, saved and unsaved configuration, structural changes, selected bodies and soft bodies.
+`tests/body_controls_state.rs` replays every momentary body control (impulses, kinematic moves,
+activation, deactivation, box activation) after a detour with 1 and 4 workers, and checks that the
+creation-only body configuration survives restores and that shape and motion type changes refuse
+earlier states.

@@ -78,6 +78,22 @@ pub const MAX_ACCELERATION: f32 = MAX_LINEAR_VELOCITY / PhysicsWorld::MIN_DELTA_
 /// [docs/limits.md#accelerations]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#accelerations
 pub const MAX_ANGULAR_ACCELERATION: f32 = MAX_ANGULAR_VELOCITY / PhysicsWorld::MIN_DELTA_TIME;
 
+/// Largest change of a body's linear velocity one impulse may cause, in m/s: twice
+/// [`MAX_LINEAR_VELOCITY`], enough to reverse a body moving at that speed.
+///
+/// See [docs/limits.md#impulses].
+///
+/// [docs/limits.md#impulses]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#impulses
+pub const MAX_VELOCITY_CHANGE: f32 = 2.0 * MAX_LINEAR_VELOCITY;
+
+/// Largest change of a body's angular velocity one angular or point impulse may cause, in
+/// rad/s: twice [`MAX_ANGULAR_VELOCITY`].
+///
+/// See [docs/limits.md#impulses].
+///
+/// [docs/limits.md#impulses]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#impulses
+pub const MAX_ANGULAR_VELOCITY_CHANGE: f32 = 2.0 * MAX_ANGULAR_VELOCITY;
+
 /// Largest absolute gravity factor of a body.
 pub const MAX_GRAVITY_FACTOR: f32 = 1000.0;
 
@@ -550,6 +566,32 @@ pub(crate) fn is_weight_impulse(mass: f32, gravity: Vec3, delta_time: f32) -> bo
     f64::from(mass) * f64_length(gravity) * f64::from(delta_time) <= f64::from(MAX_WEIGHT_IMPULSE)
 }
 
+/// What an impulse on a dynamic body must satisfy ([`is_velocity_change`]).
+pub(crate) const VELOCITY_CHANGE_RULE: &str =
+    "impulse would change the velocity by more than limits::MAX_VELOCITY_CHANGE";
+
+/// Whether an `impulse` (N·s, in `f64`) changes the velocity of a body with `inverse_mass` by at
+/// most [`MAX_VELOCITY_CHANGE`]; false for NaN.
+pub(crate) fn is_velocity_change(impulse: [f64; 3], inverse_mass: f32) -> bool {
+    norm(impulse) * f64::from(inverse_mass) <= f64::from(MAX_VELOCITY_CHANGE)
+}
+
+/// What an angular or point impulse on a dynamic body must satisfy
+/// ([`is_angular_velocity_change`]).
+pub(crate) const ANGULAR_VELOCITY_CHANGE_RULE: &str =
+    "impulse would change the angular velocity by more than limits::MAX_ANGULAR_VELOCITY_CHANGE";
+
+/// Whether an `angular_impulse` (N·m·s, in `f64`) changes the angular velocity of a body whose
+/// largest principal inverse inertia is `largest_inverse_inertia` by at most
+/// [`MAX_ANGULAR_VELOCITY_CHANGE`]; false for NaN.
+pub(crate) fn is_angular_velocity_change(
+    angular_impulse: [f64; 3],
+    largest_inverse_inertia: f32,
+) -> bool {
+    norm(angular_impulse) * f64::from(largest_inverse_inertia)
+        <= f64::from(MAX_ANGULAR_VELOCITY_CHANGE)
+}
+
 /// What a dynamic body's mass must satisfy ([`is_mass`]).
 pub(crate) const MASS_RULE: &str = "mass must be between limits::MIN_MASS and limits::MAX_MASS";
 
@@ -558,8 +600,8 @@ pub(crate) fn is_mass(mass: f32) -> bool {
     (MIN_MASS..=MAX_MASS).contains(&mass)
 }
 
-/// Whether `inverse_mass` is the inverse of a mass within `MIN_MASS..=MAX_MASS`, the range of
-/// a movable soft body vertex.
+/// Whether `inverse_mass` is the inverse of a mass within `MIN_MASS..=MAX_MASS`: the range of
+/// a movable soft body vertex, and of a rigid body that becomes dynamic.
 pub(crate) fn is_vertex_inverse_mass(inverse_mass: f32) -> bool {
     (1.0 / MAX_MASS..=MAX_VERTEX_INVERSE_MASS).contains(&inverse_mass)
 }

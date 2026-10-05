@@ -350,6 +350,15 @@ pub enum BodyError {
     SoftBody(BodyId),
     /// The operation needs a soft body and the body is a rigid body.
     NotSoftBody(BodyId),
+    /// The operation needs a body with all six degrees of freedom and the body was created with
+    /// fewer ([`BodySettings::allowed_dofs`](crate::BodySettings::allowed_dofs)).
+    RestrictedDofs(BodyId),
+    /// The operation needs a kinematic body and the body is static or dynamic.
+    NotKinematic(BodyId),
+    /// The body was created static without
+    /// [`BodySettings::allow_dynamic_or_kinematic`](crate::BodySettings::allow_dynamic_or_kinematic),
+    /// so Jolt gave it no motion properties and it cannot become kinematic or dynamic.
+    CannotMove(BodyId),
 }
 
 impl fmt::Display for BodyError {
@@ -383,6 +392,11 @@ impl fmt::Display for BodyError {
                 )
             }
             Self::NotSoftBody(id) => write!(f, "body {id:?} is not a soft body"),
+            Self::RestrictedDofs(id) => {
+                write!(f, "body {id:?} does not have all six degrees of freedom")
+            }
+            Self::NotKinematic(id) => write!(f, "body {id:?} is not kinematic"),
+            Self::CannotMove(id) => write!(f, "body {id:?} was created static and cannot move"),
         }
     }
 }
@@ -595,8 +609,9 @@ pub enum StateError {
     /// world is such a peer.
     WrongWorld,
     /// The world's structure has changed since the state was saved: a body, character, vehicle,
-    /// ragdoll or constraint was created or removed, a ragdoll's motion type was set, or the
-    /// world was rebased (a rebase that changes nothing does not count). Jolt saves neither
+    /// ragdoll or constraint was created or removed, a body's or ragdoll's motion type was
+    /// changed, a body's shape was set, or the world was rebased (a rebase that changes nothing
+    /// does not count). Jolt saves neither
     /// which objects exist nor its body id allocator, so even a create followed by a remove
     /// leaves earlier states unrestorable.
     WorldChanged,

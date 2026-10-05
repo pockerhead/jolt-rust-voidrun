@@ -259,6 +259,7 @@ const _: () = {
     assert!(size_of::<JPH_SixDOFConstraintAxis>() == 4);
     assert!(size_of::<JPH_PathRotationConstraintType>() == 4);
     assert!(size_of::<JPH_SoftBodyValidateResult>() == 4);
+    assert!(size_of::<JPH_AllowedDOFs>() == 4);
 };
 
 #[cfg(feature = "double-precision")]

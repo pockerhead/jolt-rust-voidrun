@@ -20,6 +20,7 @@ mod tapered;
 
 use crate::{Quat, ShapeError, Vec3};
 pub use mesh::{DroppedTriangles, MeshBuildQuality, MeshSettings};
+pub(crate) use static_only::static_only_leaves_are_meshes_of;
 
 /// A collision shape that bodies are created from.
 ///

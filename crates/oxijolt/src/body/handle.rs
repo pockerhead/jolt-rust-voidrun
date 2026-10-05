@@ -6,8 +6,10 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
-use super::load::{length, point_torque, read_load, require, soft_body_force, sum, Load};
-use super::{with_locked_body, with_read_locked_body, Activation, BodyId, MotionType};
+use super::load::{
+    length, point_torque, read_load, require, soft_body_force, sum, Load, PointTorque,
+};
+use super::{with_locked_body, with_read_locked_body, Activation, AllowedDofs, BodyId, MotionType};
 use crate::limits::{
     self, is_angular_velocity, is_in_frame, is_linear_velocity, ANGULAR_VELOCITY_RULE,
     LINEAR_VELOCITY_RULE, POSITION_RULE,
@@ -38,7 +40,7 @@ impl BodyRef<'_> {
         self.id
     }
 
-    fn interface(&self) -> *mut JPH_BodyInterface {
+    pub(super) fn interface(&self) -> *mut JPH_BodyInterface {
         self.body_interface.as_ptr()
     }
 
@@ -120,6 +122,60 @@ impl BodyRef<'_> {
         (inverse_mass != 0.0).then(|| 1.0 / inverse_mass)
     }
 
+    /// The degrees of freedom the body may move in, as created
+    /// ([`BodySettings::allowed_dofs`](crate::BodySettings::allowed_dofs)). A body without
+    /// motion properties, a static body that cannot move, reports [`AllowedDofs::ALL`].
+    pub fn allowed_dofs(&self) -> AllowedDofs {
+        with_read_locked_body(self.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for reading for the duration of the closure. A body that
+            // can be kinematic or dynamic has motion properties, so the unchecked getter reads a
+            // live member, without the assertion of the checked getter on static bodies; the
+            // getters only read.
+            unsafe {
+                JPH_Body_CanBeKinematicOrDynamic(body.as_ptr()).then(|| {
+                    AllowedDofs::from_jph(JPH_MotionProperties_GetAllowedDOFs(
+                        JPH_Body_GetMotionPropertiesUnchecked(body.as_ptr()),
+                    ))
+                })
+            }
+        })
+        .flatten()
+        .unwrap_or(AllowedDofs::ALL)
+    }
+
+    /// Whether the body has motion properties, so that it can be kinematic or dynamic: it was
+    /// created kinematic or dynamic, or static with
+    /// [`BodySettings::allow_dynamic_or_kinematic`] (Jolt `Body::CanBeKinematicOrDynamic`).
+    ///
+    /// [`BodySettings::allow_dynamic_or_kinematic`]: crate::BodySettings::allow_dynamic_or_kinematic
+    pub fn can_be_kinematic_or_dynamic(&self) -> bool {
+        with_read_locked_body(self.body_lock_interface, self.id, |body| {
+            // SAFETY: `body` is locked for reading for the duration of the closure; the getter
+            // only reads it.
+            unsafe { JPH_Body_CanBeKinematicOrDynamic(body.as_ptr()) }
+        })
+        .unwrap_or(false)
+    }
+
+    /// Whether the body is a sensor, as created ([`BodySettings::sensor`]).
+    ///
+    /// [`BodySettings::sensor`]: crate::BodySettings::sensor
+    pub fn is_sensor(&self) -> bool {
+        // SAFETY: as in `position`.
+        unsafe { JPH_BodyInterface_IsSensor(self.interface(), self.id.raw) }
+    }
+
+    /// The caller's value given at creation ([`BodySettings::user_data`]). A character's inner
+    /// body carries the character's
+    /// [`CharacterSettings::user_data`](crate::CharacterSettings::user_data), and a ragdoll part
+    /// carries 0.
+    ///
+    /// [`BodySettings::user_data`]: crate::BodySettings::user_data
+    pub fn user_data(&self) -> u64 {
+        // SAFETY: as in `position`.
+        unsafe { JPH_BodyInterface_GetUserData(self.interface(), self.id.raw) }
+    }
+
     /// Whether the body is a soft body ([`PhysicsWorld::create_soft_body`]).
     pub fn is_soft_body(&self) -> bool {
         with_read_locked_body(self.body_lock_interface, self.id, |body| {
@@ -136,9 +192,24 @@ impl BodyRef<'_> {
 /// Dereferences to [`BodyRef`] for reads. Setters validate their input before it reaches
 /// Jolt. Units: metres, m/s, rad/s, newtons and newton-metres. Static bodies ignore velocity
 /// and force writes. Not `Send` or `Sync`.
+///
+/// The view borrows the whole world, so it ends before the world steps:
+///
+/// ```compile_fail,E0499
+/// use oxijolt::*;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut world = PhysicsWorld::new(WorldSettings::default())?;
+/// let ball = world.create_body(&Shape::new_sphere(0.5)?, &BodySettings::new_dynamic())?;
+/// let mut body = world.body_mut(ball)?;
+/// let _ = world.step(1.0 / 60.0)?;
+/// body.add_force(Vec3::new(0.0, 10.0, 0.0))?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BodyMut<'w> {
     pub(super) inner: BodyRef<'w>,
-    pub(super) _world: PhantomData<&'w mut PhysicsWorld>,
+    pub(super) world: &'w mut PhysicsWorld,
 }
 
 impl<'w> Deref for BodyMut<'w> {
@@ -282,14 +353,17 @@ impl BodyMut<'_> {
     /// The force must be finite and the point within [`limits::MAX_POSITION`]. On a dynamic body
     /// the force accumulated this step including this one may give the body at most
     /// [`limits::MAX_ACCELERATION`], the torque at most [`limits::MAX_ANGULAR_ACCELERATION`]
-    /// (`|τ|` times the largest principal inverse inertia), and Jolt's `f32` torque
-    /// `(point - centre_of_mass) × force` must not overflow; otherwise
-    /// [`BodyError::InvalidValue`] is returned and nothing changes.
+    /// (`|τ|` times the largest principal inverse inertia, counting the rounding of Jolt's `f32`
+    /// torque `(point - centre_of_mass) × force`), and that torque must not overflow; otherwise
+    /// [`BodyError::InvalidValue`] is returned and nothing changes. [docs/limits.md#impulses]
+    /// has the rounding bound.
     ///
     /// Fails with [`BodyError::SoftBody`] for a soft body: Jolt would add the torque as well,
     /// and a soft body never clears its torque (it resets only the force after a step), so the
     /// torque would stay in the body and in its saved state. Use [`add_force`](Self::add_force)
     /// or set vertex velocities instead.
+    ///
+    /// [docs/limits.md#impulses]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#impulses
     pub fn add_force_at_point(&mut self, force: Vec3, point: RVec3) -> Result<(), BodyError> {
         self.reject_soft_body()?;
         require(force.is_finite(), "force must be finite")?;
@@ -327,7 +401,7 @@ impl BodyMut<'_> {
     }
 
     /// Fails with [`BodyError::SoftBody`] when the body is a soft body.
-    fn reject_soft_body(&self) -> Result<(), BodyError> {
+    pub(super) fn reject_soft_body(&self) -> Result<(), BodyError> {
         if self.is_soft_body() {
             Err(BodyError::SoftBody(self.id))
         } else {
@@ -359,10 +433,10 @@ impl BodyMut<'_> {
         };
         let point_torque = match point {
             Some(point) => point_torque(force, point, state.center_of_mass)?,
-            None => [0.0; 3],
+            None => PointTorque::default(),
         };
         let new_force = sum(state.force, force, [0.0; 3]);
-        let new_torque = sum(state.torque, torque, point_torque);
+        let new_torque = point_torque.largest_with(sum(state.torque, torque, [0.0; 3]));
         let largest_inverse_inertia = state
             .inverse_inertia
             .x

@@ -79,8 +79,9 @@ The full list of what works today, with links to the guides, is in
 - [x] `glam` and `mint` conversions
 - [x] One-call pose readout, a crate-wide error type, a prelude
 - [x] Convex hull, triangle mesh, scaled and tapered shapes
-- [ ] Body controls: impulses, kinematic moves, activation, sensors, user data, changing shape
+- [x] Body controls: impulses, kinematic moves, activation, sensors, user data, changing shape
       and motion type
+- [x] Locked axes (allowed degrees of freedom) at body creation
 - [x] First release on crates.io and docs.rs
 - [ ] Tracked vehicles and motorcycles
 - [ ] Playground: an example with a window that shows every feature, and GIFs for this README
