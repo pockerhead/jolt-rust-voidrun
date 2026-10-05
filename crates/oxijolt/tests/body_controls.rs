@@ -197,6 +197,46 @@ fn point_impulses_are_bounded_by_the_angular_impulse_of_their_lever() {
     assert_finite(&world, ball);
 }
 
+/// A dynamic needle of `MAX_MASS`, 2 km long and `2 * thin` thick along x, asleep with its
+/// centre at (0, -3500, -3500), and the point (0, 3500, 3500): the lever from the centre is
+/// (0, 7000, 7000), so an impulse or force along (0, 1, 1) is exactly parallel to it.
+fn add_needle(world: &mut PhysicsWorld, thin: f32) -> (BodyId, RVec3) {
+    let shape = Shape::new_box_with_convex_radius(Vec3::new(1000.0, thin, thin), 0.0).unwrap();
+    let centre = RVec3::new(0.0, -3500.0, -3500.0);
+    let id = add_sleeping(world, &shape, limits::MAX_MASS, centre);
+    (id, RVec3::new(0.0, 3500.0, 3500.0))
+}
+
+#[test]
+fn point_impulses_along_a_long_lever_count_jolt_rounding() {
+    // The exact angular impulse of an impulse parallel to its lever is 0, but Jolt's `f32`
+    // cross product, with one product fused into the subtraction, keeps that product's rounding
+    // error: about 1e5 N·m·s for 7e8 N·s at 7000 m, on a needle whose inverse inertia about x is
+    // up to about 1e14.
+    let along = |size: f32| Vec3::new(0.0, size, size);
+    for thin in [1.0e-10, 1.0e-8, 1.0e-6] {
+        let mut world = world(Vec3::ZERO, 1);
+        let (needle, point) = add_needle(&mut world, thin);
+        let mut body = world.body_mut(needle).unwrap();
+        assert!(invalid(body.add_impulse_at_point(along(7.0e8), point)));
+        assert!(body.is_sleeping());
+        let largest = largest_accepted(7.0e8, |size| {
+            body.set_angular_velocity(Vec3::ZERO).unwrap();
+            body.add_impulse_at_point(along(size), point).is_ok()
+        });
+        body.set_angular_velocity(Vec3::ZERO).unwrap();
+        body.add_impulse_at_point(along(largest), point).unwrap();
+        // Jolt's change stays below the clamp, within the bound.
+        let spin = length(body.angular_velocity());
+        assert!(
+            spin < limits::MAX_ANGULAR_VELOCITY,
+            "{thin}: {largest} {spin}"
+        );
+        step(&mut world, 3);
+        assert_finite(&world, needle);
+    }
+}
+
 #[test]
 fn impulses_respect_locked_axes() {
     let mut world = world(Vec3::ZERO, 1);

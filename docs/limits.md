@@ -283,7 +283,8 @@ With `mass <= MAX_MASS` an accepted accumulated force is at most `MAX_ACCELERATI
 about 5e14 N, so Jolt's `f32` sums (`Body.h:183,191`) and `mInvMass * F`
 (`MotionProperties.inl:134`) cannot overflow. For a force at a point the lever must be finite in
 `f32` and every product `lever_i · force_j` at most 1e37, so Jolt's cross product
-(`Body.inl:127-131`) stays finite even when its two products cancel.
+(`Body.inl:127-131`) stays finite even when its two products cancel. The torque rule counts the
+rounding of that cross product, as for [impulses](#impulses).
 
 ## Impulses
 
@@ -301,6 +302,31 @@ inverse inertia up to `MAX_ANGULAR_VELOCITY_CHANGE`, twice `MAX_ANGULAR_VELOCITY
 masked `|I⁻¹(R) · L|` for any rotation. `add_impulse_at_point` applies both rules, with the angular
 impulse `(p - com) × J` that Jolt computes in `f32`; the lever and the products of that cross
 product follow the rule of [force and torque accumulation](#force-and-torque-accumulation).
+
+The angular rule takes the largest angular impulse Jolt's `f32` cross product can produce, not the
+exact one. Component `i` is `a · b - c · d` (`a`, `c` lever components, `b`, `d` impulse
+components). Jolt's default build lets the compiler fuse one product into the subtraction
+(`/fp:fast` with MSVC, `-ffp-contract=fast` with GCC and Clang, `Build/CMakeLists.txt:209, 263-268`);
+the cross-platform deterministic build rounds both products and the difference. With the `f32` unit
+roundoff `u = 2⁻²⁴`, each rounding changes a value `x` by at most `u · |x|`, or by at most
+`f32::MIN_POSITIVE` when the result is that small (subnormal or flushed to zero). For the exact
+value `L = ab - cd` and `S = |ab| + |cd|` both orders give
+
+    |L_jolt - L| <= u · |L| + u · (1 + u) · S + 3 · MIN_POSITIVE,
+
+so the check adds `u · (|L| + 2S) + 4 · MIN_POSITIVE` to each component's magnitude (the spare
+`u · S` also covers the `f64` arithmetic of the check). For a lever exactly parallel to the impulse
+`L` is 0, but the fused form keeps the rounding of one product. On a needle of `MAX_MASS` 2 km
+long and 0.2 nm thick, the impulse (0, 7e8, 7e8) N·s at the lever (0, 7000, 7000) m has an exact
+angular impulse of 0, while Jolt's is 157696 N·m·s (the rounding of `7000 · 7e8`); times the needle's inverse
+inertia of about 1.5e14 it overflowed the squared angular speed (`MotionProperties.inl:38`), and
+needles 20 nm and 2 µm thick spun up to the clamp. With the bound, the largest accepted impulse
+along the lever changed the angular velocity by at most 15.3 rad/s on needles from 0.2 nm to 0.2 m
+thick and from `MIN_MASS` to `MAX_MASS`, below a quarter of `MAX_ANGULAR_VELOCITY_CHANGE`, as one
+product's rounding is at most `u · S / 2`. The margin is at most `3u · S`, about 2e-7 of the
+products, so it changes the outcome only where `|lever| · |J|` times the largest inverse inertia
+is above about 1e8: a lever many orders longer than the body's radius of gyration about the axis
+the impulse turns it.
 
 Jolt's angular path multiplies `Rᵀ · L` before the inverse inertia, so `|L|` itself must stay finite
 in `f32`. The largest accepted angular impulse belongs to the body with the smallest largest inverse

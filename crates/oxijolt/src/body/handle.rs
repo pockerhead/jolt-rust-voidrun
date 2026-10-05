@@ -6,7 +6,9 @@ use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
-use super::load::{length, point_torque, read_load, require, soft_body_force, sum, Load};
+use super::load::{
+    length, point_torque, read_load, require, soft_body_force, sum, Load, PointTorque,
+};
 use super::{with_locked_body, with_read_locked_body, Activation, AllowedDofs, BodyId, MotionType};
 use crate::limits::{
     self, is_angular_velocity, is_in_frame, is_linear_velocity, ANGULAR_VELOCITY_RULE,
@@ -351,14 +353,17 @@ impl BodyMut<'_> {
     /// The force must be finite and the point within [`limits::MAX_POSITION`]. On a dynamic body
     /// the force accumulated this step including this one may give the body at most
     /// [`limits::MAX_ACCELERATION`], the torque at most [`limits::MAX_ANGULAR_ACCELERATION`]
-    /// (`|τ|` times the largest principal inverse inertia), and Jolt's `f32` torque
-    /// `(point - centre_of_mass) × force` must not overflow; otherwise
-    /// [`BodyError::InvalidValue`] is returned and nothing changes.
+    /// (`|τ|` times the largest principal inverse inertia, counting the rounding of Jolt's `f32`
+    /// torque `(point - centre_of_mass) × force`), and that torque must not overflow; otherwise
+    /// [`BodyError::InvalidValue`] is returned and nothing changes. [docs/limits.md#impulses]
+    /// has the rounding bound.
     ///
     /// Fails with [`BodyError::SoftBody`] for a soft body: Jolt would add the torque as well,
     /// and a soft body never clears its torque (it resets only the force after a step), so the
     /// torque would stay in the body and in its saved state. Use [`add_force`](Self::add_force)
     /// or set vertex velocities instead.
+    ///
+    /// [docs/limits.md#impulses]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#impulses
     pub fn add_force_at_point(&mut self, force: Vec3, point: RVec3) -> Result<(), BodyError> {
         self.reject_soft_body()?;
         require(force.is_finite(), "force must be finite")?;
@@ -428,10 +433,10 @@ impl BodyMut<'_> {
         };
         let point_torque = match point {
             Some(point) => point_torque(force, point, state.center_of_mass)?,
-            None => [0.0; 3],
+            None => PointTorque::default(),
         };
         let new_force = sum(state.force, force, [0.0; 3]);
-        let new_torque = sum(state.torque, torque, point_torque);
+        let new_torque = point_torque.largest_with(sum(state.torque, torque, [0.0; 3]));
         let largest_inverse_inertia = state
             .inverse_inertia
             .x

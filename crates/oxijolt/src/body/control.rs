@@ -92,11 +92,14 @@ impl BodyMut<'_> {
     ///
     /// The impulse must be finite and the point within [`limits::MAX_POSITION`]. On a dynamic
     /// body both rules of [`add_impulse`](Self::add_impulse) and
-    /// [`add_angular_impulse`](Self::add_angular_impulse) apply, and Jolt's `f32` cross product
-    /// must not overflow; otherwise [`BodyError::InvalidValue`] is returned and nothing changes.
-    /// Static and kinematic bodies ignore it; fails with [`BodyError::SoftBody`] for a soft body.
+    /// [`add_angular_impulse`](Self::add_angular_impulse) apply, the angular rule to the angular
+    /// impulse Jolt's `f32` cross product can produce, rounding included; otherwise
+    /// [`BodyError::InvalidValue`] is returned and nothing changes. Static and kinematic bodies
+    /// ignore it; fails with [`BodyError::SoftBody`] for a soft body. [docs/limits.md#impulses]
+    /// has the rounding bound.
     ///
     /// [`limits::MAX_POSITION`]: crate::limits::MAX_POSITION
+    /// [docs/limits.md#impulses]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#impulses
     pub fn add_impulse_at_point(&mut self, impulse: Vec3, point: RVec3) -> Result<(), BodyError> {
         self.reject_soft_body()?;
         require(impulse.is_finite(), "impulse must be finite")?;
@@ -111,7 +114,10 @@ impl BodyMut<'_> {
             )?;
             let angular_impulse = point_torque(impulse, point, state.center_of_mass)?;
             require(
-                is_angular_velocity_change(angular_impulse, largest(state.inverse_inertia)),
+                is_angular_velocity_change(
+                    angular_impulse.largest_with([0.0; 3]),
+                    largest(state.inverse_inertia),
+                ),
                 ANGULAR_VELOCITY_CHANGE_RULE,
             )?;
         }

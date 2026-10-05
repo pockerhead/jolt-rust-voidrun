@@ -43,6 +43,11 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   ragdoll parts and rotating rebases refuse bodies with fewer than six degrees of freedom; ragdoll
   parts refuse user data, which Jolt overwrites.
 - `BodyMut` now borrows its world (the signature of `body_mut` is unchanged).
+- Fixed: `BodyMut::add_force_at_point` checked the exact torque, while Jolt's `f32` cross product,
+  with a product fused into the subtraction, keeps a rounding error. A force parallel to a long lever
+  on a very thin body had an exact torque of 0 and was accepted, and the next step overflowed the
+  angular velocity (a Jolt assertion, or an angular velocity of exactly 0 in release). The torque
+  rule now counts that rounding (`docs/limits.md`, Impulses), as `add_impulse_at_point` does.
 
 ## 0.4.0 — 2026-10-04
 
