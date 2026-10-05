@@ -35,7 +35,9 @@
 //! # What a world holds
 //! - Rigid bodies of box, sphere, cylinder, capsule, tapered capsule and cylinder, convex hull,
 //!   triangle mesh, heightfield, compound and scaled [`Shape`]s, with [`PhysicsMaterial`]s that
-//!   carry the caller's user data.
+//!   carry the caller's user data. [`BodyMut`] adds impulses, kinematic moves, waking and
+//!   sleeping, and shape and motion type changes; [`BodySettings`] makes sensors and sets user
+//!   data and locked axes ([body controls guide]).
 //! - Scene queries on `&PhysicsWorld`: [`PhysicsWorld::cast_ray`], [`PhysicsWorld::cast_shape`]
 //!   and [`PhysicsWorld::collide_shape`], filtered by [`QueryFilter`].
 //! - Virtual characters: [`PhysicsWorld::create_character`].
@@ -123,6 +125,7 @@
 //! ```
 //!
 //! [guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/guide.md
+//! [body controls guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/bodies.md
 //! [constraints guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/constraints.md
 //! [soft body guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/soft-bodies.md
 //! [events guide]: https://github.com/pockerhead/oxijolt/blob/main/docs/events.md
@@ -252,6 +255,11 @@ pub struct SoftBodiesGuide;
 #[cfg(doctest)]
 #[doc = include_str!("../../../docs/events.md")]
 pub struct EventsGuide;
+
+/// The body controls guide, `docs/bodies.md`.
+#[cfg(doctest)]
+#[doc = include_str!("../../../docs/bodies.md")]
+pub struct BodiesGuide;
 
 /// The save and restore guide, `docs/state.md`.
 #[cfg(doctest)]

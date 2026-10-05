@@ -25,6 +25,23 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   `HullError::Coplanar` message suggests thickening the cloud or centring it on the shape origin.
 - joltc extension: `JPH_ShapeSettings_CreateShapeWithError`, `JPH_MeshShapeSettings_Create3`
   (materials), `JPH_MeshShapeSettings_GetTriangleCount` and `JPH_Shape_GetTriangles`.
+- Body controls ([guide](docs/bodies.md)): impulses (`BodyMut::add_impulse`, `add_angular_impulse`,
+  `add_impulse_at_point`), bounded by the new `limits::MAX_VELOCITY_CHANGE` and
+  `limits::MAX_ANGULAR_VELOCITY_CHANGE`; kinematic moves (`BodyMut::move_kinematic`); waking and
+  sleeping on demand (`BodyMut::activate`, `deactivate`) and `PhysicsWorld::activate_bodies_in_box`,
+  which picks bodies by their exact bounds in body-id order.
+- Configuration fixed at creation, with getters on `BodyRef`: sensor bodies
+  (`BodySettings::sensor`, contacts reported as sensor contacts), per-body user data
+  (`BodySettings::user_data`), locked axes (`BodySettings::allowed_dofs`, `AllowedDofs`) and the
+  movement capability of static bodies (`BodySettings::allow_dynamic_or_kinematic`).
+- Structural changes: `BodyMut::set_motion_type` and `BodyMut::set_shape`. Every successful call,
+  also `set_shape` with the body's current shape, makes earlier `WorldState`s unrestorable; both
+  refuse bodies that a character, vehicle, ragdoll or constraint holds. A shape change wakes the
+  bodies around the body's old and new bounds.
+- New `BodyError` variants: `RestrictedDofs`, `NotKinematic`, `CannotMove`. Constraints, vehicles,
+  ragdoll parts and rotating rebases refuse bodies with fewer than six degrees of freedom; ragdoll
+  parts refuse user data, which Jolt overwrites.
+- `BodyMut` now borrows its world (the signature of `body_mut` is unchanged).
 
 ## 0.4.0 — 2026-10-04
 
