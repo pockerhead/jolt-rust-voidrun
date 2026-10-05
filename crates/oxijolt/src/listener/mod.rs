@@ -10,6 +10,7 @@
 
 mod activation;
 mod contact;
+mod estimate;
 mod order;
 mod soft_body;
 mod validate;
@@ -27,12 +28,14 @@ use oxijolt_sys::*;
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
 use crate::{BodyId, PhysicsWorld};
+use estimate::SolverSettings;
 
 pub use activation::ActivationEvent;
 pub use contact::{
     ContactEvent, ContactManifold, ContactPoint, ContactSettings, ContactSettingsRejection,
     SubShapeIdPair,
 };
+pub use estimate::CollisionEstimate;
 pub use soft_body::{
     SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
     SoftBodyVertexContact,
@@ -122,6 +125,7 @@ pub trait ContactListener: Send + Sync + 'static {
 pub struct EventSettings {
     contacts: bool,
     persisted_contacts: bool,
+    collision_estimates: bool,
     body_activation: bool,
     soft_body_contacts: bool,
     soft_body_validations: bool,
@@ -129,11 +133,13 @@ pub struct EventSettings {
 
 impl EventSettings {
     /// Records [`ContactEvent::Added`] and [`ContactEvent::Removed`]. Turning it off also turns
-    /// off [`persisted_contacts`](Self::persisted_contacts).
+    /// off [`persisted_contacts`](Self::persisted_contacts) and
+    /// [`collision_estimates`](Self::collision_estimates).
     #[must_use]
     pub fn contacts(mut self, value: bool) -> Self {
         self.contacts = value;
         self.persisted_contacts &= value;
+        self.collision_estimates &= value;
         self
     }
 
@@ -143,6 +149,16 @@ impl EventSettings {
     #[must_use]
     pub fn persisted_contacts(mut self, value: bool) -> Self {
         self.persisted_contacts = value;
+        self.contacts |= value;
+        self
+    }
+
+    /// Gives every [`ContactEvent::Added`] Jolt's [`CollisionEstimate`] of the impact, computed
+    /// on Jolt's worker threads as the contact is found; sensor contacts get none. Turning it on
+    /// also turns on [`contacts`](Self::contacts). Off by default, and free when off.
+    #[must_use]
+    pub fn collision_estimates(mut self, value: bool) -> Self {
+        self.collision_estimates = value;
         self.contacts |= value;
         self
     }
@@ -177,6 +193,11 @@ impl EventSettings {
     /// Whether persisted contacts are recorded.
     pub fn reports_persisted_contacts(&self) -> bool {
         self.persisted_contacts
+    }
+
+    /// Whether added contacts carry collision estimates.
+    pub fn reports_collision_estimates(&self) -> bool {
+        self.collision_estimates
     }
 
     /// Whether body activation changes are recorded.
@@ -317,6 +338,21 @@ pub(crate) fn first_payload(
     }
 }
 
+/// The solver settings of `system` that collision estimates use.
+///
+/// # Safety
+/// `system` is a live physics system that no step is updating.
+unsafe fn solver_settings(system: *mut JPH_PhysicsSystem) -> SolverSettings {
+    // SAFETY: an all-zero `JPH_PhysicsSettings` is valid: integers, floats and `false`.
+    let mut settings: JPH_PhysicsSettings = unsafe { mem::zeroed() };
+    // SAFETY: the system is live (contract); joltc writes every field of the live local.
+    unsafe { JPH_PhysicsSystem_GetPhysicsSettings(system, &mut settings) };
+    SolverSettings {
+        min_velocity_for_restitution: settings.minVelocityForRestitution,
+        num_velocity_steps: settings.numVelocitySteps,
+    }
+}
+
 /// What the native listeners of one world configuration write to. Native code holds a raw
 /// pointer to it while the listeners are attached, so it is shared through an `Arc`, its
 /// configuration never changes, and its buffers are behind mutexes.
@@ -324,6 +360,9 @@ pub(crate) struct ListenerContext {
     settings: EventSettings,
     listener: Option<Arc<dyn ContactListener>>,
     world: WorldTag,
+    /// The world's solver settings when the listeners were configured, for collision estimates.
+    /// A setter of the world's physics settings must configure the listeners again.
+    solver: SolverSettings,
     /// The events recorded since they were last moved to the world's queue.
     batch: Mutex<WorldEvents>,
     panic: PanicSlot,
@@ -337,11 +376,13 @@ impl ListenerContext {
         settings: EventSettings,
         listener: Option<Arc<dyn ContactListener>>,
         world: WorldTag,
+        solver: SolverSettings,
     ) -> Self {
         Self {
             settings,
             listener,
             world,
+            solver,
             batch: Mutex::default(),
             panic: PanicSlot::default(),
             #[cfg(test)]
@@ -537,7 +578,9 @@ impl Listeners {
             return;
         }
         install_procs();
-        let context = Arc::new(ListenerContext::new(settings, listener, world));
+        // SAFETY: the system is live (contract).
+        let solver = unsafe { solver_settings(system) };
+        let context = Arc::new(ListenerContext::new(settings, listener, world, solver));
         let user_data: *mut c_void = Arc::as_ptr(&context).cast_mut().cast();
         // SAFETY: Jolt is initialised (the system exists). joltc stores `user_data` in each new
         // listener; the listeners are destroyed before `context` (field order and `configure`),

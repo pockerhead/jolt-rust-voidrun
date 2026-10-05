@@ -4,14 +4,9 @@ use std::ptr::{null_mut, NonNull};
 
 use oxijolt_sys::*;
 
-use crate::limits::is_soft_body_force;
+use crate::limits::{is_soft_body_force, F32_PRODUCT_HEADROOM};
 use crate::math::jolt_rotate;
 use crate::{BodyError, Quat, RVec3, Vec3};
-
-/// Bound on each product `lever_i * force_j` of a point force's torque, so that Jolt's `f32`
-/// cross product (`Body.inl:127-131`) has finite products and a finite difference even when the
-/// two products cancel.
-const F32_PRODUCT_HEADROOM: f64 = 1.0e37;
 
 /// Unit roundoff of `f32`, 2^-24: rounding a result to `f32` changes it by at most this
 /// fraction of it, or by at most `f32::MIN_POSITIVE` when it is that small.

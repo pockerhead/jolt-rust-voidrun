@@ -175,8 +175,8 @@ mod vehicle;
 mod world;
 
 pub use body::{
-    Activation, AllowedDofs, BodyId, BodyMut, BodyPose, BodyRef, BodySettings, MotionQuality,
-    MotionType,
+    Activation, AllowedDofs, BodyId, BodyMut, BodyPose, BodyRef, BodySettings, BuoyancySettings,
+    MotionQuality, MotionType,
 };
 pub use character::{
     BodyVelocity, CharacterContact, CharacterContactKey, CharacterContactListener,
@@ -207,14 +207,16 @@ pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use listener::{
-    ActivationEvent, ContactCandidate, ContactEvent, ContactListener, ContactManifold,
-    ContactPoint, ContactSettings, ContactSettingsRejection, EventSettings,
+    ActivationEvent, CollisionEstimate, ContactCandidate, ContactEvent, ContactListener,
+    ContactManifold, ContactPoint, ContactSettings, ContactSettingsRejection, EventSettings,
     SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
     SoftBodyVertexContact, SubShapeIdPair, ValidateResult, WorldEvents,
 };
 pub use material::PhysicsMaterial;
 pub use math::{Quat, RVec3, Real, Vec3};
-pub use query::{CollideShape, CollideShapeHit, RayCast, RayHit, ShapeCast, ShapeCastHit};
+pub use query::{
+    CollideShape, CollideShapeHit, PointHit, RayCast, RayHit, ShapeCast, ShapeCastHit,
+};
 pub use ragdoll::{
     JointReading, JointTransform, RagdollId, RagdollJoint, RagdollMut, RagdollPart, RagdollRef,
     RagdollSettings, SettleDetector, Skeleton, SkeletonJoint, SkeletonPose,

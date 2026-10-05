@@ -279,6 +279,23 @@ JPH_CAPI void JPH_Body_SetSoftBodyVertexVelocity(JPH_Body* body, uint32_t index,
    inertia (JPH::SoftBodyMotionProperties::CalculateMassAndInertia). */
 JPH_CAPI void JPH_Body_SetSoftBodyVertexInvMass(JPH_Body* body, uint32_t index, float invMass);
 
+/* Body (buoyancy) */
+/* Jolt's Body::GetSubmergedVolume for a fluid surface through surfacePosition with surfaceNormal pointing
+   out of the fluid: total volume, submerged volume and the submerged volume's centre relative to the
+   centre of mass, in world space. Writes 0 to every output first, then returns false for a soft body and
+   for a shape that must be static (meshes, heightfields, planes and anything holding one), for which
+   Jolt has no volume; otherwise true. */
+JPH_CAPI bool JPH_Body_GetSubmergedVolume(const JPH_Body* body, const JPH_RVec3* surfacePosition, const JPH_Vec3* surfaceNormal,
+	float* outTotalVolume, float* outSubmergedVolume, JPH_Vec3* outRelativeCenterOfBuoyancy);
+/* Jolt's Body::ApplyBuoyancyImpulse overload that takes the volumes (usually from
+   JPH_Body_GetSubmergedVolume). Returns false and changes nothing unless body is a dynamic rigid body
+   with a positive inverse mass and totalVolume > 0; otherwise returns whether submergedVolume > 0.
+   Neither wakes the body nor clamps its velocities. The caller passes finite values whose products stay
+   finite in float. */
+JPH_CAPI bool JPH_Body_ApplyBuoyancyImpulse2(JPH_Body* body, float totalVolume, float submergedVolume,
+	const JPH_Vec3* relativeCenterOfBuoyancy, float buoyancy, float linearDrag, float angularDrag,
+	const JPH_Vec3* fluidVelocity, const JPH_Vec3* gravity, float deltaTime);
+
 /* PhysicsMaterial */
 /* A JPH::PhysicsMaterialSimple that also carries userData. Returns one reference, released by
    JPH_PhysicsMaterial_Destroy. Not serializable. */

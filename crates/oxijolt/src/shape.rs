@@ -14,6 +14,7 @@ mod create;
 mod geometry;
 mod hull;
 mod mesh;
+mod plane;
 mod scaled;
 mod static_only;
 mod tapered;
@@ -737,8 +738,9 @@ impl Shape {
     /// `shape` puts them, and mass and inertia are computed about the new centre. A vehicle
     /// chassis gets a low centre of mass this way. The new shape holds its own reference to
     /// `shape`, which may be dropped afterwards. A decorated shape that only static bodies may
-    /// use (a heightfield or mesh) stays static-only. [`compound_sub_shape`](Self::compound_sub_shape)
-    /// does not look through the decorator: it returns `None` for an offset compound.
+    /// use (a heightfield, mesh or plane) stays static-only.
+    /// [`compound_sub_shape`](Self::compound_sub_shape) does not look through the decorator: it
+    /// returns `None` for an offset compound.
     pub fn new_offset_center_of_mass(shape: &Shape, offset: Vec3) -> Result<Self, ShapeError> {
         if !limits::is_local_offset(offset) {
             return Err(ShapeError::InvalidDimensions(
@@ -808,8 +810,8 @@ impl Shape {
         unsafe { JPH_Shape_GetSubType(self.as_ptr()) }
     }
 
-    /// Whether Jolt allows this shape only on static bodies (meshes, heightfields and compound
-    /// or decorated shapes that contain one).
+    /// Whether Jolt allows this shape only on static bodies (meshes, heightfields, planes and
+    /// compound or decorated shapes that contain one).
     pub(crate) fn must_be_static(&self) -> bool {
         // SAFETY: the shape is live for the call; the getter only reads it.
         unsafe { JPH_Shape_MustBeStatic(self.as_ptr()) }

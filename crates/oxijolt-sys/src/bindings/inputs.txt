@@ -1,6 +1,6 @@
 format=1
 joltc.h=96902d5f9aba0835
-joltc_ext.h=6a8970ce6f814166
+joltc_ext.h=29cc75e3d7e75acb
 build/bindgen_options.rs=9f82c199e39c4c07
 build/targets.rs=9881f9df63b14859
 bindgen=0.73.2

@@ -5,7 +5,8 @@ use std::fmt;
 
 use oxijolt_sys::*;
 
-use super::{Callback, ListenerContext};
+use super::estimate::estimate;
+use super::{Callback, CollisionEstimate, ListenerContext};
 use crate::world::WorldTag;
 use crate::{limits, BodyId, ContactSettingsError, RVec3, SubShapeId, Vec3};
 
@@ -402,6 +403,10 @@ pub enum ContactEvent {
         manifold: ContactManifold,
         /// The settings Jolt resolves the contact with.
         settings: ContactSettings,
+        /// Jolt's estimate of the impact, when
+        /// [`EventSettings::collision_estimates`](crate::EventSettings::collision_estimates) is
+        /// on and the contact is not a sensor contact.
+        estimate: Option<CollisionEstimate>,
     },
     /// A contact that was there in the previous step too.
     Persisted {
@@ -515,7 +520,7 @@ unsafe fn on_manifold(
     kind: Kind,
     body1: *const JPH_Body,
     body2: *const JPH_Body,
-    manifold: *const JPH_ContactManifold,
+    native_manifold: *const JPH_ContactManifold,
     settings: *mut JPH_ContactSettings,
 ) {
     let wanted = match kind {
@@ -528,7 +533,7 @@ unsafe fn on_manifold(
     // SAFETY: the arguments are live for the callback (contract); `settings` is joltc's local
     // copy, which joltc copies back to Jolt after the callback.
     let (manifold, facts, settings) = unsafe {
-        let manifold = read_manifold(context.world, body1, body2, manifold);
+        let manifold = read_manifold(context.world, body1, body2, native_manifold);
         let facts = ContactFacts {
             sensor_body: JPH_Body_IsSensor(body1) || JPH_Body_IsSensor(body2),
             lever_arm: lever_arm(body1, &manifold),
@@ -554,10 +559,28 @@ unsafe fn on_manifold(
     }
     if wanted {
         let event = match kind {
-            Kind::Added => ContactEvent::Added {
-                manifold,
-                settings: contact_settings,
-            },
+            Kind::Added => {
+                let estimate = if context.settings.collision_estimates {
+                    // SAFETY: the arguments are the live ones of joltc's `OnContactAdded`
+                    // (contract), and `contact_settings` are the ones Jolt resolves it with.
+                    unsafe {
+                        estimate(
+                            body1,
+                            body2,
+                            native_manifold,
+                            &contact_settings,
+                            context.solver,
+                        )
+                    }
+                } else {
+                    None
+                };
+                ContactEvent::Added {
+                    manifold,
+                    settings: contact_settings,
+                    estimate,
+                }
+            }
             Kind::Persisted => ContactEvent::Persisted {
                 manifold,
                 settings: contact_settings,

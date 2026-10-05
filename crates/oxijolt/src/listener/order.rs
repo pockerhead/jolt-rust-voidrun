@@ -7,9 +7,9 @@
 use std::cmp::Ordering;
 
 use super::{
-    ActivationEvent, ContactEvent, ContactManifold, ContactSettings, ContactSettingsRejection,
-    SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
-    SubShapeIdPair,
+    ActivationEvent, CollisionEstimate, ContactEvent, ContactManifold, ContactSettings,
+    ContactSettingsRejection, SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult,
+    SoftBodyValidation, SubShapeIdPair,
 };
 use crate::{RVec3, Real, Vec3};
 
@@ -70,13 +70,15 @@ fn compare_contacts(a: &ContactEvent, b: &ContactEvent) -> Ordering {
                 ContactEvent::Added {
                     manifold: m1,
                     settings: s1,
+                    estimate: e1,
                 },
                 ContactEvent::Added {
                     manifold: m2,
                     settings: s2,
+                    estimate: e2,
                 },
-            )
-            | (
+            ) => compare_payloads(m1, s1, m2, s2).then_with(|| compare_estimates(e1, e2)),
+            (
                 ContactEvent::Persisted {
                     manifold: m1,
                     settings: s1,
@@ -85,12 +87,52 @@ fn compare_contacts(a: &ContactEvent, b: &ContactEvent) -> Ordering {
                     manifold: m2,
                     settings: s2,
                 },
-            ) => settings_bits(s1)
-                .cmp(&settings_bits(s2))
-                .then_with(|| s1.rule_bits().cmp(&s2.rule_bits()))
-                .then_with(|| compare_manifolds(m1, m2)),
+            ) => compare_payloads(m1, s1, m2, s2),
             _ => Ordering::Equal,
         })
+}
+
+fn compare_payloads(
+    m1: &ContactManifold,
+    s1: &ContactSettings,
+    m2: &ContactManifold,
+    s2: &ContactSettings,
+) -> Ordering {
+    settings_bits(s1)
+        .cmp(&settings_bits(s2))
+        .then_with(|| s1.rule_bits().cmp(&s2.rule_bits()))
+        .then_with(|| compare_manifolds(m1, m2))
+}
+
+/// No estimate first, then the estimates' bits field by field.
+fn compare_estimates(a: &Option<CollisionEstimate>, b: &Option<CollisionEstimate>) -> Ordering {
+    fn impulse_bits(e: &CollisionEstimate) -> impl Iterator<Item = u32> + '_ {
+        e.contact_impulses.iter().map(|i| i.to_bits())
+    }
+    let bits = |e: &CollisionEstimate| {
+        let vectors = [
+            e.linear_velocity1,
+            e.angular_velocity1,
+            e.linear_velocity2,
+            e.angular_velocity2,
+            e.tangent1,
+            e.tangent2,
+        ]
+        .map(vec3_bits);
+        let scalars = [
+            e.friction_impulse1,
+            e.friction_impulse2,
+            e.angular_friction_impulse,
+        ]
+        .map(f32::to_bits);
+        (vectors, scalars)
+    };
+    match (a, b) {
+        (Some(a), Some(b)) => bits(a)
+            .cmp(&bits(b))
+            .then_with(|| impulse_bits(a).cmp(impulse_bits(b))),
+        _ => a.is_some().cmp(&b.is_some()),
+    }
 }
 
 fn vec3_bits(v: Vec3) -> [u32; 3] {
@@ -257,6 +299,7 @@ mod tests {
         let added = |body1, body2, depth| ContactEvent::Added {
             manifold: manifold(pair(world, body1, body2), depth),
             settings: settings(),
+            estimate: None,
         };
         let persisted = |body1, body2, depth| ContactEvent::Persisted {
             manifold: manifold(pair(world, body1, body2), depth),
@@ -314,6 +357,7 @@ mod tests {
         let event = |manifold: ContactManifold, settings: ContactSettings| ContactEvent::Added {
             manifold,
             settings,
+            estimate: None,
         };
         let reference = event(base.clone(), settings());
         let mut variants = Vec::new();
@@ -369,6 +413,50 @@ mod tests {
     }
 
     #[test]
+    fn estimates_separate_added_contacts() {
+        let world = tag();
+        let event = |estimate| ContactEvent::Added {
+            manifold: manifold(pair(world, 1, 2), 0.0),
+            settings: settings(),
+            estimate,
+        };
+        let base = CollisionEstimate {
+            linear_velocity1: Vec3::new(1.0, 2.0, 3.0),
+            angular_velocity1: Vec3::ZERO,
+            linear_velocity2: Vec3::ZERO,
+            angular_velocity2: Vec3::ZERO,
+            contact_impulses: vec![0.5, 0.25],
+            tangent1: Vec3::new(1.0, 0.0, 0.0),
+            tangent2: Vec3::new(0.0, 0.0, 1.0),
+            friction_impulse1: 0.0,
+            friction_impulse2: 0.0,
+            angular_friction_impulse: 0.0,
+        };
+        let mut variants = vec![event(Some(base.clone()))];
+        let changes: [fn(&mut CollisionEstimate); 5] = [
+            |e| e.contact_impulses.push(0.0),
+            |e| e.contact_impulses[1] = 0.125,
+            |e| e.friction_impulse1 = -0.0,
+            |e| e.angular_velocity2.z = -0.0,
+            |e| e.tangent2.x = -0.0,
+        ];
+        for change in changes {
+            let mut estimate = base.clone();
+            change(&mut estimate);
+            variants.push(event(Some(estimate)));
+        }
+        let none = event(None);
+        for variant in &variants {
+            assert_eq!(compare_contacts(&none, variant), Ordering::Less);
+        }
+        for (i, a) in variants.iter().enumerate() {
+            for b in &variants[i + 1..] {
+                assert_ne!(compare_contacts(a, b), Ordering::Equal, "{a:?} {b:?}");
+            }
+        }
+    }
+
+    #[test]
     fn nan_payloads_separate_contacts() {
         let world = tag();
         let quiet = f32::from_bits(0x7fc0_0000);
@@ -379,6 +467,7 @@ mod tests {
             ContactEvent::Added {
                 manifold: m,
                 settings: settings(),
+                estimate: None,
             }
         };
         let real_nan =

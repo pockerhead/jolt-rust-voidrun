@@ -19,6 +19,14 @@ not a Jolt assertion threshold.
 objects of 0.1 to 2000 m; the bound applies on each side of the centre of mass. It bounds a shape's
 inertia to at most `6 · mass · MAX_SHAPE_EXTENT²`.
 
+A plane (`Shape::new_plane`) is bounded through its local bounds like any other shape. Jolt puts
+them around the square of `2 · half_extent` metres centred on `-constant · normal` and the same
+square moved `half_extent` behind the plane (`PlaneShape.cpp:46-81`). For a normal along an axis
+they reach `max(|constant|, |constant + half_extent|)` along it, so with normal +Y a half extent of
+2000 m fits a plane at y = 1 (`constant = -1`) but not one at y = -1; a tilted normal spreads the
+square over two or three axes. The constructor checks `|constant|` and `half_extent` against
+`MAX_SHAPE_EXTENT` first and Jolt's computed bounds after.
+
 ## Convex hulls
 
 `Shape::new_convex_hull` replays the start of Jolt's hull builder (`ConvexHullBuilder::Initialize`,
@@ -334,6 +342,124 @@ in `f32`. The largest accepted angular impulse belongs to the body with the smal
 inertia: a cube of 2000 m half extent and `MAX_MASS` has a moment of about 2.7e12 kg·m², so `|L|` up
 to about 2.5e14 N·m·s, far below the `f32` range. A body without rotational degrees of freedom has a
 zero inverse inertia, and Jolt masks the whole angular impulse before it multiplies.
+
+## Buoyancy
+
+`BodyMut::apply_buoyancy_impulse` calls Jolt's volume overload of `Body::ApplyBuoyancyImpulse`
+(`Body/Body.cpp:196-283`) through two extension functions: one reads the total volume `V`, the
+submerged volume `Vs` and the centre of buoyancy `r` (relative to the centre of mass) that Jolt
+computes for the surface, the other applies the impulse with exactly those values, so the check sees
+what Jolt will use. Jolt computes, all in `f32`:
+
+- the fluid density `ρ = b / (V · invM)` (`b` the buoyancy factor);
+- the buoyant impulse `Jb = -ρ · Vs · gf · g · dt` (`gf` the body's gravity factor);
+- the relative velocity `vrel = vf - (v + ω × r)` and, when `‖vrel‖² > 1e-12`, the area
+  `A = abs(R⁻¹ vrel) · q / ‖vrel‖` with `q = (sy·sz, sz·sx, sx·sy)` from the size `s` of the shape's
+  local bounding box; Cauchy-Schwarz gives `A <= ‖q‖`;
+- the drag `Jd = (0.5 · ρ · Cd · A · dt) · vrel · ‖vrel‖`, scaled down so that `‖Jd · invM‖ <= ‖v‖`;
+- the angular drag `K · ω` with `K = -Cda · Vs / V · dt · l² / invM`, `l` the mean bounding box
+  side, times the world inverse inertia and scaled down to at most `‖ω‖`;
+- the angular change `I⁻¹ (r × (Jb + Jd))`.
+
+It then adds both changes with `AddLinearVelocityStep` and `AddAngularVelocityStep`, which neither
+clamp nor mask the angular velocity (`MotionProperties.h:228-247`); Jolt clamps only in the next
+step's integration (`PhysicsSystem.cpp:1622-1627`), after the solver has used the velocities.
+
+### Product chains
+
+MSVC builds Jolt with `/fp:fast` (`Build/CMakeLists.txt:209`), which may reassociate a
+scalar product, and a factor of 0 hides nothing in `f32`: `inf · 0` is NaN. A bound on the exact
+product is therefore not enough (gravity factor 0 with `ρ = 8.75e36`, a 20 m box of `MAX_MASS`,
+makes Jolt's `-ρ · Vs · 0` NaN while the exact `Jb` is 0). For each chain of factors `f₁ … fₙ` the
+rule bounds `P = Π max(1, |fᵢ|)`, divisions entering as reciprocals. `P` bounds every sub-product in
+every order and association, also when some factor is 0. A chain rule accepts when `P · (1 + 64u)`
+is at most `H = 1e37`, so that sums of up to three bounded terms and Jolt's 3 × 3 products with
+entries at most the largest principal inverse inertia `λ` stay below `f32::MAX`. The chains:
+
+- density: `b, 1/V, 1/invM`;
+- buoyant impulse: the density chain with `Vs, gf, dt` and the largest component of `g`, alone and
+  times `invM`;
+- relative velocity: `‖ω‖, ‖r‖`;
+- area: `‖vrel‖, ‖q‖`;
+- drag: the density chain with `0.5, Cd, ‖q‖, dt, ‖vrel‖, ‖vrel‖, invM`;
+- angular drag: `Cda, Vs, 1/V, dt, l, l, 1/invM, ‖ω‖, λ`;
+- lever: `λ, ‖r‖` and the impulse bound `Jb + ‖v‖ / invM` (after Jolt's clamp the drag impulse is at
+  most `‖v‖ / invM`).
+
+### Squared lengths
+
+Where Jolt squares a length (to compare it or to clamp a velocity), the rule bounds that length by
+its value, not by its chain: an upper bound from the triangle and Cauchy-Schwarz inequalities,
+computed in `f64` from Jolt's own `f32` inputs, times the same `(1 + 64u)`, at most `H₂ = 1e18`. The
+square then stays at most 1e36 and three of them sum below `f32::MAX`. Because every sub-product of
+the chain behind such a length is within `H`, Jolt's `f32` value differs from the exact one only by a
+relative rounding of a few dozen `u` and by subnormal intermediates, at most about `n · 2⁻¹⁵⁰ · H`
+(1e-7) in absolute value. The lengths:
+
+- relative velocity: `‖vf‖ + ‖v‖ + ‖ω‖ · ‖r‖`;
+- drag change: `‖Jd · invM‖ <= 0.5 · b / V · Cd · ‖q‖ · dt · ‖vrel‖²`;
+- angular drag change: `‖I⁻¹ K ω‖ <= λ · |K| · ‖ω‖`;
+- lever: `λ · ‖r‖ · (‖Jb‖ + ‖v‖ / invM)`, with `‖Jb‖ = b · Vs / (V · invM) · abs(gf) · ‖g‖ · dt`;
+- new velocity: `2‖ω‖ + lever` and `2‖v‖ + ‖Jb‖ · invM`.
+
+Comparing the whole chain with `H₂` instead would lose the ratios `Vs / V <= 1` and
+`invM · (1/invM) = 1` and refuse large calm bodies whose squared lengths are tiny: a box of half
+extent 152 m at `MAX_MASS` (376 m at 1e4 kg, 591 m at 1e3 kg) at rest, half under water, whose
+angular drag change is 0, and at most 0.03 rad/s at `MAX_ANGULAR_VELOCITY`. Every box within
+`MAX_SHAPE_EXTENT` and `MIN_MASS..=MAX_MASS`, at rest or at both velocity bounds, in default water,
+is accepted.
+
+The density chain implies `V · invM >= 1e-37`, a normal `f32`, so `ρ` never divides by zero. The
+unit tests check each rule at its boundary, the two counterexamples above, NaN in every input, the
+boxes above, and replay Jolt's arithmetic in `f32` in source order, reversed and with fused
+multiply-adds: for 200 000 seeded inputs, for 4000 accepted inputs with `λ` raised to the largest
+value the rules accept, spread over three seeded principal moments under a seeded rotation (Jolt's
+world matrix `R · diag(d) · Rᵀ` and its products formed in `f32`), and for 4000 accepted inputs with
+the linear or the angular drag coefficient raised to the largest value the rules accept. Every
+accepted input stays finite, and the squared lengths reach 1e35.
+
+The rules overlap: the density chain is part of the buoyant and drag chains, and the new-velocity
+rules contain the lever and the buoyant velocity change. Switching off one rule at a time, the
+replays overflowed without the drag chain, the drag change, the angular drag chain, the angular drag
+change or the angular new velocity; raising `H₂` to 1e24 or dropping `λ` from the angular drag change
+made them overflow too. The density, relative velocity, area, lever and policy rules are pinned by
+their boundary tests (the density chain also by the counterexamples). No test fails with only the
+buoyant impulse chains, the relative velocity chain, the lever chain or the linear new velocity
+switched off, as later rules cover them; they are kept so that the error names the first product
+that would overflow.
+
+### Policy and clamp
+
+Only the buoyant velocity change is bounded by policy, like an impulse's:
+`b · Vs / V · abs(gf) · ‖g‖ · dt · (1 + 64u) <= MAX_VELOCITY_CHANGE`, computed in `f64` from Jolt's own
+`f32` values. A body fully under water may therefore get up to 1000 m/s from one call, and a body
+half under water the same factor's half.
+
+Right after Jolt's call, under the same body lock, both velocities are written back through
+`SetLinearVelocityClamped` and `SetAngularVelocityClamped`, which mask the locked axes and clamp to
+`MAX_LINEAR_VELOCITY` and `MAX_ANGULAR_VELOCITY` as an impulse does. The solver never sees a
+velocity beyond those bounds. The angular change of the lever term has no refusal: it grows with
+the lever over the radius of gyration, so small bodies entering water get large spins from ordinary
+inputs, and a rule like `MAX_ANGULAR_VELOCITY_CHANGE` would refuse them. The test fixture is a
+10 cm rod of 10 g falling at 20 m/s with one end, 4 cm from its centre of mass, in the water. Its
+drag impulse, about 2.3 N·s, is clamped by Jolt to the rod's momentum `‖Jd‖ = 0.01 · 20 = 0.2 N·s`;
+with the rod's inverse inertia about a transverse axis, about `1.19e5 /(kg·m²)`, that drag turns it
+by at most `1.19e5 · 0.04 · 0.2 ≈ 950 rad/s`. This is an analytic upper estimate, not a
+measurement; what the test measures is that the rod leaves the call at `MAX_ANGULAR_VELOCITY`
+(`velocities_are_clamped_right_after_the_call`).
+
+### Volumes and the centre of buoyancy
+
+Jolt takes the total and submerged volume of a box, capsule, cylinder or tapered shape from its
+bounding box (`ConvexShape.cpp:383-445`); spheres and convex hulls use their own, compounds sum their
+children. A fully submerged shape gets `Vs = V`. A convex shape fully under water puts its centre
+of buoyancy at the centre of mass Jolt passes it, so a convex body by itself gets `r = 0` exactly.
+An offset centre of mass decorator passes its inner shape a frame moved back by the offset, and a
+compound weights its children's centres by their volume: such a body gets a lever and can turn
+even fully under water (`a_fully_submerged_offset_body_turns`). Near a grazing waterline Jolt
+divides by a small positive volume difference (`PolyhedronSubmergedVolumeCalculator.h`), and the
+rounding of `r` can reach the size of the shape; `r` is therefore read from Jolt and bounded, never
+assumed to lie inside the shape.
 
 ## Soft body forces
 

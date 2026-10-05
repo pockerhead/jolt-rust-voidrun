@@ -709,7 +709,9 @@ fn recorded_settings(
 ) -> Option<ContactSettings> {
     events.contacts.into_iter().find_map(|event| {
         let (manifold, settings) = match event {
-            ContactEvent::Added { manifold, settings } if !persisted => (manifold, settings),
+            ContactEvent::Added {
+                manifold, settings, ..
+            } if !persisted => (manifold, settings),
             ContactEvent::Persisted { manifold, settings } if persisted => (manifold, settings),
             _ => return None,
         };
@@ -804,4 +806,33 @@ fn settings_moved_to_a_contact_they_do_not_fit_are_rejected() {
             assert_eq!(recorded.relative_angular_surface_velocity(), Vec3::ZERO);
         }
     }
+}
+
+#[test]
+fn a_panic_while_copying_an_estimate_frees_joltcs_impulses() {
+    use super::estimate::tests::{CREATED, FREED, PANIC_WHILE_COPYING};
+    // The only test in this binary that turns estimates on, so the counters are its own.
+    let (mut world, landing) = scene();
+    world.set_event_settings(every_event().collision_estimates(true));
+    PANIC_WHILE_COPYING.store(true, Ordering::SeqCst);
+    let payload = step_until_panic(&mut world, &landing);
+    PANIC_WHILE_COPYING.store(false, Ordering::SeqCst);
+    assert_eq!(message(&*payload), "injected estimate copy panic");
+    let created = CREATED.load(Ordering::SeqCst);
+    assert!(created > 0);
+    assert_eq!(FREED.load(Ordering::SeqCst), created);
+    // Without the injection the cube's landing is estimated.
+    let (mut world, _) = scene();
+    world.set_event_settings(EventSettings::default().collision_estimates(true));
+    let mut estimated = false;
+    for _ in 0..60 {
+        assert!(world.step(DT).unwrap().is_complete());
+        for event in world.take_events().contacts {
+            if let ContactEvent::Added { estimate, .. } = event {
+                estimated |= estimate.is_some();
+            }
+        }
+    }
+    assert!(estimated);
+    assert_eq!(FREED.load(Ordering::SeqCst), CREATED.load(Ordering::SeqCst));
 }

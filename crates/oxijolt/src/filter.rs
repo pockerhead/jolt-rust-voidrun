@@ -422,7 +422,7 @@ unsafe extern "C" fn body_should_collide(user_data: *mut c_void, body: JPH_BodyI
     })
 }
 
-/// Shape filter callback of ray casts: applies [`QueryFilter::child_groups`].
+/// Shape filter callback of ray casts and point queries: applies [`QueryFilter::child_groups`].
 ///
 /// # Safety
 /// Called only by joltc for a filter created by [`with_query_filters`], with that query's live
@@ -549,9 +549,11 @@ pub(crate) mod tests {
         Ray,
         ShapeCast,
         Collide,
+        Point,
     }
 
-    /// The body `query` finds first around the origin, from above or overlapping y 0.5.
+    /// The body `query` finds first around the origin, from above, overlapping y 0.5 or
+    /// containing a point at y 0.2.
     fn found_body(
         world: &PhysicsWorld,
         filter: &QueryFilter<'_>,
@@ -580,6 +582,11 @@ pub(crate) mod tests {
                     .first()
                     .map(|hit| hit.body)
             }
+            Query::Point => world
+                .collide_point(RVec3::new(0.0, 0.2, 0.0), filter)
+                .unwrap()
+                .first()
+                .map(|hit| hit.body),
         }
     }
 
@@ -628,6 +635,9 @@ pub(crate) mod tests {
             (Query::Collide, Callback::ObjectLayer),
             (Query::Collide, Callback::Body),
             (Query::Collide, Callback::Shape2),
+            (Query::Point, Callback::ObjectLayer),
+            (Query::Point, Callback::Body),
+            (Query::Point, Callback::Shape),
         ];
         for (query, callback) in cases {
             INJECTED_PANIC.set(Some(callback));
@@ -650,7 +660,7 @@ pub(crate) mod tests {
 
         // No body lock is left held: removing the body takes its write lock.
         world.remove_body(target).unwrap();
-        for query in [Query::Ray, Query::ShapeCast, Query::Collide] {
+        for query in [Query::Ray, Query::ShapeCast, Query::Collide, Query::Point] {
             assert_eq!(found_body(&world, &filter, query, &ball), None, "{query:?}");
         }
     }

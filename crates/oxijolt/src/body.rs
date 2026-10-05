@@ -14,6 +14,7 @@ use crate::world::WorldTag;
 use crate::{BodyError, CollisionGroup, ObjectLayer, Quat, RVec3, Shape, Vec3};
 
 mod access;
+mod buoyancy;
 mod control;
 mod dofs;
 mod handle;
@@ -24,6 +25,7 @@ mod poses;
 mod structure;
 
 pub(crate) use access::corners;
+pub use buoyancy::BuoyancySettings;
 pub use dofs::AllowedDofs;
 pub use handle::{BodyMut, BodyRef};
 pub(crate) use kinematic::kinematic_velocities;
