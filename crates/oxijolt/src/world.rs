@@ -36,7 +36,7 @@ use crate::listener::{first_payload, Listeners};
 use crate::owned::{JoltObject, Owned};
 use crate::ragdoll::RagdollEntry;
 use crate::vehicle::VehicleEntry;
-use crate::{CollisionLayers, JobSystem, StepError, Vec3, WorldError};
+use crate::{CharacterContactListener, CollisionLayers, JobSystem, StepError, Vec3, WorldError};
 
 mod rebase;
 
@@ -417,6 +417,8 @@ pub struct PhysicsWorld {
     /// simulation pass, which clears it at its end (`PhysicsSystem.cpp:2456-2457`), and inside
     /// `set_shape`, which advances the structure epoch.
     pub(crate) pending_cache_invalidations: BTreeSet<u32>,
+    /// The listener the character updates and refreshes attach for their duration.
+    pub(crate) character_listener: Option<Arc<dyn CharacterContactListener>>,
 }
 
 impl Drop for PhysicsWorld {
@@ -468,7 +470,8 @@ unsafe impl Send for PhysicsWorld {}
 // so the two may wait for each other but cannot deadlock. Event callbacks write the listener context only while Jolt steps, activates,
 // deactivates or removes bodies, which happens only in `&mut self` methods: no `&self` method
 // steps, adds, removes or wakes a body, and `event_settings` only reads the context's immutable
-// settings.
+// settings. The character contact listener is `Send + Sync` by its bound and is called only from
+// the `&mut self` character updates and refreshes.
 unsafe impl Sync for PhysicsWorld {}
 
 /// What a step length must satisfy ([`PhysicsWorld::is_valid_delta_time`]).
@@ -598,6 +601,7 @@ impl PhysicsWorld {
             next_constraint_id: 1,
             structure_epoch: 0,
             pending_cache_invalidations: BTreeSet::new(),
+            character_listener: None,
         })
     }
 

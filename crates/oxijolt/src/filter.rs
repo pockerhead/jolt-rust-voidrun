@@ -463,7 +463,7 @@ unsafe extern "C" fn shape_should_collide2(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{
         BodySettings, BroadPhaseLayer, CharacterSettings, CollideShape, CollisionLayers,
@@ -473,7 +473,7 @@ mod tests {
 
     /// A filter callback that a test can make panic.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub(super) enum Callback {
+    pub(crate) enum Callback {
         ObjectLayer,
         Body,
         Shape,
@@ -484,6 +484,11 @@ mod tests {
         /// The callback that panics on this thread. Callbacks run on the querying thread, so
         /// tests running in parallel do not see each other's choice.
         static INJECTED_PANIC: Cell<Option<Callback>> = const { Cell::new(None) };
+    }
+
+    /// Makes `callback` panic on this thread from now on, or nothing with `None`.
+    pub(crate) fn inject_panic(callback: Option<Callback>) {
+        INJECTED_PANIC.set(callback);
     }
 
     /// Panics when the running test made `callback` panic.

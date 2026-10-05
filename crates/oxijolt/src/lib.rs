@@ -178,8 +178,9 @@ pub use body::{
     MotionType,
 };
 pub use character::{
-    CharacterContact, CharacterId, CharacterMut, CharacterRef, CharacterSettings, CharacterState,
-    ExtendedUpdateSettings, GroundState, InnerBody,
+    BodyVelocity, CharacterContact, CharacterContactKey, CharacterContactListener,
+    CharacterContactSettings, CharacterId, CharacterMut, CharacterRef, CharacterSettings,
+    CharacterState, ExtendedUpdateSettings, GroundState, InnerBody,
 };
 pub use constraint::{
     AnyConstraintId, ConeConstraint, ConeConstraintSettings, ConstraintId, ConstraintKind,

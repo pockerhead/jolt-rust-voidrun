@@ -79,13 +79,13 @@
 //!   both crates must not call `JPH_*Filter_SetProcs` for these three types, and must not pass
 //!   filters it created with `JPH_*Filter_Create` to queries, because the callbacks of
 //!   `oxijolt` would receive their `userData`.
-//! - joltc's body activation listener and the extension's contact listener
-//!   (`JPH_ContactListener2_*`) and soft body contact listener also call one process-global
-//!   proc table each. The `oxijolt` crate installs them once and owns them: code that links
-//!   both crates must not call `JPH_ContactListener2_SetProcs`,
-//!   `JPH_BodyActivationListener_SetProcs` or `JPH_SoftBodyContactListener_SetProcs`, nor
-//!   create listeners of these types, whose `userData` the callbacks of `oxijolt` would
-//!   receive. joltc's own contact listener (`JPH_ContactListener_*`) is not used by `oxijolt`
+//! - joltc's body activation and character contact listeners and the extension's contact
+//!   listener (`JPH_ContactListener2_*`) and soft body contact listener also call one
+//!   process-global proc table each. The `oxijolt` crate installs them once and owns them: code
+//!   that links both crates must not call `JPH_ContactListener2_SetProcs`,
+//!   `JPH_BodyActivationListener_SetProcs`, `JPH_CharacterContactListener_SetProcs` or
+//!   `JPH_SoftBodyContactListener_SetProcs`, nor create listeners of these types, whose
+//!   `userData` the callbacks of `oxijolt` would receive. joltc's own contact listener (`JPH_ContactListener_*`) is not used by `oxijolt`
 //!   and is free for other code.
 //! - A vehicle constraint must be registered both as a constraint
 //!   (`JPH_PhysicsSystem_AddConstraint` with `JPH_VehicleConstraint_AsConstraint`) and as a
