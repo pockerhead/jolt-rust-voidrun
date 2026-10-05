@@ -11296,6 +11296,30 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn JPH_Body_GetSubmergedVolume(
+        body: *const JPH_Body,
+        surfacePosition: *const JPH_RVec3,
+        surfaceNormal: *const JPH_Vec3,
+        outTotalVolume: *mut f32,
+        outSubmergedVolume: *mut f32,
+        outRelativeCenterOfBuoyancy: *mut JPH_Vec3,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn JPH_Body_ApplyBuoyancyImpulse2(
+        body: *mut JPH_Body,
+        totalVolume: f32,
+        submergedVolume: f32,
+        relativeCenterOfBuoyancy: *const JPH_Vec3,
+        buoyancy: f32,
+        linearDrag: f32,
+        angularDrag: f32,
+        fluidVelocity: *const JPH_Vec3,
+        gravity: *const JPH_Vec3,
+        deltaTime: f32,
+    ) -> bool;
+}
+unsafe extern "C" {
     pub fn JPH_PhysicsMaterial_Create2(
         name: *const ::std::os::raw::c_char,
         color: u32,
