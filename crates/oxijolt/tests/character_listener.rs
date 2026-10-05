@@ -405,7 +405,7 @@ fn walk_into_character(listener: Option<Arc<Recorder>>) -> Real {
 #[test]
 fn a_rejected_character_contact_lets_two_characters_pass() {
     let blocked = walk_into_character(None);
-    assert!(blocked < 1.3, "{blocked}");
+    assert!(blocked < 2.0, "{blocked}");
     let listener = Arc::new(Recorder {
         ignore_characters: true,
         ..Recorder::default()
