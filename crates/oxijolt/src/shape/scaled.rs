@@ -123,8 +123,8 @@ fn triangle_leaves(shape: &Shape, scale: Vec3) -> Option<Vec<(*const JPH_Shape, 
         // which its parent keeps alive; the getters only read it.
         let (static_only, sub_type) =
             unsafe { (JPH_Shape_MustBeStatic(part), JPH_Shape_GetSubType(part)) };
-        // Only meshes and heightfields collide through their triangles, and only they (and the
-        // shapes containing them) are static-only.
+        // Only meshes and heightfields collide through their triangles. Planes, the other
+        // static-only leaf, are not reached here and leave the shape unscalable.
         if !static_only {
             continue;
         }

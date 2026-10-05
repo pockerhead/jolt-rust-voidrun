@@ -19,6 +19,14 @@ not a Jolt assertion threshold.
 objects of 0.1 to 2000 m; the bound applies on each side of the centre of mass. It bounds a shape's
 inertia to at most `6 · mass · MAX_SHAPE_EXTENT²`.
 
+A plane (`Shape::new_plane`) is bounded through its local bounds like any other shape. Jolt puts
+them around the square of `2 · half_extent` metres centred on `-constant · normal` and the same
+square moved `half_extent` behind the plane (`PlaneShape.cpp:46-81`). For a normal along an axis
+they reach `max(|constant|, |constant + half_extent|)` along it, so with normal +Y a half extent of
+2000 m fits a plane at y = 1 (`constant = -1`) but not one at y = -1; a tilted normal spreads the
+square over two or three axes. The constructor checks `|constant|` and `half_extent` against
+`MAX_SHAPE_EXTENT` first and Jolt's computed bounds after.
+
 ## Convex hulls
 
 `Shape::new_convex_hull` replays the start of Jolt's hull builder (`ConvexHullBuilder::Initialize`,

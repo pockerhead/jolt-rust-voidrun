@@ -31,8 +31,8 @@ pub(crate) struct ShapeUse {
 ///
 /// A sensor may not use a shape that only static bodies may use (`Shape::MustBeStatic`). A body
 /// that can move may use one only when every such leaf is a mesh, given a mass, and only when it
-/// is not dynamic. Jolt cannot collide a mesh with a mesh or a heightfield ("Unsupported shape
-/// pair" in `CollisionDispatch`), and such pairs stay out of reach: only bodies that are not
+/// is not dynamic. Jolt cannot collide meshes, heightfields and planes with each other
+/// ("Unsupported shape pair" in `CollisionDispatch`), and such pairs stay out of reach: only bodies that are not
 /// dynamic carry meshes, and Jolt pairs a kinematic body with a static or kinematic one only
 /// with `mCollideKinematicVsNonDynamic`, which this crate does not expose, or with a sensor
 /// (`Body::sFindCollidingPairsCanCollide`), which takes no static-only shape; query, character
@@ -113,7 +113,7 @@ impl BodyMut<'_> {
     /// - [`BodyError::SoftBody`] for a soft body, which Jolt keeps dynamic;
     /// - [`BodyError::CannotMove`] for kinematic or dynamic on a body created static without
     ///   [`BodySettings::allow_dynamic_or_kinematic`];
-    /// - [`BodyError::InvalidValue`] for dynamic when the shape contains a mesh or heightfield,
+    /// - [`BodyError::InvalidValue`] for dynamic when the shape contains a mesh, heightfield or plane,
     ///   or the mass is outside `MIN_MASS..=MAX_MASS` (a kinematic body's mass is not bounded
     ///   at creation), and for kinematic when the shape contains a static-only leaf that is not
     ///   a mesh.

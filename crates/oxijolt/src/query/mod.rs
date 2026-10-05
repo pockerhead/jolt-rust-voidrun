@@ -295,7 +295,7 @@ pub(crate) fn validate_pose(
     }
     if shape.must_be_static() {
         return Err(QueryError::InvalidValue(
-            "meshes and heightfields cannot be query shapes",
+            "static-only shapes cannot be query shapes",
         ));
     }
     Ok(())

@@ -256,6 +256,7 @@ check it at its boundary.
 | `Shape::new_box*`, `new_sphere`, `new_cylinder*`, `new_capsule` | dimensions within `MAX_SHAPE_EXTENT` | `primitive_extents_are_bounded` |
 | `Shape::new_compound`, `new_offset_center_of_mass` | positions and offset within `MAX_SHAPE_EXTENT`; local bounds within it | `decorated_and_compound_extents_are_bounded` |
 | `Shape::new_height_field` | local bounds within `MAX_SHAPE_EXTENT` | `height_field_extent_is_bounded` |
+| `Shape::new_plane`, `new_plane_with_material` | normal a finite unit vector; constant (absolute) and positive half extent within `MAX_SHAPE_EXTENT`; Jolt's local bounds within it (see [limits.md](limits.md#frame-and-extent)) | `plane_inputs_are_validated`, `a_tilted_plane_is_checked_against_jolts_bounds`, `src/shape/plane.rs`: `bounds_reach_half_extent_around_the_plane_and_behind_it` |
 | `HeightFieldSettings`, `CompoundChild::rotation` | existing ranges | `invalid_height_fields_are_rejected`, `empty_or_invalid_compounds_are_rejected` |
 | `Shape::new_box_with_material`, `new_sphere_with_material`, `new_capsule_with_material`, `new_cylinder_with_material` | the plain sibling's rules | `convex_constructors_apply_the_plain_rules` |
 | `Shape::new_height_field_with_materials` | the rules of `new_height_field`; material count `1..=256`, `(n - 1)^2` indices, each below the count | `height_field_material_lists_are_validated` |

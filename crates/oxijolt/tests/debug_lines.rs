@@ -662,3 +662,16 @@ fn a_mesh_can_be_drawn_again_after_its_shape_is_freed() {
     let again = lines_near(&world, 10.0, usize::MAX, &QueryFilter::new());
     assert_eq!(lines_of(&again, id, None).len(), SQUARE_MESH_LINES);
 }
+
+#[test]
+fn a_plane_is_drawn_as_two_triangles() {
+    let mut world = world(Vec3::ZERO, 1);
+    let plane = Shape::new_plane(Vec3::new(0.0, 1.0, 0.0), 0.0, 5.0).unwrap();
+    let floor = world
+        .create_body(&plane, &BodySettings::new_static())
+        .unwrap();
+    let lines = lines_near(&world, 20.0, usize::MAX, &QueryFilter::new());
+    let plane_lines = lines_of(&lines, floor, None);
+    assert_eq!(plane_lines.len(), 6, "two wire triangles");
+    assert_inside(&plane_lines, [0.0, 0.0, 0.0], [5.0, 0.0, 5.0], "plane");
+}
