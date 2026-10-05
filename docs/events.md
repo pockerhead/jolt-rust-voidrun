@@ -270,7 +270,7 @@ ragdolls and character inner bodies, which deactivate bodies.
 
 | Event | Jolt path | Thread |
 |---|---|---|
-| `ContactEvent::Added` / `Persisted` | `ContactConstraintManager::TemplatedAddContactConstraint` (`ContactConstraintManager.cpp:1166-1183`), `GetContactsFromCache` (`:912`), `OnCCDContactAdded` (`:1387-1454`) | Jolt's workers and the stepping thread |
+| `ContactEvent::Added` / `Persisted` | `ContactConstraintManager::TemplatedAddContactConstraint` (`ContactConstraintManager.cpp:1166-1183`), `GetContactsFromCache` (`:912`), `OnCCDContactAdded` (`:1387-1454`) | Jolt's workers, in the continuous stage too (`JobFindCCDContacts`, `PhysicsSystem.cpp:1782`), and the stepping thread |
 | `ContactEvent::Removed` | `FinalizeContactCacheAndCallContactPointRemovedCallbacks` (`:446-448`), called at the end of a step (`PhysicsSystem.cpp:2461`) | one job |
 | `ActivationEvent` | `BodyManager::ActivateBodies` (`BodyManager.cpp:495-520`), `DeactivateBodies` (`:532-565`) under `mActiveBodiesMutex` | workers during a step; the calling thread when a body is created, woken or removed |
 | `SoftBodyValidation` | `SoftBodyMotionProperties` collision collector (`SoftBodyMotionProperties.cpp:163`), and continuous collision detection of a rigid body against a soft body (`PhysicsSystem.cpp:1895`) | workers |
@@ -294,6 +294,10 @@ world or keeps a pointer.
   a body's shape during a step. For the checks of the contact settings they also read whether either
   body is a sensor (`JPH_Body_IsSensor`) and body 1's centre of mass
   (`JPH_Body_GetCenterOfMassPosition`).
+- With collision estimates on, Added also runs Jolt's `EstimateCollisionResponse` on the two bodies
+  and the manifold, which reads each body's motion type, velocities, inverse mass, inverse inertia
+  and centre of mass. No job writes velocities while the contacts are found: gravity is applied
+  before, and the solve and the continuous stage's resolve run after.
 - Removed reads the four ids of the pair through the extension's `JPH_SubShapeIDPair_*` getters,
   which use Jolt's accessors.
 - Activation records the id Jolt passes; Jolt calls it under its active-bodies mutex.
@@ -311,7 +315,8 @@ order they happened in.
 
 - Contacts sort by `(body1, sub_shape1, body2, sub_shape2)` raw ids, then Added before Persisted
   before Removed, then by every payload field bit for bit: the settings, the materials, the normal,
-  the penetration depth, the point count and each point's coordinates. Only identical events compare
+  the penetration depth, the point count, each point's coordinates and, for Added, the collision
+  estimate (none first). Only identical events compare
   equal, and each copy is kept. One key can appear twice in a step: a `MotionQuality::LinearCast`
   body that touches in the discrete stage and is then hit by its own continuous cast gets Added from
   the first and Persisted from the second (`ContactConstraintManager.cpp:1421-1454`); Jolt casts
@@ -333,6 +338,58 @@ checks that its scene stepped with every event on and a no-op contact listener s
 like the same scene with nothing installed. It requires every step to be complete
 (`StepReport::is_complete`); steps in which Jolt dropped contacts because a buffer was full are not
 covered.
+
+## Impact estimates
+
+`EventSettings::collision_estimates(true)` gives every `ContactEvent::Added` a `CollisionEstimate`:
+Jolt's estimate of what the new contact does to its two bodies (Jolt `EstimateCollisionResponse`),
+computed on Jolt's workers as the contact is found. It holds both bodies' velocities after the
+impact, the impulse along the normal at each manifold point (in the order of the manifold's
+points), the two friction directions with their impulses, and the friction impulse about the
+normal. The sum of `contact_impulses` is the impact's normal impulse in N·s, a volume for an
+impact sound or an input for damage.
+
+Jolt solves the contact of the two bodies alone, with the friction and restitution Jolt resolves
+the contact with (after a `ContactListener` changed them) and the world's restitution threshold
+and velocity iterations. The estimate is exact only for an isolated pair: other contacts and
+constraints on either body in the same step are not part of it, nor are the contact's mass and
+inertia scales, surface velocities, locked axes and the speed limits. A speculative contact
+(negative penetration depth) is estimated as if the bodies touched. A contact first found by the
+continuous stage is estimated from the velocities after the step's solve, at the time-of-impact
+points, so its angular part is approximate; when the discrete stage found the pair in the same
+step, the continuous stage reports it as Persisted, without an estimate. Sensor contacts and
+contacts without points get `None`. With estimates off nothing is computed.
+
+```rust
+use oxijolt::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    world.set_event_settings(EventSettings::default().collision_estimates(true));
+    let ground = Shape::new_plane(Vec3::new(0.0, 1.0, 0.0), 0.0, 50.0)?;
+    world.create_body(&ground, &BodySettings::new_static())?;
+    let crate_shape = Shape::new_box(Vec3::new(0.5, 0.5, 0.5))?;
+    let falling = BodySettings::new_dynamic().position(RVec3::new(0.0, 3.0, 0.0));
+    world.create_body(&crate_shape, &falling)?;
+
+    let mut loudest = 0.0_f32;
+    for _ in 0..120 {
+        assert!(world.step(1.0 / 60.0)?.is_complete());
+        for event in world.take_events().contacts {
+            if let ContactEvent::Added {
+                estimate: Some(estimate),
+                ..
+            } = event
+            {
+                let impulse: f32 = estimate.contact_impulses.iter().sum();
+                loudest = loudest.max(impulse);
+            }
+        }
+    }
+    assert!(loudest > 0.0);
+    Ok(())
+}
+```
 
 ## Character contacts: `CharacterContactListener`
 

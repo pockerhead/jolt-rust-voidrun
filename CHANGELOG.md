@@ -4,6 +4,26 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Plane shapes ([guide](docs/guide.md#shapes)): `Shape::new_plane` and `new_plane_with_material`, a
+  static ground plane cut to a square of a half extent; static bodies only, like meshes and
+  heightfields.
+- Point queries ([guide](docs/guide.md#queries)): `PhysicsWorld::collide_point` with `PointHit`
+  (filtered like the other queries, sorted by body and sub-shape id) and `Shape::collide_point`,
+  with Jolt's containment rule per shape.
+- Buoyancy ([guide](docs/bodies.md#buoyancy)): `BodyMut::apply_buoyancy_impulse` with
+  `BuoyancySettings` (surface, buoyancy factor, linear and angular drag, fluid velocity) and the
+  gravity passed per call. Every product of Jolt's arithmetic is bounded, the buoyant velocity
+  change like an impulse's, and both velocities are clamped right after the call
+  ([limits](docs/limits.md#buoyancy)).
+- Collision estimates ([guide](docs/events.md#impact-estimates)): `EventSettings::collision_estimates`
+  gives every added contact Jolt's `CollisionEstimate` of its impulses and the bodies' velocities
+  after the impact.
+- joltc extension: `JPH_Body_GetSubmergedVolume` and `JPH_Body_ApplyBuoyancyImpulse2` (Jolt's volume
+  overload of the buoyancy impulse). `JOLTC_EXT_REVISION` is 17: a `JOLTC_LIB_DIR` prefix built
+  before this change is refused until the next release's archives.
+- Changed: `ContactEvent::Added` has an `estimate` field (`None` unless collision estimates are
+  on), so patterns that name every field need `..` or the new field.
+
 - Contact validation ([guide](docs/events.md#validating-contacts)): `ContactListener` gains
   `contact_validate`, called with a `ContactCandidate` (both bodies in Jolt's collide order, their
   user data, sub-shapes, world-space points, penetration axis and depth) and answering a

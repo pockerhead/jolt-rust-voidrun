@@ -48,6 +48,9 @@ projectile that passes its shooter), a `ContactListener` validates contacts
   `samples[z * n + x]`. A column-major source must be transposed. `f32::MAX` is a hole. With the
   default block size 2, `n = 33` is padded to 34 and covers exactly the 32 x 32 cells given.
   Heightfields are for static bodies only.
+- `Shape::new_plane(normal, constant, half_extent)` is static ground: everything behind
+  `normal · p + constant = 0` is solid, within a square of `2 * half_extent` around the plane and
+  `half_extent` deep. Nothing collides beyond that square. Only static bodies take a plane.
 - `Shape::new_compound` places children with their own pose and user data. Child order is part of
   the shape.
 - A dynamic or kinematic body needs an inertia tensor Jolt can decompose. When the tensor is not
@@ -124,6 +127,10 @@ outward surface normal of the obstacle: a floor below gives a normal pointing up
   cast short of the obstacle.
 - `collide_shape`: every obstacle a shape at a pose overlaps, with penetration depth and normal.
   The hits come in no particular order; sort them when order matters.
+- `collide_point`: every body whose shape contains a point, sorted by body and sub-shape id.
+  "Contains" is Jolt's rule per shape: solid convex shapes, closed meshes by the parity of the
+  triangles above the point, never a heightfield, and strictly behind a plane.
+  `Shape::collide_point` asks one shape, in its own frame.
 
 ## Floating origin
 

@@ -2,8 +2,8 @@
 
 Rigid bodies are created from a `Shape` and `BodySettings` and changed through `BodyMut`
 (`PhysicsWorld::body_mut`). This guide covers the controls beyond poses, velocities and forces:
-impulses, kinematic moves, waking and sleeping, sensors, user data, locked axes, and changing a
-body's shape or motion type. Every call checks its input first; a refused call changes nothing.
+impulses, buoyancy, kinematic moves, waking and sleeping, sensors, user data, locked axes, and
+changing a body's shape or motion type. Every call checks its input first; a refused call changes nothing.
 
 ## Impulses and forces
 
@@ -29,6 +29,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## Buoyancy
+
+`apply_buoyancy_impulse` applies one step of a fluid's lift and drag to a body (Jolt
+`Body::ApplyBuoyancyImpulse`). Call it once per step, before `step`, for every body that may be in
+the water, with the gravity the body feels: the world's, or for radial gravity the vector at the
+body. `BuoyancySettings` describes the fluid: its surface (a point and the normal pointing up out
+of it), the buoyancy factor, the linear and angular drag and the fluid's velocity.
+
+The buoyancy factor is the fluid's density over the body's, with the body's volume as Jolt computes
+it: the bounding box for boxes, capsules, cylinders and tapered shapes, the shape itself for spheres
+and convex hulls. A factor of 1 floats neutrally, 2 floats half under. The lift scales with the
+body's gravity factor, so a body with gravity factor 0 gets none. Linear drag is quadratic, over
+the area of the bounding box facing the flow, and never takes more than the body's own speed in
+one call, so a current does not carry a body at rest. The velocities change at once and are
+clamped as an impulse's; the buoyant velocity change is bounded like an impulse's
+([limits.md](limits.md#buoyancy)). The call returns whether the body is in the water and wakes it
+when it is. Static, kinematic and dry bodies are left alone.
+
+```rust
+use oxijolt::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    // A 1 m x 0.5 m x 1 m crate, four times lighter than the water.
+    let crate_shape = Shape::new_box(Vec3::new(0.5, 0.25, 0.5))?;
+    let settings = BodySettings::new_dynamic()
+        .position(RVec3::new(0.0, 0.5, 0.0))
+        .linear_damping(1.0);
+    let floating = world.create_body(&crate_shape, &settings)?;
+    let water = BuoyancySettings::default()
+        .surface(RVec3::ZERO, Vec3::new(0.0, 1.0, 0.0))
+        .buoyancy(4.0)
+        .linear_drag(2.0);
+    let dt = 1.0 / 60.0;
+    for _ in 0..600 {
+        let gravity = world.gravity();
+        world
+            .body_mut(floating)?
+            .apply_buoyancy_impulse(&water, gravity, dt)?;
+        assert!(world.step(dt)?.is_complete());
+    }
+    // A quarter of its height is under water: its centre floats 0.125 m above the surface.
+    let y = world.body(floating)?.position().y;
+    assert!((y - 0.125).abs() < 0.01);
+    Ok(())
+}
+```
+
+Quadratic drag alone barely damps slow bobbing; the crate above also has linear damping.
 
 ## Kinematic platforms
 
