@@ -85,8 +85,8 @@ impl MotorcycleSettings {
 
     /// Integral term of the lean controller (Jolt `mLeanSpringIntegrationCoefficient`), which
     /// would make it a PID controller. Must be 0, Jolt's default: Jolt's `SaveState` does not save
-    /// the integrated lean angle, so with any other value a restored
-    /// [`WorldState`](crate::WorldState) would not replay the same steps.
+    /// the integrated lean angle, so with another value a restored
+    /// [`WorldState`](crate::WorldState) can replay different steps.
     /// [`PhysicsWorld::create_motorcycle`](crate::PhysicsWorld::create_motorcycle) refuses it
     /// with [`VehicleError::LeanSpringIntegrationNotSaved`].
     #[must_use]

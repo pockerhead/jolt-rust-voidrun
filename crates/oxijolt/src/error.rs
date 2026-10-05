@@ -454,8 +454,8 @@ pub enum VehicleError {
     /// The world has given out every vehicle id.
     TooManyVehicles,
     /// A motorcycle's lean spring integration coefficient is not 0. Jolt's state does not hold
-    /// the integrated lean angle, so a restored [`WorldState`](crate::WorldState) would not
-    /// replay the same steps; see
+    /// the integrated lean angle, so a restored [`WorldState`](crate::WorldState) could replay
+    /// different steps; see
     /// [`MotorcycleSettings::lean_spring_integration_coefficient`](crate::MotorcycleSettings::lean_spring_integration_coefficient).
     LeanSpringIntegrationNotSaved,
 }

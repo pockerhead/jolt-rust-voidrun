@@ -541,6 +541,92 @@ effective mass that is at most each body's own along the axis. With
 `VehicleAntiRollBar::MAX_STIFFNESS` and wheel lengths at most `MAX_SHAPE_EXTENT`, `b` is at most
 5e14 m/s, so the velocity change along the suspension axis stays finite and squares finitely.
 
+## Track ratios
+
+Jolt keeps a tracked vehicle's two tracks in step after the engine torque and after the
+longitudinal impulse of each unbraked wheel (`TrackedVehicleController.cpp:188-208, 291, 406`). With track ratios `L` and `R` of the
+same sign (`L·R > 0`, `:194`) it divides `L·ω_r − R·ω_l` by `L·I_r + R·I_l`, otherwise by
+`R·I_l − L·I_r`, where `I` are the track inertias. In both cases the two terms of the divisor have
+the same sign, so its magnitude is at least the smaller ratio times the smaller inertia.
+
+`TrackedDriverInput` keeps both ratios within `1/MAX_RATIO..=1` in magnitude, and
+`TrackedVehicleSettings` refuses a track inertia below `f32::MIN_POSITIVE · MAX_RATIO`. Then
+`L·R` is at least 1e-8, far from underflow, and each divisor term stays a normal `f32`. Without the
+floor, equal ratios of 1e-30 make `L·R` underflow to 0, Jolt takes the second branch, and with equal
+inertias the divisor is 0: in a probe both track speeds were NaN after the first step, with and
+without Jolt's assertions. The upper bound 1 is what the [tracked step
+coefficients](#tracked-step-coefficients) assume for the torque a track receives.
+
+## Tracked step coefficients
+
+`TrackedVehicleSettings` checks the terms below, which the tracked controller forms from the
+settings alone, each in `f32` in Jolt's order, at the largest step `MAX_DELTA_TIME` unless noted. `T` is the
+engine's largest torque, `max_torque` times the largest `|y|` of its torque curve, times
+`1 + 8·2⁻²⁴` because `LinearCurve::GetValue` interpolates (`Core/LinearCurve.cpp:25-39`) and may
+round above its largest point. `g_max` and `g_min` are the largest and smallest gear ratio in
+magnitude, forward and reverse.
+
+- The engine's own terms, as for wheeled vehicles (`VehicleEngine::ApplyTorque`).
+- The torque the transmission gives the differentials (`TrackedVehicleController.cpp:266`): the
+  clutch friction, at most 1 (`VehicleTransmission.cpp:106-123`), times the gear ratio times the
+  engine torque, so at most `g_max·T`.
+- For each track: the differential torque `differential ratio · track ratio · transmission torque`
+  (`:282`), at most `differential ratio · g_max·T`; that torque times the step, and divided by the
+  track inertia (`:286`).
+- The brake (`:297-337`): `max brake torque · dt / inertia` (`:311`); the torque that locks the
+  track, `|ω| · inertia / dt`, per rad/s at the smallest step `MIN_DELTA_TIME` (`:301`); the brake
+  torque over the smallest wheel radius of the track, and that times the step (`:329-336`).
+- The synchronisation of the tracks: see [track ratios](#track-ratios); the sum of both
+  inertias must be finite too.
+- For each wheel of a track: the driven wheel's radius over the wheel's radius (`:63`), the track
+  inertia over the wheel's radius (`:395`) and the wheel's radius over the track inertia (`:405`).
+- The track's speed limit at the engine's rpm (`:279`), `rpm / (gear ratio · differential ratio ·
+  track ratio · 60/2π) · 1.001`: its divisor at its smallest, `g_min · differential ratio ·
+  (1/MAX_RATIO) · 60/2π`, must be at least `f32::MIN_POSITIVE`, and `max_rpm` over it, times 1.001,
+  finite. This check is policy: Jolt only compares the limit with the track speed, and an infinite
+  limit lets the torque through.
+
+Values valid one by one can fail together: a torque curve of 1e15, a max torque of 1e20, an engine
+inertia of 1e36 and gear and differential ratios of 100 pass the engine's checks, but the
+differential torque overflows. In a probe with this check removed, Jolt's clutch, which engages
+from 0, let only finite torques through, and the tracks reached 4.6e32 rad/s within 300 steps.
+What the step computes from the vehicle's state (track and wheel speeds, ground velocities, the
+relative velocity at a contact, `:394`) is not bounded here.
+
+## Motorcycle lean
+
+**Lean angle.** With the lean steering limit on, Jolt limits the steering angle to
+`asin(wheel base · tan(max lean angle) · |g| / (v² · cos caster))`
+(`MotorcycleController.cpp:149,177`), with an `asin` that clamps its argument. The tangent grows
+without bound toward 90°, and the `f32` value of π/2 lies just above 90°, where it is about
+−2.3e7: in a probe the front wheel then steered 90° although its largest steering angle was 30°.
+`MotorcycleSettings::MAX_LEAN_ANGLE` is 80°, where the tangent is 5.67.
+
+**Lean spring.** While both wheels touch the ground, Jolt applies the angular impulse
+`(k·d − c·ω_f + k_i·∫d)·dt` about the chassis' forward axis, minus what it applied earlier in the
+step (`MotorcycleController.cpp:214-226`), through `Body::AddAngularImpulse`, which clamps the
+angular velocity to `MAX_ANGULAR_VELOCITY` afterwards (`Body.inl:149-154`). `d` is the lean error,
+an `acos` within `[0, π]` with a sign, and `ω_f` the angular velocity about forward. The first
+solver call of a step applies the whole term (`PreCollide` resets the applied impulse, `:187`).
+Later calls apply only the change: the target, the integral and the chassis rotation are fixed
+within a step, so the spring part cancels and the damping part changes by at most `c·Δω_f·dt`.
+`create_motorcycle` therefore requires
+
+`(k·π + c · MAX_ANGULAR_VELOCITY_CHANGE) · I⁻¹max · (1 + 4·u) ≤ MAX_ANGULAR_ACCELERATION`,
+
+with `I⁻¹max` the chassis' largest principal inverse inertia (an upper bound for any axis) and
+`u = 5e-7` the tolerance within which the forward axis is a unit vector, computed in `f64`. Each
+call then changes the angular velocity by at most about `2 · MAX_ANGULAR_ACCELERATION · dt`, far
+from where its squared length overflows. With `c·dt·I⁻¹max > 1` the damping overshoots within a
+step and the clamp bounds it: the rule keeps the values finite, not the controller well behaved.
+Jolt's default spring (5000 and 1000) fits a chassis with `I⁻¹max` up to about 428 1/(kg·m²); the
+240 kg test motorcycle has about 0.1. In a probe without the rule, `k = c = 1e30` on that chassis
+failed Jolt's assertion that the squared angular velocity is finite (`MotionProperties.inl:38`).
+
+**Integration coefficient.** Jolt's `MotorcycleController::SaveState` writes the target lean but
+not the integrated lean angle `∫d` (`:263-275`), so `MotorcycleSettings` accepts only an
+integration coefficient of 0, Jolt's default; with 0 the integral has no effect.
+
 ## Restitution
 
 At most 1, so the restitution target speed is at most the approach speed.

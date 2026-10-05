@@ -41,7 +41,8 @@ Jolt's saved state of the physics system (`PhysicsSystem::SaveState`):
 - the contact cache;
 - every constraint's own state: its enabled flag, the solver parts' warm start, motor states and
   targets, and for path constraints also the motor settings and maximum friction;
-- for vehicles the driver input and the engine, transmission and wheel state.
+- for vehicles the driver input and the engine, transmission and wheel state, a tracked vehicle's
+  track speeds and a motorcycle's target lean.
 
 On top of that it holds every character's `CharacterState`.
 
@@ -100,7 +101,13 @@ Each step sets the world up to the opposite of the gravity the vehicle uses (wor
 `VehicleMut::set_gravity`). In zero gravity a step keeps the world up it had. So after a restore
 in zero gravity, the vehicle keeps the world up the abandoned run ended with. If that run had
 gravity in another direction, a vehicle with a pitch and roll limit
-(`VehicleSettings::max_pitch_roll_angle` below π) replays differently.
+(`VehicleSettings::max_pitch_roll_angle` below π) replays differently, and so does a motorcycle,
+whose lean controller uses the world up even with the limit off.
+
+A motorcycle's integrated lean angle is not saved either (Jolt's `MotorcycleController::SaveState`
+writes only the target lean). It acts only through the lean spring's integration coefficient,
+which `MotorcycleSettings` therefore requires to be 0. A motorcycle's lean controller and lean
+steering limit switches are not saved; they are settings fixed at creation.
 
 The wheel contacts a vehicle reports are empty right after a restore until the next step, because
 Jolt clears a wheel's contact body on restore.

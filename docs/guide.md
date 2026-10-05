@@ -7,6 +7,7 @@ in a second world. Everything runs headless; nothing is drawn. The three complet
 tests (`cargo test -p oxijolt --doc`).
 
 Other topics have guides of their own: [constraints](constraints.md), [soft bodies](soft-bodies.md),
+[tanks and motorcycles](vehicles.md),
 [events and contact listeners](events.md), [saving and restoring a world](state.md),
 [running jobs on your own thread pool](job-system.md), [determinism](determinism.md) and
 [building](building.md).
@@ -138,8 +139,9 @@ The rest of the world moves along:
 - **Characters** move in id order after the bodies: position and rotation as for bodies, up and
   velocity as vectors. Their cached contacts and ground stay in the old frame; after a rotating
   rebase call `refresh_character_contacts` for every character before its next update.
-- **Vehicles** move with their chassis. A rotation also rotates each vehicle's gravity override and
-  the up of a ray or sphere tester. The wheel contacts stay in the old frame until the next step.
+- **Vehicles** move with their chassis. A rotation also rotates each vehicle's gravity override,
+  the up of a ray or sphere tester and each motorcycle's target lean. The wheel contacts stay in the
+  old frame until the next step.
 - **Ragdolls, soft bodies and constraints** are stored relative to their bodies and need no change.
   A soft body's vertices turn with it, which leaves its body rotation non-identity.
 - **Pulleys** are the exception: their fixed points are world points, so a rebase recreates each
@@ -598,7 +600,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 A vehicle is Jolt's `VehicleConstraint` with the wheeled controller, attached to a dynamic body the
 caller created, its chassis. `PhysicsWorld::create_vehicle(chassis, &settings)` adds it; from then
 on it runs inside every `step`: at the start of the step each wheel casts against the scene and
-gravity is applied, then engine, brakes and tire friction act through the constraint.
+gravity is applied, then engine, brakes and tire friction act through the constraint. Tracked
+vehicles and motorcycles work the same way and have [a guide of their own](vehicles.md); what
+follows holds for every kind unless it names the wheeled settings.
 
 - **Chassis.** The chassis shape gives the vehicle its mass and centre of mass.
   `Shape::new_offset_center_of_mass` moves only the centre of mass, not the collision surface, so a
@@ -630,8 +634,8 @@ gravity is applied, then engine, brakes and tire friction act through the constr
   outward normal, as in queries. A wheel whose cast starts inside a solid body reports suspension
   length 0 and `hit_hard_point`, not how deep it is; `collide_shape` gives the depth.
 - **Rebase.** `PhysicsWorld::rebase` moves the chassis like any body and rotates each vehicle's
-  gravity override and the up of a ray or sphere tester; the reported contacts stay in the old
-  frame until the next step.
+  gravity override, the up of a ray or sphere tester and a motorcycle's target lean; the reported
+  contacts stay in the old frame until the next step.
 - **Tester accuracy.** `wheel_contacts_match_the_ground_geometry` checks every tester on flat
   ground within 1e-3 m. A one-off measurement on a chassis rolled 6° or pitched -4° over box and
   heightfield ground and a 6° slope found the ray and sphere testers' suspension length within

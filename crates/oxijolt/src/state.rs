@@ -15,7 +15,8 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 ///
 /// It holds Jolt's saved state of the physics system (bodies with their poses, velocities,
 /// forces and sleep data, soft body vertices, the contact cache, each constraint's own state,
-/// vehicles' driver input and drivetrain) and every character's [`CharacterState`].
+/// vehicles' driver input and drivetrain, tracked vehicles' track speeds and motorcycles' target
+/// lean) and every character's [`CharacterState`].
 ///
 /// A state restores only into the world that saved it, and only while that world's structure is
 /// unchanged: creating or removing a body, character, vehicle, ragdoll or constraint, setting a
@@ -26,7 +27,9 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 ///
 /// Configuration Jolt does not save, such as constraint limits, motor settings, a vehicle's
 /// gravity override and soft body vertex inverse masses, stays as it is when a state is
-/// restored. So does a vehicle's world up, which a zero gravity keeps from the step before.
+/// restored. So does a vehicle's world up, which a zero gravity keeps from the step before. Jolt
+/// does not save a motorcycle's integrated lean angle, which is why its integration coefficient
+/// must be 0.
 /// [docs/state.md] lists every such setter.
 ///
 /// A state is opaque: it gives neither its bytes nor `==`, because Jolt's stream may hold bytes
