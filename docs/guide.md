@@ -31,6 +31,13 @@ data values 0 to 31.
 `child_groups` selects compound children by group, `exclude_body` skips one body (the querying
 actor's own). An unset part accepts everything.
 
+Layers decide which bodies the solver collides by class. For pairs within a class, such as a
+vehicle that must not collide with its driver or a chain whose neighbouring links overlap, give the
+bodies a `CollisionGroup` at creation; queries and characters ignore those groups
+([bodies.md](bodies.md#collision-groups)). For per-contact decisions (a one-way platform, a
+projectile that passes its shooter), a `ContactListener` validates contacts
+([events.md](events.md#validating-contacts)).
+
 ## Shapes
 
 - `Shape::new_box`, `new_sphere`, `new_cylinder` and `new_capsule` (cylinders and capsules along
@@ -209,6 +216,10 @@ of the update and is not added to the velocity; the caller feeds the vertical sp
   the same ids.
 - **Rebase.** `PhysicsWorld::rebase` moves the characters with the bodies; after a rotating rebase,
   call `refresh_character_contacts` for each character before its next update.
+- **Contact callbacks.** `set_character_contact_listener` installs a `CharacterContactListener` for
+  moving platforms and conveyors (`adjust_body_velocity`, read back as `ground_velocity`), contacts a
+  character ignores, whether a contact pushes the character or the character pushes it, and added,
+  persisted and removed contacts ([events.md](events.md#character-contacts-charactercontactlistener)).
 
 ### Sharp steps and the game's own autostep
 

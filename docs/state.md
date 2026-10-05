@@ -44,10 +44,18 @@ Jolt's saved state of the physics system (`PhysicsSystem::SaveState`):
 - for vehicles the driver input and the engine, transmission and wheel state, a tracked vehicle's
   track speeds and a motorcycle's target lean.
 
-On top of that it holds every character's `CharacterState`.
+On top of that it holds every character's `CharacterState` and the contact-cache invalidations
+(`BodyMut::invalidate_contact_cache`, and the one `BodyMut::set_shape` makes) that no step has
+applied yet; `restore_state` replaces the pending ones with these. Jolt keeps its own invalidation
+flag in no saved state and cannot clear it, so for `invalidate_contact_cache` the world sets it only
+right before a step in which some body is awake or a vehicle exists, which clears it at its end.
+`set_shape` is the exception: Jolt's `SetShape` sets the flag at once when the shape changes. That
+call also changes the world's structure, so no state saved before it restores, and the pending
+request sets the flag again before the next simulating step after a restore of a state saved after
+it.
 
-`save_state_of(&bodies)` saves only the listed bodies; global state, contacts, constraints and
-characters are saved whole. Restoring it leaves every other body as it is (except that a character's
+`save_state_of(&bodies)` saves only the listed bodies; global state, contacts, constraints,
+characters and the pending invalidations are saved whole. Restoring it leaves every other body as it is (except that a character's
 inner body moves to the restored character's pose), so a replay from it is exact only when those
 bodies did not change since the save, for example static bodies the caller never moved.
 
@@ -88,7 +96,8 @@ documentation asks for body friction. These setters change such configuration:
 Body properties set at creation (shape, mass, friction, layers) are not saved either; the body
 setters change only poses and velocities, which are saved, and the shape and motion type changes
 count as structural changes. The sensor flag, user data, allowed degrees of freedom and movement
-capability of `BodySettings` are fixed at creation, so no restore can find them changed.
+capability and collision group of `BodySettings` are fixed at creation, so no restore can find them
+changed.
 Impulses, kinematic moves, activation and deactivation change only velocities and sleep state,
 which are saved. A target changed after a save, such as a
 hinge's target angle, is part of the saved state and is undone.
@@ -111,6 +120,9 @@ steering limit switches are not saved; they are settings fixed at creation.
 
 The wheel contacts a vehicle reports are empty right after a restore until the next step, because
 Jolt clears a wheel's contact body on restore.
+
+Listeners are configuration, not state: a `ContactListener` or `CharacterContactListener` set after
+a save stays set after a restore. A replay that changed them must set the original ones again.
 
 Events are not part of the state: `restore_state` neither clears nor rewinds the queue that
 `take_events` drains, and a restore reports no activation changes. Take the events before a rollback

@@ -5,11 +5,12 @@ use std::ptr::{null, NonNull};
 
 use oxijolt_sys::*;
 
+use super::listener::{with_character_listener, Removal};
 use super::{
     CharacterEntry, CharacterId, CharacterMut, CharacterRef, CharacterSettings,
     ExtendedUpdateSettings, INVALID_ID,
 };
-use crate::filter::with_query_filters;
+use crate::filter::{with_query_filters, FilterState, RawFilters};
 use crate::limits::{self, POSITION_RULE};
 use crate::math::ROTATION_RULE;
 use crate::owned::Owned;
@@ -176,12 +177,14 @@ impl PhysicsWorld {
         }
         if let Some(body) = entry.inner_body {
             self.inner_bodies.remove(&body.to_raw());
+            self.pending_cache_invalidations.remove(&body.to_raw());
         }
         // Other characters may keep a pointer to this one in their cached contacts. That is
-        // sound: without a contact listener Jolt never dereferences a cached contact's
-        // `mCharacterB` (`ValidateContact` and `ContactAdded` return early), joltc's contact
-        // readout copies the pointer without dereferencing it, and oxijolt installs no
-        // listener and never reads that pointer.
+        // sound: a contact listener is attached only during one update or refresh of a
+        // character, and every contact it receives was collected in that call from the live
+        // characters of the collision set; joltc's contact readout copies the pointer without
+        // dereferencing it, oxijolt never reads it, and the solve callbacks, which pass it on,
+        // are not installed.
         drop(entry);
         Ok(())
     }
@@ -234,9 +237,16 @@ impl PhysicsWorld {
     ///   [`limits::MAX_WEIGHT_IMPULSE`];
     /// - `settings` are invalid, or a layer of `filter` is not in this world.
     ///
+    /// A [`CharacterContactListener`](crate::CharacterContactListener) set with
+    /// [`set_character_contact_listener`](Self::set_character_contact_listener) is called
+    /// during the update, and its removals after it.
+    ///
     /// # Panics
-    /// A panic in a filter callback is caught inside the update (the callback then rejects) and
-    /// resumed after joltc has returned.
+    /// A panic in a filter or listener callback is caught inside the update and resumed after
+    /// joltc has returned. From the first one on, the filters of that update reject and the
+    /// listener keeps Jolt's values; the update's removals are not delivered. A panic in
+    /// [`contact_removed`](crate::CharacterContactListener::contact_removed) is not caught: the
+    /// removals before it have been delivered, the rest are lost.
     ///
     /// # Example
     /// ```
@@ -280,12 +290,12 @@ impl PhysicsWorld {
                 "mass times gravity times delta time must be at most limits::MAX_WEIGHT_IMPULSE",
             ));
         }
-        let character = entry.character.as_ptr();
+        let character = entry.character.as_non_null();
         filter.validate(self).map_err(query_error)?;
         let gravity = gravity.to_jph();
         let settings = settings.to_jph();
         let allocator = self.temp_allocator.as_ptr();
-        with_query_filters(self, filter, |raw, _| {
+        self.with_character_filters(character, filter, |raw| {
             // SAFETY: `&mut self` gives this call exclusive use of the world, the character and
             // the temp allocator; `gravity` and `settings` are live locals and the filters are
             // live or null (accept everything). The filter callbacks get `&PhysicsWorld` while
@@ -300,7 +310,7 @@ impl PhysicsWorld {
             // filter.
             unsafe {
                 JPH_CharacterVirtual_ExtendedUpdate2(
-                    character,
+                    character.as_ptr(),
                     delta_time,
                     &gravity,
                     &settings,
@@ -312,28 +322,28 @@ impl PhysicsWorld {
                 )
             }
         })
-        .map_err(query_error)
     }
 
     /// Recomputes a character's contacts and ground at its current pose, without moving it,
     /// colliding with what `filter` selects. Call it after moving a character with a setter or
     /// after a rotating [`rebase`](Self::rebase).
     ///
-    /// Fails as [`update_character`](Self::update_character) does for the filter, and panics in
-    /// filter callbacks resume the same way.
+    /// Fails as [`update_character`](Self::update_character) does for the filter; the character
+    /// contact listener is called, and panics in filter and listener callbacks resume, the same
+    /// way.
     pub fn refresh_character_contacts(
         &mut self,
         id: CharacterId,
         filter: &QueryFilter<'_>,
     ) -> Result<(), CharacterError> {
-        let character = self.character_entry(id)?.character.as_ptr();
+        let character = self.character_entry(id)?.character.as_non_null();
         filter.validate(self).map_err(query_error)?;
         let allocator = self.temp_allocator.as_ptr();
-        with_query_filters(self, filter, |raw, _| {
+        self.with_character_filters(character, filter, |raw| {
             // SAFETY: as in `update_character`, without the move.
             unsafe {
                 JPH_CharacterVirtual_RefreshContacts2(
-                    character,
+                    character.as_ptr(),
                     null(),
                     raw.object_layer,
                     raw.body,
@@ -342,7 +352,38 @@ impl PhysicsWorld {
                 )
             }
         })
-        .map_err(query_error)
+    }
+
+    /// Runs `run`, a joltc update or refresh of `character`, with the joltc filters of `filter`
+    /// and the world's character contact listener attached, then delivers the removals the
+    /// listener collected.
+    fn with_character_filters(
+        &mut self,
+        character: NonNull<JPH_CharacterVirtual>,
+        filter: &QueryFilter<'_>,
+        run: impl FnOnce(&RawFilters),
+    ) -> Result<(), CharacterError> {
+        let listener = self.character_listener.clone();
+        let world = self.tag;
+        let removed = with_query_filters(self, filter, |raw, state: &FilterState<'_>| {
+            let Some(listener) = &listener else {
+                run(raw);
+                return Vec::<Removal>::new();
+            };
+            // SAFETY: `character` is a live character of this world, which the caller holds
+            // mutably for the whole call, and `run` updates or refreshes only that character.
+            let ((), removed) = unsafe {
+                with_character_listener(state, &**listener, world, character, || run(raw))
+            };
+            removed
+        })
+        .map_err(query_error)?;
+        if let Some(listener) = &listener {
+            for (character, key) in removed {
+                listener.contact_removed(character, key);
+            }
+        }
+        Ok(())
     }
 }
 

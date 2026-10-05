@@ -517,6 +517,36 @@ with a smaller principal inverse inertia, the angular velocity change is at most
 one-second update (5e14 N·s) on the edge of a 6 cm cube of `MIN_MASS` overflows the cube's squared
 angular speed, which Jolt asserts on (`MotionProperties.inl:38`).
 
+## Character contacts
+
+`CharacterContactListener::adjust_body_velocity` reports the velocity of a body as a character sees
+it. `BodyVelocity::set_linear_velocity` and `set_angular_velocity` accept a finite vector whose
+length, as Jolt computes it, is at most `limits::MAX_LINEAR_VELOCITY` (500 m/s) or
+`limits::MAX_ANGULAR_VELOCITY` (about 47 rad/s): the bounds Jolt clamps every body's velocity to.
+So a listener cannot tell a character about a body moving faster than a body can. The bounds depend
+on nothing of the call, so a value kept from another call stays valid.
+
+Jolt turns the pair into the velocity of the contact point, `v + ω × r` with `r` from the body's
+centre of mass to the contact (`CharacterVirtual.cpp:216-223`), and a real body at the bounds gives
+the same: a lever of up to `√3 · MAX_SHAPE_EXTENT` makes that some 1.6e5 m/s, which the character's
+solver and `ground_velocity` then report. `a_far_lever_adjusted_velocity_stays_finite` puts a
+character at the edge of a static box of `MAX_SHAPE_EXTENT`, reports the box as moving at
+`MAX_LINEAR_VELOCITY` and spinning at `MAX_ANGULAR_VELOCITY`, and updates it 120 times next to a 1 kg
+cube it pushes, with the world stepped in between: every position and velocity stays finite, in the
+default and in the asserts build. Without the setters' check a NaN reaches the character's ground
+velocity (an asserts-build probe with the check removed reported `ground_velocity` x = NaN), so the
+refusal guards the character's state rather than a Jolt assertion.
+
+## Group filter table size
+
+`GroupFilterTable::MAX_SUB_GROUPS` (4096) is an oxijolt bound. Jolt's table stores one bit per pair
+of different sub groups, `n (n - 1) / 2` bits, so 4096 sub groups take about 1 MB, and it indexes
+the bits with an `int` computed from `n (n - 1) / 2` in 32-bit unsigned arithmetic
+(`GroupFilterTable.h:57`, `:66`), which overflows `int` above 65 536 sub groups. Sub-group ids are
+checked against the table's size before they reach Jolt, which asserts on an id at or beyond it
+(`:52`) and on a pair of equal ids (`:46`); with either check removed, the asserts build stops on that
+assertion.
+
 ## Springs
 
 Jolt derives a stiffness `k` and damping `c` from every spring (`SpringPart.h:36-55,91-104`). Both

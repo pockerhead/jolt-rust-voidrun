@@ -124,9 +124,10 @@ static_assert(int(JPH_SoftBodyLRAType_None) == int(JPH::SoftBodySharedSettings::
 static_assert(int(JPH_SoftBodyLRAType_EuclideanDistance) == int(JPH::SoftBodySharedSettings::ELRAType::EuclideanDistance), "JPH_SoftBodyLRAType_EuclideanDistance");
 static_assert(int(JPH_SoftBodyLRAType_GeodesicDistance) == int(JPH::SoftBodySharedSettings::ELRAType::GeodesicDistance), "JPH_SoftBodyLRAType_GeodesicDistance");
 
-// Contact settings. joltc's listener copies JPH_ContactSettings field by field (FromJolt/ToJolt of
-// ContactSettings), and the extension's soft body listener copies JPH_SoftBodyContactSettings the
-// same way, so only the C ABI is pinned here.
+// Contact settings. joltc's listener and the extension's JPH_ContactListener2 copy
+// JPH_ContactSettings field by field (FromJolt/ToJolt of ContactSettings), the extension's soft body
+// listener copies JPH_SoftBodyContactSettings and joltc's character contact listener
+// JPH_CharacterContactSettings the same way, so only the C ABI is pinned here.
 OXIJOLT_SYS_ASSERT_LAYOUT(JPH_ContactSettings, 52, 4);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_ContactSettings, combinedFriction, 0);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_ContactSettings, combinedRestitution, 4);
@@ -142,6 +143,9 @@ OXIJOLT_SYS_ASSERT_OFFSET(JPH_SoftBodyContactSettings, invMassScale1, 0);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_SoftBodyContactSettings, invMassScale2, 4);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_SoftBodyContactSettings, invInertiaScale2, 8);
 OXIJOLT_SYS_ASSERT_OFFSET(JPH_SoftBodyContactSettings, isSensor, 12);
+OXIJOLT_SYS_ASSERT_LAYOUT(JPH_CharacterContactSettings, 2, 1);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CharacterContactSettings, canPushCharacter, 0);
+OXIJOLT_SYS_ASSERT_OFFSET(JPH_CharacterContactSettings, canReceiveImpulses, 1);
 
 // Scene query settings and results. joltc converts these field by field
 // (ToJolt/FromJolt), so only the C ABI is pinned here, not agreement with the

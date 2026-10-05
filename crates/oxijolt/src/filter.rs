@@ -35,7 +35,9 @@ use crate::{BodyId, ObjectLayer, PhysicsWorld, QueryError, SubShapeId};
 /// For collision groups that are per body, give each group its own object layer and select
 /// layers; for groups that share one body (the children of a chunk compound), store the group
 /// as child user data and select it with a group mask. oxijolt stores no mapping from layers
-/// to groups: the caller knows which layer holds which group.
+/// to groups: the caller knows which layer holds which group. These are not the bodies'
+/// [`CollisionGroup`](crate::CollisionGroup)s, which filter what the solver collides and which
+/// queries ignore.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct QueryFilter<'a> {
     object_layers: Option<&'a [ObjectLayer]>,
@@ -463,7 +465,7 @@ unsafe extern "C" fn shape_should_collide2(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{
         BodySettings, BroadPhaseLayer, CharacterSettings, CollideShape, CollisionLayers,
@@ -473,7 +475,7 @@ mod tests {
 
     /// A filter callback that a test can make panic.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub(super) enum Callback {
+    pub(crate) enum Callback {
         ObjectLayer,
         Body,
         Shape,
@@ -484,6 +486,11 @@ mod tests {
         /// The callback that panics on this thread. Callbacks run on the querying thread, so
         /// tests running in parallel do not see each other's choice.
         static INJECTED_PANIC: Cell<Option<Callback>> = const { Cell::new(None) };
+    }
+
+    /// Makes `callback` panic on this thread from now on, or nothing with `None`.
+    pub(crate) fn inject_panic(callback: Option<Callback>) {
+        INJECTED_PANIC.set(callback);
     }
 
     /// Panics when the running test made `callback` panic.

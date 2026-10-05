@@ -11,7 +11,7 @@ use crate::limits::{
 use crate::math::{is_finite_non_negative, ROTATION_RULE};
 use crate::owned::{JoltObject, Owned};
 use crate::world::WorldTag;
-use crate::{BodyError, ObjectLayer, Quat, RVec3, Shape, Vec3};
+use crate::{BodyError, CollisionGroup, ObjectLayer, Quat, RVec3, Shape, Vec3};
 
 mod access;
 mod control;
@@ -180,6 +180,7 @@ pub struct BodySettings {
     pub(crate) sensor: bool,
     pub(crate) user_data: u64,
     pub(crate) allow_dynamic_or_kinematic: bool,
+    pub(crate) collision_group: Option<CollisionGroup>,
 }
 
 impl Default for BodySettings {
@@ -206,6 +207,7 @@ impl Default for BodySettings {
             sensor: false,
             user_data: 0,
             allow_dynamic_or_kinematic: false,
+            collision_group: None,
         }
     }
 }
@@ -469,6 +471,21 @@ impl BodySettings {
         self
     }
 
+    /// The body's collision group, fixed for its life: Jolt saves no group in its state, so a
+    /// group change could not be rolled back. Default none: the body collides by its object
+    /// layer alone. See [`CollisionGroup`] for Jolt's rules.
+    ///
+    /// The group filters what the solver collides, in the discrete and the continuous stage and
+    /// for soft bodies. A sensor does not detect a body its group excludes. Scene queries,
+    /// character movement and vehicle wheel casts ignore groups (a wheel's own filter only skips
+    /// its chassis), so a grouped body still blocks characters and is found by queries.
+    /// `docs/bodies.md` (section "Collision groups") has examples.
+    #[must_use]
+    pub fn collision_group(mut self, value: CollisionGroup) -> Self {
+        self.collision_group = Some(value);
+        self
+    }
+
     /// Whether Jolt gives the body motion properties (`BodyCreationSettings::HasMassProperties`):
     /// it is not static, or it may become kinematic or dynamic.
     pub(crate) fn can_move(&self) -> bool {
@@ -658,6 +675,12 @@ impl CreationSettings {
                 ptr,
                 settings.allow_dynamic_or_kinematic,
             );
+        }
+        if let Some(group) = &settings.collision_group {
+            let group = group.to_jph();
+            // SAFETY: `ptr` is live; the table behind `group` is live for the call, and the
+            // settings take their own reference to it (Jolt's `RefConst<GroupFilter>`).
+            unsafe { JPH_BodyCreationSettings_SetCollisionGroup(ptr, &group) };
         }
         if let Some(mass) = settings.mass {
             // Jolt ignores the inertia with `CalculateInertia` (`BodyCreationSettings.cpp`).

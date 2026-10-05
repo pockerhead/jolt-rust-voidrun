@@ -68,9 +68,6 @@ struct ShapeChange {
     motion_type: MotionType,
     can_move: bool,
     sensor: bool,
-    /// Whether the body uses the new shape already, in which case Jolt's `SetShape` changes
-    /// nothing.
-    same_shape: bool,
     /// Whether a dynamic body holds forces or torques added since the last step.
     pending_load: bool,
     bounds: JPH_AABox,
@@ -221,7 +218,7 @@ impl BodyMut<'_> {
         if let Some(mass) = mass {
             require(is_mass(mass), MASS_RULE)?;
         }
-        let before = self.shape_change(shape)?;
+        let before = self.shape_change()?;
         require(
             !before.pending_load,
             "a body with pending forces cannot change shape; reset_forces first",
@@ -271,12 +268,11 @@ impl BodyMut<'_> {
             bounds
         })
         .unwrap_or_else(|| unreachable!("`&mut` keeps the body in the world"));
-        if before.same_shape {
-            // Jolt's `SetShape` left the contact cache alone for the same shape, but the mass
-            // may have changed.
-            // SAFETY: as for `SetShape`.
-            unsafe { JPH_BodyInterface_InvalidateContactCache(self.interface(), id.raw) };
-        }
+        // Jolt's `SetShape` invalidated the contact cache of a changed shape itself and left it
+        // alone for the same shape, whose mass may have changed. The pending request makes the
+        // next simulating step invalidate it either way, also after a restore of a state saved
+        // before that step.
+        self.world.pending_cache_invalidations.insert(id.raw);
         if activation == Activation::Activate {
             self.activate();
         }
@@ -294,7 +290,7 @@ impl BodyMut<'_> {
 
     /// Reads what [`set_shape`](Self::set_shape) checks, under a read lock that is released
     /// before it returns.
-    fn shape_change(&self, shape: &Shape) -> Result<ShapeChange, BodyError> {
+    fn shape_change(&self) -> Result<ShapeChange, BodyError> {
         with_read_locked_body(self.inner.body_lock_interface, self.inner.id, |body| {
             let body = body.as_ptr();
             let mut bounds = NO_BOUNDS;
@@ -313,7 +309,6 @@ impl BodyMut<'_> {
                     motion_type: MotionType::from_jph(JPH_Body_GetMotionType(body)),
                     can_move: JPH_Body_CanBeKinematicOrDynamic(body),
                     sensor: JPH_Body_IsSensor(body),
-                    same_shape: std::ptr::eq(JPH_Body_GetShape(body), shape.as_ptr()),
                     pending_load: dynamic
                         && (Vec3::from_jph(force) != Vec3::ZERO
                             || Vec3::from_jph(torque) != Vec3::ZERO),

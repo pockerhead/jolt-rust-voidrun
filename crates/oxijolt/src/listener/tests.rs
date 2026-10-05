@@ -158,6 +158,7 @@ fn assert_world_still_works(world: &mut PhysicsWorld, scene: &Scene) {
 #[test]
 fn a_panic_in_any_callback_during_a_step_is_resumed_by_step() {
     for callback in [
+        Callback::ContactValidate,
         Callback::ContactAdded,
         Callback::ContactPersisted,
         Callback::ContactRemoved,
@@ -174,6 +175,57 @@ fn a_panic_in_any_callback_during_a_step_is_resumed_by_step() {
         );
         assert_world_still_works(&mut world, &scene);
     }
+}
+
+/// A validation that panics on every call accepts the hit, so the cube still lands on the floor,
+/// and every step that validated resumes the panic.
+#[test]
+fn a_validate_panic_accepts_and_is_resumed_by_step() {
+    let (mut world, scene) = scene();
+    world.set_contact_listener(Some(Arc::new(RejectAll)));
+    set_panic(&world, Callback::ContactValidate as u8);
+    let mut panics = 0;
+    for _ in 0..60 {
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| world.step(DT))) {
+            assert_eq!(message(&*payload), "listener test panic in ContactValidate");
+            panics += 1;
+        }
+    }
+    assert!(panics > 0);
+    let height = world.body(scene.cube).unwrap().position().y;
+    assert!(height > 0.2, "the floor holds the cube: {height}");
+    assert_world_still_works(&mut world, &scene);
+}
+
+/// Rejects every hit.
+struct RejectAll;
+
+impl ContactListener for RejectAll {
+    fn contact_validate(&self, _: &ContactCandidate) -> ValidateResult {
+        ValidateResult::RejectAllContactsForThisBodyPair
+    }
+}
+
+#[test]
+fn without_a_user_listener_validation_accepts_every_pair() {
+    let (mut world, scene) = scene();
+    assert!(world.listeners.context.as_ref().unwrap().listener.is_none());
+    for _ in 0..60 {
+        assert!(world.step(DT).unwrap().is_complete());
+    }
+    let height = world.body(scene.cube).unwrap().position().y;
+    assert!(height > 0.2, "the floor holds the cube: {height}");
+    world.set_contact_listener(Some(Arc::new(RejectAll)));
+    world
+        .body_mut(scene.cube)
+        .unwrap()
+        .set_position(RVec3::new(-1.0, 1.0, 0.0), Activation::Activate)
+        .unwrap();
+    for _ in 0..60 {
+        assert!(world.step(DT).unwrap().is_complete());
+    }
+    let height = world.body(scene.cube).unwrap().position().y;
+    assert!(height < -1.0, "a rejecting listener lets it fall: {height}");
 }
 
 /// A ball dropped on a sleeping cube wakes it inside a step, on a worker thread.

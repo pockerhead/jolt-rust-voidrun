@@ -39,9 +39,10 @@ pub use settle::SettleDetector;
 /// Identifies a ragdoll in the world that created it.
 ///
 /// The raw value is 1 for the first ragdoll of a world, then 2, 3 and so on; ids are never
-/// reused within a world, so the same creation history gives the same ids. It is also the Jolt
-/// collision group of the ragdoll's parts. Using an id with another world returns
-/// [`RagdollError::WrongWorld`].
+/// reused within a world, so the same creation history gives the same ids. Its parts use the
+/// Jolt collision group `2^31 + to_raw()`, above every
+/// [`CollisionGroup::MAX_GROUP_ID`](crate::CollisionGroup::MAX_GROUP_ID). Using an id with
+/// another world returns [`RagdollError::WrongWorld`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RagdollId {
     // Declared first, so ids order by creation before the world.
@@ -310,6 +311,14 @@ pub struct RagdollMut<'w> {
 
 /// What the motion type of a ragdoll part must satisfy: not static.
 const PART_MOTION_RULE: &str = "ragdoll parts are dynamic or kinematic";
+
+/// The parts of a ragdoll use the collision group id `RAGDOLL_GROUP_BASE + RagdollId::to_raw()`,
+/// above every caller group id ([`CollisionGroup::MAX_GROUP_ID`]), so a caller group never
+/// shares an id with a ragdoll: Jolt never lets two bodies with the same group id and different
+/// tables collide.
+///
+/// [`CollisionGroup::MAX_GROUP_ID`]: crate::CollisionGroup::MAX_GROUP_ID
+const RAGDOLL_GROUP_BASE: u32 = 1 << 31;
 
 impl RagdollMut<'_> {
     fn interface(&self) -> *mut JPH_BodyInterface {
@@ -603,8 +612,8 @@ impl PhysicsWorld {
             pose.validate(parts)?;
         }
         let raw = self.next_ragdoll_id;
-        // `u32::MAX` is Jolt's invalid collision group.
-        if raw == u32::MAX {
+        // The group id stays below `u32::MAX`, Jolt's invalid group.
+        if raw > RAGDOLL_GROUP_BASE - 2 {
             return Err(RagdollError::TooManyRagdolls);
         }
         if !self.has_room_for_bodies(parts) {
@@ -620,7 +629,7 @@ impl PhysicsWorld {
             Owned::from_raw(JPH_RagdollSettings_CreateRagdoll(
                 settings.as_ptr(),
                 self.system.as_ptr(),
-                raw,
+                RAGDOLL_GROUP_BASE + raw,
                 0,
             ))
         }
@@ -729,6 +738,7 @@ impl PhysicsWorld {
             .collect();
         for body in &entry.bodies {
             self.ragdoll_bodies.remove(&body.to_raw());
+            self.pending_cache_invalidations.remove(&body.to_raw());
         }
         self.unregister_ragdoll(entry);
         for bounds in &bounds {
@@ -790,6 +800,52 @@ mod tests {
     fn distance_squared(a: RVec3, b: RVec3) -> Real {
         let d = [a.x - b.x, a.y - b.y, a.z - b.z];
         d.iter().map(|value| value * value).sum()
+    }
+
+    /// The last ragdoll id whose group id is below Jolt's invalid group is created, and its
+    /// parts carry that group id; the next is refused before anything changes.
+    #[test]
+    fn ragdoll_group_ids_stop_below_the_invalid_group() {
+        let mut world = PhysicsWorld::new(WorldSettings::default().gravity(Vec3::ZERO)).unwrap();
+        let skeleton = Skeleton::new(&[SkeletonJoint {
+            name: "root",
+            parent: None,
+        }])
+        .unwrap();
+        let shape = Shape::new_sphere(0.2).unwrap();
+        let parts = [RagdollPart {
+            shape: &shape,
+            body: BodySettings::new_dynamic(),
+            joint: None,
+        }];
+        let settings = RagdollSettings::new(&skeleton, &parts).unwrap();
+        world.next_ragdoll_id = RAGDOLL_GROUP_BASE - 2;
+        let id = world
+            .create_ragdoll(&settings, None, Activation::Activate)
+            .unwrap();
+        let part = world.ragdoll(id).unwrap().body_ids()[0];
+        let mut group = JPH_CollisionGroup {
+            groupFilter: std::ptr::null(),
+            groupID: 0,
+            subGroupID: 0,
+        };
+        // SAFETY: the body interface is the live world's and the part exists; `group` is a live
+        // local that joltc overwrites with a borrowed table pointer, which is not used.
+        unsafe {
+            JPH_BodyInterface_GetCollisionGroup(
+                world.body_interface.as_ptr(),
+                part.to_raw(),
+                &mut group,
+            )
+        };
+        assert_eq!(group.groupID, u32::MAX - 1);
+
+        let (epoch, bodies) = (world.structure_epoch, world.body_count());
+        assert_eq!(
+            world.create_ragdoll(&settings, None, Activation::Activate),
+            Err(RagdollError::TooManyRagdolls)
+        );
+        assert_eq!((world.structure_epoch, world.body_count()), (epoch, bodies));
     }
 
     #[test]

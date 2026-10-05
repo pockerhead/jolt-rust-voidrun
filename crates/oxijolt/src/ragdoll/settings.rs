@@ -37,17 +37,6 @@ impl JoltObject for JPH_RagdollSettings {
     }
 }
 
-/// A group filter table, owned with the one reference `JPH_GroupFilterTable_Create` returns.
-/// Every part's collision group holds its own reference.
-impl JoltObject for JPH_GroupFilterTable {
-    unsafe fn destroy(ptr: *mut Self) {
-        // SAFETY: the owner holds one reference (trait contract). `GroupFilterTable` derives from
-        // `GroupFilter` with single inheritance, as joltc's header notes, so the pointer is the
-        // `GroupFilter` that `Release` acts on.
-        unsafe { JPH_GroupFilter_Destroy(ptr.cast()) };
-    }
-}
-
 /// One joint of a [`Skeleton`]: its name and the index of its parent joint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SkeletonJoint<'a> {
@@ -442,6 +431,9 @@ fn validate_parts(skeleton: &Skeleton, parts: &[RagdollPart<'_>]) -> Result<(), 
         // Jolt's `Ragdoll` overwrites every part's user data with its own (`Ragdoll.cpp:428`).
         if part.body.user_data != 0 {
             return invalid("ragdoll parts take no user data: Jolt gives every part the ragdoll's");
+        }
+        if part.body.collision_group.is_some() {
+            return invalid("ragdoll parts use the ragdoll's own collision group");
         }
         // SAFETY: the shape is live for the call; the getter only reads it.
         if unsafe { JPH_Shape_MustBeStatic(part.shape.as_ptr()) } {

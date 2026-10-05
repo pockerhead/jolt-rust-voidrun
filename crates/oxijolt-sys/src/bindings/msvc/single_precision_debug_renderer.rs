@@ -11594,6 +11594,28 @@ unsafe extern "C" {
         pair: *const JPH_SubShapeIDPair,
     ) -> JPH_SubShapeID;
 }
+#[repr(C)]
+#[derive(Debug)]
+pub struct JPH_ContactListener2 {
+    _unused: [u8; 0],
+}
+unsafe extern "C" {
+    pub fn JPH_ContactListener2_SetProcs(procs: *const JPH_ContactListener_Procs);
+}
+unsafe extern "C" {
+    pub fn JPH_ContactListener2_Create(
+        userData: *mut ::std::os::raw::c_void,
+    ) -> *mut JPH_ContactListener2;
+}
+unsafe extern "C" {
+    pub fn JPH_ContactListener2_Destroy(listener: *mut JPH_ContactListener2);
+}
+unsafe extern "C" {
+    pub fn JPH_PhysicsSystem_SetContactListener2(
+        system: *mut JPH_PhysicsSystem,
+        listener: *mut JPH_ContactListener2,
+    );
+}
 pub const JPH_SoftBodyValidateResult_AcceptContact: JPH_SoftBodyValidateResult = 0;
 pub const JPH_SoftBodyValidateResult_RejectContact: JPH_SoftBodyValidateResult = 1;
 pub const _JPH_SoftBodyValidateResult_Force32: JPH_SoftBodyValidateResult = 2147483647;

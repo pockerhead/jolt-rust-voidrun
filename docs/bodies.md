@@ -70,6 +70,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 order, so the result does not depend on the broad phase's history. A restore puts bodies to sleep or
 wakes them without events.
 
+`invalidate_contact_cache` makes Jolt collide a body's pairs afresh in the next step that simulates,
+instead of reusing their cached contacts, so a contact listener whose `contact_validate` answer
+changed is asked again ([events.md](events.md#validating-contacts)). It also wakes the body. The
+request waits for a step in which some body is awake or a vehicle exists, and a `WorldState` saved
+before that holds it.
+
 ## Sensors
 
 `BodySettings::sensor(true)` makes a trigger: Jolt reports its contacts and resolves none of them.
@@ -111,6 +117,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `BodySettings::user_data` stores a `u64` of the caller's in the body, for example the key of its
 entity in an ECS, and `BodyRef::user_data` reads it back. It is fixed at creation, so no restore can
 change it.
+
+## Collision groups
+
+A `CollisionGroup` filters which bodies the solver lets collide, beyond their object layers: for a
+ragdoll that does not collide with itself, a chain whose neighbouring links overlap, or a vehicle
+that ignores its driver. Build a `GroupFilterTable` of sub groups with a `GroupFilterTableBuilder`,
+which says which pairs of sub groups collide; once built, a table never changes and bodies share it.
+Give a body its group at creation with `BodySettings::collision_group` (or
+`SoftBodySettings::collision_group`).
+
+```rust
+use oxijolt::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    let floor = Shape::new_box(Vec3::new(10.0, 0.5, 10.0))?;
+    world.create_body(&floor, &BodySettings::new_static().position(RVec3::new(0.0, -0.5, 0.0)))?;
+
+    // One sub group: bodies of the same group id never collide with each other.
+    let table = GroupFilterTableBuilder::new(1)?.build();
+    let crew = CollisionGroup::new(&table, 1, 0)?;
+    let cube = Shape::new_box(Vec3::new(0.5, 0.5, 0.5))?;
+    let at = |y| BodySettings::new_dynamic().position(RVec3::new(0.0, y, 0.0));
+    world.create_body(&cube, &at(0.5).collision_group(crew.clone()))?;
+    let upper = world.create_body(&cube, &at(1.6).collision_group(crew))?;
+    for _ in 0..90 {
+        assert!(world.step(1.0 / 60.0)?.is_complete());
+    }
+    // The upper cube fell through the lower one onto the floor.
+    assert!(world.body(upper)?.position().y < 0.6);
+    Ok(())
+}
+```
+
+Jolt's rules for two bodies that both have a group (`GroupFilterTable::CanCollide`):
+- different group ids collide;
+- the same group id with different tables never collides;
+- within one table the same sub group never collides, and different sub groups collide unless the
+  table disables the pair.
+
+A body without a group collides by its object layer alone. `CollisionGroup::can_collide` answers by
+the same rules. Caller group ids go up to `CollisionGroup::MAX_GROUP_ID` (2^31 - 1); a table has at
+most `GroupFilterTable::MAX_SUB_GROUPS` sub groups ([limits.md](limits.md#group-filter-table-size)).
+
+Where groups apply: the discrete and continuous collision of rigid bodies (`Body.inl:74-76`,
+`PhysicsSystem.cpp:1992`), soft bodies against rigid bodies (`SoftBodyMotionProperties.cpp:148`), and
+sensors, which do not detect a body their group excludes. Scene queries, character movement and
+vehicle wheel casts do not look at groups (a wheel's own filter skips only its chassis): a grouped
+body is still found by a ray cast and still blocks a character. A character's inner body has no
+group.
+
+The group is fixed at creation: Jolt saves no group in its state (`Body::SaveState`,
+`Body.cpp:296-324`), so a change could not be rolled back. Ragdolls give their parts the group id
+`2^31 + RagdollId::to_raw()`, above every caller group id, with a table in which no two parts of one
+ragdoll collide; a ragdoll part cannot take a caller group. Two ragdolls of one settings object
+share the table and still collide with each other, because their group ids differ.
 
 ## Locked axes
 
@@ -162,8 +224,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Fixed at creation
 
-The sensor flag, user data, locked axes and movement capability have no setters, so a rollback
-never has to restore them. Each of these programs fails to compile only because the setter does not
+The sensor flag, user data, locked axes, movement capability and collision group have no setters, so
+a rollback never has to restore them. Each of these programs fails to compile only because the setter does not
 exist:
 
 ```rust,compile_fail,E0599

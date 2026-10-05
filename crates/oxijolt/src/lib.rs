@@ -147,6 +147,7 @@
 
 mod body;
 mod character;
+mod collision_group;
 mod constraint;
 #[cfg(feature = "debug-renderer")]
 mod debug;
@@ -178,9 +179,11 @@ pub use body::{
     MotionType,
 };
 pub use character::{
-    CharacterContact, CharacterId, CharacterMut, CharacterRef, CharacterSettings, CharacterState,
-    ExtendedUpdateSettings, GroundState, InnerBody,
+    BodyVelocity, CharacterContact, CharacterContactKey, CharacterContactListener,
+    CharacterContactSettings, CharacterId, CharacterMut, CharacterRef, CharacterSettings,
+    CharacterState, ExtendedUpdateSettings, GroundState, InnerBody,
 };
+pub use collision_group::{CollisionGroup, GroupFilterTable, GroupFilterTableBuilder};
 pub use constraint::{
     AnyConstraintId, ConeConstraint, ConeConstraintSettings, ConstraintId, ConstraintKind,
     ConstraintMut, ConstraintRef, ConstraintSettings, ConstraintSpace, ConstraintType,
@@ -196,17 +199,18 @@ pub use constraint::{
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, ConstraintError, ContactSettingsError, HullError, MeshError,
-    QueryError, RagdollError, ShapeError, SoftBodyError, StateError, StepError, ThinTrianglesError,
-    VehicleError, WorldError,
+    BodyError, CharacterError, CollisionGroupError, ConstraintError, ContactSettingsError,
+    HullError, MeshError, QueryError, RagdollError, ShapeError, SoftBodyError, StateError,
+    StepError, ThinTrianglesError, VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
 pub use layers::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use listener::{
-    ActivationEvent, ContactEvent, ContactListener, ContactManifold, ContactPoint, ContactSettings,
-    ContactSettingsRejection, EventSettings, SoftBodyContactSettings, SoftBodyContacts,
-    SoftBodyValidateResult, SoftBodyValidation, SoftBodyVertexContact, SubShapeIdPair, WorldEvents,
+    ActivationEvent, ContactCandidate, ContactEvent, ContactListener, ContactManifold,
+    ContactPoint, ContactSettings, ContactSettingsRejection, EventSettings,
+    SoftBodyContactSettings, SoftBodyContacts, SoftBodyValidateResult, SoftBodyValidation,
+    SoftBodyVertexContact, SubShapeIdPair, ValidateResult, WorldEvents,
 };
 pub use material::PhysicsMaterial;
 pub use math::{Quat, RVec3, Real, Vec3};

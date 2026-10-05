@@ -276,6 +276,40 @@ impl fmt::Display for ContactSettingsError {
 
 impl std::error::Error for ContactSettingsError {}
 
+/// Why a [`GroupFilterTableBuilder`](crate::GroupFilterTableBuilder) or a
+/// [`CollisionGroup`](crate::CollisionGroup) refused a value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CollisionGroupError {
+    /// Jolt's one-time global initialisation failed.
+    InitFailed,
+    /// A table needs at least one sub group.
+    NoSubGroups,
+    /// More sub groups than [`GroupFilterTable::MAX_SUB_GROUPS`](crate::GroupFilterTable::MAX_SUB_GROUPS).
+    TooManySubGroups(u32),
+    /// A sub group at or beyond the table's sub-group count.
+    SubGroupOutOfRange(u32),
+    /// A pair of sub groups that is one sub group, which never collides with itself.
+    SameSubGroup(u32),
+    /// A group id above [`CollisionGroup::MAX_GROUP_ID`](crate::CollisionGroup::MAX_GROUP_ID).
+    GroupIdOutOfRange(u32),
+}
+
+impl fmt::Display for CollisionGroupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InitFailed => f.write_str("Jolt initialisation failed"),
+            Self::NoSubGroups => f.write_str("a group filter table needs a sub group"),
+            Self::TooManySubGroups(count) => write!(f, "too many sub groups: {count}"),
+            Self::SubGroupOutOfRange(id) => write!(f, "sub group {id} is not in the table"),
+            Self::SameSubGroup(id) => write!(f, "sub group {id} paired with itself"),
+            Self::GroupIdOutOfRange(id) => write!(f, "group id {id} is out of range"),
+        }
+    }
+}
+
+impl std::error::Error for CollisionGroupError {}
+
 /// Why a scene query could not run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -699,6 +733,8 @@ pub enum Error {
     SoftBody(SoftBodyError),
     /// A [`StateError`].
     State(StateError),
+    /// A [`CollisionGroupError`].
+    CollisionGroup(CollisionGroupError),
 }
 
 /// `Result<T>` is `Result<T, oxijolt::error::Error>`; the second parameter keeps `Result<T, E>`
@@ -777,6 +813,12 @@ impl From<StateError> for Error {
     }
 }
 
+impl From<CollisionGroupError> for Error {
+    fn from(error: CollisionGroupError) -> Self {
+        Self::CollisionGroup(error)
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -792,6 +834,7 @@ impl fmt::Display for Error {
             Self::Constraint(error) => fmt::Display::fmt(error, f),
             Self::SoftBody(error) => fmt::Display::fmt(error, f),
             Self::State(error) => fmt::Display::fmt(error, f),
+            Self::CollisionGroup(error) => fmt::Display::fmt(error, f),
         }
     }
 }
@@ -811,6 +854,7 @@ impl std::error::Error for Error {
             Self::Constraint(error) => error.source(),
             Self::SoftBody(error) => error.source(),
             Self::State(error) => error.source(),
+            Self::CollisionGroup(error) => error.source(),
         }
     }
 }

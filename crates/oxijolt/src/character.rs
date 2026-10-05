@@ -24,10 +24,14 @@ use crate::world::WorldTag;
 use crate::{BodyId, ObjectLayer, RVec3, Shape, SubShapeId, Vec3};
 
 mod handle;
+mod listener;
 mod settings;
 mod update;
 
 pub use handle::{CharacterMut, CharacterRef};
+pub use listener::{
+    BodyVelocity, CharacterContactKey, CharacterContactListener, CharacterContactSettings,
+};
 pub use settings::{CharacterSettings, ExtendedUpdateSettings};
 
 /// What the shape of a character's inner body must satisfy: a finite inverse mass and inertia
