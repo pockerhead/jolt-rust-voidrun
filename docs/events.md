@@ -221,8 +221,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 - Body order: in the discrete stage `body1` has the higher motion type (dynamic over kinematic over
   static), equal types by lower id (`PhysicsSystem.cpp:1075-1077`); in the continuous stage
-  (`MotionQuality::LinearCast`) `body1` is the body being cast and the points are where it is at the
-  time of impact (`PhysicsSystem.cpp:1864-1890`). Contact events and `SubShapeIdPair` order by id
+  (`MotionQuality::LinearCast`) `body1` is the body being cast, and both points are where the sweep puts
+  `body1` at the time of impact as if `body2` did not move: Jolt shifts them by `body2`'s own motion
+  only after validation (`PhysicsSystem.cpp:1864-1930`). Contact events and `SubShapeIdPair` order by id
   instead.
 - `AcceptContact` and `RejectContact` decide one hit and ask again for the pair's next hit;
   `AcceptAllContactsForThisBodyPair` and `RejectAllContactsForThisBodyPair` end the asking for that

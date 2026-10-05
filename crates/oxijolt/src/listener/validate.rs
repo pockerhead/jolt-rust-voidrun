@@ -30,9 +30,11 @@ pub struct ContactCandidate {
     /// The sub-shape of `body2` that is hit.
     pub sub_shape2: SubShapeId,
     /// The deepest point on `body1`'s surface, in world space (metres). In the continuous stage
-    /// it is where `body1` is at the time of impact.
+    /// it is where `body1` is at the time of impact, computed as if `body2` did not move.
     pub point_on1: RVec3,
-    /// The deepest point on `body2`'s surface, in world space (metres).
+    /// The deepest point on `body2`'s surface, in world space (metres). In the continuous stage
+    /// `body2` is taken at its pose at the start of the step; Jolt shifts both points by
+    /// `body2`'s motion only after validation.
     pub point_on2: RVec3,
     /// The direction along which `body2` moves out of `body1`, in world space; only the direction
     /// is meaningful, not the length.
