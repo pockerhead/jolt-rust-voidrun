@@ -396,6 +396,13 @@ unit tests check each chain at its boundary, the two counterexamples above, NaN 
 replay Jolt's arithmetic in `f32` in source order, reversed and with fused multiply-adds for 200 000
 seeded inputs: every accepted input stays finite.
 
+The chains overlap: the density chain is part of the buoyant and drag chains, the new-velocity rule
+contains the lever and the buoyant velocity change, and the drag chain holds the relative velocity
+twice. Switching off one rule at a time, the replay overflowed only without the squared drag rule or
+the squared angular drag rule; every other rule is covered by a later one and is kept so that the
+error names the first product that would overflow. None of these switches made Jolt assert in the
+buoyancy tests of the `asserts` build, whose inputs stay far from the bounds.
+
 ### Policy and clamp
 
 Only the buoyant velocity change is bounded by policy, like an impulse's:
