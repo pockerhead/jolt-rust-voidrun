@@ -291,7 +291,7 @@ fn a_soft_body_reports_a_sensor() {
 }
 
 #[test]
-fn a_deactivated_sensor_detects_nothing() {
+fn a_deactivated_sensor_does_not_see_a_sleeping_body() {
     let mut world = world(GRAVITY, 1);
     world.set_event_settings(EventSettings::default().contacts(true));
     add_floor(&mut world);
@@ -314,4 +314,36 @@ fn a_deactivated_sensor_detects_nothing() {
     world.body_mut(sensor).unwrap().activate();
     let events = contact_events(&mut world, 2);
     assert_eq!(contact_kinds(&events, sensor, cube), "a");
+}
+
+#[test]
+fn an_awake_body_still_triggers_a_deactivated_sensor() {
+    let mut world = world(GRAVITY, 1);
+    world.set_event_settings(every_event());
+    let sensor = world
+        .create_body(
+            &Shape::new_box(Vec3::new(1.0, 1.0, 1.0)).unwrap(),
+            &BodySettings::new_kinematic().sensor(true),
+        )
+        .unwrap();
+    world.body_mut(sensor).unwrap().deactivate().unwrap();
+    let cube = add_cube(&mut world, RVec3::new(0.0, 3.0, 0.0));
+    world.take_events();
+    let mut events = Vec::new();
+    for _ in 0..90 {
+        events.extend(contact_events(&mut world, 1));
+        assert!(world.body(sensor).unwrap().is_sleeping());
+    }
+    let contacts = sensor_contacts(&events, sensor, cube);
+    let kinds = contact_kinds(&events, sensor, cube);
+    assert!(kinds.starts_with("ap") && kinds.ends_with("pr"), "{kinds}");
+    assert!(kinds[1..kinds.len() - 1].chars().all(|kind| kind == 'p'));
+    assert!(contacts
+        .iter()
+        .filter_map(|(_, settings)| *settings)
+        .all(|settings| settings.is_sensor()));
+    // No response: the cube fell through at free-fall speed.
+    let body = world.body(cube).unwrap();
+    assert!(body.position().y < -5.0, "{:?}", body.position());
+    assert!(body.linear_velocity().y < -14.0);
 }

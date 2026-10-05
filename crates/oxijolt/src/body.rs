@@ -413,8 +413,9 @@ impl BodySettings {
     /// A sensor's contacts arrive as [`ContactEvent`]s whose
     /// [`ContactSettings::is_sensor`] is true. A static sensor detects only awake bodies and
     /// loses a contact when the body falls asleep; an awake kinematic or dynamic sensor also
-    /// detects sleeping bodies, and never falls asleep itself, but one put to sleep with
-    /// [`BodyMut::deactivate`] detects nothing until it is woken. A kinematic body is detected by
+    /// detects sleeping bodies, and never falls asleep itself. One put to sleep with
+    /// [`BodyMut::deactivate`] detects awake bodies only, like a static sensor, and stays asleep
+    /// while they pass through it. A kinematic body is detected by
     /// static and kinematic sensors; a kinematic sensor does not detect static bodies.
     ///
     /// A character is never blocked by a sensor but lists it among its contacts

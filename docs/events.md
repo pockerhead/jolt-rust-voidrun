@@ -78,8 +78,11 @@ Which pairs Jolt tests (`Body::sFindCollidingPairsCanCollide`, `Body.inl:30-44`,
 - Jolt tests a pair only when one of its bodies is awake (`PhysicsSystem.cpp:1052-1053`). A static
   sensor therefore detects awake bodies only and loses the contact (a `Removed` event) when the body
   falls asleep. An awake kinematic or dynamic sensor also detects sleeping bodies; a sensor never
-  falls asleep on its own (`Body::UpdateSleepStateInternal`, `Body.cpp:146-148`), but one
-  deactivated by hand detects nothing until it is woken.
+  falls asleep on its own (`Body::UpdateSleepStateInternal`, `Body.cpp:146-148`). One deactivated
+  by hand leaves the active set: it stops testing pairs itself, but an awake body still pairs with
+  it (`Body.inl:50-70`), so it detects awake bodies like a static sensor and stays asleep, because
+  a sensor contact creates no contact constraint that would wake it
+  (`ContactConstraintManager.cpp:1159-1197`). Deactivation does not turn a sensor off.
 
 Other parts of Jolt treat sensors their own way:
 - Continuous collision detection: a sensor cannot use `MotionQuality::LinearCast`
