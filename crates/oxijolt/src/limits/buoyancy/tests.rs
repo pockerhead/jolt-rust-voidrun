@@ -1,4 +1,7 @@
 use super::*;
+use crate::limits::{
+    MAX_ANGULAR_VELOCITY, MAX_LINEAR_VELOCITY, MAX_MASS, MAX_SHAPE_EXTENT, MIN_MASS,
+};
 
 /// A unit cube of 1 kg, half under water, at rest, under Earth gravity at 60 Hz.
 fn cube() -> BuoyancyInputs {
@@ -129,32 +132,37 @@ fn each_chain_has_its_boundary() {
             )
         },
     );
-    // Quadratic drag at 1e6 m/s relative velocity; its velocity change is squared.
+    let dt = f64::from(cube().delta_time);
+    // Quadratic drag at 1e6 m/s relative velocity: its velocity change
+    // `0.5 · b / V · Cd · ‖q‖ · dt · ‖vrel‖²` is squared.
     assert_boundary(
         BuoyancyRule::Drag,
         |i, drag| {
             i.fluid_velocity = Vec3::new(1.0e6, 0.0, 0.0);
             i.linear_drag = drag;
         },
-        around(h2, 1.0e12 * 3.0_f64.sqrt()),
+        around(h2, 0.5 * 3.0_f64.sqrt() * dt * 1.0e12),
     );
-    // Angular drag on a 1e6 kg body whose inverse inertia is 6: the change is squared.
+    // Angular drag on a 1e6 kg body whose inverse inertia is 6, spinning at 1 rad/s: its change
+    // `λ · Cda · Vs / V · dt · l² / invM · ‖ω‖` is squared.
     assert_boundary(
         BuoyancyRule::AngularDrag,
         |i, drag| {
             i.inverse_mass = 1.0e-6;
+            i.angular_velocity = Vec3::new(0.0, 1.0, 0.0);
             i.angular_drag = drag;
         },
-        around(h2, 6.0e6),
+        around(h2, 6.0 * 0.5 * dt * 1.0e6),
     );
-    // A light body whose inverse inertia multiplies the buoyant impulse at a 1 m lever.
+    // A light body whose inverse inertia turns the buoyant impulse `b · Vs / V · |g| · dt / invM`
+    // at a 1 m lever.
     assert_boundary(
         BuoyancyRule::Lever,
         |i, inverse_inertia| {
             i.center_of_buoyancy = Vec3::new(1.0, 0.0, 0.0);
             i.largest_inverse_inertia = inverse_inertia;
         },
-        around(h2, f64::from(9.81_f32)),
+        around(h2, 0.5 * f64::from(9.81_f32) * dt),
     );
     // A spin close to the squared headroom, with no lever to speak of.
     assert_boundary(
@@ -524,14 +532,19 @@ fn accepted_inputs_stay_finite_in_any_association() {
     assert!(largest > 1.0e30, "{largest}");
 }
 
-/// The largest inverse inertia that `check` accepts with the rest of `inputs`, which it accepts.
-fn largest_accepted_inverse_inertia(inputs: &BuoyancyInputs) -> f32 {
-    let accepts = |lambda: f64| {
+/// The largest value of the input that `set` writes that `check` accepts with the rest of
+/// `inputs`, which it accepts with `start`; every rule refuses `1e38` in any of these inputs.
+fn largest_accepted(
+    inputs: &BuoyancyInputs,
+    start: f32,
+    set: impl Fn(&mut BuoyancyInputs, f32),
+) -> f32 {
+    let accepts = |value: f64| {
         let mut probe = *inputs;
-        probe.largest_inverse_inertia = lambda as f32;
+        set(&mut probe, value as f32);
         check(&probe).is_ok()
     };
-    let (mut low, mut high) = (f64::from(inputs.largest_inverse_inertia), 1.0e30);
+    let (mut low, mut high) = (f64::from(start), 1.0e38);
     assert!(accepts(low) && !accepts(high));
     for _ in 0..80 {
         let middle = if low > 0.0 {
@@ -586,23 +599,118 @@ fn rotated_anisotropic_inertia_at_the_bound_stays_finite() {
             continue;
         }
         cases += 1;
-        let lambda = largest_accepted_inverse_inertia(&inputs);
+        let lambda = largest_accepted(&inputs, inputs.largest_inverse_inertia, |i, lambda| {
+            i.largest_inverse_inertia = lambda;
+        });
         inputs.largest_inverse_inertia = lambda;
-        let mut moments = [0; 3].map(|_| lambda * rng.unit() as f32);
-        moments[(rng.next() % 3) as usize] = lambda;
-        let rotation = seeded_rotation(&mut rng);
-        for order in [Order::Source, Order::Reversed, Order::Fused] {
-            let inertia = world_inverse_inertia(rotation, moments, order);
+        let inertias = seeded_inertia(&mut rng, lambda);
+        for (order, inertia) in [Order::Source, Order::Reversed, Order::Fused]
+            .into_iter()
+            .zip(inertias)
+        {
             let value = replay_with_inertia(&inputs, inertia, order);
-            assert!(
-                value.is_some(),
-                "case {cases} {order:?}: {inputs:?} {moments:?}"
-            );
+            assert!(value.is_some(), "case {cases} {order:?}: {inputs:?}");
             largest = largest.max(value.unwrap_or_default());
         }
     }
     // The angular velocity's square reaches the squared headroom's scale.
     assert!(largest > 1.0e35, "{largest}");
+}
+
+/// Seeded rotated world inverse inertia with the largest principal moment `lambda` on a seeded
+/// axis, in `order`.
+fn seeded_inertia(rng: &mut SplitMix64, lambda: f32) -> [[Vec3; 3]; 3] {
+    let mut moments = [0; 3].map(|_| lambda * rng.unit() as f32);
+    moments[(rng.next() % 3) as usize] = lambda;
+    let rotation = seeded_rotation(rng);
+    [Order::Source, Order::Reversed, Order::Fused]
+        .map(|order| world_inverse_inertia(rotation, moments, order))
+}
+
+#[test]
+fn drag_coefficients_at_their_bound_stay_finite() {
+    // Accepted inputs with the largest linear or angular drag coefficient the rules allow: the
+    // lengths Jolt squares sit at the squared rules' bound, and every order stays finite.
+    let mut rng = SplitMix64(0xD7A6_B0B5);
+    let (mut cases, mut largest) = (0, 0.0_f32);
+    while cases < 4000 {
+        let mut inputs = seeded_inputs(&mut rng);
+        if check(&inputs).is_err() {
+            continue;
+        }
+        cases += 1;
+        if cases % 2 == 0 {
+            inputs.linear_drag = largest_accepted(&inputs, inputs.linear_drag, |i, drag| {
+                i.linear_drag = drag;
+            });
+        } else {
+            inputs.angular_drag = largest_accepted(&inputs, inputs.angular_drag, |i, drag| {
+                i.angular_drag = drag;
+            });
+        }
+        let inertias = seeded_inertia(&mut rng, inputs.largest_inverse_inertia);
+        for (order, inertia) in [Order::Source, Order::Reversed, Order::Fused]
+            .into_iter()
+            .zip(inertias)
+        {
+            let value = replay_with_inertia(&inputs, inertia, order);
+            assert!(value.is_some(), "case {cases} {order:?}: {inputs:?}");
+            largest = largest.max(value.unwrap_or_default());
+        }
+    }
+    // The squares of the drag changes reach the squared headroom's scale.
+    assert!(largest > 1.0e35, "{largest}");
+}
+
+/// A box of half extent `a` and `mass` in `cube()`'s fluid (Jolt's default drags), half under
+/// water, moving at `velocity` and spinning at `spin`: what Jolt gives the check.
+fn half_submerged_box(a: f32, mass: f32, velocity: Vec3, spin: Vec3) -> BuoyancyInputs {
+    let side = 2.0 * a;
+    let volume = side * side * side;
+    BuoyancyInputs {
+        total_volume: volume,
+        submerged_volume: 0.5 * volume,
+        center_of_buoyancy: Vec3::new(0.0, -0.5 * a, 0.0),
+        inverse_mass: 1.0 / mass,
+        // A solid box's moment of inertia is `mass · side² / 6` about every axis.
+        largest_inverse_inertia: 6.0 / (mass * side * side),
+        linear_velocity: velocity,
+        angular_velocity: spin,
+        bounds_size: Vec3::new(side, side, side),
+        ..cube()
+    }
+}
+
+#[test]
+fn large_calm_bodies_are_accepted() {
+    // Every box within the shape extent and mass bounds, at rest or at both velocity bounds,
+    // half under default water. Among them the boxes of half extent 152 m at the mass bound,
+    // 376 m at 1e4 kg and 591 m at 1e3 kg, which a rule comparing whole factor chains with the
+    // squared headroom would refuse although their angular drag change is at most 0.03 rad/s.
+    let moving = (
+        Vec3::new(MAX_LINEAR_VELOCITY, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, MAX_ANGULAR_VELOCITY),
+    );
+    let mut boxes = vec![(152.0, MAX_MASS), (376.0, 1.0e4), (591.0, 1.0e3)];
+    for size in 0..=12 {
+        for mass in 0..=9 {
+            let a = 0.005 * (MAX_SHAPE_EXTENT / 0.005).powf(size as f32 / 12.0);
+            let mass = MIN_MASS * (MAX_MASS / MIN_MASS).powf(mass as f32 / 9.0);
+            boxes.push((a.min(MAX_SHAPE_EXTENT), mass.min(MAX_MASS)));
+        }
+    }
+    for (a, mass) in boxes {
+        for (velocity, spin) in [(Vec3::ZERO, Vec3::ZERO), moving] {
+            let inputs = half_submerged_box(a, mass, velocity, spin);
+            assert_eq!(check(&inputs), Ok(()), "{a} m, {mass} kg: {inputs:?}");
+            for order in [Order::Source, Order::Reversed, Order::Fused] {
+                assert!(
+                    replay(&inputs, order).is_some(),
+                    "{a} m, {mass} kg {order:?}"
+                );
+            }
+        }
+    }
 }
 
 #[test]

@@ -7,7 +7,7 @@
 use super::{f64_length, F32_PRODUCT_HEADROOM, F32_UNIT_ROUNDOFF, MAX_VELOCITY_CHANGE};
 use crate::Vec3;
 
-/// Bound of a product Jolt squares afterwards (a length it compares or a velocity it clamps):
+/// Bound of a length Jolt squares afterwards (a length it compares or a velocity it clamps):
 /// its square stays at most 1e36 and three of them sum below `f32::MAX`.
 const SQUARED_HEADROOM: f64 = 1.0e18;
 
@@ -131,6 +131,11 @@ pub(crate) fn check(inputs: &BuoyancyInputs) -> Result<(), BuoyancyRule> {
     let r = f64_length(i.center_of_buoyancy);
     let v = f64_length(i.linear_velocity);
     let w = f64_length(i.angular_velocity);
+    // The buoyant velocity change `‖Jb‖ · invM`.
+    let change = f(i.buoyancy) * f(i.submerged_volume) / f(i.total_volume)
+        * f(i.gravity_factor).abs()
+        * f64_length(i.gravity)
+        * f(i.delta_time);
     let density = [f(i.buoyancy), 1.0 / f(i.total_volume), 1.0 / inverse_mass];
     require(within(chain(&density), h), Density)?;
 
@@ -165,12 +170,18 @@ pub(crate) fn check(inputs: &BuoyancyInputs) -> Result<(), BuoyancyRule> {
         relative,
         relative,
     ]);
-    let drag_bound = chain(&drag);
-    require(within(drag_bound, h), Drag)?;
-    require(within(drag_bound * inverse_mass.max(1.0), h2), Drag)?;
+    require(within(chain(&drag) * inverse_mass.max(1.0), h), Drag)?;
+    // The length Jolt squares, `‖Jd · invM‖ <= 0.5 · b / V · Cd · ‖q‖ · dt · ‖vrel‖²`.
+    let drag_change = 0.5 * f(i.buoyancy) / f(i.total_volume)
+        * f(i.linear_drag)
+        * facing
+        * f(i.delta_time)
+        * relative
+        * relative;
+    require(within(drag_change, h2), Drag)?;
 
     let width = (s[0] + s[1] + s[2]) / 3.0;
-    let angular_drag = chain(&[
+    let angular_factor = [
         f(i.angular_drag),
         f(i.submerged_volume),
         1.0 / f(i.total_volume),
@@ -178,28 +189,22 @@ pub(crate) fn check(inputs: &BuoyancyInputs) -> Result<(), BuoyancyRule> {
         width,
         width,
         1.0 / inverse_mass,
-    ]);
-    require(within(angular_drag, h), AngularDrag)?;
-    require(within(angular_drag * w.max(1.0), h), AngularDrag)?;
+    ];
     require(
-        within(angular_drag * w.max(1.0) * lambda.max(1.0), h2),
+        within(chain(&angular_factor) * w.max(1.0) * lambda.max(1.0), h),
         AngularDrag,
     )?;
+    // The length Jolt squares, `‖I⁻¹ K ω‖ <= λ · |K| · ‖ω‖`.
+    let angular_drag_change = lambda * angular_factor.iter().product::<f64>() * w;
+    require(within(angular_drag_change, h2), AngularDrag)?;
 
-    // Jolt clamps the drag impulse to the body's own momentum, `|v| / (1/m)`.
-    let impulse = buoyant_bound + v / inverse_mass;
-    let lever = chain(&[lambda, r, impulse]);
+    // Jolt clamps the drag impulse to the body's own momentum, `‖v‖ / invM`.
+    let impulse_bound = buoyant_bound + v / inverse_mass;
+    require(within(chain(&[lambda, r, impulse_bound]), h), Lever)?;
+    let lever = lambda * r * (change + v) / inverse_mass;
     require(within(lever, h2), Lever)?;
     require(within(2.0 * w + lever, h2), NewVelocity)?;
-    require(
-        within(2.0 * v + buoyant_bound * inverse_mass.max(1.0), h2),
-        NewVelocity,
-    )?;
-
-    let change = f(i.buoyancy) * f(i.submerged_volume) / f(i.total_volume)
-        * f(i.gravity_factor).abs()
-        * f64_length(i.gravity)
-        * f(i.delta_time);
+    require(within(2.0 * v + change, h2), NewVelocity)?;
     require(
         within(change, f(MAX_VELOCITY_CHANGE)),
         BuoyantVelocityChange,

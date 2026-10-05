@@ -372,39 +372,61 @@ scalar product, and a factor of 0 hides nothing in `f32`: `inf · 0` is NaN. A b
 product is therefore not enough (gravity factor 0 with `ρ = 8.75e36`, a 20 m box of `MAX_MASS`,
 makes Jolt's `-ρ · Vs · 0` NaN while the exact `Jb` is 0). For each chain of factors `f₁ … fₙ` the
 rule bounds `P = Π max(1, |fᵢ|)`, divisions entering as reciprocals. `P` bounds every sub-product in
-every order and association, also when some factor is 0. A rule accepts when `P · (1 + 64u)` is
-at most `H = 1e37`, or `H₂ = 1e18` where Jolt squares the result afterwards (a length it compares,
-a velocity it clamps), so that the square stays at most 1e36 and three of them sum below
-`f32::MAX`. Sums of up to three bounded terms and Jolt's 3 × 3 products with entries at most the
-largest principal inverse inertia `λ` stay below `f32::MAX` with these margins. The chains:
+every order and association, also when some factor is 0. A chain rule accepts when `P · (1 + 64u)`
+is at most `H = 1e37`, so that sums of up to three bounded terms and Jolt's 3 × 3 products with
+entries at most the largest principal inverse inertia `λ` stay below `f32::MAX`. The chains:
 
-- density: `b, 1/V, 1/invM` within `H`;
-- buoyant impulse: the density chain with `Vs, gf, dt` and the largest component of `g` within `H`,
-  and the same times `invM`;
-- relative velocity: `‖ω‖, ‖r‖` within `H`, and `‖vf‖ + ‖v‖ + ‖ω‖ · ‖r‖` within `H₂`;
-- area: `‖vrel‖, ‖q‖` within `H`;
-- drag: the density chain with `0.5, Cd, ‖q‖, dt, ‖vrel‖, ‖vrel‖` within `H`, and that times `invM`
-  within `H₂`;
-- angular drag: `Cda, Vs, 1/V, dt, l, l, 1/invM` within `H`, times `‖ω‖` within `H`, times `λ`
-  within `H₂`;
-- lever: `λ, ‖r‖` and the impulse bound `Jb + ‖v‖ / invM` within `H₂` (after Jolt's clamp the drag
-  impulse is at most `‖v‖ / invM`);
-- new velocity: `2‖ω‖ + lever` and `2‖v‖ + Jb · invM` within `H₂`.
+- density: `b, 1/V, 1/invM`;
+- buoyant impulse: the density chain with `Vs, gf, dt` and the largest component of `g`, alone and
+  times `invM`;
+- relative velocity: `‖ω‖, ‖r‖`;
+- area: `‖vrel‖, ‖q‖`;
+- drag: the density chain with `0.5, Cd, ‖q‖, dt, ‖vrel‖, ‖vrel‖, invM`;
+- angular drag: `Cda, Vs, 1/V, dt, l, l, 1/invM, ‖ω‖, λ`;
+- lever: `λ, ‖r‖` and the impulse bound `Jb + ‖v‖ / invM` (after Jolt's clamp the drag impulse is at
+  most `‖v‖ / invM`).
+
+### Squared lengths
+
+Where Jolt squares a length (to compare it or to clamp a velocity), the rule bounds that length by
+its value, not by its chain: an upper bound from the triangle and Cauchy-Schwarz inequalities,
+computed in `f64` from Jolt's own `f32` inputs, times the same `(1 + 64u)`, at most `H₂ = 1e18`. The
+square then stays at most 1e36 and three of them sum below `f32::MAX`. Because every sub-product of
+the chain behind such a length is within `H`, Jolt's `f32` value differs from the exact one only by a
+relative rounding of a few dozen `u` and by subnormal intermediates, at most about `n · 2⁻¹⁵⁰ · H`
+(1e-7) in absolute value. The lengths:
+
+- relative velocity: `‖vf‖ + ‖v‖ + ‖ω‖ · ‖r‖`;
+- drag change: `‖Jd · invM‖ <= 0.5 · b / V · Cd · ‖q‖ · dt · ‖vrel‖²`;
+- angular drag change: `‖I⁻¹ K ω‖ <= λ · |K| · ‖ω‖`;
+- lever: `λ · ‖r‖ · (‖Jb‖ + ‖v‖ / invM)`, with `‖Jb‖ = b · Vs / (V · invM) · abs(gf) · ‖g‖ · dt`;
+- new velocity: `2‖ω‖ + lever` and `2‖v‖ + ‖Jb‖ · invM`.
+
+Comparing the whole chain with `H₂` instead would lose the ratios `Vs / V <= 1` and
+`invM · (1/invM) = 1` and refuse large calm bodies whose squared lengths are tiny: a box of half
+extent 152 m at `MAX_MASS` (376 m at 1e4 kg, 591 m at 1e3 kg) at rest, half under water, whose
+angular drag change is 0, and at most 0.03 rad/s at `MAX_ANGULAR_VELOCITY`. Every box within
+`MAX_SHAPE_EXTENT` and `MIN_MASS..=MAX_MASS`, at rest or at both velocity bounds, in default water,
+is accepted.
 
 The density chain implies `V · invM >= 1e-37`, a normal `f32`, so `ρ` never divides by zero. The
-unit tests check each chain at its boundary, the two counterexamples above, NaN in every input, and
-replay Jolt's arithmetic in `f32` in source order, reversed and with fused multiply-adds for 200 000
-seeded inputs: every accepted input stays finite. A second replay takes 4000 accepted inputs, raises
-`λ` to the largest value the rules accept, spreads it over three seeded principal moments under a
-seeded rotation and forms Jolt's world matrix `R · diag(d) · Rᵀ` and its products in `f32`: these
-stay finite too.
+unit tests check each rule at its boundary, the two counterexamples above, NaN in every input, the
+boxes above, and replay Jolt's arithmetic in `f32` in source order, reversed and with fused
+multiply-adds: for 200 000 seeded inputs, for 4000 accepted inputs with `λ` raised to the largest
+value the rules accept, spread over three seeded principal moments under a seeded rotation (Jolt's
+world matrix `R · diag(d) · Rᵀ` and its products formed in `f32`), and for 4000 accepted inputs with
+the linear or the angular drag coefficient raised to the largest value the rules accept. Every
+accepted input stays finite, and the squared lengths reach 1e35.
 
-The chains overlap: the density chain is part of the buoyant and drag chains, the new-velocity rule
-contains the lever and the buoyant velocity change, and the drag chain holds the relative velocity
-twice. Switching off one rule at a time, the replay overflowed only without the squared drag rule or
-the squared angular drag rule; every other rule is covered by a later one and is kept so that the
-error names the first product that would overflow. None of these switches made Jolt assert in the
-buoyancy tests of the `asserts` build, whose inputs stay far from the bounds.
+The rules overlap: the density chain is part of the buoyant and drag chains, and the new-velocity
+rules contain the lever and the buoyant velocity change. Switching off one rule at a time, the
+replays overflowed without the drag chain, the drag change, the angular drag chain, the angular drag
+change or the angular new velocity; raising `H₂` to 1e24 or dropping `λ` from the angular drag change
+made them overflow too. The density, relative velocity, area, lever and policy rules are pinned by
+their boundary tests (the density chain also by the counterexamples). No test fails with only the
+buoyant impulse chains, the relative velocity chain, the lever chain or the linear new velocity
+switched off, as later rules cover them; they are kept so that the error names the first product
+that would overflow.
 
 ### Policy and clamp
 
