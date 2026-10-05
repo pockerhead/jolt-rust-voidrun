@@ -163,8 +163,9 @@ impl Shape {
     ///   cylinders and hulls); points within about 1e-4 m of the surface may go either way;
     /// - tapered capsule: within about 1e-4 m of the rounded shape;
     /// - mesh: the point lies in the shape's bounds and a ray from it along +Y crosses an odd
-    ///   number of triangles (the id is the last triangle crossed), so only closed meshes give an
-    ///   inside;
+    ///   number of triangles (the id is the last triangle crossed). Jolt does not check that the
+    ///   mesh is closed: an open mesh reports points whose ray happens to cross an odd number of
+    ///   triangles, so only a closed mesh gives its enclosed volume;
     /// - heightfield: never;
     /// - plane: strictly behind the plane (`normal · p + constant < 0`), anywhere, also beyond
     ///   the half extent, unlike a ray, which counts the plane itself as solid;

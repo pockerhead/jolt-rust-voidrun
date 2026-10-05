@@ -369,24 +369,25 @@ fn world_queries_apply_every_filter_part_and_sort_by_body() {
     assert_eq!(all[3].object_layer, item);
     assert!(all[1].sub_shape_id < all[2].sub_shape_id);
 
+    // Each filter keeps exactly the unfiltered hits it lets through.
     let chunk_only = [chunk];
     let hits = world_hits(&world, at, &QueryFilter::new().object_layers(&chunk_only));
-    assert!(hits.iter().all(|hit| hit.body == structure));
+    assert_eq!(hits, [all[1], all[2]]);
     let hits = world_hits(
         &world,
         at,
         &QueryFilter::new().child_groups(1 << Groups::FEATURE),
     );
-    let structure_children: Vec<u32> = hits
-        .iter()
-        .filter(|hit| hit.body == structure)
-        .map(|hit| hit.compound_child.unwrap().user_data)
-        .collect();
-    assert_eq!(structure_children, [Groups::FEATURE]);
+    let feature = if all[1].compound_child.unwrap().user_data == Groups::FEATURE {
+        all[1]
+    } else {
+        all[2]
+    };
+    assert_eq!(feature.compound_child.unwrap().user_data, Groups::FEATURE);
     // Bodies that are not compounds are not filtered by child.
-    assert!(hits.iter().any(|hit| hit.body == ground));
+    assert_eq!(hits, [all[0], feature, all[3]]);
     let hits = world_hits(&world, at, &QueryFilter::new().exclude_body(ground));
-    assert!(hits.iter().all(|hit| hit.body != ground));
+    assert_eq!(hits, all[1..]);
 
     world.remove_body(crate_body).unwrap();
     assert!(world_hits(&world, at, &QueryFilter::new())

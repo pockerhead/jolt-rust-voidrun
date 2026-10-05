@@ -128,8 +128,9 @@ outward surface normal of the obstacle: a floor below gives a normal pointing up
 - `collide_shape`: every obstacle a shape at a pose overlaps, with penetration depth and normal.
   The hits come in no particular order; sort them when order matters.
 - `collide_point`: every body whose shape contains a point, sorted by body and sub-shape id.
-  "Contains" is Jolt's rule per shape: solid convex shapes, closed meshes by the parity of the
-  triangles above the point, never a heightfield, and strictly behind a plane.
+  "Contains" is Jolt's rule per shape: solid convex shapes, meshes by the parity of the
+  triangles above the point (an inside only for closed meshes), never a heightfield, and
+  strictly behind a plane.
   `Shape::collide_point` asks one shape, in its own frame.
 
 ## Floating origin
