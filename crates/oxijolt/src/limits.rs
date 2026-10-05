@@ -192,6 +192,13 @@ pub const MIN_TRACK_INERTIA: f32 = 1.0e-3;
 /// [docs/limits.md#track-drive-envelope]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-drive-envelope
 pub const MAX_TRACK_INERTIA: f32 = 1.0e6;
 
+/// Largest ratio between the moments of inertia of a tracked vehicle's two tracks.
+///
+/// See [docs/limits.md#track-inertia-ratio].
+///
+/// [docs/limits.md#track-inertia-ratio]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-inertia-ratio
+pub const MAX_TRACK_INERTIA_RATIO: f32 = 100.0;
+
 /// Largest lever-arm ratio a world constraint may give a dynamic body: how far the point where
 /// the constraint holds the body lies from its centre of mass, measured against the body's own
 /// size.
@@ -687,6 +694,12 @@ pub(crate) fn is_torque_curve(points: &[(f32, f32)]) -> bool {
 /// Whether `inertia` is within `MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA`.
 pub(crate) fn is_track_inertia(inertia: f32) -> bool {
     (MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA).contains(&inertia)
+}
+
+/// Whether the larger of two positive track inertias is at most [`MAX_TRACK_INERTIA_RATIO`]
+/// times the smaller, the product rounded to `f32`.
+pub(crate) fn is_track_inertia_ratio(first: f32, second: f32) -> bool {
+    first.max(second) <= MAX_TRACK_INERTIA_RATIO * first.min(second)
 }
 
 /// The lever-arm ratio (see [`MAX_LEVER_ARM_RATIO`]) of a dynamic body with `inverse_mass` and

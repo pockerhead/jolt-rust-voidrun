@@ -617,8 +617,8 @@ forward and reverse; `N` the max rpm; `T` the engine's largest torque; `h` = `MA
   `|ω_i| = B·|L_i| / (|L_l|/I_l + |L_r|/I_r)`, that is `|ω_j|/I_j ≤ κ_j·B` with
   `κ_j = (1/I_j) / (1/I_j + r/I_i) < 1`.
 - Ground contact (`:351-407`) moves a track towards the ground's speed under a wheel over that
-  wheel's radius, as far as the friction impulse allows. Body velocities and contact impulses
-  bound it, not the settings; it is not part of the envelope.
+  wheel's radius, as far as the friction impulse allows. It is not part of the envelope; the
+  [track inertia ratio](#track-inertia-ratio) says what bounds it and what does not.
 
 A step that drives only track `i` thus gives `B' ≤ τ_i/I_i + κ_j·B`, one that drives both
 `B' ≤ τ_l/I_l + τ_r/I_r`, one that drives neither `B' ≤ B`. The tracks start at rest, and the
@@ -656,6 +656,35 @@ the envelope check removed, a 1e34 N·m engine on the light tracks and a 1e37 N�
 wide-ratio tracks gave NaN on the second step, in the default and the asserts build. With the
 inertia range or the radius ratio removed instead, the envelope refuses the two probes above by
 itself: those ranges keep its inputs physical.
+
+## Track inertia ratio
+
+Under each unbraked wheel in contact, Jolt sizes the longitudinal impulse for that track's inertia
+alone, applies it, and synchronises the tracks again (`TrackedVehicleController.cpp:394-406`). The
+synchronisation keeps `ω_l/I_l + ω_r/I_r`, not the tracks' angular momentum, so the lighter track's
+speed sets both: an impulse that changes the light track's speed moves the heavy track by about as
+much, with nothing paying for it. With very unequal inertias this diverged in probes through the
+safe API. A 4000 kg tank on 50 m wheels with track inertias 1e-3 and 1e6 kg·m², tire and ground
+friction 1000 and Jolt's tracked engine at 500 N·m, driving straight at 60 Hz, had tracks at 3e20
+rad/s after the first step and NaN tracks and chassis after the second, either way round; the
+asserts build stopped at `MotionProperties.inl:28` (`isfinite(len_sq)`). The engine torque made no
+difference. With the lighter track at 1e-3 to 10 kg·m², the onset needed a ratio of about 1e3,
+combined friction of 300 or more and wheels of 5 m or more.
+
+`TrackedVehicleSettings` refuses a larger track inertia above `MAX_TRACK_INERTIA_RATIO` (100) times
+the smaller one. At that ratio, with the lighter track at 1e-3 or 1 kg·m², wheels of 5, 50 and
+1000 m and friction 1000, the tank stayed finite for 300 steps driving straight and with ratios,
+throttle and brake changing every step, in the default and the asserts build. With the rule
+removed, the scene above gives NaN again in the default build and stops at the same assertion in
+the asserts build. The ratio is policy from these measurements, not a derived bound.
+
+It does not bound ground contact as a whole. The same contact solve diverged with equal inertias
+when the tracks were heavy for the chassis and the friction high: on the 4000 kg tank, inertias of
+1e5 kg·m² on 50 m wheels and of 1e4 kg·m² on 0.3 m wheels turning in place with friction 1000, and
+of 1e5 kg·m² on 1000 m wheels with friction 30, gave NaN within a few steps; so did a 1 kg chassis
+on tracks of 100 kg·m² and 1 m wheels with friction 1000. With friction up to 10, none of 480 runs
+over inertias up to 1e6 kg·m², wheels of 0.3 to 1000 m and chassis of 1 kg and 4000 kg diverged.
+No rule in `oxijolt::limits` excludes those settings ([coverage](coverage.md#not-covered)).
 
 ## Motorcycle lean
 

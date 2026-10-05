@@ -186,7 +186,8 @@ impl VehicleTrackSettings {
     }
 
     /// Moment of inertia of the track and its wheels about the driven wheel's axle, kg·m², within
-    /// [`limits::MIN_TRACK_INERTIA`]`..=`[`limits::MAX_TRACK_INERTIA`]. Default 10.
+    /// [`limits::MIN_TRACK_INERTIA`]`..=`[`limits::MAX_TRACK_INERTIA`] and within a factor
+    /// [`limits::MAX_TRACK_INERTIA_RATIO`] of the other track's. Default 10.
     #[must_use]
     pub fn inertia(mut self, value: f32) -> Self {
         self.inertia = value;
@@ -378,6 +379,11 @@ impl TrackedVehicleSettings {
         self.frame.validate()?;
         for track in self.tracks() {
             track.validate()?;
+        }
+        if !limits::is_track_inertia_ratio(self.left.inertia, self.right.inertia) {
+            return Err(VehicleError::InvalidValue(
+                "track inertia ratio must be at most limits::MAX_TRACK_INERTIA_RATIO",
+            ));
         }
         validate_wheel_count(
             self.left

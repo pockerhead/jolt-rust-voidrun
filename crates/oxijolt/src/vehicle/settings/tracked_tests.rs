@@ -29,6 +29,12 @@ fn with_left(
     settings
 }
 
+fn with_inertias(left: f32, right: f32) -> TrackedVehicleSettings {
+    let mut settings = with_left(|t| t.inertia(left));
+    settings.right = settings.right.clone().inertia(right);
+    settings
+}
+
 fn with_wheel(
     edit: impl Fn(TrackedWheelSettings) -> TrackedWheelSettings,
 ) -> TrackedVehicleSettings {
@@ -239,7 +245,7 @@ fn tracked_settings_are_validated() {
         assert_refused(with_left(|t| t.inertia(inertia)), "track inertia");
     }
     for inertia in [limits::MIN_TRACK_INERTIA, limits::MAX_TRACK_INERTIA] {
-        assert_eq!(with_left(|t| t.inertia(inertia)).validate(LAYERS), Ok(()));
+        assert_eq!(with_inertias(inertia, inertia).validate(LAYERS), Ok(()));
     }
     assert_refused(with_left(|t| t.angular_damping(-0.1)), "angular damping");
     assert_refused(
@@ -341,15 +347,29 @@ fn track_wheel_radii_stay_within_max_ratio_of_the_driven_wheel() {
 }
 
 #[test]
+fn track_inertias_stay_within_max_track_inertia_ratio() {
+    let ratio = limits::MAX_TRACK_INERTIA_RATIO;
+    for lighter in [limits::MIN_TRACK_INERTIA, 10.0, 1.0e3] {
+        let heavier = ratio * lighter;
+        let above = f32::from_bits(heavier.to_bits() + 1);
+        assert_eq!(with_inertias(lighter, heavier).validate(LAYERS), Ok(()));
+        assert_eq!(with_inertias(heavier, lighter).validate(LAYERS), Ok(()));
+        assert_refused(with_inertias(lighter, above), "inertia ratio");
+        assert_refused(with_inertias(above, lighter), "inertia ratio");
+    }
+}
+
+#[test]
 fn tracked_drive_envelope_bounds_the_drivetrain() {
     const ENVELOPE: &str = "drive envelope";
     let engine = TrackedVehicleSettings::default_engine;
     let transmission = TrackedVehicleSettings::default_transmission;
     let torque = |value: f32| engine().max_torque(value);
-    // Valid one by one: a huge max torque, a heavy track, gear and differential ratios of 100.
-    let counter_example = with_left(|t| t.inertia(1.0e6).differential_ratio(100.0))
+    // Valid one by one: a huge max torque, heavy tracks, gear and differential ratios of 100.
+    let mut counter_example = with_inertias(1.0e6, 1.0e6)
         .engine(torque(1.0e20).normalized_torque(vec![(0.0, limits::MAX_NORMALIZED_TORQUE)]))
         .transmission(transmission().gear_ratios(vec![100.0]));
+    counter_example.left = counter_example.left.clone().differential_ratio(100.0);
     assert_refused(counter_example, ENVELOPE);
 
     // Each factor alone, a decade inside and a decade outside.

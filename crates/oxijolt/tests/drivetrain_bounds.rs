@@ -1,6 +1,7 @@
 //! Drivetrain bounds: overflowing torque curves and tracked drivetrains are refused, and the
 //! strongest accepted ones stay finite through a step, with every wheel, track and chassis
-//! value read back.
+//! value read back. Tracks of very unequal inertia are refused, and the widest accepted ratio
+//! stays finite on high-friction ground.
 
 mod common;
 
@@ -313,6 +314,142 @@ fn the_strongest_tracks_on_the_widest_curve_stay_finite() {
     drive_every_way(&settings(torque));
     drive_every_way(&settings(1.0e-30));
     drive_every_way(&settings(0.0));
+}
+
+/// A track of seven wheels of `radius` with tire friction `MAX_FRICTION` and no brake: the driven
+/// wheel high in front, the other six carrying the vehicle.
+fn high_friction_track(x: f32, radius: f32, inertia: f32) -> VehicleTrackSettings {
+    let wheel = |position: Vec3| {
+        TrackedWheelSettings::new(position)
+            .radius(radius)
+            .longitudinal_friction(limits::MAX_FRICTION)
+            .lateral_friction(limits::MAX_FRICTION)
+    };
+    let driven = wheel(Vec3::new(x, 0.4, 0.0))
+        .suspension_min_length(0.0)
+        .suspension_max_length(0.05);
+    let carrying = [2.5, 1.5, 0.5, -0.5, -1.5, -2.5].map(|z| {
+        wheel(Vec3::new(x, -0.3, z))
+            .suspension_min_length(0.1)
+            .suspension_max_length(0.5)
+    });
+    let wheels = std::iter::once(driven).chain(carrying).collect();
+    VehicleTrackSettings::new(wheels, 0)
+        .inertia(inertia)
+        .max_brake_torque(0.0)
+}
+
+/// A 4000 kg tank resting on wheels of `radius` on ground of friction `MAX_FRICTION`, with track
+/// inertias `[left, right]`, and the result of creating it.
+fn high_friction_tank(
+    radius: f32,
+    [left, right]: [f32; 2],
+) -> (
+    PhysicsWorld,
+    BodyId,
+    Result<VehicleId<TrackedVehicle>, VehicleError>,
+) {
+    let (mut world, layers) = car_world(GRAVITY, 1);
+    let ground = Shape::new_box(Vec3::new(400.0, 1.0, 400.0)).unwrap();
+    world
+        .create_body(
+            &ground,
+            &BodySettings::new_static()
+                .position(RVec3::new(0.0, -1.0, 0.0))
+                .object_layer(layers.ground)
+                .friction(limits::MAX_FRICTION),
+        )
+        .unwrap();
+    let height = (0.7 + radius) as Real;
+    let chassis = world
+        .create_body(
+            &tank_chassis_shape(),
+            &behaviour_chassis(
+                &layers,
+                4000.0,
+                RVec3::new(0.0, height, 0.0),
+                Quat::IDENTITY,
+            ),
+        )
+        .unwrap();
+    let settings = tracked(
+        &layers,
+        high_friction_track(1.7, radius, left),
+        high_friction_track(-1.7, radius, right),
+        vec![
+            (0.0, limits::MAX_NORMALIZED_TORQUE),
+            (1.0, limits::MAX_NORMALIZED_TORQUE),
+        ],
+        500.0,
+    )
+    .max_pitch_roll_angle(std::f32::consts::PI);
+    let tank = world.create_tracked_vehicle(chassis, &settings);
+    (world, chassis, tank)
+}
+
+#[test]
+fn unequal_track_inertias_are_refused() {
+    // On 50 m wheels these gave NaN tracks and chassis on the second step, and Jolt's assertion
+    // `MotionProperties.inl:28` in the asserts build.
+    for inertias in [[1.0e-3, 1.0e6], [1.0e6, 1.0e-3]] {
+        let (_, _, tank) = high_friction_tank(50.0, inertias);
+        assert_refused(tank, "inertia ratio");
+    }
+}
+
+#[test]
+fn the_widest_track_inertia_ratio_stays_finite_on_high_friction_ground() {
+    let slow = 1.0 / limits::MAX_RATIO;
+    let braking = TrackedDriverInput {
+        brake: 1.0,
+        ..tracks(1.0, 1.0, slow)
+    };
+    let schedules = [
+        [tracks(1.0, 1.0, 1.0); 4],
+        [
+            tracks(1.0, 1.0, -slow),
+            tracks(-1.0, -slow, 1.0),
+            tracks(1.0, slow, 1.0),
+            braking,
+        ],
+    ];
+    let ratio = limits::MAX_TRACK_INERTIA_RATIO;
+    for radius in [5.0, 50.0, 1000.0] {
+        for lighter in [limits::MIN_TRACK_INERTIA, 1.0] {
+            for inertias in [[lighter, ratio * lighter], [ratio * lighter, lighter]] {
+                for schedule in schedules {
+                    let (mut world, chassis, tank) = high_friction_tank(radius, inertias);
+                    let tank = tank.unwrap();
+                    let mut contacts = 0;
+                    for tick in 0..300 {
+                        world
+                            .vehicle_mut(tank)
+                            .unwrap()
+                            .set_driver_input(schedule[tick % 4])
+                            .unwrap();
+                        let _ = world.step(1.0 / 60.0).unwrap();
+                        assert_finite(&world, tank, chassis);
+                        let vehicle = world.vehicle(tank).unwrap();
+                        for state in vehicle.tracks() {
+                            assert!(
+                                state.angular_velocity.is_finite(),
+                                "{state:?}, radius {radius}, inertias {inertias:?}, tick {tick}"
+                            );
+                        }
+                        contacts += vehicle
+                            .wheels()
+                            .iter()
+                            .filter(|wheel| wheel.contact.is_some())
+                            .count();
+                    }
+                    assert!(
+                        contacts > 0,
+                        "radius {radius}: the tank never touched the ground"
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Steps a wheeled vehicle in the air at `forward` throttle and checks every value.

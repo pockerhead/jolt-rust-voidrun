@@ -10,8 +10,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   speed ratio per track, at least `1/limits::MAX_RATIO` in magnitude; `VehicleRef::tracks`,
   `track`, `track_wheels` (`TrackState`, `TrackSide`) read them back. A track's inertia is within
   `limits::MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA` and its wheel radii within a factor
-  `limits::MAX_RATIO` of its driven wheel's, and the track speeds the drivetrain can reach must
-  keep the tracked step finite (`docs/limits.md`, Track drive envelope).
+  `limits::MAX_RATIO` of its driven wheel's, the two tracks' inertias within a factor
+  `limits::MAX_TRACK_INERTIA_RATIO` (100) of each other, because Jolt's ground contact diverged
+  between very unequal tracks (`docs/limits.md`, Track inertia ratio), and the track speeds the
+  drivetrain can reach must keep the tracked step finite (`docs/limits.md`, Track drive envelope).
 - Motorcycles: `PhysicsWorld::create_motorcycle` with `MotorcycleSettings`, which wraps a
   two-wheeled `VehicleSettings` and adds the lean controller: max lean angle up to
   `MotorcycleSettings::MAX_LEAN_ANGLE` (80°), a lean spring bounded against the chassis' inertia,

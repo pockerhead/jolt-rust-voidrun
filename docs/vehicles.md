@@ -87,12 +87,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `TrackState` gives a track's driven wheel, its angular velocity and its speed (angular velocity
 times the driven wheel's radius). The settings are checked before anything is created: both
 tracks need a wheel and a driven wheel among them, an inertia within
-`limits::MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA` and a positive differential ratio; the wheels
-follow the wheeled vehicle's wheel rules plus a friction of at most `limits::MAX_FRICTION`, with
-every radius within a factor `limits::MAX_RATIO` of the driven wheel's; and the track speeds the
-drivetrain can reach must keep every term of Jolt's tracked step within the track drive envelope
-([limits](limits.md#track-drive-envelope)). `TrackedVehicleSettings::default_engine` and
-`default_transmission` are Jolt's tracked defaults, which differ from the wheeled ones.
+`limits::MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA`, at most `limits::MAX_TRACK_INERTIA_RATIO` times
+the other track's ([limits](limits.md#track-inertia-ratio)), and a positive differential ratio;
+the wheels follow the wheeled vehicle's wheel rules plus a friction of at most
+`limits::MAX_FRICTION`, with every radius within a factor `limits::MAX_RATIO` of the driven
+wheel's; and the track speeds the drivetrain can reach must keep every term of Jolt's tracked step
+within the track drive envelope ([limits](limits.md#track-drive-envelope)).
+`TrackedVehicleSettings::default_engine` and `default_transmission` are Jolt's tracked defaults,
+which differ from the wheeled ones.
 
 ## A motorcycle
 
