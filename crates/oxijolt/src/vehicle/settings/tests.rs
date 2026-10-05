@@ -2,11 +2,11 @@ use super::*;
 use crate::world::ensure_initialized;
 use crate::{limits, ObjectLayer};
 
-fn bits3(v: Vec3) -> [u32; 3] {
+pub(super) fn bits3(v: Vec3) -> [u32; 3] {
     <[f32; 3]>::from(v).map(f32::to_bits)
 }
 
-fn jolt_vec(get: impl FnOnce(*mut JPH_Vec3)) -> Vec3 {
+pub(super) fn jolt_vec(get: impl FnOnce(*mut JPH_Vec3)) -> Vec3 {
     let mut value = Vec3::ZERO.to_jph();
     get(&mut value);
     Vec3::from_jph(value)
@@ -16,7 +16,7 @@ fn jolt_vec(get: impl FnOnce(*mut JPH_Vec3)) -> Vec3 {
 ///
 /// # Safety
 /// `curve` points to a live curve.
-unsafe fn curve_points(curve: *const JPH_LinearCurve) -> Vec<(f32, f32)> {
+pub(super) unsafe fn curve_points(curve: *const JPH_LinearCurve) -> Vec<(f32, f32)> {
     // SAFETY: the curve is live (caller contract); the getters only read it, with indices
     // below its point count.
     unsafe {
@@ -42,26 +42,26 @@ fn wheel_defaults_are_jolts() {
     // settings, read while the guard keeps them alive. Every output is a live local.
     unsafe {
         let direction = jolt_vec(|v| JPH_WheelSettings_GetSuspensionDirection(base, v));
-        assert_eq!(bits3(direction), bits3(ours.suspension_direction));
+        assert_eq!(bits3(direction), bits3(ours.base.suspension_direction));
         let axis = jolt_vec(|v| JPH_WheelSettings_GetSteeringAxis(base, v));
-        assert_eq!(bits3(axis), bits3(ours.steering_axis));
+        assert_eq!(bits3(axis), bits3(ours.base.steering_axis));
         let up = jolt_vec(|v| JPH_WheelSettings_GetWheelUp(base, v));
-        assert_eq!(bits3(up), bits3(ours.wheel_up));
+        assert_eq!(bits3(up), bits3(ours.base.wheel_up));
         let forward = jolt_vec(|v| JPH_WheelSettings_GetWheelForward(base, v));
-        assert_eq!(bits3(forward), bits3(ours.wheel_forward));
+        assert_eq!(bits3(forward), bits3(ours.base.wheel_forward));
         assert!(!JPH_WheelSettings_GetEnableSuspensionForcePoint(base));
-        assert_eq!(ours.suspension_force_point, None);
+        assert_eq!(ours.base.suspension_force_point, None);
         assert_eq!(
             JPH_WheelSettings_GetSuspensionMinLength(base),
-            ours.suspension_min_length
+            ours.base.suspension_min_length
         );
         assert_eq!(
             JPH_WheelSettings_GetSuspensionMaxLength(base),
-            ours.suspension_max_length
+            ours.base.suspension_max_length
         );
         assert_eq!(
             JPH_WheelSettings_GetSuspensionPreloadLength(base),
-            ours.suspension_preload_length
+            ours.base.suspension_preload_length
         );
         let mut spring = JPH_SpringSettings {
             mode: JPH_SpringMode_StiffnessAndDamping,
@@ -69,12 +69,12 @@ fn wheel_defaults_are_jolts() {
             damping: 0.0,
         };
         JPH_WheelSettings_GetSuspensionSpring(base, &mut spring);
-        let expected = ours.suspension_spring.to_jph();
+        let expected = ours.base.suspension_spring.to_jph();
         assert_eq!(spring.mode, expected.mode);
         assert_eq!(spring.frequencyOrStiffness, expected.frequencyOrStiffness);
         assert_eq!(spring.damping, expected.damping);
-        assert_eq!(JPH_WheelSettings_GetRadius(base), ours.radius);
-        assert_eq!(JPH_WheelSettings_GetWidth(base), ours.width);
+        assert_eq!(JPH_WheelSettings_GetRadius(base), ours.base.radius);
+        assert_eq!(JPH_WheelSettings_GetWidth(base), ours.base.width);
         assert_eq!(JPH_WheelSettingsWV_GetInertia(wv), ours.inertia);
         assert_eq!(
             JPH_WheelSettingsWV_GetAngularDamping(wv),
@@ -190,12 +190,18 @@ fn constraint_differential_and_anti_roll_bar_defaults_are_jolts() {
         JPH_VehicleAntiRollBar_Init(&mut bar);
         (constraint, differential, bar)
     };
-    assert_eq!(bits3(Vec3::from_jph(constraint.up)), bits3(vehicle.up));
+    assert_eq!(
+        bits3(Vec3::from_jph(constraint.up)),
+        bits3(vehicle.frame.up)
+    );
     assert_eq!(
         bits3(Vec3::from_jph(constraint.forward)),
-        bits3(vehicle.forward)
+        bits3(vehicle.frame.forward)
     );
-    assert_eq!(constraint.maxPitchRollAngle, vehicle.max_pitch_roll_angle);
+    assert_eq!(
+        constraint.maxPitchRollAngle,
+        vehicle.frame.max_pitch_roll_angle
+    );
 
     let ours = VehicleDifferentialSettings::new(None, None).to_jph();
     assert_eq!(ours.leftWheel, differential.leftWheel);
@@ -231,7 +237,7 @@ fn built_settings_reach_jolt() {
     // SAFETY: the settings are live and only read; outputs are live locals.
     unsafe {
         let position = jolt_vec(|v| JPH_WheelSettings_GetPosition(base, v));
-        assert_eq!(bits3(position), bits3(wheel.position));
+        assert_eq!(bits3(position), bits3(wheel.base.position));
         assert!(JPH_WheelSettings_GetEnableSuspensionForcePoint(base));
         assert_eq!(JPH_WheelSettings_GetRadius(base), 0.35);
         assert_eq!(JPH_WheelSettings_GetWidth(base), 0.2);
@@ -549,6 +555,48 @@ fn engine_values_are_validated() {
     assert_rejected(engine(|e| {
         e.normalized_torque(vec![(0.5, 1.0), (0.2, 0.8)])
     }));
+}
+
+#[test]
+fn engine_torque_curves_stay_in_their_domain() {
+    let curve = |points: Vec<(f32, f32)>| {
+        car().engine(VehicleEngineSettings::default().normalized_torque(points))
+    };
+    let refused = |points: Vec<(f32, f32)>| match curve(points.clone()).validate(LAYERS) {
+        Err(VehicleError::InvalidValue(what)) => assert_eq!(what, limits::TORQUE_CURVE_RULE),
+        other => panic!("{points:?} gave {other:?}"),
+    };
+    let spacing = limits::MIN_TORQUE_CURVE_SPACING;
+    let top = limits::MAX_NORMALIZED_TORQUE;
+    // The widest curve: both ends of x, the closest spacing, y from 0 to the top.
+    assert_eq!(
+        curve(vec![(0.0, 0.0), (spacing, top), (1.0, top)]).validate(LAYERS),
+        Ok(())
+    );
+    refused(vec![(-f32::EPSILON, 1.0)]);
+    refused(vec![(0.5, 1.0), (1.0 + f32::EPSILON, 1.0)]);
+    refused(vec![(0.5, -f32::MIN_POSITIVE)]);
+    refused(vec![(0.5, f32::from_bits(top.to_bits() + 1))]);
+    refused(vec![(0.5, f32::NAN)]);
+    refused(vec![(0.5, 1.0), (0.5 + 0.99 * spacing, 1.0)]);
+    // Rounding x to `f32` may take up to one epsilon off the spacing: a curve sampled at
+    // `i / 1000` passes, and above 0.5 the closest accepted neighbour is one ulp from refused.
+    let sampled = (0..=1000).map(|i| (i as f32 / 1000.0, 1.0)).collect();
+    assert_eq!(curve(sampled).validate(LAYERS), Ok(()));
+    let closest = 0.500_999_9_f32;
+    assert_eq!(
+        curve(vec![(0.5, 1.0), (closest, 1.0)]).validate(LAYERS),
+        Ok(())
+    );
+    refused(vec![
+        (0.5, 1.0),
+        (f32::from_bits(closest.to_bits() - 1), 1.0),
+    ]);
+    // Curves whose interpolation overflows in Jolt: a wide x span with a huge y, a wide x span
+    // alone, a wide y span alone.
+    refused(vec![(-1.0e30, 0.0), (1.0e30, 1.0e30)]);
+    refused(vec![(-1.0e38, 0.0), (1.0e38, top)]);
+    refused(vec![(0.0, -3.0e38), (1.0, 3.0e38)]);
 }
 
 #[test]

@@ -91,6 +91,10 @@ Other gates of the same kind:
 - `tests/body_controls_determinism.rs` runs a scene that uses every body control at fixed ticks
   (impulses, kinematic moves, sensors, deactivation and activation, box activation, a shape and a
   motion type change, a `PLANE_2D` body) with 1 and 4 workers, in one process and in two.
+- `tests/vehicle_kinds_determinism.rs` runs 12 tanks, 12 motorcycles and a car over flat ground
+  and a ramp with scripted inputs, removing a tank on the way, with 1 and 4 workers, in one process
+  and in two; a changed input must change the digest. `tests/vehicle_kinds_state.rs` replays a tank
+  and a motorcycle after a rollback with 1 and 4 workers and in two processes.
 - `tests/body_poses.rs` compares `PhysicsWorld::active_body_poses`, which returns the awake bodies
   in ascending `BodyId` order, for 1 and 4 workers and for caller job systems while a grid of
   cubes wakes and falls asleep again.

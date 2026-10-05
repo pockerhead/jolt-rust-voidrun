@@ -15,7 +15,8 @@ what is planned next.
 - A character controller (Jolt's `CharacterVirtual`) with stair walking, floor sticking and an up
   direction that can change every update, for walking on a planet.
 - Wheeled vehicles with suspension, engine, automatic transmission, differentials and anti-roll
-  bars.
+  bars; tracked vehicles (tanks) with two tracks; motorcycles with a lean controller
+  ([guide](vehicles.md)).
 - Ragdolls from a skeleton, posed, motor-driven or kinematic, with settle detection.
 - Twelve kinds of constraints with motors, springs and limits: fixed, point, distance, hinge,
   slider, cone, swing-twist, six-DOF, gear, rack and pinion, pulley and path

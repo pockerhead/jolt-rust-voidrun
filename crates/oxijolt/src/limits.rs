@@ -161,6 +161,61 @@ pub const MAX_RATIO: f32 = 1.0e4;
 /// [docs/limits.md#coupling-ratios]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#coupling-ratios
 pub const MAX_GEAR_RATIO: f32 = 10.0;
 
+/// Largest torque fraction of a vehicle engine's torque curve
+/// ([`VehicleEngineSettings::normalized_torque`](crate::VehicleEngineSettings::normalized_torque)):
+/// every point's y is within `0..=MAX_NORMALIZED_TORQUE`.
+///
+/// See [docs/limits.md#torque-curves].
+///
+/// [docs/limits.md#torque-curves]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#torque-curves
+pub const MAX_NORMALIZED_TORQUE: f32 = 10.0;
+
+/// Smallest x distance between neighbouring points of a vehicle engine's torque curve, whose x
+/// are within `0..=1`, up to rounding x to `f32`.
+///
+/// See [docs/limits.md#torque-curves].
+///
+/// [docs/limits.md#torque-curves]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#torque-curves
+pub const MIN_TORQUE_CURVE_SPACING: f32 = 1.0e-3;
+
+/// Smallest moment of inertia of a tracked vehicle's track, kg·m².
+///
+/// See [docs/limits.md#track-drive-envelope].
+///
+/// [docs/limits.md#track-drive-envelope]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-drive-envelope
+pub const MIN_TRACK_INERTIA: f32 = 1.0e-3;
+
+/// Largest moment of inertia of a tracked vehicle's track, kg·m².
+///
+/// See [docs/limits.md#track-drive-envelope].
+///
+/// [docs/limits.md#track-drive-envelope]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-drive-envelope
+pub const MAX_TRACK_INERTIA: f32 = 1.0e6;
+
+/// Largest ratio between the moments of inertia of a tracked vehicle's two tracks.
+///
+/// See [docs/limits.md#track-inertia-ratio].
+///
+/// [docs/limits.md#track-inertia-ratio]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-inertia-ratio
+pub const MAX_TRACK_INERTIA_RATIO: f32 = 100.0;
+
+/// Largest track mass ratio of a tracked vehicle's wheel: its track's moment of inertia over
+/// the wheel's radius squared (the track's mass as the ground feels it at that wheel), divided by
+/// the smallest effective mass of the chassis where the wheel pushes it, along any direction in
+/// the wheel's forward/up plane (tilted ground turns the push within that plane).
+///
+/// Jolt sizes each wheel's driving impulse for the track alone, as if the chassis did not move,
+/// so a track heavy against the chassis makes the solver overshoot and diverge.
+/// [`PhysicsWorld::create_tracked_vehicle`] computes the ratio from the chassis' mass, inertia
+/// and centre of mass and refuses a vehicle with any wheel above this bound. Jolt's `TankTest`
+/// tank has a ratio of 0.23; a narrow or flat hull, with little roll and pitch inertia, allows
+/// much lighter tracks.
+///
+/// See [docs/limits.md#track-mass-ratio].
+///
+/// [docs/limits.md#track-mass-ratio]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-mass-ratio
+pub const MAX_TRACK_MASS_RATIO: f32 = 0.25;
+
 /// Largest lever-arm ratio a world constraint may give a dynamic body: how far the point where
 /// the constraint holds the body lies from its centre of mass, measured against the body's own
 /// size.
@@ -592,6 +647,23 @@ pub(crate) fn is_angular_velocity_change(
         <= f64::from(MAX_ANGULAR_VELOCITY_CHANGE)
 }
 
+/// What a motorcycle's lean spring must satisfy on its chassis ([`is_lean_spring`]).
+pub(crate) const LEAN_SPRING_RULE: &str =
+    "lean spring would exceed limits::MAX_ANGULAR_ACCELERATION for this chassis";
+
+/// Whether a motorcycle lean spring of `constant` (N·m/rad) and `damping` (N·m·s/rad) keeps
+/// the angular acceleration it gives a chassis whose largest principal inverse inertia is
+/// `largest_inverse_inertia` within [`MAX_ANGULAR_ACCELERATION`], computed in `f64`: the
+/// torque at a lean error of π and an angular velocity about forward of
+/// [`MAX_ANGULAR_VELOCITY_CHANGE`], with headroom for a forward axis that is unit only within
+/// `math::UNIT_TOLERANCE`. See docs/limits.md#motorcycle-lean.
+pub(crate) fn is_lean_spring(constant: f32, damping: f32, largest_inverse_inertia: f32) -> bool {
+    let torque = f64::from(constant) * std::f64::consts::PI
+        + f64::from(damping) * f64::from(MAX_ANGULAR_VELOCITY_CHANGE);
+    let headroom = 1.0 + 4.0 * f64::from(crate::math::UNIT_TOLERANCE);
+    torque * f64::from(largest_inverse_inertia) * headroom <= f64::from(MAX_ANGULAR_ACCELERATION)
+}
+
 /// What a dynamic body's mass must satisfy ([`is_mass`]).
 pub(crate) const MASS_RULE: &str = "mass must be between limits::MIN_MASS and limits::MAX_MASS";
 
@@ -614,6 +686,92 @@ pub(crate) fn is_compliance(compliance: f32) -> bool {
 /// Whether `ratio` is finite and its magnitude within `1 / MAX_RATIO..=MAX_RATIO`.
 pub(crate) fn is_ratio(ratio: f32) -> bool {
     (1.0 / MAX_RATIO..=MAX_RATIO).contains(&ratio.abs())
+}
+
+/// What an engine's torque curve must satisfy ([`is_torque_curve`]).
+pub(crate) const TORQUE_CURVE_RULE: &str = "engine torque curve needs x in 0..=1, \
+     limits::MIN_TORQUE_CURVE_SPACING apart, and y in 0..=limits::MAX_NORMALIZED_TORQUE";
+
+/// Whether `points` make an engine torque curve: at least one point, x within `0..=1` and
+/// increasing by at least [`MIN_TORQUE_CURVE_SPACING`], y within `0..=MAX_NORMALIZED_TORQUE`.
+///
+/// The spacing is measured on the exact values of the `f32` coordinates and may fall short by
+/// one `f32` epsilon, which covers rounding x within `0..=1` to `f32`: points at `i / 1000` pass.
+pub(crate) fn is_torque_curve(points: &[(f32, f32)]) -> bool {
+    let spacing = f64::from(MIN_TORQUE_CURVE_SPACING) - f64::from(f32::EPSILON);
+    !points.is_empty()
+        && points
+            .iter()
+            .all(|&(x, y)| (0.0..=1.0).contains(&x) && (0.0..=MAX_NORMALIZED_TORQUE).contains(&y))
+        && points
+            .windows(2)
+            .all(|pair| f64::from(pair[1].0) - f64::from(pair[0].0) >= spacing)
+}
+
+/// Whether `inertia` is within `MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA`.
+pub(crate) fn is_track_inertia(inertia: f32) -> bool {
+    (MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA).contains(&inertia)
+}
+
+/// Whether the larger of two positive track inertias is at most [`MAX_TRACK_INERTIA_RATIO`]
+/// times the smaller, the product rounded to `f32`.
+pub(crate) fn is_track_inertia_ratio(first: f32, second: f32) -> bool {
+    first.max(second) <= MAX_TRACK_INERTIA_RATIO * first.min(second)
+}
+
+/// What a tracked vehicle's tracks must satisfy on their chassis ([`is_track_mass_ratio`]).
+pub(crate) const TRACK_MASS_RATIO_RULE: &str =
+    "a track is too heavy for its chassis: see limits::MAX_TRACK_MASS_RATIO";
+
+/// Whether `ratio` is at most [`MAX_TRACK_MASS_RATIO`]; false for NaN.
+pub(crate) fn is_track_mass_ratio(ratio: f64) -> bool {
+    ratio <= f64::from(MAX_TRACK_MASS_RATIO)
+}
+
+/// The inverse mass and the principal inverse inertia of a dynamic body, in `f64`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PrincipalMass {
+    pub(crate) inverse_mass: f64,
+    pub(crate) inverse_inertia: [f64; 3],
+}
+
+impl PrincipalMass {
+    /// The largest lever term of the body at `lever` along any unit direction `d` in the plane
+    /// spanned by the orthonormal `first` and `second`, all in the principal frame: the largest
+    /// `√((r × d)ᵀ I⁻¹ (r × d))`. An impulse of 1 along `d` at `r` changes the velocity along `d`
+    /// at `r` by `inverse_mass + lever²`.
+    pub(crate) fn lever_in_plane(&self, lever: [f64; 3], first: [f64; 3], second: [f64; 3]) -> f64 {
+        let (a, b) = (cross(lever, first), cross(lever, second));
+        let (aa, ab, bb) = (self.form(a, a), self.form(a, b), self.form(b, b));
+        let half_gap = 0.5 * (aa - bb);
+        (0.5 * (aa + bb) + (half_gap * half_gap + ab * ab).sqrt()).sqrt()
+    }
+
+    /// The largest lever term along any direction at any point within 1 m of the centre of
+    /// mass: `√` of the largest principal inverse inertia.
+    pub(crate) fn lever_per_metre(&self) -> f64 {
+        self.inverse_inertia.into_iter().fold(0.0, f64::max).sqrt()
+    }
+
+    /// `aᵀ I⁻¹ b`.
+    fn form(&self, a: [f64; 3], b: [f64; 3]) -> f64 {
+        (0..3).map(|k| self.inverse_inertia[k] * a[k] * b[k]).sum()
+    }
+}
+
+/// `a × b` in `f64`.
+pub(crate) fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// `v` scaled to unit length, in `f64`.
+pub(crate) fn normalized(v: [f64; 3]) -> [f64; 3] {
+    let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    v.map(|c| c / length)
 }
 
 /// The lever-arm ratio (see [`MAX_LEVER_ARM_RATIO`]) of a dynamic body with `inverse_mass` and

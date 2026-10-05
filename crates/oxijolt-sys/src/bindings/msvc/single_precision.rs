@@ -10556,6 +10556,18 @@ unsafe extern "C" {
     ) -> *mut JPH_VehicleCollisionTesterCastCylinder;
 }
 unsafe extern "C" {
+    pub fn JPH_MotorcycleController_GetTargetLean(
+        controller: *const JPH_VehicleController,
+        result: *mut JPH_Vec3,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn JPH_MotorcycleController_SetTargetLean(
+        controller: *mut JPH_VehicleController,
+        value: *const JPH_Vec3,
+    ) -> bool;
+}
+unsafe extern "C" {
     pub fn JPH_RagdollSettings_SetPart(
         settings: *mut JPH_RagdollSettings,
         partIndex: ::std::os::raw::c_int,

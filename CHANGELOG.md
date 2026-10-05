@@ -4,6 +4,43 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Tracked vehicles ([guide](docs/vehicles.md)): `PhysicsWorld::create_tracked_vehicle` with
+  `TrackedVehicleSettings`, two `VehicleTrackSettings` that own their `TrackedWheelSettings`, and
+  Jolt's tracked engine and transmission defaults. `TrackedDriverInput` sets throttle, brake and a
+  speed ratio per track, at least `1/limits::MAX_RATIO` in magnitude; `VehicleRef::tracks`,
+  `track`, `track_wheels` (`TrackState`, `TrackSide`) read them back. A track's inertia is within
+  `limits::MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA` and its wheel radii within a factor
+  `limits::MAX_RATIO` of its driven wheel's, the two tracks' inertias within a factor
+  `limits::MAX_TRACK_INERTIA_RATIO` (100) of each other, because Jolt's ground contact diverged
+  between very unequal tracks (`docs/limits.md`, Track inertia ratio), and the track speeds the
+  drivetrain can reach must keep the tracked step finite (`docs/limits.md`, Track drive envelope).
+  `create_tracked_vehicle` refuses tracks heavy against their chassis: every wheel's track inertia
+  over its radius squared, times the chassis' largest inverse effective mass at the wheel over the
+  wheel's forward/up plane, is at most `limits::MAX_TRACK_MASS_RATIO` (0.25), because Jolt's ground
+  contact diverged and spun the chassis up to its angular velocity clamp from a ratio of 6 at steps
+  up to 0.1 s (`docs/limits.md`, Track mass ratio). Jolt's `TankTest` hull accepts tracks up to 11 kg·m².
+- Motorcycles: `PhysicsWorld::create_motorcycle` with `MotorcycleSettings`, which wraps a
+  two-wheeled `VehicleSettings` and adds the lean controller: max lean angle up to
+  `MotorcycleSettings::MAX_LEAN_ANGLE` (80°), a lean spring bounded against the chassis' inertia,
+  smoothing, and the lean controller and lean steering limit switches, fixed at creation.
+  `VehicleRef::lean` (`MotorcycleLean`) reads the target lean and the lean angles. A rotating
+  `rebase` rotates each motorcycle's target lean.
+- `VehicleError::LeanSpringIntegrationNotSaved`: Jolt does not save a motorcycle's integrated lean
+  angle, so a nonzero lean spring integration coefficient is refused.
+- joltc extension: `JPH_MotorcycleController_GetTargetLean` and `_SetTargetLean`, which check the
+  controller's kind.
+- Changed (breaking): an engine's torque curve (`VehicleEngineSettings::normalized_torque`, for
+  every vehicle kind) needs x within `0..=1`, at least `limits::MIN_TORQUE_CURVE_SPACING` apart
+  up to rounding x to `f32` (points at `i / 1000` pass), and y within
+  `0..=limits::MAX_NORMALIZED_TORQUE`. Any finite points with increasing x were accepted before,
+  and wide spans overflowed Jolt's interpolation (`docs/limits.md`, Torque curves).
+- Changed (breaking): vehicle ids are typed by kind. `VehicleId` is now `VehicleId<K>` with `K`
+  `WheeledVehicle` (the default), `TrackedVehicle` or `Motorcycle`, and `VehicleRef` and
+  `VehicleMut` take the same parameter. `vehicle_ids` and `vehicle_of_body` return `AnyVehicleId`
+  (with `kind` and `downcast`), `remove_vehicle` takes either id, and `VehicleError::NotFound` and
+  `WrongWorld` carry an `AnyVehicleId`. An id's `Debug` output names its kind:
+  `VehicleId(Wheeled, 1)`.
+
 ## 0.5.0 — 2026-10-05
 
 - Shapes: convex hulls (`Shape::new_convex_hull`, `new_convex_hull_with_material`, `HullError`),

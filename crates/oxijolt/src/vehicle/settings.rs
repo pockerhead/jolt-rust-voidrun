@@ -1,26 +1,30 @@
-//! Settings of a wheeled vehicle, in Jolt's vocabulary, with Jolt's defaults.
+//! Settings of the vehicle kinds, in Jolt's vocabulary, with Jolt's defaults.
 //!
-//! The types here are plain Rust values. [`PhysicsWorld::create_vehicle`] validates them and
-//! builds the joltc settings objects from them, which it releases again once the vehicle exists.
-//!
-//! [`PhysicsWorld::create_vehicle`]: crate::PhysicsWorld::create_vehicle
+//! The types here are plain Rust values. The world's vehicle creators validate them and build
+//! the joltc settings objects from them, which they release again once the vehicle exists.
 
 use std::f32::consts::PI;
+use std::ops::Range;
 
 use oxijolt_sys::*;
 
 use crate::math::{is_finite_non_negative, is_unit};
 use crate::owned::{JoltObject, Owned};
-use crate::{PhysicsWorld, Vec3, VehicleError};
+use crate::{PhysicsWorld, Vec3, VehicleError, VehicleType};
 
 mod collision_tester;
 mod drivetrain;
+mod motorcycle;
+mod tracked;
 mod wheel;
 
 pub use collision_tester::VehicleCollisionTester;
 pub use drivetrain::{
     VehicleDifferentialSettings, VehicleEngineSettings, VehicleTransmissionSettings,
 };
+pub use motorcycle::MotorcycleSettings;
+pub(crate) use tracked::ChassisMass;
+pub use tracked::{TrackedVehicleSettings, TrackedWheelSettings, VehicleTrackSettings};
 pub(crate) use wheel::WheelGeometry;
 pub use wheel::{SuspensionSpring, VehicleAntiRollBar, WheelSettings};
 /// Jolt's default longitudinal friction curve of a wheel (`WheelSettingsWV`): friction
@@ -47,9 +51,7 @@ pub struct VehicleSettings {
     pub(crate) wheels: Vec<WheelSettings>,
     pub(crate) differentials: Vec<VehicleDifferentialSettings>,
     pub(crate) collision_tester: VehicleCollisionTester,
-    up: Vec3,
-    forward: Vec3,
-    max_pitch_roll_angle: f32,
+    pub(super) frame: VehicleFrame,
     anti_roll_bars: Vec<VehicleAntiRollBar>,
     engine: VehicleEngineSettings,
     transmission: VehicleTransmissionSettings,
@@ -69,9 +71,7 @@ impl VehicleSettings {
             wheels,
             differentials,
             collision_tester,
-            up: Vec3::new(0.0, 1.0, 0.0),
-            forward: Vec3::new(0.0, 0.0, 1.0),
-            max_pitch_roll_angle: PI,
+            frame: VehicleFrame::default(),
             anti_roll_bars: Vec::new(),
             engine: VehicleEngineSettings::default(),
             transmission: VehicleTransmissionSettings::default(),
@@ -82,7 +82,7 @@ impl VehicleSettings {
     /// Up of the vehicle in body space, a unit vector. Default +Y.
     #[must_use]
     pub fn up(mut self, value: Vec3) -> Self {
-        self.up = value;
+        self.frame.up = value;
         self
     }
 
@@ -90,7 +90,7 @@ impl VehicleSettings {
     /// [`up`](Self::up). Default +Z.
     #[must_use]
     pub fn forward(mut self, value: Vec3) -> Self {
-        self.forward = value;
+        self.frame.forward = value;
         self
     }
 
@@ -100,7 +100,7 @@ impl VehicleSettings {
     /// tilting further. π, the default, turns the limit off.
     #[must_use]
     pub fn max_pitch_roll_angle(mut self, radians: f32) -> Self {
-        self.max_pitch_roll_angle = radians;
+        self.frame.max_pitch_roll_angle = radians;
         self
     }
 
@@ -139,21 +139,8 @@ impl VehicleSettings {
     /// derives from the settings ([`validate_step_coefficients`](Self::validate_step_coefficients)).
     pub(crate) fn validate(&self, object_layer_count: u32) -> Result<(), VehicleError> {
         let invalid = |what| Err(VehicleError::InvalidValue(what));
-        if self.wheels.is_empty() {
-            return invalid("a vehicle needs at least one wheel");
-        }
-        if u32::try_from(self.wheels.len()).is_err() || i32::try_from(self.wheels.len()).is_err() {
-            return invalid("too many wheels");
-        }
-        if !(is_unit(self.up) && is_unit(self.forward)) {
-            return invalid("vehicle up and forward must be finite unit vectors");
-        }
-        if self.up.dot(self.forward).abs() > PERPENDICULAR_TOLERANCE {
-            return invalid("vehicle up and forward must be perpendicular");
-        }
-        if !(is_finite_non_negative(self.max_pitch_roll_angle) && self.max_pitch_roll_angle <= PI) {
-            return invalid(MAX_PITCH_ROLL_RULE);
-        }
+        validate_wheel_count(self.wheels.len())?;
+        self.frame.validate()?;
         if !is_limited_slip_ratio(self.differential_limited_slip_ratio) {
             return invalid(LIMITED_SLIP_RULE);
         }
@@ -211,9 +198,9 @@ impl VehicleSettings {
                 wheel.inertia / PhysicsWorld::MIN_DELTA_TIME,
                 brake_impulse,
                 brake_impulse / wheel.inertia,
-                brake_impulse / wheel.radius,
-                wheel.radius / wheel.inertia,
-                wheel.inertia / wheel.radius,
+                brake_impulse / wheel.base.radius,
+                wheel.base.radius / wheel.inertia,
+                wheel.inertia / wheel.base.radius,
             ]) {
                 return invalid(
                     "wheel inertia, radius and brake torques give a non-finite step coefficient",
@@ -221,22 +208,8 @@ impl VehicleSettings {
             }
         }
 
-        let engine = &self.engine;
-        let dt_div_ie = dt / engine.inertia;
-        let largest_torque_fraction = engine
-            .normalized_torque
-            .iter()
-            .map(|(_, fraction)| fraction.abs())
-            .fold(0.0, f32::max);
-        let torque = engine.max_torque * largest_torque_fraction;
-        if !all_finite(&[
-            dt_div_ie,
-            torque,
-            dt_div_ie * torque,
-            ANGULAR_VELOCITY_TO_RPM * torque * dt / engine.inertia,
-        ]) {
-            return invalid("engine inertia and torque give a non-finite step coefficient");
-        }
+        self.engine.validate_step_coefficients()?;
+        let dt_div_ie = dt / self.engine.inertia;
 
         // The clutch couples the engine to every driven wheel through the gear ratio times the
         // differential ratio; each wheel gets at most all of the engine torque.
@@ -281,9 +254,34 @@ impl VehicleSettings {
         Ok(())
     }
 
-    /// The joltc wheel settings, one guard per wheel.
-    pub(crate) fn create_wheels(&self) -> Vec<Owned<JPH_WheelSettingsWV>> {
-        self.wheels.iter().map(WheelSettings::create).collect()
+    /// The joltc objects of these validated settings, for a wheeled vehicle.
+    pub(crate) fn build(&self) -> BuiltSettings {
+        self.build_with(ControllerGuard::Wheeled(self.create_controller()))
+    }
+
+    /// The joltc objects of these validated settings, with `controller` as the controller.
+    pub(super) fn build_with(&self, controller: ControllerGuard) -> BuiltSettings {
+        BuiltSettings {
+            wheels: self
+                .wheels
+                .iter()
+                .map(|wheel| WheelGuard::Wheeled(wheel.create()))
+                .collect(),
+            controller,
+            anti_roll_bars: self
+                .anti_roll_bars
+                .iter()
+                .map(|bar| JPH_VehicleAntiRollBar {
+                    leftWheel: bar.left_wheel as i32,
+                    rightWheel: bar.right_wheel as i32,
+                    stiffness: bar.stiffness,
+                })
+                .collect(),
+            frame: self.frame,
+            collision_tester: self.collision_tester,
+            geometry: self.wheels.iter().map(WheelGeometry::of).collect(),
+            tracks: None,
+        }
     }
 
     /// The joltc controller settings: engine, transmission and differentials.
@@ -292,67 +290,165 @@ impl VehicleSettings {
         // The settings are returned holding one reference, which the guard takes over.
         let controller = unsafe { Owned::from_raw(JPH_WheeledVehicleControllerSettings_Create()) }
             .unwrap_or_else(|| unreachable!("joltc `new`s the settings"));
-        let torque_curve = create_curve(&self.engine.normalized_torque);
-        let engine = JPH_VehicleEngineSettings {
-            maxTorque: self.engine.max_torque,
-            minRPM: self.engine.min_rpm,
-            maxRPM: self.engine.max_rpm,
-            normalizedTorque: torque_curve.as_ptr(),
-            inertia: self.engine.inertia,
-            angularDamping: self.engine.angular_damping,
-        };
+        // SAFETY: the guard owns the new settings, which nothing else uses yet.
+        unsafe { self.fill_wheeled_controller(controller.as_ptr()) };
+        controller
+    }
+
+    /// Writes the engine, transmission and differentials of these validated settings into
+    /// wheeled controller settings.
+    ///
+    /// # Safety
+    /// `controller` points to live joltc wheeled controller settings (or settings derived from
+    /// them with single inheritance) that nothing else uses during the call.
+    pub(super) unsafe fn fill_wheeled_controller(
+        &self,
+        controller: *mut JPH_WheeledVehicleControllerSettings,
+    ) {
         let transmission = self.transmission.create();
         let differentials: Vec<JPH_VehicleDifferentialSettings> = self
             .differentials
             .iter()
             .map(|differential| differential.to_jph())
             .collect();
-        // SAFETY: the controller settings, the curve and the transmission settings are live and
-        // owned by their guards; joltc copies the engine (with its curve), the transmission and
-        // the differentials into the controller settings. `differentials` holds as many entries
-        // as passed and lives for the call. All values were validated.
-        unsafe {
-            JPH_WheeledVehicleControllerSettings_SetEngine(controller.as_ptr(), &engine);
-            JPH_WheeledVehicleControllerSettings_SetTransmission(
-                controller.as_ptr(),
-                transmission.as_ptr(),
-            );
-            JPH_WheeledVehicleControllerSettings_SetDifferentials(
-                controller.as_ptr(),
-                differentials.as_ptr(),
-                differentials.len() as u32,
-            );
-            JPH_WheeledVehicleControllerSettings_SetDifferentialLimitedSlipRatio(
-                controller.as_ptr(),
-                self.differential_limited_slip_ratio,
-            );
+        self.engine.with_jph(|engine| {
+            // SAFETY: `controller` is live and unshared (contract); the transmission settings are
+            // owned by their guard and the engine's curve lives for this closure. joltc copies
+            // the engine (with its curve), the transmission and the differentials into the
+            // controller settings. `differentials` holds as many entries as passed and lives for
+            // the call. All values were validated.
+            unsafe {
+                JPH_WheeledVehicleControllerSettings_SetEngine(controller, engine);
+                JPH_WheeledVehicleControllerSettings_SetTransmission(
+                    controller,
+                    transmission.as_ptr(),
+                );
+                JPH_WheeledVehicleControllerSettings_SetDifferentials(
+                    controller,
+                    differentials.as_ptr(),
+                    differentials.len() as u32,
+                );
+                JPH_WheeledVehicleControllerSettings_SetDifferentialLimitedSlipRatio(
+                    controller,
+                    self.differential_limited_slip_ratio,
+                );
+            }
+        });
+    }
+}
+
+/// A vehicle's frame in its chassis' local space and its pitch and roll limit, shared by every
+/// vehicle kind (Jolt `VehicleConstraintSettings::mUp`, `mForward`, `mMaxPitchRollAngle`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct VehicleFrame {
+    pub(crate) up: Vec3,
+    pub(crate) forward: Vec3,
+    pub(crate) max_pitch_roll_angle: f32,
+}
+
+impl Default for VehicleFrame {
+    /// Jolt's defaults: up +Y, forward +Z, no pitch and roll limit.
+    fn default() -> Self {
+        Self {
+            up: Vec3::new(0.0, 1.0, 0.0),
+            forward: Vec3::new(0.0, 0.0, 1.0),
+            max_pitch_roll_angle: PI,
         }
-        controller
+    }
+}
+
+impl VehicleFrame {
+    fn validate(&self) -> Result<(), VehicleError> {
+        let invalid = |what| Err(VehicleError::InvalidValue(what));
+        if !(is_unit(self.up) && is_unit(self.forward)) {
+            return invalid("vehicle up and forward must be finite unit vectors");
+        }
+        if self.up.dot(self.forward).abs() > PERPENDICULAR_TOLERANCE {
+            return invalid("vehicle up and forward must be perpendicular");
+        }
+        if !(is_finite_non_negative(self.max_pitch_roll_angle) && self.max_pitch_roll_angle <= PI) {
+            return invalid(MAX_PITCH_ROLL_RULE);
+        }
+        Ok(())
+    }
+}
+
+/// Checks that a vehicle with `count` wheels can be built: at least one wheel, and indices that
+/// fit Jolt's `uint` and joltc's `int` wheel indices.
+fn validate_wheel_count(count: usize) -> Result<(), VehicleError> {
+    if count == 0 {
+        return Err(VehicleError::InvalidValue(
+            "a vehicle needs at least one wheel",
+        ));
+    }
+    if u32::try_from(count).is_err() || i32::try_from(count).is_err() {
+        return Err(VehicleError::InvalidValue("too many wheels"));
+    }
+    Ok(())
+}
+
+/// One wheel's joltc settings, of the kind its vehicle's controller expects.
+pub(crate) enum WheelGuard {
+    /// The wheel of a wheeled vehicle or a motorcycle.
+    Wheeled(Owned<JPH_WheelSettingsWV>),
+    /// The wheel of a tracked vehicle.
+    Tracked(Owned<JPH_WheelSettingsTV>),
+}
+
+impl WheelGuard {
+    /// The settings as joltc's base wheel settings, still owned by the guard.
+    pub(crate) fn as_base(&self) -> *mut JPH_WheelSettings {
+        match self {
+            // Both kinds are `WheelSettings` with single inheritance.
+            Self::Wheeled(wheel) => wheel.as_ptr().cast(),
+            Self::Tracked(wheel) => wheel.as_ptr().cast(),
+        }
+    }
+}
+
+/// A vehicle controller's joltc settings.
+pub(crate) enum ControllerGuard {
+    /// A wheeled vehicle's controller.
+    Wheeled(Owned<JPH_WheeledVehicleControllerSettings>),
+    /// A tracked vehicle's controller.
+    Tracked(Owned<JPH_TrackedVehicleControllerSettings>),
+    /// A motorcycle's controller.
+    Motorcycle(Owned<JPH_MotorcycleControllerSettings>),
+}
+
+impl ControllerGuard {
+    /// The settings as joltc's base controller settings, still owned by the guard.
+    pub(crate) fn as_base(&self) -> *mut JPH_VehicleControllerSettings {
+        match self {
+            // Every controller's settings derive from `VehicleControllerSettings` with single
+            // inheritance.
+            Self::Wheeled(controller) => controller.as_ptr().cast(),
+            Self::Tracked(controller) => controller.as_ptr().cast(),
+            Self::Motorcycle(controller) => controller.as_ptr().cast(),
+        }
     }
 
-    /// The joltc anti-roll bars.
-    pub(crate) fn anti_roll_bars_to_jph(&self) -> Vec<JPH_VehicleAntiRollBar> {
-        self.anti_roll_bars
-            .iter()
-            .map(|bar| JPH_VehicleAntiRollBar {
-                leftWheel: bar.left_wheel as i32,
-                rightWheel: bar.right_wheel as i32,
-                stiffness: bar.stiffness,
-            })
-            .collect()
+    /// The kind of vehicle these settings make.
+    pub(crate) fn kind(&self) -> VehicleType {
+        match self {
+            Self::Wheeled(_) => VehicleType::Wheeled,
+            Self::Tracked(_) => VehicleType::Tracked,
+            Self::Motorcycle(_) => VehicleType::Motorcycle,
+        }
     }
+}
 
-    pub(crate) fn up_to_jph(&self) -> JPH_Vec3 {
-        self.up.to_jph()
-    }
-
-    pub(crate) fn forward_to_jph(&self) -> JPH_Vec3 {
-        self.forward.to_jph()
-    }
-
-    pub(crate) fn max_pitch_roll_angle_value(&self) -> f32 {
-        self.max_pitch_roll_angle
-    }
+/// The joltc objects a vehicle is created from, with what the world keeps of the settings. The
+/// guards release the world's references once `JPH_VehicleConstraint_Create` has taken its own.
+pub(crate) struct BuiltSettings {
+    pub(crate) wheels: Vec<WheelGuard>,
+    pub(crate) controller: ControllerGuard,
+    pub(crate) anti_roll_bars: Vec<JPH_VehicleAntiRollBar>,
+    pub(crate) frame: VehicleFrame,
+    pub(crate) collision_tester: VehicleCollisionTester,
+    pub(crate) geometry: Vec<WheelGeometry>,
+    /// The vehicle wheel indices of a tracked vehicle's left and right track.
+    pub(crate) tracks: Option<[Range<u32>; 2]>,
 }
 
 /// Jolt's `VehicleEngine::cAngularVelocityToRPM`.
@@ -375,15 +471,17 @@ fn is_limited_slip_ratio(value: f32) -> bool {
     value.is_finite() && value > 1.0
 }
 
-/// Whether `points` make a valid Jolt `LinearCurve`: at least one point, finite, with strictly
-/// increasing x.
+/// Whether `points` make a valid Jolt `LinearCurve` for a wheel's friction: at least one point,
+/// finite, with strictly increasing x. Engine torque curves have their own domain
+/// ([`limits::is_torque_curve`](crate::limits::is_torque_curve)).
 fn is_curve(points: &[(f32, f32)]) -> bool {
     !points.is_empty()
         && points.iter().all(|(x, y)| x.is_finite() && y.is_finite())
         && points.windows(2).all(|pair| pair[0].0 < pair[1].0)
 }
 
-/// A joltc linear curve holding `points`, which [`is_curve`] accepted.
+/// A joltc linear curve holding `points`, which [`is_curve`] or
+/// [`limits::is_torque_curve`](crate::limits::is_torque_curve) accepted.
 fn create_curve(points: &[(f32, f32)]) -> Owned<JPH_LinearCurve> {
     // SAFETY: Jolt is initialised. joltc `new`s the curve, which the guard owns whole.
     let curve = unsafe { Owned::from_raw(JPH_LinearCurve_Create()) }

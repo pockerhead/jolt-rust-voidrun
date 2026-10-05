@@ -541,6 +541,266 @@ effective mass that is at most each body's own along the axis. With
 `VehicleAntiRollBar::MAX_STIFFNESS` and wheel lengths at most `MAX_SHAPE_EXTENT`, `b` is at most
 5e14 m/s, so the velocity change along the suspension axis stays finite and squares finitely.
 
+## Torque curves
+
+Jolt reads an engine's torque curve at the current rpm over the max rpm
+(`VehicleEngine::GetTorque`, `VehicleEngine.h:63`), and the rpm stays within `min_rpm..=max_rpm`
+(`ClampRPM`), so it reads x between `min_rpm / max_rpm` and 1. `LinearCurve::GetValue`
+(`Core/LinearCurve.cpp:25-39`) interpolates between the points around x as
+`y1 + (x − x1)·(y2 − y1) / (x2 − x1)`. With any finite points that overflows: in probes through the
+safe API, `(−1e30, 0), (1e30, 1e30)` read at 0.125, `(−1e38, 0), (1e38, 10)` and
+`(0, −3e38), (1, 3e38)` gave NaN wheel or track speeds within two steps for wheeled vehicles,
+motorcycles and tracked vehicles, with and without Jolt's assertions.
+
+Every vehicle kind's engine therefore takes a curve with x within `0..=1`, neighbouring x at least
+`MIN_TORQUE_CURVE_SPACING` (1e-3) apart, and y within `0..=MAX_NORMALIZED_TORQUE` (10). The
+spacing is measured on the exact values of the `f32` coordinates and may fall short by one `f32`
+epsilon (2⁻²³), which covers rounding x within `0..=1` to `f32`: a curve sampled at `i / 1000`
+passes.
+Then `x − x1` is at most `x2 − x1` (rounding is monotonic), both are at most 1, the divisor is a
+normal `f32`, and the result lies between the two y up to rounding, at most `y_max·(1 + 8·2⁻²⁴)`
+with `y_max` the largest y. The engine's largest torque is `max_torque · y_max · (1 + 8·2⁻²⁴)`.
+Removing the x or the y range lets the curves above through again. The spacing keeps the divisor
+away from subnormal values, where rounding `(x − x1)·(y2 − y1)` to a subnormal adds up to half a
+unit to the result instead of a relative error: policy for this bound, not a NaN guard. Wheel
+friction curves keep their own rule (finite points, increasing x), because their x is a slip ratio
+or a slip angle in degrees.
+
+## Track ratios
+
+Jolt keeps a tracked vehicle's two tracks in step after the engine torque and after the
+longitudinal impulse of each unbraked wheel (`TrackedVehicleController.cpp:188-208, 291, 406`). With track ratios `L` and `R` of the
+same sign (`L·R > 0`, `:194`) it divides `L·ω_r − R·ω_l` by `L·I_r + R·I_l`, otherwise by
+`R·I_l − L·I_r`, where `I` are the track inertias. In both cases the two terms of the divisor have
+the same sign, so its magnitude is at least the smaller ratio times the sum of the inertias.
+
+`TrackedDriverInput` keeps both ratios within `1/MAX_RATIO..=1` in magnitude, and
+`TrackedVehicleSettings` keeps a track inertia within `MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA`. Then
+`L·R` is at least 1e-8, far from underflow, and each divisor term is at least 1e-7. Without a
+floor on the ratios, equal ratios of 1e-30 make `L·R` underflow to 0, Jolt takes the second branch,
+and with equal inertias the divisor is 0: in a probe both track speeds were NaN after the first
+step, with and without Jolt's assertions. The upper bound 1 is what the [track drive
+envelope](#track-drive-envelope) assumes for the torque a track receives.
+
+## Track drive envelope
+
+The tracked controller turns the engine's torque into track speeds, keeps the two tracks in step
+and turns every wheel at its track's speed (`TrackedVehicleController.cpp`). Settings that are each
+in range overflowed those steps in probes through the safe API: track inertias of 1e-30 and 2e-30
+under a 500 N·m engine gave track speeds of 2e32 and 1e32 rad/s on the second step, and the
+synchronisation quotient `(1e32 − 2e32) / 3e-30` made both infinite; a 1e-36 m wheel on a track
+driven at a 0.3 m wheel turned at `1200 · 0.3 / 1e-36` rad/s, infinite, and its rotation angle
+became NaN. Every term of the settings alone was finite in both.
+
+`TrackedVehicleSettings` keeps the inputs in physical ranges first: track inertia within
+`MIN_TRACK_INERTIA..=MAX_TRACK_INERTIA` (1e-3 to 1e6 kg·m²), every wheel's radius within a factor
+`MAX_RATIO` of its track's driven wheel, the torque curve as in [torque curves](#torque-curves).
+It then bounds how fast the drivetrain can spin each track and every term the step forms from
+that speed.
+
+Notation: `r = 1/MAX_RATIO`, the smallest track ratio; `I_l`, `I_r` the track inertias; `d` a
+track's differential ratio; `g_min`, `g_max` the smallest and largest gear ratio in magnitude,
+forward and reverse; `N` the max rpm; `T` the engine's largest torque; `h` = `MAX_DELTA_TIME`;
+`K = 60/2π`. What changes a track's speed `ω` in a step:
+
+- Damping (`:184-185`) and the brakes (`:294-313`) never raise `|ω|`.
+- The drive (`:264-287`) adds `d·L·c·g·torque·dt / I` to a track, `c` the clutch friction (at most
+  1, `VehicleTransmission.cpp:106-123`), only while the track turns slower than its speed limit
+  `rpm / (g·d·L·K) · 1.001` or against it. The rpm is at most `N` and `|L|` at least `r`, and the
+  limit is tested before the torque is added. So the drive leaves `|ω|` at most its value before or
+  the track's target `τ = λ + Δ`, with the speed limit `λ = 1.001·N / (g_min·d·r·K)` and one
+  torque step `Δ = d·g_max·T·h / I`, the overshoot.
+- The synchronisation (`:188-208`) keeps `ω_l/I_l + ω_r/I_r` when `L·R > 0`, otherwise
+  `ω_l/I_l − ω_r/I_r`, and leaves the speeds in the ratio `L : R`. The weighted speed
+  `B = |ω_l|/I_l + |ω_r|/I_r` then equals the magnitude of the kept sum, so it never grows in the
+  synchronisation, and right after it
+  `|ω_i| = B·|L_i| / (|L_l|/I_l + |L_r|/I_r)`, that is `|ω_j|/I_j ≤ κ_j·B` with
+  `κ_j = (1/I_j) / (1/I_j + r/I_i) < 1`.
+- Ground contact (`:351-407`) moves a track towards the ground's speed under a wheel over that
+  wheel's radius, as far as the friction impulse allows. It is not part of the envelope; the
+  [track inertia ratio](#track-inertia-ratio) and the [track mass ratio](#track-mass-ratio) bound
+  it.
+
+A step that drives only track `i` thus gives `B' ≤ τ_i/I_i + κ_j·B`, one that drives both
+`B' ≤ τ_l/I_l + τ_r/I_r`, one that drives neither `B' ≤ B`. The tracks start at rest, and the
+fixed point of the first is `τ_i·(1/I_i + 1/(r·I_j))`, so `B` never exceeds
+
+```text
+β = max(τ_l/I_l + τ_r/I_r,  τ_l·(1/I_l + 1/(r·I_r)),  τ_r·(1/I_r + 1/(r·I_l)))
+```
+
+and track `i` never turns faster than `Ω_i = β·min(I_i, I_j/r)`, which also covers its target.
+`TrackedVehicleSettings` computes these in `f64` and refuses settings for which any of the
+following exceeds 1e30, 2²⁸ below `f32::MAX`; Jolt computes them in `f32`, and the headroom covers
+the rounding the real-arithmetic bound leaves out.
+
+- The synchronisation quotient (`:197, 204`), at most `(Ω_l + Ω_r) / (r·(I_l + I_r))`, and that
+  times the larger inertia (`:198-206`).
+- Each `Ω`, and the torque that locks the track, `Ω·I / MIN_DELTA_TIME` (`:301`).
+- Each wheel's speed, `Ω` times the driven wheel's radius over the wheel's (`:63`), and its
+  rotation over `h` (`:71`).
+- Terms of the settings alone: the transmission torque `g_max·T` (`:266`), each differential
+  torque `d·g_max·T` and its impulse over `h` (`:282-286`), the brake impulse over the inertia
+  (`:311`), the brake torque over the track's smallest wheel radius and its impulse (`:329-336`),
+  and per wheel the inertia over the radius and the radius over the inertia (`:395, 405`).
+
+The divisor of the speed limit, `g_min·d·r·K` in `f32`, must also be a normal `f32`, so that Jolt's
+limit is the `λ` above; were it 0, the limit would be infinite and the drive would never stop.
+
+For Jolt's tracked defaults on the test tank `λ` is 7.0e5 rad/s, `Ω` 7.0e9 rad/s and the largest
+term, the lock torque, 7e16. The tests find the largest accepted max torque by bisection (8.3e14
+N·m on tracks of `MIN_TRACK_INERTIA` and twice that, 4.2e18 N·m with a wheel radius ratio of
+`MAX_RATIO`, 4.2e17 N·m on the widest torque curve) and drive those vehicles straight, with one
+track at `1/MAX_RATIO`, pivoting, backwards and idle, at 1/60 s and at `MAX_DELTA_TIME`, in the air
+and on the ground: the tracks reached 2e19 rad/s, the wheels 1e23 rad/s, every value finite. With
+the envelope check removed, a 1e34 N·m engine on the light tracks and a 1e37 N·m engine on the
+wide-ratio tracks gave NaN on the second step, in the default and the asserts build. With the
+inertia range or the radius ratio removed instead, the envelope refuses the two probes above by
+itself: those ranges keep its inputs physical.
+
+## Track inertia ratio
+
+Under each unbraked wheel in contact, Jolt sizes the longitudinal impulse for that track's inertia
+alone, applies it, and synchronises the tracks again (`TrackedVehicleController.cpp:394-406`). The
+synchronisation keeps `ω_l/I_l + ω_r/I_r`, not the tracks' angular momentum, so the lighter track's
+speed sets both: an impulse that changes the light track's speed moves the heavy track by about as
+much, with nothing paying for it. With very unequal inertias this diverged in probes through the
+safe API. A 4000 kg tank on 50 m wheels with track inertias 1e-3 and 1e6 kg·m², tire and ground
+friction 1000 and Jolt's tracked engine at 500 N·m, driving straight at 60 Hz, had tracks at 3e20
+rad/s after the first step and NaN tracks and chassis after the second, either way round; the
+asserts build stopped at `MotionProperties.inl:28` (`isfinite(len_sq)`). The engine torque made no
+difference. With the lighter track at 1e-3 to 10 kg·m², the onset needed a ratio of about 1e3,
+combined friction of 300 or more and wheels of 5 m or more.
+
+`TrackedVehicleSettings` refuses a larger track inertia above `MAX_TRACK_INERTIA_RATIO` (100) times
+the smaller one. At that ratio, with the lighter track at 1e-3 or 1 kg·m², wheels of 5, 50 and
+1000 m and friction 1000, the tank stayed finite for 300 steps driving straight and with ratios,
+throttle and brake changing every step, in the default and the asserts build. With the rule
+removed, the scene above gives NaN again in the default build and stops at the same assertion in
+the asserts build. The ratio is policy from these measurements, not a derived bound.
+
+It does not bound ground contact as a whole: the same solve diverged with equal inertias when
+the tracks were heavy for the chassis, which the [track mass ratio](#track-mass-ratio) bounds.
+
+## Track mass ratio
+
+Under each unbraked wheel in contact, Jolt sizes the longitudinal impulse as if the chassis stood
+still: the slip `s = ω·r − v` between the track and the ground under the wheel, times the track's
+mass at that wheel `M = I/r²` (`I` the track's inertia, `r` the wheel's radius;
+`TrackedVehicleController.cpp:394-406`). The impulse also moves the chassis: by `w` per unit of
+impulse at that point along the longitudinal direction `d`, with the chassis' inverse effective
+mass `w = 1/m + (c × d)ᵀ I⁻¹ (c × d)` (`c` the contact from the centre of mass, `I⁻¹` the chassis'
+inverse inertia; `AxisConstraintPart.h`). Leaving the synchronisation of the tracks and the
+friction limit aside, the slip after the solve is `−M·w·s`: the solver, which repeats this for
+every wheel in every velocity iteration, converges only while `M·w` stays below about 1. The
+synchronisation and the friction limit move that onset, so the bound is measured.
+
+`PhysicsWorld::create_tracked_vehicle` computes `M·w` for every wheel in `f64` from the chassis'
+inverse mass, principal inverse inertia, inertia rotation and centre of mass, and refuses the
+vehicle when any wheel's exceeds `MAX_TRACK_MASS_RATIO` (0.25). `w` is the largest the wheel can
+give:
+- `d` is any direction in the wheel's forward/up plane. Jolt's longitudinal direction is the
+  ground normal crossed with the wheel's right (`VehicleConstraint.cpp:254-271`), so it lies in
+  that plane: along the wheel's forward on ground perpendicular to the wheel's up, turned toward
+  the up on an edge, a kerb, a ramp or a wall. The largest `|a × d|` over the plane, measured with
+  `I⁻¹`, is the square root of the larger eigenvalue of a 2×2 form.
+- Every collision tester puts the contact within `ρ = max_length + √(r² + (width/2)²)` of the
+  attachment point `a`: the ray ends `max_length + r` along the suspension, the cast sphere's
+  centre stops `max_length + r − radius` along it, the cylinder's centre `max_length` along it with
+  its surface within `√(r² + (width/2)²)`. Since `|c × d|` measured with `I⁻¹` is a norm of `c`, it
+  is at most `|a × d| + ρ·σ`, with `σ²` the largest principal inverse inertia. The ratio is not
+  tied to the tester, which can be replaced after creation.
+- With a suspension force point, Jolt pushes there and measures the slip at the contact; the
+  mixed term is at most the product of the two levers, so the larger lever is used.
+
+Over the plane the lever takes in the chassis' roll and pitch inertia, so the hull's shape matters
+as much as its mass. Tracks on Jolt's tank wheels at x = ±1.7 under a 4000 kg box hull:
+
+| Hull half extents, centre of mass offset | Ratio of 10 kg·m² tracks, along the forward | Over the plane | Heaviest accepted tracks |
+|---|---|---|---|
+| `TankTest`: 1.7, 0.5, 3.2; −0.5 | 0.070 | 0.226 | 11.0 kg·m² |
+| short: 1.7, 0.5, 1.0; −0.5 | 0.201 | 0.641 | 3.9 kg·m² |
+| narrow: 0.5, 0.1, 3.2 | 0.079 | 2.09 | 1.2 kg·m² |
+| short and narrow: 0.5, 0.1, 1.0 | 0.488 | 2.67 | 0.94 kg·m² |
+
+Measured with the rule removed, through the safe API, in the default build: 60480 runs over the
+four hulls at plane ratios of 0.02 to 12, tire friction 4/2 on ground of friction 0.2, 1 and 1000
+and tire and ground friction 1000, ray, sphere and cylinder testers, on flat ground, kerbs of 0.3
+and 0.6 m, a wall, ramps of 30 and 45° approached from flat ground, a 30° slope facing uphill and
+across, 100 kg rubble and a 100 kg slab, driving straight, turning in place and through the gears,
+at 1/60 s for 600 steps, 0.1 s for 100 and 1 s for 20, after settling at 1/60 s; then 58000 runs at
+1 s on the static scenes at plane ratios of 0.001 to 1.
+- At 1/60 and 0.1 s nothing went NaN below a ratio of 8 (short hull at a wall, tire and ground
+  friction 1000), and the chassis first reached Jolt's angular velocity clamp (15π rad/s) on static
+  ground at game friction at 6 (short narrow hull, 0.1 s). At game friction nothing went NaN up to
+  12 at any step length.
+- At 1 s with tire friction 4/2 and ground friction 1000, the first NaN was at 6 (short narrow
+  hull, 45° ramp).
+- At 1 s the onsets are lower and scattered: at game friction the chassis reached the clamp from
+  0.32 (short hull parked on a 30° slope) and 0.48 (`TankTest`, 30° ramp); with tire and ground
+  friction 1000, 3 of 17280 runs between 0.001 and 0.2 went NaN, the lowest at 0.062 (short narrow
+  hull, 30° ramp). The narrow hulls also reach the clamp at 1 s with tracks of 1e-3 kg·m²: that
+  part does not come from the tracks.
+
+`MAX_TRACK_MASS_RATIO` is 0.25, the round value just above `TankTest`'s 0.226, 24 times below the
+onsets at 1/60 and 0.1 s and at ground friction 1000 with game tires. No ratio that keeps Jolt's
+tank covers the onsets at 1 s steps: four times below them would be 0.08 at game friction and 0.016
+with tire and ground friction 1000, which refuse `TankTest`'s tracks above 3.5 and 0.7 kg·m².
+
+With it, 24000 accepted runs drove the four hulls with their heaviest accepted tracks and
+`TankTest` with tracks of 10 and 11 kg·m² (20, 40 and 70 are refused) over the scenes above plus a
+15° ramp and slope, a 0.15 m kerb, 1 and 10 kg rubble, slabs of 1, 10 and 1000 kg and a second tank
+across the hull, at 1/240, 1/60, 0.1, 1 and 1e-6 s, through gear changes and inputs that flip every
+step. Up to 0.1 s every run on static ground stayed finite and below the clamp at every friction,
+and every run at game friction did on dynamic bodies too. At 1 s the narrow hulls reached the clamp
+about as often as with tracks of 1e-3 kg·m² in the same scenes, and 7 runs went NaN, all with tire
+and ground friction 1000.
+
+Not covered:
+- 1 s steps with tire and ground friction 1000 on the short and narrow hulls. Over 50 chassis
+  masses from 3900 to 4096 kg, on the static scenes, 0 of 14400 runs went NaN with tracks of
+  1e-3 kg·m² and at ratios of 0.02 and 0.05, and 5, 29 and 37 at 0.1, 0.15 and 0.25; `TankTest`
+  stayed finite at all of them. The onset depends on the hull, not only on the ratio.
+- A dynamic body under the wheels: the contact moves that body too, and its inverse mass adds to
+  `w`; the ratio counts the chassis alone. With the rule removed, 100 kg rubble or slabs at 1 s and
+  tire and ground friction 1000 gave NaN from a ratio of 0.75. With the rule, at up to 0.1 s and
+  ground friction 1000, rubble of 1 and 10 kg and a 1 kg slab brought the chassis to the clamp in up
+  to 9 of 384 runs per hull (at most 1 with tracks of 1e-3 kg·m²).
+
+## Motorcycle lean
+
+**Lean angle.** With the lean steering limit on, Jolt limits the steering angle to
+`asin(wheel base · tan(max lean angle) · |g| / (v² · cos caster))`
+(`MotorcycleController.cpp:149,177`), with an `asin` that clamps its argument. The tangent grows
+without bound toward 90°, and the `f32` value of π/2 lies just above 90°, where it is about
+−2.3e7: in a probe the front wheel then steered 90° although its largest steering angle was 30°.
+`MotorcycleSettings::MAX_LEAN_ANGLE` is 80°, where the tangent is 5.67.
+
+**Lean spring.** While both wheels touch the ground, Jolt applies the angular impulse
+`(k·d − c·ω_f + k_i·∫d)·dt` about the chassis' forward axis, minus what it applied earlier in the
+step (`MotorcycleController.cpp:214-226`), through `Body::AddAngularImpulse`, which clamps the
+angular velocity to `MAX_ANGULAR_VELOCITY` afterwards (`Body.inl:149-154`). `d` is the lean error,
+an `acos` within `[0, π]` with a sign, and `ω_f` the angular velocity about forward. The first
+solver call of a step applies the whole term (`PreCollide` resets the applied impulse, `:187`).
+Later calls apply only the change: the target, the integral and the chassis rotation are fixed
+within a step, so the spring part cancels and the damping part changes by at most `c·Δω_f·dt`.
+`create_motorcycle` therefore requires
+
+`(k·π + c · MAX_ANGULAR_VELOCITY_CHANGE) · I⁻¹max · (1 + 4·u) ≤ MAX_ANGULAR_ACCELERATION`,
+
+with `I⁻¹max` the chassis' largest principal inverse inertia (an upper bound for any axis) and
+`u = 5e-7` the tolerance within which the forward axis is a unit vector, computed in `f64`. Each
+call then changes the angular velocity by at most about `2 · MAX_ANGULAR_ACCELERATION · dt`, far
+from where its squared length overflows. With `c·dt·I⁻¹max > 1` the damping overshoots within a
+step and the clamp bounds it: the rule keeps the values finite, not the controller well behaved.
+Jolt's default spring (5000 and 1000) fits a chassis with `I⁻¹max` up to about 428 1/(kg·m²); the
+240 kg test motorcycle has about 0.1. In a probe without the rule, `k = c = 1e30` on that chassis
+failed Jolt's assertion that the squared angular velocity is finite (`MotionProperties.inl:38`).
+
+**Integration coefficient.** Jolt's `MotorcycleController::SaveState` writes the target lean but
+not the integrated lean angle `∫d` (`:263-275`), so `MotorcycleSettings` accepts only an
+integration coefficient of 0, Jolt's default; with 0 the integral has no effect.
+
 ## Restitution
 
 At most 1, so the restitution target speed is at most the approach speed.

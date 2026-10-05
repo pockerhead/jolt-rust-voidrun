@@ -69,6 +69,17 @@ JPH_CAPI JPH_VehicleCollisionTesterRay* JPH_VehicleCollisionTesterRay_Create2(JP
 JPH_CAPI JPH_VehicleCollisionTesterCastSphere* JPH_VehicleCollisionTesterCastSphere_Create2(JPH_ObjectLayer layer, float radius, const JPH_Vec3* up, float maxSlopeAngle, JPH_BodyID vehicleBody);
 JPH_CAPI JPH_VehicleCollisionTesterCastCylinder* JPH_VehicleCollisionTesterCastCylinder_Create2(JPH_ObjectLayer layer, float convexRadiusFraction, JPH_BodyID vehicleBody);
 
+/* MotorcycleController */
+/* Reads the target lean the lean controller steers the chassis' up toward, a world-space vector
+   (Jolt's protected MotorcycleController::mTargetLean, part of its saved state): the zero vector
+   before the first step, world up after a step with the lean controller off. Returns false, and
+   leaves result untouched, when controller is not a MotorcycleController. The kind check
+   allocates and releases one settings object (VehicleController::GetSettings). */
+JPH_CAPI bool JPH_MotorcycleController_GetTargetLean(const JPH_VehicleController* controller, JPH_Vec3* result);
+/* Replaces the target lean, for moving a world into a rotated frame; the next step smooths from
+   it. Returns false, changing nothing, when controller is not a MotorcycleController. */
+JPH_CAPI bool JPH_MotorcycleController_SetTargetLean(JPH_VehicleController* controller, const JPH_Vec3* value);
+
 /* RagdollSettings */
 /* Copies every BodyCreationSettings field (shape reference, collision group, damping, velocities, mass
    override, ...) into part partIndex; the part's constraint to its parent is kept. */

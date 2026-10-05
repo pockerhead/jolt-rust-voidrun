@@ -13,9 +13,9 @@
 [![Jolt Physics 5.6.0](https://img.shields.io/badge/Jolt%20Physics-5.6.0-orange.svg)](https://github.com/jrouwe/JoltPhysics/releases/tag/v5.6.0)
 
 Rust bindings for [Jolt Physics](https://github.com/jrouwe/JoltPhysics) 5.6: a safe API with
-rigid bodies, a character controller, wheeled vehicles, ragdolls, soft bodies, constraints and
-contact events, built for deterministic simulation. Underneath are raw bindings to the [joltc] C
-wrapper. Everything runs headless and is tested without a window.
+rigid bodies, a character controller, wheeled and tracked vehicles and motorcycles, ragdolls, soft
+bodies, constraints and contact events, built for deterministic simulation. Underneath are raw
+bindings to the [joltc] C wrapper. Everything runs headless and is tested without a window.
 
 ## Example
 
@@ -83,7 +83,7 @@ The full list of what works today, with links to the guides, is in
       and motion type
 - [x] Locked axes (allowed degrees of freedom) at body creation
 - [x] First release on crates.io and docs.rs
-- [ ] Tracked vehicles and motorcycles
+- [x] Tracked vehicles and motorcycles
 - [ ] Character contact callbacks, contact validation and collision groups
 - [ ] Mutable compounds, buoyancy, point queries, plane shape, collision response estimate, skeleton mapper
 - [ ] Playground: an example with a window that shows every feature, and GIFs for this README

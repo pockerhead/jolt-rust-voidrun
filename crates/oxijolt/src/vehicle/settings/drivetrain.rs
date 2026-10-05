@@ -2,12 +2,22 @@
 
 use oxijolt_sys::*;
 
-use super::{is_curve, is_limited_slip_ratio, DEFAULT_NORMALIZED_TORQUE, LIMITED_SLIP_RULE};
+use super::{
+    create_curve, is_limited_slip_ratio, ANGULAR_VELOCITY_TO_RPM, DEFAULT_NORMALIZED_TORQUE,
+    LIMITED_SLIP_RULE,
+};
+use crate::limits;
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
-use crate::VehicleError;
+use crate::{PhysicsWorld, VehicleError};
 
-/// The engine of a wheeled vehicle (Jolt `VehicleEngineSettings`). The defaults are Jolt's.
+/// How far above its largest point Jolt's `LinearCurve::GetValue` may round when it
+/// interpolates a torque curve: `1 + 8·2⁻²⁴`.
+const CURVE_ROUNDING: f32 = 1.0 + 4.0 * f32::EPSILON;
+
+/// The engine of a vehicle (Jolt `VehicleEngineSettings`). The defaults are Jolt's wheeled
+/// vehicle defaults; [`TrackedVehicleSettings::default_engine`](crate::TrackedVehicleSettings::default_engine)
+/// gives the tracked ones.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VehicleEngineSettings {
     pub(super) max_torque: f32,
@@ -54,8 +64,10 @@ impl VehicleEngineSettings {
     }
 
     /// Fraction of the maximum torque over fraction of the maximum rpm, as `(rpm fraction,
-    /// torque fraction)` points with strictly increasing x. Default
-    /// [`DEFAULT_NORMALIZED_TORQUE`].
+    /// torque fraction)` points: x within `0..=1`, increasing by at least
+    /// [`limits::MIN_TORQUE_CURVE_SPACING`]; y within `0..=`[`limits::MAX_NORMALIZED_TORQUE`].
+    /// Jolt reads the curve at the current rpm over the max rpm, between `min_rpm / max_rpm` and
+    /// 1. Default [`DEFAULT_NORMALIZED_TORQUE`].
     #[must_use]
     pub fn normalized_torque(mut self, points: Vec<(f32, f32)>) -> Self {
         self.normalized_torque = points;
@@ -95,17 +107,67 @@ impl VehicleEngineSettings {
         if !is_finite_non_negative(self.angular_damping) {
             return invalid("engine angular damping must be finite and not negative");
         }
-        if !is_curve(&self.normalized_torque) {
-            return invalid(
-                "engine torque curve needs at least one finite point and strictly increasing x",
-            );
+        if !limits::is_torque_curve(&self.normalized_torque) {
+            return invalid(limits::TORQUE_CURVE_RULE);
         }
         Ok(())
     }
+
+    /// The largest torque these validated settings let the engine deliver, N·m: the max torque
+    /// times the largest torque fraction of the curve, with the rounding of Jolt's
+    /// interpolation; see [docs/limits.md#torque-curves].
+    ///
+    /// [docs/limits.md#torque-curves]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#torque-curves
+    pub(super) fn largest_torque(&self) -> f32 {
+        let largest_torque_fraction = self
+            .normalized_torque
+            .iter()
+            .map(|&(_, fraction)| fraction)
+            .fold(0.0, f32::max);
+        self.max_torque * largest_torque_fraction * CURVE_ROUNDING
+    }
+
+    /// Checks that the coefficients `VehicleEngine::ApplyTorque` forms from these validated
+    /// settings are finite at the largest step.
+    pub(super) fn validate_step_coefficients(&self) -> Result<(), VehicleError> {
+        let dt = PhysicsWorld::MAX_DELTA_TIME;
+        let dt_div_ie = dt / self.inertia;
+        let torque = self.largest_torque();
+        let coefficients = [
+            dt_div_ie,
+            torque,
+            dt_div_ie * torque,
+            ANGULAR_VELOCITY_TO_RPM * torque * dt / self.inertia,
+        ];
+        if coefficients.iter().all(|value| value.is_finite()) {
+            Ok(())
+        } else {
+            Err(VehicleError::InvalidValue(
+                "engine inertia and torque give a non-finite step coefficient",
+            ))
+        }
+    }
+
+    /// Calls `f` with the joltc engine settings of these validated settings; their torque curve
+    /// lives for the call.
+    pub(super) fn with_jph<R>(&self, f: impl FnOnce(&JPH_VehicleEngineSettings) -> R) -> R {
+        let torque_curve = create_curve(&self.normalized_torque);
+        f(&JPH_VehicleEngineSettings {
+            maxTorque: self.max_torque,
+            minRPM: self.min_rpm,
+            maxRPM: self.max_rpm,
+            normalizedTorque: torque_curve.as_ptr(),
+            inertia: self.inertia,
+            angularDamping: self.angular_damping,
+        })
+    }
 }
 
-/// The automatic transmission of a wheeled vehicle (Jolt `VehicleTransmissionSettings` in
-/// `ETransmissionMode::Auto`; the manual mode is not offered). The defaults are Jolt's.
+/// The automatic transmission of a vehicle (Jolt `VehicleTransmissionSettings` in
+/// `ETransmissionMode::Auto`; the manual mode is not offered). The defaults are Jolt's wheeled
+/// vehicle defaults;
+/// [`TrackedVehicleSettings::default_transmission`](crate::TrackedVehicleSettings::default_transmission)
+/// gives the tracked ones.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VehicleTransmissionSettings {
     pub(super) gear_ratios: Vec<f32>,

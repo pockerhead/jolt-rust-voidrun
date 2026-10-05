@@ -86,11 +86,11 @@ impl SuspensionSpring {
     }
 }
 
-/// One wheel of a wheeled vehicle (Jolt `WheelSettings` and `WheelSettingsWV`). Positions and
-/// directions are in the chassis body's local space, lengths in metres. The defaults are
-/// Jolt's.
+/// The part of a wheel every vehicle kind shares (Jolt `WheelSettings`): where the suspension is
+/// attached, how it moves and springs, and the wheel's size. The builders and rules are those of
+/// [`WheelSettings`].
 #[derive(Clone, Debug, PartialEq)]
-pub struct WheelSettings {
+pub(super) struct WheelBase {
     pub(super) position: Vec3,
     pub(super) suspension_force_point: Option<Vec3>,
     pub(super) suspension_direction: Vec3,
@@ -103,19 +103,11 @@ pub struct WheelSettings {
     pub(super) suspension_spring: SuspensionSpring,
     pub(super) radius: f32,
     pub(super) width: f32,
-    pub(super) inertia: f32,
-    pub(super) angular_damping: f32,
-    pub(super) max_steer_angle: f32,
-    pub(super) longitudinal_friction: Vec<(f32, f32)>,
-    pub(super) lateral_friction: Vec<(f32, f32)>,
-    pub(super) max_brake_torque: f32,
-    pub(super) max_hand_brake_torque: f32,
 }
 
-impl WheelSettings {
-    /// A wheel whose suspension is attached to the chassis at `position` (body space, each
-    /// component within [`limits::MAX_SHAPE_EXTENT`]).
-    pub fn new(position: Vec3) -> Self {
+impl WheelBase {
+    /// Jolt's defaults, with the suspension attached at `position`.
+    pub(super) fn new(position: Vec3) -> Self {
         Self {
             position,
             suspension_force_point: None,
@@ -129,157 +121,7 @@ impl WheelSettings {
             suspension_spring: SuspensionSpring::default(),
             radius: 0.3,
             width: 0.1,
-            inertia: 0.9,
-            angular_damping: 0.2,
-            max_steer_angle: 70.0_f32.to_radians(),
-            longitudinal_friction: DEFAULT_LONGITUDINAL_FRICTION.to_vec(),
-            lateral_friction: DEFAULT_LATERAL_FRICTION.to_vec(),
-            max_brake_torque: 1500.0,
-            max_hand_brake_torque: 4000.0,
         }
-    }
-
-    /// Where suspension and tire forces act on the chassis (body space, each component within
-    /// [`limits::MAX_SHAPE_EXTENT`]). `None`, the
-    /// default, applies them at the contact point, which is more accurate against dynamic
-    /// ground but less stable (Jolt `mEnableSuspensionForcePoint`).
-    #[must_use]
-    pub fn suspension_force_point(mut self, value: Option<Vec3>) -> Self {
-        self.suspension_force_point = value;
-        self
-    }
-
-    /// Direction the suspension extends in, a unit vector pointing down. Default −Y.
-    #[must_use]
-    pub fn suspension_direction(mut self, value: Vec3) -> Self {
-        self.suspension_direction = value;
-        self
-    }
-
-    /// Axis the wheel steers about, a unit vector pointing up. Default +Y.
-    #[must_use]
-    pub fn steering_axis(mut self, value: Vec3) -> Self {
-        self.steering_axis = value;
-        self
-    }
-
-    /// Up of the wheel in the neutral steering position, a unit vector; tilt it for camber.
-    /// Default +Y.
-    #[must_use]
-    pub fn wheel_up(mut self, value: Vec3) -> Self {
-        self.wheel_up = value;
-        self
-    }
-
-    /// Forward of the wheel in the neutral steering position, a unit vector perpendicular to
-    /// [`wheel_up`](Self::wheel_up); turn it for toe. Default +Z.
-    #[must_use]
-    pub fn wheel_forward(mut self, value: Vec3) -> Self {
-        self.wheel_forward = value;
-        self
-    }
-
-    /// Suspension length when fully raised, from the attachment point, between 0 and
-    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.3.
-    #[must_use]
-    pub fn suspension_min_length(mut self, value: f32) -> Self {
-        self.suspension_min_length = value;
-        self
-    }
-
-    /// Suspension length when fully extended, at least the minimum length and at most
-    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.5.
-    #[must_use]
-    pub fn suspension_max_length(mut self, value: f32) -> Self {
-        self.suspension_max_length = value;
-        self
-    }
-
-    /// How far the spring is already compressed at full extension, between 0 and
-    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.
-    #[must_use]
-    pub fn suspension_preload_length(mut self, value: f32) -> Self {
-        self.suspension_preload_length = value;
-        self
-    }
-
-    /// The suspension spring. Default [`SuspensionSpring::default`]. The stiffness and damping
-    /// Jolt derives from it must stay at most [`limits::MAX_SPRING_COEFFICIENT`] for a chassis of
-    /// [`limits::MAX_MASS`]: in frequency mode `MAX_MASS·ω²` and `2·MAX_MASS·ζ·ω` with
-    /// `ω = 2π·frequency`, in stiffness mode the values themselves.
-    #[must_use]
-    pub fn suspension_spring(mut self, value: SuspensionSpring) -> Self {
-        self.suspension_spring = value;
-        self
-    }
-
-    /// Wheel radius, positive and at most [`limits::MAX_SHAPE_EXTENT`]. Default 0.3.
-    #[must_use]
-    pub fn radius(mut self, value: f32) -> Self {
-        self.radius = value;
-        self
-    }
-
-    /// Wheel width, between 0 and [`limits::MAX_SHAPE_EXTENT`]; positive with
-    /// [`VehicleCollisionTester::CastCylinder`](super::VehicleCollisionTester::CastCylinder).
-    /// Default 0.1.
-    #[must_use]
-    pub fn width(mut self, value: f32) -> Self {
-        self.width = value;
-        self
-    }
-
-    /// Moment of inertia of the wheel about its axle, kg·m², positive. Default 0.9.
-    #[must_use]
-    pub fn inertia(mut self, value: f32) -> Self {
-        self.inertia = value;
-        self
-    }
-
-    /// Angular damping of the wheel, `dω/dt = −c·ω`, not negative. Default 0.2.
-    #[must_use]
-    pub fn angular_damping(mut self, value: f32) -> Self {
-        self.angular_damping = value;
-        self
-    }
-
-    /// Largest steering angle in radians, at most π/2 in magnitude; 0 for wheels that do not
-    /// steer. Default 70°.
-    #[must_use]
-    pub fn max_steer_angle(mut self, radians: f32) -> Self {
-        self.max_steer_angle = radians;
-        self
-    }
-
-    /// Friction coefficient over longitudinal slip ratio, as `(slip, friction)` points with
-    /// strictly increasing slip. Default [`DEFAULT_LONGITUDINAL_FRICTION`].
-    #[must_use]
-    pub fn longitudinal_friction(mut self, points: Vec<(f32, f32)>) -> Self {
-        self.longitudinal_friction = points;
-        self
-    }
-
-    /// Friction coefficient over slip angle in degrees, as `(angle, friction)` points with
-    /// strictly increasing angle. Default [`DEFAULT_LATERAL_FRICTION`].
-    #[must_use]
-    pub fn lateral_friction(mut self, points: Vec<(f32, f32)>) -> Self {
-        self.lateral_friction = points;
-        self
-    }
-
-    /// Largest brake torque, N·m, not negative. Default 1500.
-    #[must_use]
-    pub fn max_brake_torque(mut self, value: f32) -> Self {
-        self.max_brake_torque = value;
-        self
-    }
-
-    /// Largest hand brake torque, N·m, not negative; usually 0 on the front wheels. Default
-    /// 4000.
-    #[must_use]
-    pub fn max_hand_brake_torque(mut self, value: f32) -> Self {
-        self.max_hand_brake_torque = value;
-        self
     }
 
     pub(super) fn validate(&self) -> Result<(), VehicleError> {
@@ -339,6 +181,230 @@ impl WheelSettings {
                 "wheel width must be finite and between 0 and limits::MAX_SHAPE_EXTENT",
             );
         }
+        Ok(())
+    }
+
+    /// Writes these validated values into joltc wheel settings of any kind.
+    ///
+    /// # Safety
+    /// `wheel` points to live joltc wheel settings that nothing else uses during the call.
+    pub(super) unsafe fn apply(&self, wheel: *mut JPH_WheelSettings) {
+        let position = self.position.to_jph();
+        let force_point = self.suspension_force_point.unwrap_or(Vec3::ZERO).to_jph();
+        let suspension_direction = self.suspension_direction.to_jph();
+        let steering_axis = self.steering_axis.to_jph();
+        let wheel_up = self.wheel_up.to_jph();
+        let wheel_forward = self.wheel_forward.to_jph();
+        let mut spring = self.suspension_spring.to_jph();
+        // SAFETY: `wheel` is live and unshared (contract). The setters copy the vectors and the
+        // spring, which are live locals.
+        unsafe {
+            JPH_WheelSettings_SetPosition(wheel, &position);
+            JPH_WheelSettings_SetSuspensionForcePoint(wheel, &force_point);
+            JPH_WheelSettings_SetEnableSuspensionForcePoint(
+                wheel,
+                self.suspension_force_point.is_some(),
+            );
+            JPH_WheelSettings_SetSuspensionDirection(wheel, &suspension_direction);
+            JPH_WheelSettings_SetSteeringAxis(wheel, &steering_axis);
+            JPH_WheelSettings_SetWheelUp(wheel, &wheel_up);
+            JPH_WheelSettings_SetWheelForward(wheel, &wheel_forward);
+            JPH_WheelSettings_SetSuspensionMinLength(wheel, self.suspension_min_length);
+            JPH_WheelSettings_SetSuspensionMaxLength(wheel, self.suspension_max_length);
+            JPH_WheelSettings_SetSuspensionPreloadLength(wheel, self.suspension_preload_length);
+            JPH_WheelSettings_SetSuspensionSpring(wheel, &mut spring);
+            JPH_WheelSettings_SetRadius(wheel, self.radius);
+            JPH_WheelSettings_SetWidth(wheel, self.width);
+        }
+    }
+
+    /// What a collision tester needs to know about this wheel.
+    pub(super) fn geometry(&self) -> WheelGeometry {
+        WheelGeometry {
+            suspension_max_length: self.suspension_max_length,
+            radius: self.radius,
+            width: self.width,
+        }
+    }
+}
+
+/// One wheel of a wheeled vehicle or a motorcycle (Jolt `WheelSettings` and `WheelSettingsWV`).
+/// Positions and directions are in the chassis body's local space, lengths in metres. The
+/// defaults are Jolt's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WheelSettings {
+    pub(super) base: WheelBase,
+    pub(super) inertia: f32,
+    pub(super) angular_damping: f32,
+    pub(super) max_steer_angle: f32,
+    pub(super) longitudinal_friction: Vec<(f32, f32)>,
+    pub(super) lateral_friction: Vec<(f32, f32)>,
+    pub(super) max_brake_torque: f32,
+    pub(super) max_hand_brake_torque: f32,
+}
+
+impl WheelSettings {
+    /// A wheel whose suspension is attached to the chassis at `position` (body space, each
+    /// component within [`limits::MAX_SHAPE_EXTENT`]).
+    pub fn new(position: Vec3) -> Self {
+        Self {
+            base: WheelBase::new(position),
+            inertia: 0.9,
+            angular_damping: 0.2,
+            max_steer_angle: 70.0_f32.to_radians(),
+            longitudinal_friction: DEFAULT_LONGITUDINAL_FRICTION.to_vec(),
+            lateral_friction: DEFAULT_LATERAL_FRICTION.to_vec(),
+            max_brake_torque: 1500.0,
+            max_hand_brake_torque: 4000.0,
+        }
+    }
+
+    /// Where suspension and tire forces act on the chassis (body space, each component within
+    /// [`limits::MAX_SHAPE_EXTENT`]). `None`, the
+    /// default, applies them at the contact point, which is more accurate against dynamic
+    /// ground but less stable (Jolt `mEnableSuspensionForcePoint`).
+    #[must_use]
+    pub fn suspension_force_point(mut self, value: Option<Vec3>) -> Self {
+        self.base.suspension_force_point = value;
+        self
+    }
+
+    /// Direction the suspension extends in, a unit vector pointing down. Default −Y.
+    #[must_use]
+    pub fn suspension_direction(mut self, value: Vec3) -> Self {
+        self.base.suspension_direction = value;
+        self
+    }
+
+    /// Axis the wheel steers about, a unit vector pointing up. Default +Y.
+    #[must_use]
+    pub fn steering_axis(mut self, value: Vec3) -> Self {
+        self.base.steering_axis = value;
+        self
+    }
+
+    /// Up of the wheel in the neutral steering position, a unit vector; tilt it for camber.
+    /// Default +Y.
+    #[must_use]
+    pub fn wheel_up(mut self, value: Vec3) -> Self {
+        self.base.wheel_up = value;
+        self
+    }
+
+    /// Forward of the wheel in the neutral steering position, a unit vector perpendicular to
+    /// [`wheel_up`](Self::wheel_up); turn it for toe. Default +Z.
+    #[must_use]
+    pub fn wheel_forward(mut self, value: Vec3) -> Self {
+        self.base.wheel_forward = value;
+        self
+    }
+
+    /// Suspension length when fully raised, from the attachment point, between 0 and
+    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.3.
+    #[must_use]
+    pub fn suspension_min_length(mut self, value: f32) -> Self {
+        self.base.suspension_min_length = value;
+        self
+    }
+
+    /// Suspension length when fully extended, at least the minimum length and at most
+    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.5.
+    #[must_use]
+    pub fn suspension_max_length(mut self, value: f32) -> Self {
+        self.base.suspension_max_length = value;
+        self
+    }
+
+    /// How far the spring is already compressed at full extension, between 0 and
+    /// [`limits::MAX_SHAPE_EXTENT`]. Default 0.
+    #[must_use]
+    pub fn suspension_preload_length(mut self, value: f32) -> Self {
+        self.base.suspension_preload_length = value;
+        self
+    }
+
+    /// The suspension spring. Default [`SuspensionSpring::default`]. The stiffness and damping
+    /// Jolt derives from it must stay at most [`limits::MAX_SPRING_COEFFICIENT`] for a chassis of
+    /// [`limits::MAX_MASS`]: in frequency mode `MAX_MASS·ω²` and `2·MAX_MASS·ζ·ω` with
+    /// `ω = 2π·frequency`, in stiffness mode the values themselves.
+    #[must_use]
+    pub fn suspension_spring(mut self, value: SuspensionSpring) -> Self {
+        self.base.suspension_spring = value;
+        self
+    }
+
+    /// Wheel radius, positive and at most [`limits::MAX_SHAPE_EXTENT`]. Default 0.3.
+    #[must_use]
+    pub fn radius(mut self, value: f32) -> Self {
+        self.base.radius = value;
+        self
+    }
+
+    /// Wheel width, between 0 and [`limits::MAX_SHAPE_EXTENT`]; positive with
+    /// [`VehicleCollisionTester::CastCylinder`](super::VehicleCollisionTester::CastCylinder).
+    /// Default 0.1.
+    #[must_use]
+    pub fn width(mut self, value: f32) -> Self {
+        self.base.width = value;
+        self
+    }
+
+    /// Moment of inertia of the wheel about its axle, kg·m², positive. Default 0.9.
+    #[must_use]
+    pub fn inertia(mut self, value: f32) -> Self {
+        self.inertia = value;
+        self
+    }
+
+    /// Angular damping of the wheel, `dω/dt = −c·ω`, not negative. Default 0.2.
+    #[must_use]
+    pub fn angular_damping(mut self, value: f32) -> Self {
+        self.angular_damping = value;
+        self
+    }
+
+    /// Largest steering angle in radians, at most π/2 in magnitude; 0 for wheels that do not
+    /// steer. Default 70°.
+    #[must_use]
+    pub fn max_steer_angle(mut self, radians: f32) -> Self {
+        self.max_steer_angle = radians;
+        self
+    }
+
+    /// Friction coefficient over longitudinal slip ratio, as `(slip, friction)` points with
+    /// strictly increasing slip. Default [`DEFAULT_LONGITUDINAL_FRICTION`].
+    #[must_use]
+    pub fn longitudinal_friction(mut self, points: Vec<(f32, f32)>) -> Self {
+        self.longitudinal_friction = points;
+        self
+    }
+
+    /// Friction coefficient over slip angle in degrees, as `(angle, friction)` points with
+    /// strictly increasing angle. Default [`DEFAULT_LATERAL_FRICTION`].
+    #[must_use]
+    pub fn lateral_friction(mut self, points: Vec<(f32, f32)>) -> Self {
+        self.lateral_friction = points;
+        self
+    }
+
+    /// Largest brake torque, N·m, not negative. Default 1500.
+    #[must_use]
+    pub fn max_brake_torque(mut self, value: f32) -> Self {
+        self.max_brake_torque = value;
+        self
+    }
+
+    /// Largest hand brake torque, N·m, not negative; usually 0 on the front wheels. Default
+    /// 4000.
+    #[must_use]
+    pub fn max_hand_brake_torque(mut self, value: f32) -> Self {
+        self.max_hand_brake_torque = value;
+        self
+    }
+
+    pub(super) fn validate(&self) -> Result<(), VehicleError> {
+        let invalid = |what| Err(VehicleError::InvalidValue(what));
+        self.base.validate()?;
         // Jolt asserts only `>= 0` but divides by the inertia
         // (`WheeledVehicleController::PostCollide`).
         if !is_finite_positive(self.inertia) {
@@ -372,35 +438,11 @@ impl WheelSettings {
         let longitudinal = create_curve(&self.longitudinal_friction);
         let lateral = create_curve(&self.lateral_friction);
         let ptr = wheel.as_ptr();
-        let base: *mut JPH_WheelSettings = ptr.cast();
-        let position = self.position.to_jph();
-        let force_point = self.suspension_force_point.unwrap_or(Vec3::ZERO).to_jph();
-        let suspension_direction = self.suspension_direction.to_jph();
-        let steering_axis = self.steering_axis.to_jph();
-        let wheel_up = self.wheel_up.to_jph();
-        let wheel_forward = self.wheel_forward.to_jph();
-        let mut spring = self.suspension_spring.to_jph();
         // SAFETY: the settings and both curves are live and owned by their guards; a
         // `WheelSettingsWV` derives from `WheelSettings` with single inheritance, joltc's own
-        // cast convention. The setters copy the vectors, the spring and the curves. All values
-        // were validated.
+        // cast convention. The setters copy the curves. All values were validated.
         unsafe {
-            JPH_WheelSettings_SetPosition(base, &position);
-            JPH_WheelSettings_SetSuspensionForcePoint(base, &force_point);
-            JPH_WheelSettings_SetEnableSuspensionForcePoint(
-                base,
-                self.suspension_force_point.is_some(),
-            );
-            JPH_WheelSettings_SetSuspensionDirection(base, &suspension_direction);
-            JPH_WheelSettings_SetSteeringAxis(base, &steering_axis);
-            JPH_WheelSettings_SetWheelUp(base, &wheel_up);
-            JPH_WheelSettings_SetWheelForward(base, &wheel_forward);
-            JPH_WheelSettings_SetSuspensionMinLength(base, self.suspension_min_length);
-            JPH_WheelSettings_SetSuspensionMaxLength(base, self.suspension_max_length);
-            JPH_WheelSettings_SetSuspensionPreloadLength(base, self.suspension_preload_length);
-            JPH_WheelSettings_SetSuspensionSpring(base, &mut spring);
-            JPH_WheelSettings_SetRadius(base, self.radius);
-            JPH_WheelSettings_SetWidth(base, self.width);
+            self.base.apply(ptr.cast());
             JPH_WheelSettingsWV_SetInertia(ptr, self.inertia);
             JPH_WheelSettingsWV_SetAngularDamping(ptr, self.angular_damping);
             JPH_WheelSettingsWV_SetMaxSteerAngle(ptr, self.max_steer_angle);
@@ -417,17 +459,13 @@ impl WheelSettings {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct WheelGeometry {
     pub(super) suspension_max_length: f32,
-    pub(super) radius: f32,
+    pub(crate) radius: f32,
     pub(super) width: f32,
 }
 
 impl WheelGeometry {
     pub(crate) fn of(wheel: &WheelSettings) -> Self {
-        Self {
-            suspension_max_length: wheel.suspension_max_length,
-            radius: wheel.radius,
-            width: wheel.width,
-        }
+        wheel.base.geometry()
     }
 }
 
