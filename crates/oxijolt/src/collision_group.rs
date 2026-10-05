@@ -158,6 +158,9 @@ unsafe impl Sync for TableInner {}
 impl GroupFilterTable {
     /// The most sub groups a table may have, an oxijolt bound: the table takes about n²/16
     /// bytes, and Jolt's `int` bit index (`GroupFilterTable::GetBit`) overflows above 65 536.
+    /// See [docs/limits.md#group-filter-table-size].
+    ///
+    /// [docs/limits.md#group-filter-table-size]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#group-filter-table-size
     pub const MAX_SUB_GROUPS: u32 = 4096;
 
     /// How many sub groups the table has; their ids are `0..sub_groups()`.

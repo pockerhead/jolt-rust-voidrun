@@ -8,12 +8,17 @@ what is planned next.
   the triangles too thin to collide with, for static and kinematic bodies), heightfield, compound
   and scaled shapes; physics materials with user data;
   forces, sleeping, continuous collision; impulses, kinematic moves, waking and sleeping on demand,
-  sensors, per-body user data, locked axes (allowed degrees of freedom), and shape and motion type
-  changes ([guide](bodies.md)).
+  sensors, per-body user data, locked axes (allowed degrees of freedom), shape and motion type
+  changes, and contact-cache invalidation ([guide](bodies.md)).
+- Collision groups: tables of sub groups that say which pairs collide, given to rigid and soft
+  bodies at creation, for ragdolls, chains and vehicles that ignore their driver
+  ([guide](bodies.md#collision-groups)).
 - Scene queries: ray casts, shape casts and collide-shape, filtered by layer, compound child
   group and body.
 - A character controller (Jolt's `CharacterVirtual`) with stair walking, floor sticking and an up
-  direction that can change every update, for walking on a planet.
+  direction that can change every update, for walking on a planet, and a character contact
+  listener for moving platforms, ignored contacts, push settings and added, persisted and removed
+  contacts ([guide](events.md#character-contacts-charactercontactlistener)).
 - Wheeled vehicles with suspension, engine, automatic transmission, differentials and anti-roll
   bars; tracked vehicles (tanks) with two tracks; motorcycles with a lean controller
   ([guide](vehicles.md)).
@@ -25,7 +30,8 @@ what is planned next.
   ([guide](soft-bodies.md)).
 - Contact, activation and soft body contact events in an order that does not depend on the
   thread count, and a contact listener that changes friction, restitution, mass scales or surface
-  velocity per contact ([guide](events.md)).
+  velocity per contact, or rejects contacts before they form (one-way platforms)
+  ([guide](events.md)).
 - Saving and restoring a world's state for rollback and replays ([guide](state.md)).
 - A floating origin (`PhysicsWorld::rebase`) and optional `f64` world positions.
 - Jolt's jobs on Jolt's thread pool or on your own, such as Rayon ([guide](job-system.md)).

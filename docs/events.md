@@ -2,8 +2,9 @@
 
 A world can report what happened in a step: contacts that began, lasted or ended, bodies that woke
 up or fell asleep, and soft body vertices that touched something. A `ContactListener` can also
-change how Jolt resolves a contact, for example to make ice slippery. The first sections show how to
-use them; the later ones describe which Jolt code paths produce each event. Line numbers refer to
+change how Jolt resolves a contact, for example to make ice slippery, or reject a contact before it
+forms (a one-way platform), and a `CharacterContactListener` does the same for characters. The first
+sections show how to use them; the later ones describe which Jolt code paths produce each event. Line numbers refer to
 the vendored Jolt 5.6 sources (`crates/oxijolt-sys/vendor/JoltPhysics/Jolt/Physics/`) and joltc
 (`crates/oxijolt-sys/vendor/joltc/src/joltc.cpp`).
 
@@ -159,6 +160,89 @@ arguments and on data fixed for the step. Settings a method leaves invalid for i
 applied and are reported ([below](#rejected-contact-settings)); a panic is resumed by `step`
 ([below](#panics)).
 
+## Validating contacts
+
+`ContactListener::contact_validate` decides whether Jolt keeps a hit between two rigid bodies before
+it becomes a contact (Jolt `ContactListener::OnContactValidate`). It gets a `ContactCandidate` (both
+bodies, their user data, the sub-shapes, the deepest points in world space, the penetration axis and
+depth) and answers a `ValidateResult`. The default accepts everything, as Jolt does without a
+listener.
+
+```rust
+use std::sync::Arc;
+use oxijolt::*;
+
+/// The user data of a platform that bodies pass from below.
+const PLATFORM: u64 = 1;
+
+struct OneWayPlatform;
+
+impl ContactListener for OneWayPlatform {
+    fn contact_validate(&self, contact: &ContactCandidate) -> ValidateResult {
+        // Body 2 moves out of body 1 along the penetration axis.
+        let pushed_up = match contact.user_data {
+            [PLATFORM, _] => contact.penetration_axis.y > 0.0,
+            [_, PLATFORM] => contact.penetration_axis.y < 0.0,
+            _ => return ValidateResult::AcceptAllContactsForThisBodyPair,
+        };
+        if pushed_up {
+            ValidateResult::AcceptContact
+        } else {
+            ValidateResult::RejectContact
+        }
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    world.set_contact_listener(Some(Arc::new(OneWayPlatform)));
+    let floor = Shape::new_box(Vec3::new(10.0, 0.5, 10.0))?;
+    world.create_body(&floor, &BodySettings::new_static().position(RVec3::new(0.0, -0.5, 0.0)))?;
+    let platform = Shape::new_box(Vec3::new(2.0, 0.05, 2.0))?;
+    world.create_body(
+        &platform,
+        &BodySettings::new_static().position(RVec3::new(0.0, 2.0, 0.0)).user_data(PLATFORM),
+    )?;
+    let cube_shape = Shape::new_box(Vec3::new(0.25, 0.25, 0.25))?;
+    let cube = world.create_body(
+        &cube_shape,
+        &BodySettings::new_dynamic()
+            .position(RVec3::new(0.0, 0.25, 0.0))
+            .linear_velocity(Vec3::new(0.0, 8.0, 0.0)),
+    )?;
+    for _ in 0..180 {
+        assert!(world.step(1.0 / 60.0)?.is_complete());
+    }
+    // Fired up through the platform, the cube came to rest on top of it.
+    assert!(world.body(cube)?.position().y > 2.2);
+    Ok(())
+}
+```
+
+- Body order: in the discrete stage `body1` has the higher motion type (dynamic over kinematic over
+  static), equal types by lower id (`PhysicsSystem.cpp:1075-1077`); in the continuous stage
+  (`MotionQuality::LinearCast`) `body1` is the body being cast and the points are where it is at the
+  time of impact (`PhysicsSystem.cpp:1864-1890`). Contact events and `SubShapeIdPair` order by id
+  instead.
+- `AcceptContact` and `RejectContact` decide one hit and ask again for the pair's next hit;
+  `AcceptAllContactsForThisBodyPair` and `RejectAllContactsForThisBodyPair` end the asking for that
+  pair in that collision pass (`PhysicsSystem.cpp:1141-1160`).
+- Jolt may ask any number of times per pair and step, in no fixed order, also for hits it then
+  drops (the continuous stage validates every hit of its cast with an early-out). Count or log the
+  calls only for debugging; the decision must depend only on the candidate and on data fixed for the
+  step.
+- The contact cache: a pair whose bodies barely moved relative to each other since the last step
+  reuses its cached contacts and is not asked again, and the cache remembers "no contact" too
+  (`PhysicsSystem.cpp:1079-1094`). A validator whose answer changes for a resting pair takes effect
+  after `BodyMut::invalidate_contact_cache` on one of the bodies. The call wakes the body and is
+  applied right before the next step in which some body is awake or a vehicle exists; until then it
+  is part of the world's state, which `save_state` holds and `restore_state` replaces
+  ([state.md](state.md)). Jolt's own invalidation flag is in no saved state and cannot be cleared
+  once set, which is why the world defers it.
+- Soft body pairs go to `soft_body_contact_validate` instead, and character movement does not call
+  it ([below](#character-contacts-charactercontactlistener)).
+- Without a user listener the callback accepts the pair before reading anything.
+
 ## Listeners
 
 A world installs nothing until `set_event_settings` asks for events or `set_contact_listener` sets a
@@ -166,9 +250,13 @@ listener. It then creates the native listeners these need and attaches them to i
 
 | Listener | Created when | Jolt interface |
 |---|---|---|
-| joltc's `ManagedContactListener` (`joltc.cpp:7923-8037`) | `contacts`, or a contact listener is set | `ContactListener` |
+| the extension's `ManagedContactListener2` (`native/joltc_ext/joltc_ext_listener.cpp`) | `contacts`, or a contact listener is set | `ContactListener` |
 | joltc's `ManagedBodyActivationListener` (`joltc.cpp:8040-8095`) | `body_activation` | `BodyActivationListener` |
 | the extension's `ManagedSoftBodyContactListener` (`native/joltc_ext/joltc_ext_listener.cpp`) | `soft_body_contacts` or `soft_body_validations`, or a contact listener is set | `SoftBodyContactListener` |
+
+The extension's contact listener takes joltc's proc table type and forwards added, persisted and
+removed contacts as joltc's does, but fills the validate callback's collide result without the face
+arrays that joltc's `FromJolt` allocates on every call (`joltc.cpp:428-461`).
 
 Each listener type calls one process-global proc table, installed once; per-world state goes through
 the listener's `userData`, which points at a context the world shares with the native listeners
@@ -196,6 +284,9 @@ activation changes.
 The callbacks copy the data Jolt hands them and nothing else. None of them locks a body, changes the
 world or keeps a pointer.
 
+- Validate reads both bodies' ids and user data (`JPH_Body_GetUserData`, Jolt's const
+  `Body::GetUserData`) and the collide result the extension filled, without faces. Jolt holds both
+  bodies locked during the call.
 - Added and Persisted read both bodies' ids (`JPH_Body_GetID`), the manifold through joltc's getters
   (`joltc.cpp:8099-8132`), and each side's material: the body's shape (`JPH_Body_GetShape`, which
   calls Jolt's const `Body::GetShape`) and `Shape::GetMaterial(sub-shape id)`. Jolt does not change
@@ -242,6 +333,92 @@ like the same scene with nothing installed. It requires every step to be complet
 (`StepReport::is_complete`); steps in which Jolt dropped contacts because a buffer was full are not
 covered.
 
+## Character contacts: `CharacterContactListener`
+
+`set_character_contact_listener` installs a `CharacterContactListener`, which Jolt calls while a
+character moves (Jolt `CharacterContactListener`):
+- `adjust_body_velocity`: the velocity of a body as the character sees it, for moving platforms and
+  conveyors. The character's `ground_velocity()` reports it; the caller adds it to the character's
+  velocity. `BodyVelocity`'s setters refuse velocities beyond the bounds Jolt clamps bodies to
+  ([limits.md](limits.md#character-contacts)).
+- `contact_validate`: whether the character collides with a body or another character.
+- `contact_added` and `contact_persisted` with `CharacterContactSettings`: `can_push_character`
+  (whether what it touches can push the character) and `can_receive_impulses` (whether the
+  character pushes dynamic bodies; the weight with which it stands on a body is applied either way,
+  `CharacterVirtual.cpp:1474-1481`).
+- `contact_removed`, with a `CharacterContactKey`.
+
+```rust
+use std::sync::Arc;
+use oxijolt::*;
+
+/// The user data of a conveyor belt.
+const BELT: u64 = 1;
+
+struct Conveyor;
+
+impl CharacterContactListener for Conveyor {
+    fn adjust_body_velocity(&self, _: CharacterId, _: BodyId, user_data: u64, velocity: &mut BodyVelocity) {
+        if user_data == BELT {
+            velocity.set_linear_velocity(Vec3::new(2.0, 0.0, 0.0)).expect("within the bounds");
+        }
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    world.set_character_contact_listener(Some(Arc::new(Conveyor)));
+    let belt = Shape::new_box(Vec3::new(20.0, 0.5, 20.0))?;
+    world.create_body(
+        &belt,
+        &BodySettings::new_static().position(RVec3::new(0.0, -0.5, 0.0)).user_data(BELT),
+    )?;
+    let capsule = Shape::new_capsule(0.7, 0.4)?;
+    let settings = CharacterSettings::new(&capsule).shape_offset(Vec3::new(0.0, 1.1, 0.0));
+    let id = world.create_character(&settings, RVec3::ZERO, Quat::IDENTITY)?;
+    world.refresh_character_contacts(id, &QueryFilter::new())?;
+    for _ in 0..60 {
+        let ground = world.character(id)?.ground_velocity();
+        world.character_mut(id)?.set_linear_velocity(Vec3::new(ground.x, -1.0, ground.z))?;
+        world.update_character(
+            id,
+            1.0 / 60.0,
+            Vec3::new(0.0, -9.81, 0.0),
+            &ExtendedUpdateSettings::default(),
+            &QueryFilter::new(),
+        )?;
+    }
+    // The character rode the belt.
+    assert!(world.character(id)?.position().x > 1.5);
+    Ok(())
+}
+```
+
+How it runs:
+- Jolt calls the methods on the thread that calls `update_character` or
+  `refresh_character_contacts`, during that call, for the character it updates. A native listener
+  exists only for that call: it is attached before joltc runs and detached and destroyed before the
+  call returns. Methods must not touch the world; `adjust_body_velocity` runs while Jolt holds the
+  body's read lock, so a method that locks something that also guards the world can deadlock.
+- `adjust_body_velocity` and `contact_validate` may be called any number of times per update, in no
+  fixed order, also for hits Jolt does not use (`CharacterVirtual.cpp:178-195`, `:337-381`).
+- One update (with stick to floor and walk stairs) or one refresh is one tracking scope: each contact
+  is reported at most once, as added when it is new and as persisted when the character touched it at
+  the end of its previous update or refresh, also when no listener was set then
+  (`CharacterVirtual.cpp:1385-1439`). A listener set while the character stands on the ground
+  therefore first sees that contact as persisted.
+- Removals are delivered after the update or refresh returned, sorted by body, character and
+  sub-shape raw id ("none" last). Jolt reports them in the bucket order of a hash map whose capacity
+  depends on earlier updates, which would make the order depend on history. The body or character
+  of a removal may no longer exist.
+- Two characters that collide with each other stop at each other's padding, so the velocity of a
+  walking character reaches the other one's update only within that gap: in the tests a character
+  walking at 2 m/s into a standing one did not push it, whatever `can_push_character` said.
+- A panic in a method is caught; Jolt keeps its own value for that call, the rest of the update
+  skips the methods (and its query filters reject), the update resumes the panic after joltc
+  returned, and that update's removals are not delivered.
+- Jolt's solve callbacks (`OnContactSolve`, `OnCharacterContactSolve`) are not installed.
+
 ## Lifetimes and the queue
 
 - Events wait in the world until `take_events`; nothing bounds the queue, so a caller that records
@@ -261,7 +438,11 @@ their payload's `Drop` panics. Recording continues after a panic, and the next s
 
 Once a panic is kept, callbacks that start skip the user's `ContactListener` until the panic is
 resumed. A worker that already passed that check, or is inside the listener, finishes its call; its
-settings are still applied when they are valid.
+settings are still applied when they are valid. A validation that panics, or is skipped, accepts the
+pair (`AcceptAllContactsForThisBodyPair`).
+
+Character contact listeners resume their panics from `update_character` and
+`refresh_character_contacts` instead ([above](#character-contacts-charactercontactlistener)).
 
 ## Rejected contact settings
 
@@ -304,3 +485,13 @@ released gave a median of 370 kB per block, native contact listeners that were n
 kB, and a dropped world that forgot its listeners 1.26 MB; each failed it. A leak of one small
 native object per world (a forgotten `JPH_ContactListener` alone: about 33 bytes per round) stays
 below what the block noise lets this gate resolve.
+
+`crates/oxijolt/tests/contact_control_leaks.rs` applies the same method to contact control: per
+round ten validating contact listeners, a group table of 64 sub groups, four grouped cubes and a
+grouped cloth, ten character updates with a character contact listener (one native listener per
+update) and a contact-cache invalidation, in one world and then in a new world per round. Measured
+locally, a per-update character listener that was never destroyed gave a median of 389 kB per block
+of 1 000 rounds, a group table never released 348 kB, and a native contact listener never destroyed
+389 kB; each failed the 100 kB budget. A table of 8 sub groups leaked every round stays at about the
+budget (median 98 kB), which is why the gate uses 64. The median's blind spot is the same: a leak
+that grows three or fewer of the seven blocks passes.

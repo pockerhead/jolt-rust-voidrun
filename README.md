@@ -84,7 +84,7 @@ The full list of what works today, with links to the guides, is in
 - [x] Locked axes (allowed degrees of freedom) at body creation
 - [x] First release on crates.io and docs.rs
 - [x] Tracked vehicles and motorcycles
-- [ ] Character contact callbacks, contact validation and collision groups
+- [x] Character contact callbacks, contact validation and collision groups
 - [ ] Mutable compounds, buoyancy, point queries, plane shape, collision response estimate, skeleton mapper
 - [ ] Playground: an example with a window that shows every feature, and GIFs for this README
 - [ ] Comparison with Rapier and Avian

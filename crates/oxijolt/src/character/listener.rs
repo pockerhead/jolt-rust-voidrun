@@ -5,7 +5,7 @@
 //! [`PhysicsWorld::refresh_character_contacts`] call: it is created and attached before joltc
 //! runs, and detached and destroyed before the call returns. Its `userData` points to state on
 //! that call's stack, and the callbacks catch panics into the call's
-//! [`FilterState`](crate::filter::FilterState), which resumes the first one after joltc returned.
+//! [`FilterState`], which resumes the first one after joltc returned.
 
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -103,7 +103,9 @@ pub trait CharacterContactListener: Send + Sync + 'static {
 /// The setters refuse a velocity no body could have: it must be finite and at most
 /// [`limits::MAX_LINEAR_VELOCITY`](crate::limits::MAX_LINEAR_VELOCITY) or
 /// [`limits::MAX_ANGULAR_VELOCITY`](crate::limits::MAX_ANGULAR_VELOCITY) long, the bounds Jolt
-/// clamps every body to.
+/// clamps every body to. See [docs/limits.md#character-contacts].
+///
+/// [docs/limits.md#character-contacts]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#character-contacts
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BodyVelocity {
     linear: Vec3,

@@ -4,6 +4,36 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Contact validation ([guide](docs/events.md#validating-contacts)): `ContactListener` gains
+  `contact_validate`, called with a `ContactCandidate` (both bodies in Jolt's collide order, their
+  user data, sub-shapes, world-space points, penetration axis and depth) and answering a
+  `ValidateResult`. The default accepts every hit, as Jolt does without a listener; a panic accepts
+  the hit and is resumed by `step`.
+- `BodyMut::invalidate_contact_cache`: the next step that simulates collides the body's pairs
+  afresh, so a changed validation answer reaches resting pairs. It wakes the body, and the pending
+  request is saved in `WorldState` (also by `save_state_of`) and replaced on restore.
+- Character contact listener ([guide](docs/events.md#character-contacts-charactercontactlistener)):
+  `CharacterContactListener` and `PhysicsWorld::set_character_contact_listener` adjust the velocity
+  a character sees for a body (`BodyVelocity`, bounded like body velocities), validate contacts
+  with bodies and characters, set `CharacterContactSettings` (can push the character, receives
+  impulses) and report added, persisted and removed contacts (`CharacterContactKey`). Removals are
+  delivered after the update, sorted.
+- Collision groups ([guide](docs/bodies.md#collision-groups)): `GroupFilterTableBuilder`,
+  `GroupFilterTable` (at most `GroupFilterTable::MAX_SUB_GROUPS` sub groups), `CollisionGroup`
+  (group ids up to `CollisionGroup::MAX_GROUP_ID`) and `CollisionGroupError`;
+  `BodySettings::collision_group` and `SoftBodySettings::collision_group`, fixed at creation.
+- joltc extension: `JPH_ContactListener2_SetProcs`, `_Create`, `_Destroy` and
+  `JPH_PhysicsSystem_SetContactListener2`, a contact listener whose validate callback gets the
+  collide result without faces, so validation allocates nothing.
+- Changed: the world's native contact listener is the extension's `JPH_ContactListener2`; joltc's
+  own `JPH_ContactListener_*` is no longer used by `oxijolt`. `oxijolt` now also installs joltc's
+  character contact listener proc table, which other code linking both crates must not set.
+- Changed: ragdoll parts use the collision group id `2^31 + RagdollId::to_raw()` instead of the
+  raw id itself, so caller groups never share an id with a ragdoll; ragdoll ids are unchanged, and
+  a ragdoll part refuses a collision group.
+- Fixed: a state saved right after `BodyMut::set_shape` replayed with the old shape's cached
+  contacts, because Jolt's contact-cache invalidation was not part of the saved state.
+
 - Tracked vehicles ([guide](docs/vehicles.md)): `PhysicsWorld::create_tracked_vehicle` with
   `TrackedVehicleSettings`, two `VehicleTrackSettings` that own their `TrackedWheelSettings`, and
   Jolt's tracked engine and transmission defaults. `TrackedDriverInput` sets throttle, brake and a
