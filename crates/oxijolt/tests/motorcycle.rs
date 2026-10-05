@@ -144,6 +144,45 @@ fn without_the_lean_controller_it_falls_over() {
 }
 
 /// The chassis pose and velocities as exact bits.
+/// In zero gravity, world or override, the steering limit is 0 while the bike moves forward and
+/// does not apply at rest, where the front wheel turns as far as full steering asks.
+#[test]
+fn zero_gravity_steering_limit_applies_only_while_moving() {
+    let full_steer = 30.0_f32.to_radians();
+    for world_gravity in [Vec3::ZERO, GRAVITY] {
+        for (speed, expected) in [(0.0, full_steer), (5.0, 0.0)] {
+            let (mut world, layers) = car_world(world_gravity, 1);
+            let (_, bike) = add_bike_with(
+                &mut world,
+                &behaviour_chassis(
+                    &layers,
+                    BIKE_MASS,
+                    RVec3::new(0.0, 2.0, 0.0),
+                    Quat::IDENTITY,
+                )
+                .linear_velocity(Vec3::new(0.0, 0.0, speed)),
+                &MotorcycleSettings::new(bike_vehicle_settings(bike_tester(&layers))),
+            );
+            if world_gravity != Vec3::ZERO {
+                world
+                    .vehicle_mut(bike)
+                    .unwrap()
+                    .set_gravity(Vec3::ZERO)
+                    .unwrap();
+            }
+            drive(&mut world, bike, ride(0.0, 1.0), 1);
+            let vehicle = world.vehicle(bike).unwrap();
+            assert!(vehicle.is_lean_steering_limit_enabled());
+            let steer = vehicle.wheel(0).unwrap().steer_angle;
+            assert_eq!(
+                steer.abs(),
+                expected,
+                "speed {speed} m/s, world gravity {world_gravity:?}: steer {steer}"
+            );
+        }
+    }
+}
+
 fn chassis_bits(world: &PhysicsWorld, chassis: BodyId) -> Vec<u8> {
     let mut digest = Vec::new();
     record_body(world, chassis, &mut digest);

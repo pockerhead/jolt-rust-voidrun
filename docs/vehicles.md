@@ -154,8 +154,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   does not save these switches in its state, so they are settings, read back with
   `is_lean_controller_enabled` and `is_lean_steering_limit_enabled`.
 - **Steering limit and gravity.** With the steering limit on, Jolt limits the steering angle by the
-  lean the turn would need at the current speed, using the gravity the vehicle uses. In zero
-  gravity (world or `set_gravity`) the limit is 0 and the motorcycle cannot steer.
+  lean the turn would need at the current speed, using the gravity the vehicle uses. It applies
+  while the forward speed is above 1e-3 m/s and the wheel's steering axis tilts towards the
+  vehicle's up. In zero gravity (world or `set_gravity`) the limit is 0: a moving motorcycle cannot
+  steer, one at rest turns its front wheel fully.
 - **Lean spring.** `max_lean_angle` is at most `MotorcycleSettings::MAX_LEAN_ANGLE` (80°). The
   spring constant and damping must keep the chassis' angular acceleration within
   `limits::MAX_ANGULAR_ACCELERATION`, which `create_motorcycle` checks against the chassis'

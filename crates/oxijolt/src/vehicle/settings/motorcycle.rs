@@ -113,9 +113,11 @@ impl MotorcycleSettings {
     }
 
     /// Whether the steering angle is limited by speed so the lean the turn needs stays within
-    /// [`max_lean_angle`](Self::max_lean_angle). With it on, a zero gravity (world or override)
-    /// gives a limit of 0, so the motorcycle cannot steer. Default on. Fixed at creation: Jolt
-    /// does not save this switch in its state.
+    /// [`max_lean_angle`](Self::max_lean_angle). Jolt applies the limit to a wheel while the
+    /// forward speed is above 1e-3 m/s and the wheel's steering axis tilts towards the vehicle's
+    /// up (`cos` of the caster angle above 1e-6). In zero gravity (world or override) the limit
+    /// is then 0: a moving motorcycle cannot steer, one at rest turns its front wheel fully.
+    /// Default on. Fixed at creation: Jolt does not save this switch in its state.
     #[must_use]
     pub fn lean_steering_limit(mut self, enabled: bool) -> Self {
         self.lean_steering_limit = enabled;
