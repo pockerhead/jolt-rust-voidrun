@@ -94,10 +94,11 @@ the wheels follow the wheeled vehicle's wheel rules plus a friction of at most
 wheel's; and the track speeds the drivetrain can reach must keep every term of Jolt's tracked step
 within the track drive envelope ([limits](limits.md#track-drive-envelope)).
 `create_tracked_vehicle` also weighs the tracks against the chassis: for every wheel, the track's
-inertia over the wheel's radius squared, times the chassis' inverse effective mass where the wheel
-pushes it, must be at most `limits::MAX_TRACK_MASS_RATIO` ([limits](limits.md#track-mass-ratio)).
-Jolt's `TankTest` tracks have a ratio of 0.07 and could be about seven times heavier; small wheels
-and light chassis need light tracks.
+inertia over the wheel's radius squared, times the chassis' largest inverse effective mass where
+the wheel pushes it along its forward or tilted toward its up, must be at most
+`limits::MAX_TRACK_MASS_RATIO` ([limits](limits.md#track-mass-ratio)). Jolt's `TankTest` tracks
+have a ratio of 0.23 and are accepted up to 11 kg·m²; small wheels, light chassis and hulls with
+little roll or pitch inertia next to the tracks' reach need lighter tracks.
 `TrackedVehicleSettings::default_engine` and `default_transmission` are Jolt's tracked defaults,
 which differ from the wheeled ones.
 

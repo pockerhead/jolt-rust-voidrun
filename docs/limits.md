@@ -697,48 +697,75 @@ synchronisation and the friction limit move that onset, so the bound is measured
 
 `PhysicsWorld::create_tracked_vehicle` computes `M·w` for every wheel in `f64` from the chassis'
 inverse mass, principal inverse inertia, inertia rotation and centre of mass, and refuses the
-vehicle when any wheel's exceeds `MAX_TRACK_MASS_RATIO` (0.5). `w` is the largest the wheel can
+vehicle when any wheel's exceeds `MAX_TRACK_MASS_RATIO` (0.25). `w` is the largest the wheel can
 give:
-- `d` is the wheel's forward as Jolt builds it (`VehicleConstraint::GetWheelLocalBasis`), the
-  longitudinal direction on ground perpendicular to the wheel's up.
+- `d` is any direction in the wheel's forward/up plane. Jolt's longitudinal direction is the
+  ground normal crossed with the wheel's right (`VehicleConstraint.cpp:254-271`), so it lies in
+  that plane: along the wheel's forward on ground perpendicular to the wheel's up, turned toward
+  the up on an edge, a kerb, a ramp or a wall. The largest `|a × d|` over the plane, measured with
+  `I⁻¹`, is the square root of the larger eigenvalue of a 2×2 form.
 - Every collision tester puts the contact within `ρ = max_length + √(r² + (width/2)²)` of the
   attachment point `a`: the ray ends `max_length + r` along the suspension, the cast sphere's
   centre stops `max_length + r − radius` along it, the cylinder's centre `max_length` along it with
-  its surface within `√(r² + (width/2)²)`. Since `|(c × d)|` measured with `I⁻¹` is a norm of `c`
-  across `d`, it is at most `|(a × d)| + ρ·σ`, with `σ²` the largest eigenvalue of `I⁻¹` across
-  `d`. The ratio is not tied to the tester, which can be replaced after creation.
+  its surface within `√(r² + (width/2)²)`. Since `|c × d|` measured with `I⁻¹` is a norm of `c`, it
+  is at most `|a × d| + ρ·σ`, with `σ²` the largest principal inverse inertia. The ratio is not
+  tied to the tester, which can be replaced after creation.
 - With a suspension force point, Jolt pushes there and measures the slip at the contact; the
   mixed term is at most the product of the two levers, so the larger lever is used.
 
-Measured with the rule removed, through the safe API on a tank-sized box chassis on ground with
-the wheels' friction, in the default build: a sweep of 15456 runs over equal track
-inertias of 1e-3 to 1e6 kg·m² and pairs 100 apart, wheels of 0.3 to 1000 m, chassis of 1 kg to
-1e6 kg, friction 1 to 1000, driving straight and turning in place, at 1/60 s for 300 steps and at
-`MAX_DELTA_TIME` for 60, then a fine scan of ratios 0.5 to 8 in four wheel layouts (seven wheels
-with a raised driven wheel, Jolt's `TankTest` layout, one and two wheels per track) and with tilted
-gravity. The first divergence was at a ratio of 2.70 (`TankTest` layout, 1000 m wheels, friction
-1000, straight, 1/60 s; 2.65 stayed finite); the one- and two-wheel layouts did not diverge up to
-3. The five accepted scenes that diverged before the rule had ratios of 6.7 to 354. The friction
-limit caps the impulse and delays the onset: at friction 1 nothing diverged up to ratios of 3e7,
-at friction 4 the first divergence was at 27 with 1 s steps. The rule does not count on it.
+Over the plane the lever takes in the chassis' roll and pitch inertia, so the hull's shape matters
+as much as its mass. Tracks on Jolt's tank wheels at x = ±1.7 under a 4000 kg box hull:
 
-`MAX_TRACK_MASS_RATIO` is 0.5, 5.4 times below the first divergence. With it, 39872 of 78784 runs
-over the axes above, a 1 g chassis, the four layouts and the heaviest accepted tracks of every
-layout, wheel size and chassis mass (with the other track equal or 100 times lighter) were
-accepted, and every one stayed finite for every step in the default and the asserts build. The
-tests find the heaviest accepted tracks by bisection (71 kg·m² on 0.3 m wheels under the 4000 kg
-tank, 1.8 kg·m² on 1000 m wheels under 1 kg) and drive them. Jolt's `TankTest` (10 kg·m² tracks on
-0.3 m wheels, 4000 kg) has a ratio of 0.070. With the rule removed, or with the `ρ·σ` term
-dropped, accepted settings give NaN again and the asserts build stops at
-`MotionProperties.inl:28` or `:38`; the inverse mass, the inertia rotation and the force point
-terms are policy that keeps the bound conservative, with no failure measured without them.
+| Hull half extents, centre of mass offset | Ratio of 10 kg·m² tracks, along the forward | Over the plane | Heaviest accepted tracks |
+|---|---|---|---|
+| `TankTest`: 1.7, 0.5, 3.2; −0.5 | 0.070 | 0.226 | 11.0 kg·m² |
+| short: 1.7, 0.5, 1.0; −0.5 | 0.201 | 0.641 | 3.9 kg·m² |
+| narrow: 0.5, 0.1, 3.2 | 0.079 | 2.09 | 1.2 kg·m² |
+| short and narrow: 0.5, 0.1, 1.0 | 0.488 | 2.67 | 0.94 kg·m² |
+
+Measured with the rule removed, through the safe API, in the default build: 60480 runs over the
+four hulls at plane ratios of 0.02 to 12, tire friction 4/2 on ground of friction 0.2, 1 and 1000
+and tire and ground friction 1000, ray, sphere and cylinder testers, on flat ground, kerbs of 0.3
+and 0.6 m, a wall, ramps of 30 and 45° approached from flat ground, a 30° slope facing uphill and
+across, 100 kg rubble and a 100 kg slab, driving straight, turning in place and through the gears,
+at 1/60 s for 600 steps, 0.1 s for 100 and 1 s for 20, after settling at 1/60 s; then 58000 runs at
+1 s on the static scenes at plane ratios of 0.001 to 1.
+- At 1/60 and 0.1 s nothing went NaN below a ratio of 8 (short hull at a wall, tire and ground
+  friction 1000), and the chassis first reached Jolt's angular velocity clamp (15π rad/s) on static
+  ground at game friction at 6 (short narrow hull, 0.1 s). At game friction nothing went NaN up to
+  12 at any step length.
+- At 1 s with tire friction 4/2 and ground friction 1000, the first NaN was at 6 (short narrow
+  hull, 45° ramp).
+- At 1 s the onsets are lower and scattered: at game friction the chassis reached the clamp from
+  0.32 (short hull parked on a 30° slope) and 0.48 (`TankTest`, 30° ramp); with tire and ground
+  friction 1000, 3 of 17280 runs between 0.001 and 0.2 went NaN, the lowest at 0.062 (short narrow
+  hull, 30° ramp). The narrow hulls also reach the clamp at 1 s with tracks of 1e-3 kg·m²: that
+  part does not come from the tracks.
+
+`MAX_TRACK_MASS_RATIO` is 0.25, the round value just above `TankTest`'s 0.226, 24 times below the
+onsets at 1/60 and 0.1 s and at ground friction 1000 with game tires. No ratio that keeps Jolt's
+tank covers the onsets at 1 s steps: four times below them would be 0.08 at game friction and 0.016
+with tire and ground friction 1000, which refuse `TankTest`'s tracks above 3.5 and 0.7 kg·m².
+
+With it, 24000 accepted runs drove the four hulls with their heaviest accepted tracks and
+`TankTest` with tracks of 10 and 11 kg·m² (20, 40 and 70 are refused) over the scenes above plus a
+15° ramp and slope, a 0.15 m kerb, 1 and 10 kg rubble, slabs of 1, 10 and 1000 kg and a second tank
+across the hull, at 1/240, 1/60, 0.1, 1 and 1e-6 s, through gear changes and inputs that flip every
+step. Up to 0.1 s every run on static ground stayed finite and below the clamp at every friction,
+and every run at game friction did on dynamic bodies too. At 1 s the narrow hulls reached the clamp
+about as often as with tracks of 1e-3 kg·m² in the same scenes, and 7 runs went NaN, all with tire
+and ground friction 1000.
 
 Not covered:
-- Ground that tilts the longitudinal direction away from the wheel's forward (a wheel on an edge,
-  a step or a wall). Across the wheel's up the lever is longer: over every direction in the
-  forward-up plane, `TankTest`'s ratio would be 0.30. Only the margin covers it.
-- A dynamic body under the wheels: the contact constraint moves that body too, and its inverse
-  mass adds to `w`. The ratio counts the chassis alone.
+- 1 s steps with tire and ground friction 1000 on the short and narrow hulls. Over 50 chassis
+  masses from 3900 to 4096 kg, on the static scenes, 0 of 14400 runs went NaN with tracks of
+  1e-3 kg·m² and at ratios of 0.02 and 0.05, and 5, 29 and 37 at 0.1, 0.15 and 0.25; `TankTest`
+  stayed finite at all of them. The onset depends on the hull, not only on the ratio.
+- A dynamic body under the wheels: the contact moves that body too, and its inverse mass adds to
+  `w`; the ratio counts the chassis alone. With the rule removed, 100 kg rubble or slabs at 1 s and
+  tire and ground friction 1000 gave NaN from a ratio of 0.75. With the rule, at up to 0.1 s and
+  ground friction 1000, rubble of 1 and 10 kg and a 1 kg slab brought the chassis to the clamp in up
+  to 9 of 384 runs per hull (at most 1 with tracks of 1e-3 kg·m²).
 
 ## Motorcycle lean
 

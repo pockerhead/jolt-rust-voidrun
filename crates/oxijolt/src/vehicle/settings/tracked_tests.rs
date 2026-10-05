@@ -450,32 +450,49 @@ fn chassis(inverse_inertia: [f64; 3], body_to_principal: Quat, center: Vec3) -> 
     }
 }
 
+/// The largest `√((r × d)ᵀ M (r × d))` over 3600 directions `d` in the y/z plane, for the
+/// symmetric `M` given by its rows.
+fn sampled_plane_lever(m: [[f64; 3]; 3], r: [f64; 3]) -> f64 {
+    (0..3600)
+        .map(|k| {
+            let (sin, cos) = (f64::from(k) * std::f64::consts::PI / 1800.0).sin_cos();
+            let c = limits::cross(r, [0.0, sin, cos]);
+            (0..3)
+                .flat_map(|i| (0..3).map(move |j| (i, j)))
+                .map(|(i, j)| c[i] * m[i][j] * c[j])
+                .sum::<f64>()
+                .sqrt()
+        })
+        .fold(0.0, f64::max)
+}
+
 #[test]
 fn track_mass_ratio_takes_the_chassis_inertia_at_the_farthest_contact() {
-    let (a, b, c) = (1.0 / 1500.0, 1.0 / 4000.0, 1.0 / 2000.0);
+    let (a, b, c): (f64, f64, f64) = (1.0 / 1500.0, 1.0 / 4000.0, 1.0 / 2000.0);
     let center = Vec3::new(0.3, -0.5, 0.0);
-    // `tank()`'s wheels: x = ±1, y = −0.3, forward +Z, Jolt's 10 kg·m² tracks on 0.3 m wheels,
-    // every contact within 0.5 + √(0.3² + 0.05²) of the attachment.
+    // `tank()`'s wheels: x = ±1, y = −0.3, z = 1, 0, −1, up +Y and forward +Z, so every ground
+    // normal gives a longitudinal direction in the y/z plane. Jolt's 10 kg·m² tracks on 0.3 m
+    // wheels, every contact within 0.5 + √(0.3² + 0.05²) of the attachment, where a unit lever
+    // weighs at most the largest inverse inertia.
     let reach = 0.5 + 0.3_f64.hypot(0.05);
+    let per_metre = a.max(b).max(c).sqrt();
     let track_mass = 10.0 / (0.3_f64 * 0.3);
     for angle in [0.0_f64, 0.4, -0.4] {
         let (half_sin, half_cos) = (0.5 * angle).sin_cos();
         let to_principal = Quat::from_xyzw(0.0, 0.0, half_sin as f32, half_cos as f32);
-        // The body-space inverse inertia Rᵀ D R across +Z, with R the turn by `angle` about z.
+        // The body-space inverse inertia Rᵀ D R, with R the turn by `angle` about z.
         let (sin, cos) = angle.sin_cos();
         let xx = a * cos * cos + b * sin * sin;
         let yy = a * sin * sin + b * cos * cos;
         let xy = sin * cos * (b - a);
-        let across = 0.5 * (xx + yy) + (0.25 * (xx - yy) * (xx - yy) + xy * xy).sqrt();
+        let body = [[xx, xy, 0.0], [xy, yy, 0.0], [0.0, 0.0, c]];
         let expected = [1.0_f64, -1.0]
-            .map(|x| {
-                // The lever across +Z: (r_y, −r_x) for r = attachment − centre.
-                let (u, v) = (-0.3 + 0.5, -(x - 0.3));
-                let lever =
-                    (xx * u * u + 2.0 * xy * u * v + yy * v * v).sqrt() + reach * across.sqrt();
+            .into_iter()
+            .flat_map(|x| [1.0_f64, 0.0, -1.0].map(|z| [x - 0.3, -0.3 + 0.5, z]))
+            .map(|r| {
+                let lever = sampled_plane_lever(body, r) + reach * per_metre;
                 track_mass * (1.0 / 4000.0 + lever * lever)
             })
-            .into_iter()
             .fold(0.0, f64::max);
         let ratio = tank().largest_track_mass_ratio(&chassis([a, b, c], to_principal, center));
         assert!(
@@ -488,7 +505,8 @@ fn track_mass_ratio_takes_the_chassis_inertia_at_the_farthest_contact() {
     settings.left.wheels[0] = settings.left.wheels[0]
         .clone()
         .suspension_force_point(Some(Vec3::new(1.0, -5.0, 0.0)));
-    let lever = (a * 4.5 * 4.5 + b * 0.7 * 0.7).sqrt();
+    let principal = [[a, 0.0, 0.0], [0.0, b, 0.0], [0.0, 0.0, c]];
+    let lever = sampled_plane_lever(principal, [0.7, -4.5, 0.0]);
     let expected = track_mass * (1.0 / 4000.0 + lever * lever);
     let ratio = settings.largest_track_mass_ratio(&chassis([a, b, c], Quat::IDENTITY, center));
     assert!(

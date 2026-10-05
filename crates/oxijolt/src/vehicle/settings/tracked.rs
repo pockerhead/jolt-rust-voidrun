@@ -600,9 +600,10 @@ pub(crate) struct ChassisMass {
 }
 
 impl ChassisMass {
-    /// The largest inverse effective mass of the chassis where `wheel` can push it along the
-    /// wheel's forward: the lever is taken at the farthest point the wheel's contact can reach,
-    /// and at the suspension force point when the wheel has one.
+    /// The largest inverse effective mass of the chassis where `wheel` can push it along any
+    /// direction in the wheel's forward/up plane, which holds Jolt's longitudinal direction for
+    /// every ground normal: the lever is taken at the farthest point the wheel's contact can
+    /// reach, and at the suspension force point when the wheel has one.
     fn inverse_effective_mass(&self, wheel: &WheelBase) -> f64 {
         let principal = |v: Vec3| {
             let v = self.body_to_principal.rotate(v);
@@ -611,18 +612,17 @@ impl ChassisMass {
         let center = self.center_of_mass;
         let from_center =
             |p: Vec3| principal(Vec3::new(p.x - center.x, p.y - center.y, p.z - center.z));
-        // Jolt's longitudinal direction on ground perpendicular to the wheel's up
-        // (`VehicleConstraint::GetWheelLocalBasis`).
-        let up = principal(wheel.wheel_up);
+        // Jolt's longitudinal direction is `normal × right` (`VehicleConstraint::OnStep`).
+        let up = limits::normalized(principal(wheel.wheel_up));
         let right = limits::normalized(limits::cross(principal(wheel.wheel_forward), up));
-        let forward = limits::normalized(limits::cross(up, right));
+        let forward = limits::cross(up, right);
         // Every tester puts the contact within this distance of the attachment point.
         let reach = f64::from(wheel.suspension_max_length)
             + f64::from(wheel.radius).hypot(0.5 * f64::from(wheel.width));
-        let mut lever = self.mass.lever(from_center(wheel.position), forward)
-            + reach * self.mass.lever_per_metre(forward);
+        let lever_at = |point: Vec3| self.mass.lever_in_plane(from_center(point), forward, up);
+        let mut lever = lever_at(wheel.position) + reach * self.mass.lever_per_metre();
         if let Some(point) = wheel.suspension_force_point {
-            lever = lever.max(self.mass.lever(from_center(point), forward));
+            lever = lever.max(lever_at(point));
         }
         self.mass.inverse_mass + lever * lever
     }

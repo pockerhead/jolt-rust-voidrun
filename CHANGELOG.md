@@ -15,9 +15,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   between very unequal tracks (`docs/limits.md`, Track inertia ratio), and the track speeds the
   drivetrain can reach must keep the tracked step finite (`docs/limits.md`, Track drive envelope).
   `create_tracked_vehicle` refuses tracks heavy against their chassis: every wheel's track inertia
-  over its radius squared, times the chassis' inverse effective mass at the wheel, is at most
-  `limits::MAX_TRACK_MASS_RATIO` (0.5), because Jolt's ground contact diverged above about 2.7
-  (`docs/limits.md`, Track mass ratio).
+  over its radius squared, times the chassis' largest inverse effective mass at the wheel over the
+  wheel's forward/up plane, is at most `limits::MAX_TRACK_MASS_RATIO` (0.25), because Jolt's ground
+  contact diverged and spun the chassis up to its angular velocity clamp from a ratio of 6 at steps
+  up to 0.1 s (`docs/limits.md`, Track mass ratio). Jolt's `TankTest` hull accepts tracks up to 11 kg·m².
 - Motorcycles: `PhysicsWorld::create_motorcycle` with `MotorcycleSettings`, which wraps a
   two-wheeled `VehicleSettings` and adds the lean controller: max lean angle up to
   `MotorcycleSettings::MAX_LEAN_ANGLE` (80°), a lean spring bounded against the chassis' inertia,

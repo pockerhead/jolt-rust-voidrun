@@ -287,11 +287,11 @@ fn the_strongest_light_tracks_stay_finite() {
 
 #[test]
 fn the_strongest_tracks_with_the_widest_radius_ratio_stay_finite() {
-    // A 0.1 mm wheel makes even the lightest track heavy at its contact: only the heaviest
+    // A 0.2 mm wheel makes even the lightest track heavy at its contact: only the heaviest
     // chassis carries it.
     let (mut world, layers, chassis) = tank_world(false, limits::MAX_MASS);
     let wide = |x: f32| {
-        track(x, &[1.0, 1.0 / limits::MAX_RATIO])
+        track(x, &[2.0, 2.0 / limits::MAX_RATIO])
             .inertia(limits::MIN_TRACK_INERTIA)
             .max_brake_torque(0.0)
     };
@@ -482,6 +482,108 @@ fn tracks_heavy_against_their_chassis_are_refused() {
     }
 }
 
+/// A 4000 kg narrow hull (half extents 0.5, 0.1, 3.2) with Jolt's tank wheels outside it at
+/// x = ±1.7 and tracks of `inertia`, settled before a 45° ramp of friction 1000 that starts 5 m
+/// ahead, with a cast sphere tester; and the result of creating it.
+fn narrow_tank_before_a_ramp(
+    inertia: f32,
+) -> (
+    PhysicsWorld,
+    BodyId,
+    Result<VehicleId<TrackedVehicle>, VehicleError>,
+) {
+    let (mut world, layers) = car_world(GRAVITY, 1);
+    let ground = |world: &mut PhysicsWorld, half: Vec3, position: RVec3, rotation: Quat| {
+        let settings = BodySettings::new_static()
+            .position(position)
+            .rotation(rotation)
+            .object_layer(layers.ground)
+            .friction(limits::MAX_FRICTION);
+        world
+            .create_body(&Shape::new_box(half).unwrap(), &settings)
+            .unwrap();
+    };
+    let below = RVec3::new(0.0, -50.0, 0.0);
+    ground(
+        &mut world,
+        Vec3::new(200.0, 50.0, 200.0),
+        below,
+        Quat::IDENTITY,
+    );
+    // A box of half extents (10, 5, 20) turned 45° about x, its top face rising from z = 5: its
+    // centre (0, −5, 20) turned lands at (0, 15, 25) / √2.
+    let (sin, cos) = std::f32::consts::FRAC_PI_8.sin_cos();
+    let s = std::f32::consts::FRAC_1_SQRT_2;
+    let center = RVec3::new(0.0, (15.0 * s) as Real, (25.0 * s + 5.0) as Real);
+    let turned = Quat::from_xyzw(-sin, 0.0, 0.0, cos);
+    ground(&mut world, Vec3::new(10.0, 5.0, 20.0), center, turned);
+    let hull = Shape::new_box(Vec3::new(0.5, 0.1, 3.2)).unwrap();
+    let position = RVec3::new(0.0, 1.2, 0.0);
+    let chassis = world
+        .create_body(
+            &hull,
+            &behaviour_chassis(&layers, 4000.0, position, Quat::IDENTITY),
+        )
+        .unwrap();
+    let tester = VehicleCollisionTester::CastSphere {
+        object_layer: layers.probe,
+        radius: 0.3,
+        up: Vec3::new(0.0, 1.0, 0.0),
+        max_slope_angle: 80.0_f32.to_radians(),
+    };
+    let settings = TrackedVehicleSettings::new(
+        tank_track(1.7).inertia(inertia),
+        tank_track(-1.7).inertia(inertia),
+        tester,
+    )
+    .max_pitch_roll_angle(60.0_f32.to_radians());
+    let tank = world.create_tracked_vehicle(chassis, &settings);
+    (world, chassis, tank)
+}
+
+#[test]
+fn tracks_heavy_against_a_narrow_hull_are_refused() {
+    // Along the wheel's forward these tracks have a ratio of 0.5; on the ramp the ground turns
+    // the longitudinal direction toward the wheel's up, where the narrow hull's ratio is 13. They
+    // gave NaN tracks and chassis climbing the ramp at 0.1 s steps (tick 91). Jolt's default
+    // tracks of 10 kg·m² have a ratio of 2.1 on this hull.
+    for inertia in [63.255_165, 10.0] {
+        let (_, _, tank) = narrow_tank_before_a_ramp(inertia);
+        assert_refused(tank, "too heavy for its chassis");
+    }
+    // The heaviest tracks the hull accepts climb the same ramp without reaching the clamp.
+    let accepts = |inertia: f32| narrow_tank_before_a_ramp(inertia).2.is_ok();
+    let (mut low, mut high) = (limits::MIN_TRACK_INERTIA.to_bits(), 10.0_f32.to_bits());
+    while high - low > 1 {
+        let middle = low + (high - low) / 2;
+        if accepts(f32::from_bits(middle)) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    let heaviest = f32::from_bits(low);
+    eprintln!("narrow hull: tracks up to {heaviest:e} kg·m²");
+    let (mut world, chassis, tank) = narrow_tank_before_a_ramp(heaviest);
+    let tank = tank.unwrap();
+    for _ in 0..60 {
+        let _ = world.step(1.0 / 60.0).unwrap();
+    }
+    for tick in 0..100 {
+        let forward = if tick < 60 { 1.0 } else { -1.0 };
+        world
+            .vehicle_mut(tank)
+            .unwrap()
+            .set_driver_input(tracks(forward, 1.0, 1.0))
+            .unwrap();
+        let _ = world.step(0.1).unwrap();
+        assert_finite(&world, tank, chassis);
+        let spin = world.body(chassis).unwrap().angular_velocity();
+        let spin = (spin.x * spin.x + spin.y * spin.y + spin.z * spin.z).sqrt();
+        assert!(spin < 10.0, "tick {tick}: {spin} rad/s");
+    }
+}
+
 /// The heaviest equal track inertia, at most `MAX_TRACK_INERTIA`, that a tank of `mass` on wheels
 /// of `radius` accepts, by bisection over `f32`; `None` when even the lightest track is too heavy.
 fn heaviest_accepted_tracks(mass: f32, radius: f32) -> Option<f32> {
@@ -570,9 +672,9 @@ fn the_heaviest_accepted_tracks_stay_finite_on_high_friction_ground() {
 }
 
 #[test]
-fn jolt_tank_tracks_are_far_inside_the_track_mass_ratio() {
+fn jolt_tank_tracks_are_inside_the_track_mass_ratio() {
     // Jolt's TankTest: 10 kg·m² tracks on 0.3 m wheels under a 4000 kg hull have a track mass
-    // ratio of about 0.07, so the tracks may be about seven times heavier.
+    // ratio of about 0.23 over the wheels' forward/up plane.
     let (mut world, layers) = car_world(GRAVITY, 1);
     let chassis = world
         .create_body(
@@ -587,14 +689,14 @@ fn jolt_tank_tracks_are_far_inside_the_track_mass_ratio() {
             VehicleCollisionTester::ray(layers.probe),
         )
     };
-    for inertia in [10.0, 70.0] {
+    for inertia in [10.0, 11.0] {
         let id = world
             .create_tracked_vehicle(chassis, &tank(inertia))
             .unwrap();
         world.remove_vehicle(id).unwrap();
     }
     assert_refused(
-        world.create_tracked_vehicle(chassis, &tank(75.0)),
+        world.create_tracked_vehicle(chassis, &tank(12.0)),
         "too heavy for its chassis",
     );
 }

@@ -225,25 +225,37 @@ fn principal_levers_measure_the_lever_with_the_inverse_inertia() {
         inverse_mass: 0.5,
         inverse_inertia: [1.0, 2.0, 3.0],
     };
-    let z = [0.0, 0.0, 1.0];
-    // r × d = (1, 0, 0), weighted by 1; the y component of a lever along d adds nothing.
-    assert!((mass.lever([0.0, 1.0, 0.0], z) - 1.0).abs() < 1e-12);
-    assert!((mass.lever([0.0, 1.0, 5.0], z) - 1.0).abs() < 1e-12);
-    // r × d = (0, -2, 0), weighted by 2: √(4 · 2).
-    assert!((mass.lever([2.0, 0.0, 0.0], z) - 8.0_f64.sqrt()).abs() < 1e-12);
-    // Per metre: the largest inverse inertia across the direction.
-    assert!((mass.lever_per_metre(z) - 2.0_f64.sqrt()).abs() < 1e-12);
-    assert!((mass.lever_per_metre([1.0, 0.0, 0.0]) - 3.0_f64.sqrt()).abs() < 1e-12);
-    let diagonal = normalized([1.0, 1.0, 0.0]);
-    assert!((mass.lever_per_metre(diagonal) - 3.0_f64.sqrt()).abs() < 1e-12);
-    // Across (0, 1, 1): 1 along x and (2 + 3) / 2 along (0, 1, -1).
+    let lever_along = |r: [f64; 3], d: [f64; 3]| {
+        let c = cross(r, d);
+        (0..3)
+            .map(|k| mass.inverse_inertia[k] * c[k] * c[k])
+            .sum::<f64>()
+            .sqrt()
+    };
+    let (y, z) = ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    // At (2, 0, 0): r × y = (0, 0, 2) weighted by 3, r × z = (0, −2, 0) weighted by 2.
+    assert!((mass.lever_in_plane([2.0, 0.0, 0.0], y, z) - 12.0_f64.sqrt()).abs() < 1e-12);
+    // At (0, 1, 1): r × y = (−1, 0, 0) and r × z = (1, 0, 0), largest along (y − z) / √2.
+    assert!((mass.lever_in_plane([0.0, 1.0, 1.0], y, z) - 2.0_f64.sqrt()).abs() < 1e-12);
+    // It is the largest lever over the directions of the plane.
     let tilted = normalized([0.0, 1.0, 1.0]);
-    assert!((mass.lever_per_metre(tilted) - 2.5_f64.sqrt()).abs() < 1e-12);
-    // It bounds the lever of every unit vector.
+    let across = cross(tilted, [1.0, 0.0, 0.0]);
+    let r = [0.7, -1.3, 2.1];
+    let largest = mass.lever_in_plane(r, tilted, across);
+    let sampled = (0..3600)
+        .map(|k| {
+            let (sin, cos) = (f64::from(k) * std::f64::consts::PI / 1800.0).sin_cos();
+            lever_along(r, [0, 1, 2].map(|i| cos * tilted[i] + sin * across[i]))
+        })
+        .fold(0.0, f64::max);
+    assert!(sampled <= largest + 1e-12 && sampled >= largest * (1.0 - 1e-5));
+    // Per metre: the largest inverse inertia, which bounds every unit lever in every direction.
+    assert!((mass.lever_per_metre() - 3.0_f64.sqrt()).abs() < 1e-12);
     for k in 0..64 {
         let angle = f64::from(k) * 0.1;
         let u = normalized([angle.cos(), angle.sin(), 0.3 * angle]);
-        assert!(mass.lever(u, tilted) <= mass.lever_per_metre(tilted) + 1e-12);
+        let d = normalized([angle.sin(), 0.5, angle.cos()]);
+        assert!(lever_along(u, d) <= mass.lever_per_metre() + 1e-12);
     }
     let bound = f64::from(MAX_TRACK_MASS_RATIO);
     assert!(is_track_mass_ratio(bound));

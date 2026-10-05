@@ -201,18 +201,20 @@ pub const MAX_TRACK_INERTIA_RATIO: f32 = 100.0;
 
 /// Largest track mass ratio of a tracked vehicle's wheel: its track's moment of inertia over
 /// the wheel's radius squared (the track's mass as the ground feels it at that wheel), divided by
-/// the chassis' effective mass where the wheel pushes it along its forward.
+/// the smallest effective mass of the chassis where the wheel pushes it, along any direction in
+/// the wheel's forward/up plane (tilted ground turns the push within that plane).
 ///
 /// Jolt sizes each wheel's driving impulse for the track alone, as if the chassis did not move,
 /// so a track heavy against the chassis makes the solver overshoot and diverge.
 /// [`PhysicsWorld::create_tracked_vehicle`] computes the ratio from the chassis' mass, inertia
 /// and centre of mass and refuses a vehicle with any wheel above this bound. Jolt's `TankTest`
-/// tank has a ratio of 0.07.
+/// tank has a ratio of 0.23; a narrow or flat hull, with little roll and pitch inertia, allows
+/// much lighter tracks.
 ///
 /// See [docs/limits.md#track-mass-ratio].
 ///
 /// [docs/limits.md#track-mass-ratio]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-mass-ratio
-pub const MAX_TRACK_MASS_RATIO: f32 = 0.5;
+pub const MAX_TRACK_MASS_RATIO: f32 = 0.25;
 
 /// Largest lever-arm ratio a world constraint may give a dynamic body: how far the point where
 /// the constraint holds the body lies from its centre of mass, measured against the body's own
@@ -734,36 +736,26 @@ pub(crate) struct PrincipalMass {
 }
 
 impl PrincipalMass {
-    /// The lever term of the body at `lever` along the unit `direction`, both in the principal
-    /// frame: `√((r × d)ᵀ I⁻¹ (r × d))`. An impulse of 1 along `d` at `r` changes the velocity
-    /// along `d` at `r` by `inverse_mass + lever²`.
-    pub(crate) fn lever(&self, lever: [f64; 3], direction: [f64; 3]) -> f64 {
-        let c = cross(lever, direction);
-        (0..3)
-            .map(|k| self.inverse_inertia[k] * c[k] * c[k])
-            .sum::<f64>()
-            .sqrt()
+    /// The largest lever term of the body at `lever` along any unit direction `d` in the plane
+    /// spanned by the orthonormal `first` and `second`, all in the principal frame: the largest
+    /// `√((r × d)ᵀ I⁻¹ (r × d))`. An impulse of 1 along `d` at `r` changes the velocity along `d`
+    /// at `r` by `inverse_mass + lever²`.
+    pub(crate) fn lever_in_plane(&self, lever: [f64; 3], first: [f64; 3], second: [f64; 3]) -> f64 {
+        let (a, b) = (cross(lever, first), cross(lever, second));
+        let (aa, ab, bb) = (self.form(a, a), self.form(a, b), self.form(b, b));
+        let half_gap = 0.5 * (aa - bb);
+        (0.5 * (aa + bb) + (half_gap * half_gap + ab * ab).sqrt()).sqrt()
     }
 
-    /// The largest [`lever`](Self::lever) along the unit `direction` at any point within 1 m of
-    /// the centre of mass: the largest `√(wᵀ I⁻¹ w)` over unit `w` perpendicular to
-    /// `direction`, the greater eigenvalue of `I⁻¹` restricted to that plane.
-    pub(crate) fn lever_per_metre(&self, direction: [f64; 3]) -> f64 {
-        let helper = if direction[0].abs() < 0.9 {
-            [1.0, 0.0, 0.0]
-        } else {
-            [0.0, 1.0, 0.0]
-        };
-        let e1 = normalized(cross(direction, helper));
-        let e2 = cross(direction, e1);
-        let form = |a: [f64; 3], b: [f64; 3]| {
-            (0..3)
-                .map(|k| self.inverse_inertia[k] * a[k] * b[k])
-                .sum::<f64>()
-        };
-        let (a, b, c) = (form(e1, e1), form(e1, e2), form(e2, e2));
-        let half_gap = 0.5 * (a - c);
-        (0.5 * (a + c) + (half_gap * half_gap + b * b).sqrt()).sqrt()
+    /// The largest lever term along any direction at any point within 1 m of the centre of
+    /// mass: `√` of the largest principal inverse inertia.
+    pub(crate) fn lever_per_metre(&self) -> f64 {
+        self.inverse_inertia.into_iter().fold(0.0, f64::max).sqrt()
+    }
+
+    /// `aᵀ I⁻¹ b`.
+    fn form(&self, a: [f64; 3], b: [f64; 3]) -> f64 {
+        (0..3).map(|k| self.inverse_inertia[k] * a[k] * b[k]).sum()
     }
 }
 
