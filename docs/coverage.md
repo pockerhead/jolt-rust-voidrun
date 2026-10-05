@@ -173,6 +173,11 @@ check it at its boundary.
 | `BodyMut::add_angular_impulse` | finite; on a dynamic body `|L|` times the largest principal inverse inertia `<=` `MAX_ANGULAR_VELOCITY_CHANGE` | `body_controls.rs`: `angular_impulses_are_bounded_by_the_angular_velocity_change` |
 | `BodyMut::add_impulse_at_point` | both impulse rules with `L = (p - com) × J`, the angular one for the largest `L` Jolt's `f32` cross product can give (see [limits.md](limits.md#impulses)); point within `MAX_POSITION`; `f32` cross product products | `body_controls.rs`: `point_impulses_are_bounded_by_the_angular_impulse_of_their_lever`, `angular_impulses_are_bounded_by_the_angular_velocity_change`, `point_impulses_along_a_long_lever_count_jolt_rounding`; `src/body/tests.rs`: `point_torque_rounding_covers_every_f32_evaluation_order` |
 | `BodyMut::move_kinematic` | position within `MAX_POSITION`, unit rotation, step delta time; Jolt's implied velocities within `MAX_LINEAR_VELOCITY` and `MAX_ANGULAR_VELOCITY` | `body_controls.rs`: `kinematic_moves_are_bounded_by_the_velocities_they_imply` |
+| `BuoyancySettings::surface` | position within `MAX_POSITION`; normal a finite unit vector | `buoyancy.rs`: `invalid_inputs_change_nothing` |
+| `BuoyancySettings::buoyancy`, `linear_drag`, `angular_drag` | finite, not negative; then the product chains of [limits.md](limits.md#buoyancy) | `invalid_inputs_change_nothing`, `bodies_at_the_bounds_stay_finite`, `small_light_and_far_buoyancy_centres_stay_finite`; `src/limits/buoyancy/tests.rs`: `each_chain_has_its_boundary`, `nan_in_any_input_is_refused`, `zero_factors_do_not_hide_large_ones`, `accepted_inputs_stay_finite_in_any_association` |
+| `BuoyancySettings::fluid_velocity` | `MAX_LINEAR_VELOCITY` | `invalid_inputs_change_nothing`, `bodies_at_the_bounds_stay_finite` |
+| `BodyMut::apply_buoyancy_impulse` gravity, delta time | `MAX_ACCELERATION`; the bounds of `PhysicsWorld::step` | `invalid_inputs_change_nothing`, `bodies_at_the_bounds_stay_finite` |
+| `BodyMut::apply_buoyancy_impulse` buoyant velocity change | `b · Vs / V · abs(gf) · length(g) · dt <=` `MAX_VELOCITY_CHANGE`, for both signs of the gravity factor (see [limits.md](limits.md#buoyancy)) | `invalid_inputs_change_nothing`, `velocities_are_clamped_right_after_the_call`; `src/limits/buoyancy/tests.rs`: `both_signs_of_the_gravity_factor_are_bounded_alike` |
 | `PhysicsWorld::activate_bodies_in_box` | corners within `MAX_POSITION`, `min <= max` per axis | `body_controls.rs`: `activation_box_is_validated`, `box_activation_compares_in_caller_precision` |
 | `BodySettings::allowed_dofs` | a translation axis; all six on a static body that cannot move | `src/body/tests.rs`: `dofs_without_translation_are_refused`; `body_settings.rs`: `a_static_body_that_cannot_move_refuses_restricted_dofs` |
 | `BodySettings::sensor` | discrete motion quality; no static-only shape | `sensors.rs`: `sensor_rules_refuse_static_only_shapes_and_linear_cast` |
@@ -345,10 +350,16 @@ scenes with inputs at their bounds; no derivation backs them:
   on a static body or between two bodies, each holding a 1 g, 6 cm cube or a 1 kg, 1 m cube at the
   velocity bounds under gravity (`constraints_at_the_lever_arm_bound_step_finitely`);
 - a motorcycle lean spring at the bound of its rule on a 1 g chassis of 7 cm, turning at the
-  smallest, a 60 Hz and the largest step (`lean_spring_at_its_bound_steps_finitely`).
+  smallest, a 60 Hz and the largest step (`lean_spring_at_its_bound_steps_finitely`);
+- buoyancy on 500 seeded bodies of seven shape kinds across the surface, at speeds up to the bounds,
+  with gravity factors up to 1000 of either sign, drags up to 1e30 and both step bounds: every call
+  is accepted or refused, and the velocities stay finite and within the bounds after the call and
+  after a step (`seeded_calls_are_accepted_or_refused_and_stay_finite`).
 
 ## Not covered
 
+- The spin a buoyancy impulse gives through the lever of its centre of buoyancy is clamped to
+  `MAX_ANGULAR_VELOCITY` right after the call, not refused (see [limits.md](limits.md#buoyancy)).
 - State the simulation produces itself is not an input and is not checked again: a body Jolt carries
   out of the frame, the positions a rebase computes (only checked to be finite), or a character
   state restored with `CharacterMut::restore_state`, which can only come from

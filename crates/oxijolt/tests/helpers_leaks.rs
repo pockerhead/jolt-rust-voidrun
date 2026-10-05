@@ -1,5 +1,5 @@
 //! A leak gate for the physics helpers: plane shapes with and without a material on a static
-//! body and filtered point queries, round after round in one world.
+//! body, filtered point queries and buoyancy, round after round in one world.
 //!
 //! It measures the private bytes of the process (Windows `K32GetProcessMemoryInfo`), because
 //! shapes and Jolt's body data are allocated by C++, which a Rust global allocator does not see.
@@ -58,7 +58,7 @@ impl Scene {
     }
 
     /// One round: a new plane, with a material every other round, on a static body for one
-    /// step, then removed; point queries with every filter part.
+    /// step with the cube floating on it, then removed; point queries with every filter part.
     fn round(&mut self) {
         self.round += 1;
         let plane = if self.round.is_multiple_of(2) {
@@ -71,6 +71,12 @@ impl Scene {
             .create_body(&plane, &BodySettings::new_static())
             .unwrap();
         drop(plane);
+        let water = BuoyancySettings::default().surface(RVec3::new(0.0, 0.6, 0.0), UP);
+        self.world
+            .body_mut(self.cube)
+            .unwrap()
+            .apply_buoyancy_impulse(&water, Vec3::new(0.0, -9.81, 0.0), DT)
+            .unwrap();
         step(&mut self.world, 1);
         self.world.remove_body(floor).unwrap();
         let layers = [ObjectLayer::NON_MOVING, ObjectLayer::MOVING];

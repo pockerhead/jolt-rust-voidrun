@@ -275,6 +275,10 @@ const MAX_PRESSURE_VERTEX_FORCE: f64 = MAX_ACCELERATION as f64 / MAX_VERTEX_INVE
 /// Unit roundoff of `f32`, `2^-24`.
 const F32_UNIT_ROUNDOFF: f64 = f32::EPSILON as f64 / 2.0;
 
+/// Bound on a product Jolt forms in `f32`, so that it and a sum of a few such products stay
+/// finite (`f32::MAX` is about 3.4e38).
+pub(crate) const F32_PRODUCT_HEADROOM: f64 = 1.0e37;
+
 /// What [`is_soft_body_pressure`] needs to know of a soft body's vertices and faces, computed
 /// once when its shared settings are built; the rule and its error bounds are derived in
 /// [docs/limits.md#soft-body-pressure].
@@ -807,6 +811,8 @@ pub(crate) fn f64_length(v: Vec3) -> f64 {
     let [x, y, z] = [v.x, v.y, v.z].map(f64::from);
     (x * x + y * y + z * z).sqrt()
 }
+
+pub(crate) mod buoyancy;
 
 #[cfg(test)]
 mod tests;
