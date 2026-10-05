@@ -106,6 +106,9 @@ fn compare_payloads(
 
 /// No estimate first, then the estimates' bits field by field.
 fn compare_estimates(a: &Option<CollisionEstimate>, b: &Option<CollisionEstimate>) -> Ordering {
+    fn impulse_bits(e: &CollisionEstimate) -> impl Iterator<Item = u32> + '_ {
+        e.contact_impulses.iter().map(|i| i.to_bits())
+    }
     let bits = |e: &CollisionEstimate| {
         let vectors = [
             e.linear_velocity1,
@@ -122,10 +125,14 @@ fn compare_estimates(a: &Option<CollisionEstimate>, b: &Option<CollisionEstimate
             e.angular_friction_impulse,
         ]
         .map(f32::to_bits);
-        let impulses: Vec<u32> = e.contact_impulses.iter().map(|i| i.to_bits()).collect();
-        (vectors, scalars, impulses)
+        (vectors, scalars)
     };
-    a.as_ref().map(bits).cmp(&b.as_ref().map(bits))
+    match (a, b) {
+        (Some(a), Some(b)) => bits(a)
+            .cmp(&bits(b))
+            .then_with(|| impulse_bits(a).cmp(impulse_bits(b))),
+        _ => a.is_some().cmp(&b.is_some()),
+    }
 }
 
 fn vec3_bits(v: Vec3) -> [u32; 3] {

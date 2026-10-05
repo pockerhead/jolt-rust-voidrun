@@ -93,10 +93,14 @@ impl Drop for EstimationResult {
 ///
 /// # Safety
 /// The arguments are the live bodies and native manifold of a joltc `OnContactAdded` callback.
-/// Jolt calls it from `JobFindCollisions` (body access `Read, Read`, `PhysicsSystem.cpp:897`) or
-/// from `JobFindCCDContacts` (`:1786`); no job writes velocities while either runs (gravity is
-/// applied before them, the solve and `JobResolveCCDContacts` run after them), so the bodies'
-/// velocities, masses and inertias stay as Jolt reads them.
+/// Jolt calls it from one of two jobs, both with body access `Read, Read`, and no job writes
+/// velocities while either runs, so the bodies' velocities, masses and inertias stay as Jolt
+/// reads them:
+/// - discrete: `JobFindCollisions` (`PhysicsSystem.cpp:897`) runs after gravity is applied and
+///   before the velocity solve;
+/// - continuous: `JobFindCCDContacts` (`:1786`) runs after the solve and the velocity
+///   integration, and `JobResolveCCDContacts`, which writes the bodies, depends on every such job
+///   (`:1727`).
 pub(super) unsafe fn estimate(
     body1: *const JPH_Body,
     body2: *const JPH_Body,
