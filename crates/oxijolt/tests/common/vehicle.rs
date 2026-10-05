@@ -138,7 +138,11 @@ fn push_f32(digest: &mut Vec<u8>, value: f32) {
 /// per wheel the contact flag, contact body raw id, sub-shape id, contact position and normal,
 /// suspension length, angular velocity, rotation and steer angle, then the engine rpm and the
 /// gear, all as exact little-endian bits.
-pub fn record_vehicle(world: &PhysicsWorld, id: VehicleId, digest: &mut Vec<u8>) {
+pub fn record_vehicle<K: VehicleKind>(
+    world: &PhysicsWorld,
+    id: VehicleId<K>,
+    digest: &mut Vec<u8>,
+) {
     let vehicle = world.vehicle(id).unwrap();
     super::record_body(world, vehicle.body(), digest);
     for wheel in vehicle.wheels() {

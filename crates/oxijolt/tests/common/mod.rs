@@ -290,3 +290,51 @@ pub unsafe fn raw_system() -> *mut oxijolt_sys::JPH_PhysicsSystem {
         JPH_PhysicsSystem_Create(&settings)
     }
 }
+
+/// A bare joltc physics system with one object layer and one dynamic box, for the control run.
+///
+/// # Safety
+/// Jolt is initialised, and no other thread creates or destroys a physics system meanwhile.
+pub unsafe fn raw_system_with_body(
+) -> (*mut oxijolt_sys::JPH_PhysicsSystem, oxijolt_sys::JPH_BodyID) {
+    // SAFETY: Jolt is initialised and system creation is not concurrent (function contract),
+    // as `raw_system` requires. The shape and creation settings hold one reference each,
+    // released after the body took its own.
+    unsafe {
+        use oxijolt_sys::*;
+
+        let system = raw_system();
+        let half_extent = JPH_Vec3 {
+            x: 0.9,
+            y: 0.3,
+            z: 2.0,
+        };
+        let shape = JPH_BoxShape_Create(&half_extent, 0.05);
+        let position = JPH_RVec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let rotation = JPH_Quat {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 1.0,
+        };
+        let creation = JPH_BodyCreationSettings_Create3(
+            shape.cast(),
+            &position,
+            &rotation,
+            JPH_MotionType_Dynamic,
+            0,
+        );
+        let body = JPH_BodyInterface_CreateAndAddBody(
+            JPH_PhysicsSystem_GetBodyInterface(system),
+            creation,
+            JPH_Activation_DontActivate,
+        );
+        JPH_BodyCreationSettings_Destroy(creation);
+        JPH_Shape_Destroy(shape.cast());
+        (system, body)
+    }
+}
