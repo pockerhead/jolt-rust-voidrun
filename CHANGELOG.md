@@ -4,6 +4,8 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+## 0.5.0 — 2026-10-05
+
 - Shapes: convex hulls (`Shape::new_convex_hull`, `new_convex_hull_with_material`, `HullError`),
   triangle meshes with a material per triangle for static and kinematic bodies (`Shape::new_mesh`,
   `new_mesh_with_settings`, `MeshSettings`, `MeshBuildQuality`, `MeshError`), scaled shapes
