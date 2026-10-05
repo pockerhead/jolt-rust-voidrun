@@ -84,11 +84,15 @@ The full list of what works today, with links to the guides, is in
 - [x] Locked axes (allowed degrees of freedom) at body creation
 - [x] First release on crates.io and docs.rs
 - [ ] Tracked vehicles and motorcycles
+- [ ] Character contact callbacks, contact validation and collision groups
+- [ ] Mutable compounds, buoyancy, point queries, plane shape, collision response estimate
 - [ ] Playground: an example with a window that shows every feature, and GIFs for this README
 - [ ] Comparison with Rapier and Avian
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
 - [ ] Rollback helpers: reusable state buffer, filtered restore
+- [ ] Real meshes from open sources tested in CI, and shape cooking (save and load built shapes)
+- [ ] API review and freeze for 1.0
 - [ ] Same results across operating systems, checked in CI
 
 ## Status
