@@ -42,8 +42,11 @@ The buoyancy factor is the fluid's density over the body's, with the body's volu
 it: the bounding box for boxes, capsules, cylinders and tapered shapes, the shape itself for spheres
 and convex hulls. A factor of 1 floats neutrally, 2 floats half under. The lift scales with the
 body's gravity factor, so a body with gravity factor 0 gets none. Linear drag is quadratic, over
-the area of the bounding box facing the flow, and never takes more than the body's own speed in
-one call, so a current does not carry a body at rest. The velocities change at once and are
+the area of the bounding box facing the flow, and changes the velocity by at most the body's own
+speed in one call. A current therefore takes a few steps to catch a slow body, but under gravity a
+floating body is never exactly at rest: a crate four times lighter than the water, starting at
+rest at its draft in a 2 m/s current, drifts about 15.5 m in 10 s. Only a body exactly at rest, as
+in zero gravity, stays put. The velocities change at once and are
 clamped as an impulse's; the buoyant velocity change is bounded like an impulse's
 ([limits.md](limits.md#buoyancy)). The call returns whether the body is in the water and wakes it
 when it is. Static, kinematic and dry bodies are left alone.

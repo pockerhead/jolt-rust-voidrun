@@ -174,7 +174,7 @@ fn drag_never_reverses_a_body_in_one_call() {
 }
 
 #[test]
-fn a_current_does_not_carry_a_body_at_rest() {
+fn a_current_leaves_a_body_exactly_at_rest_in_zero_gravity() {
     let (mut world, id) = submerged_cube(Vec3::ZERO, Vec3::ZERO);
     let settings = water_at(10.0)
         .fluid_velocity(Vec3::new(3.0, 0.0, 1.0))
@@ -186,6 +186,36 @@ fn a_current_does_not_carry_a_body_at_rest() {
     let body = world.body(id).unwrap();
     assert_eq!(body.linear_velocity(), Vec3::ZERO);
     assert_eq!(body.position(), RVec3::ZERO);
+}
+
+#[test]
+fn a_current_carries_a_floating_body() {
+    // A crate four times lighter than the water, starting at rest at its draft (centre 0.125 m
+    // above the surface) in a 2 m/s current. Gravity keeps it from being exactly at rest, and
+    // each call's drag may add up to its own speed, so the current catches it within seconds.
+    let mut world = world(GRAVITY, 1);
+    let id = world
+        .create_body(
+            &Shape::new_box(Vec3::new(0.5, 0.25, 0.5)).unwrap(),
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(0.0, 0.125, 0.0))
+                .linear_damping(0.05)
+                .allow_sleeping(false),
+        )
+        .unwrap();
+    let settings = water()
+        .buoyancy(4.0)
+        .fluid_velocity(Vec3::new(2.0, 0.0, 0.0));
+    float(&mut world, id, &settings, 600);
+    let body = world.body(id).unwrap();
+    let drift = body.position().x;
+    // Measured: 15.45 m in 10 s, against 20 m at the current's speed throughout.
+    assert!((14.5..16.5).contains(&drift), "{drift}");
+    assert!(
+        body.linear_velocity().x > 1.5,
+        "{:?}",
+        body.linear_velocity()
+    );
 }
 
 #[test]

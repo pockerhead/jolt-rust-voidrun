@@ -165,7 +165,10 @@ impl Shape {
     /// - mesh: the point lies in the shape's bounds and a ray from it along +Y crosses an odd
     ///   number of triangles (the id is the last triangle crossed). Jolt does not check that the
     ///   mesh is closed: an open mesh reports points whose ray happens to cross an odd number of
-    ///   triangles, so only a closed mesh gives its enclosed volume;
+    ///   triangles. A ray through an edge or a vertex counts every triangle that meets there, so
+    ///   such a point can come out on the wrong side even for a closed mesh: the centre of a cube
+    ///   mesh whose top face is split along a diagonal is outside. Every other point of a closed
+    ///   mesh comes out as the mesh encloses it;
     /// - heightfield: never;
     /// - plane: strictly behind the plane (`normal · p + constant < 0`), anywhere, also beyond
     ///   the half extent, unlike a ray, which counts the plane itself as solid;

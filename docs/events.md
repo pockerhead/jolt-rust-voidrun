@@ -353,9 +353,12 @@ Jolt solves the contact of the two bodies alone, with the friction and restituti
 the contact with (after a `ContactListener` changed them) and the world's restitution threshold
 and velocity iterations. The estimate is exact only for an isolated pair: other contacts and
 constraints on either body in the same step are not part of it, nor are the contact's mass and
-inertia scales, surface velocities, locked axes and the speed limits. A speculative contact
-(negative penetration depth) is estimated as if the bodies touched. A contact first found by the
-continuous stage is estimated from the velocities after the step's solve, at the time-of-impact
+inertia scales, surface velocities, locked axes and the speed limits. Gravity and forces are
+applied before contacts are found, and the estimate bounces that changed velocity, while the
+solver takes the change out of its bounce (`ContactConstraintManager.cpp:88-117`); under gravity
+the estimated rebound is faster by `restitution · g · dt` along the normal, 0.08 m/s for a
+restitution of 0.5 at 60 Hz. A speculative contact (negative penetration depth) is estimated as
+if the bodies touched. A contact first found by the continuous stage is estimated from the velocities after the step's solve, at the time-of-impact
 points, so its angular part is approximate; when the discrete stage found the pair in the same
 step, the continuous stage reports it as Persisted, without an estimate. Sensor contacts and
 contacts without points get `None`. With estimates off nothing is computed.

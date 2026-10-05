@@ -129,8 +129,9 @@ outward surface normal of the obstacle: a floor below gives a normal pointing up
   The hits come in no particular order; sort them when order matters.
 - `collide_point`: every body whose shape contains a point, sorted by body and sub-shape id.
   "Contains" is Jolt's rule per shape: solid convex shapes, meshes by the parity of the
-  triangles above the point (an inside only for closed meshes), never a heightfield, and
-  strictly behind a plane.
+  triangles above the point (the inside of a closed mesh, except where the upward ray passes
+  through an edge or a vertex: the centre of a cube mesh is reported outside), never a
+  heightfield, and strictly behind a plane.
   `Shape::collide_point` asks one shape, in its own frame.
 
 ## Floating origin

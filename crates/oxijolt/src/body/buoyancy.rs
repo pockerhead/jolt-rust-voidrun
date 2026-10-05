@@ -123,8 +123,9 @@ impl BodyMut<'_> {
     /// nothing for a body above the surface, and for static and kinematic bodies.
     ///
     /// The lift scales with the body's gravity factor, so a body with gravity factor 0 gets
-    /// none. Linear drag never takes more than the body's own speed in one call, so a current
-    /// does not carry a body at rest, and angular drag never more than its spin.
+    /// none. In one call linear drag changes the velocity by at most the body's own speed and
+    /// angular drag the spin by at most the spin, so a current takes a few steps to catch a
+    /// slow body; only a body exactly at rest, as in zero gravity, stays put.
     ///
     /// Fails with [`BodyError::SoftBody`] for a soft body and with [`BodyError::InvalidValue`],
     /// changing nothing, when `settings`, `gravity` (at most [`limits::MAX_ACCELERATION`] long)

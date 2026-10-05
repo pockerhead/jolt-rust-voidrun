@@ -191,6 +191,45 @@ fn a_bouncing_box_is_estimated_to_leave_at_half_speed() {
 }
 
 #[test]
+fn under_gravity_the_estimated_bounce_is_faster_by_restitution_g_dt() {
+    // The bounce above under gravity: the step's gravity is applied before the contact is found,
+    // so the cube hits at 5 + g · dt. The estimate bounces that velocity, the solver removes the
+    // gravity of the step from its bounce target first.
+    let g = 9.81_f32;
+    let mut world = world(Vec3::new(0.0, -g, 0.0), 1);
+    world.set_event_settings(estimates());
+    let floor = world
+        .create_body(
+            &Shape::new_box(Vec3::new(10.0, 0.5, 10.0)).unwrap(),
+            &BodySettings::new_static()
+                .position(RVec3::new(0.0, -0.5, 0.0))
+                .restitution(0.5),
+        )
+        .unwrap();
+    let cube = world
+        .create_body(
+            &cube_shape(),
+            &BodySettings::new_dynamic()
+                .position(RVec3::new(0.0, 0.505, 0.0))
+                .restitution(0.5)
+                .linear_damping(0.0)
+                .linear_velocity(Vec3::new(0.0, -5.0, 0.0)),
+        )
+        .unwrap();
+    step(&mut world, 1);
+    let found = estimates_of(&world.take_events(), floor, cube);
+    let estimate = found[0].clone().unwrap();
+    let estimated = estimate.linear_velocity2.y;
+    let stepped = world.body(cube).unwrap().linear_velocity().y;
+    assert!(
+        (estimated - 0.5 * (5.0 + g * DT)).abs() < 1.0e-3,
+        "{estimated}"
+    );
+    assert!((stepped - 2.5).abs() < 1.0e-3, "{stepped}");
+    assert!((estimated - stepped - 0.5 * g * DT).abs() < 1.0e-3);
+}
+
+#[test]
 fn a_contact_found_by_the_continuous_stage_is_estimated() {
     let mut world = world(Vec3::ZERO, 1);
     world.set_event_settings(estimates());

@@ -150,6 +150,9 @@ fn meshes_count_the_triangles_above_the_point() {
     assert!(!inside(&closed, Vec3::new(0.2, 0.6, 0.1)));
     assert!(!inside(&closed, Vec3::new(0.7, 0.0, 0.1)));
     assert!(!inside(&closed, Vec3::new(0.2, -0.6, 0.1)));
+    // The ray from the centre runs along the top face's diagonal and crosses both of its
+    // triangles: an even count, so the centre of the closed cube is reported outside.
+    assert!(!inside(&closed, Vec3::ZERO));
 
     // Without its top the ray crosses nothing: the point is outside.
     let open_top = mesh(

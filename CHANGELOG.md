@@ -21,7 +21,7 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - joltc extension: `JPH_Body_GetSubmergedVolume` and `JPH_Body_ApplyBuoyancyImpulse2` (Jolt's volume
   overload of the buoyancy impulse). `JOLTC_EXT_REVISION` is 17: a `JOLTC_LIB_DIR` prefix built
   before this change is refused until the next release's archives.
-- Changed: `ContactEvent::Added` has an `estimate` field (`None` unless collision estimates are
+- Changed (breaking): `ContactEvent::Added` has an `estimate` field (`None` unless collision estimates are
   on), so patterns that name every field need `..` or the new field.
 
 - Contact validation ([guide](docs/events.md#validating-contacts)): `ContactListener` gains

@@ -14,10 +14,12 @@ use crate::Vec3;
 /// and the world's restitution threshold and velocity iterations, so the result is exact only
 /// for an isolated pair: other contacts and constraints on either body in the same step are not
 /// part of it. It does not model the contact's mass and inertia scales, surface velocities,
-/// locked axes or the speed limits. A speculative contact (negative penetration depth) is
-/// estimated as if the bodies touched. A contact found in the continuous collision stage is
-/// estimated from the velocities after the step's solve, at the time-of-impact points, which
-/// makes its angular part approximate.
+/// locked axes or the speed limits. It bounces the velocity that the step's gravity and forces
+/// have already changed, while the solver takes that change out of the bounce, so under gravity
+/// the estimated rebound is faster by `restitution · g · dt` along the normal. A speculative
+/// contact (negative penetration depth) is estimated as if the bodies touched. A contact found
+/// in the continuous collision stage is estimated from the velocities after the step's solve,
+/// at the time-of-impact points, which makes its angular part approximate.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct CollisionEstimate {
