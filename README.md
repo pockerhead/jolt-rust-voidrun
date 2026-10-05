@@ -85,7 +85,7 @@ The full list of what works today, with links to the guides, is in
 - [x] First release on crates.io and docs.rs
 - [ ] Tracked vehicles and motorcycles
 - [ ] Character contact callbacks, contact validation and collision groups
-- [ ] Mutable compounds, buoyancy, point queries, plane shape, collision response estimate
+- [ ] Mutable compounds, buoyancy, point queries, plane shape, collision response estimate, skeleton mapper
 - [ ] Playground: an example with a window that shows every feature, and GIFs for this README
 - [ ] Comparison with Rapier and Avian
 - [ ] Bevy plugin, in a separate repository
