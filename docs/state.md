@@ -47,8 +47,12 @@ Jolt's saved state of the physics system (`PhysicsSystem::SaveState`):
 On top of that it holds every character's `CharacterState` and the contact-cache invalidations
 (`BodyMut::invalidate_contact_cache`, and the one `BodyMut::set_shape` makes) that no step has
 applied yet; `restore_state` replaces the pending ones with these. Jolt keeps its own invalidation
-flag in no saved state and cannot clear it, so the world sets it only right before a step in which
-some body is awake or a vehicle exists, which clears it at its end.
+flag in no saved state and cannot clear it, so for `invalidate_contact_cache` the world sets it only
+right before a step in which some body is awake or a vehicle exists, which clears it at its end.
+`set_shape` is the exception: Jolt's `SetShape` sets the flag at once when the shape changes. That
+call also changes the world's structure, so no state saved before it restores, and the pending
+request sets the flag again before the next simulating step after a restore of a state saved after
+it.
 
 `save_state_of(&bodies)` saves only the listed bodies; global state, contacts, constraints,
 characters and the pending invalidations are saved whole. Restoring it leaves every other body as it is (except that a character's
