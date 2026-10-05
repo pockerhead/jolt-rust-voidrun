@@ -542,3 +542,28 @@ fn builder_and_group_boundaries() {
     let group = CollisionGroup::new(&table, 0, 3).unwrap();
     assert_eq!((group.sub_group_id(), group.table()), (3, &table));
 }
+
+#[test]
+fn enabling_a_disabled_pair_makes_it_collide_again() {
+    use CollisionGroupError::*;
+    let mut builder = GroupFilterTableBuilder::new(4).unwrap();
+    builder.disable_collision(0, 2).unwrap();
+    builder.disable_collision(1, 3).unwrap();
+    builder.enable_collision(2, 0).unwrap();
+    assert_eq!(builder.enable_collision(1, 1), Err(SameSubGroup(1)));
+    assert_eq!(builder.enable_collision(4, 1), Err(SubGroupOutOfRange(4)));
+    assert_eq!(
+        builder.enable_collision(1, u32::MAX),
+        Err(SubGroupOutOfRange(u32::MAX))
+    );
+    let table = builder.build();
+    assert!(table.is_collision_enabled(0, 2).unwrap());
+    assert!(table.is_collision_enabled(2, 0).unwrap());
+    assert!(
+        !table.is_collision_enabled(1, 3).unwrap(),
+        "refused calls change nothing"
+    );
+    let group = |sub_group| CollisionGroup::new(&table, 7, sub_group).unwrap();
+    assert!(group(0).can_collide(&group(2)));
+    assert!(!group(3).can_collide(&group(1)));
+}
