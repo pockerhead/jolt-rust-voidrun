@@ -55,10 +55,12 @@ impl Shape {
     /// 2000 m fits for `constant = -1` (plane at y = 1) but not for `constant = 1`.
     ///
     /// ```
-    /// # use oxijolt::{Shape, Vec3};
+    /// # use oxijolt::*;
+    /// let mut world = PhysicsWorld::new(WorldSettings::default())?;
     /// // Ground at y = 0, solid below, 500 m in every direction.
     /// let ground = Shape::new_plane(Vec3::new(0.0, 1.0, 0.0), 0.0, 500.0)?;
-    /// # Ok::<(), oxijolt::ShapeError>(())
+    /// world.create_body(&ground, &BodySettings::new_static())?;
+    /// # Ok::<(), oxijolt::error::Error>(())
     /// ```
     pub fn new_plane(normal: Vec3, constant: f32, half_extent: f32) -> Result<Self, ShapeError> {
         Self::plane(normal, constant, half_extent, None)
