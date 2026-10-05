@@ -118,30 +118,74 @@ fn height_field_shape() -> *mut JPH_Shape {
     shape.cast()
 }
 
-/// A static compound whose only child is a heightfield, inside an offset centre of mass
-/// decorator; holds one reference for the caller.
-fn decorated_height_field_compound() -> *mut JPH_Shape {
-    let height_field = height_field_shape();
-    let (position, rotation, offset) = (vec3(0.0, 0.0, 0.0), quat_identity(), vec3(0.1, 0.0, 0.0));
-    // SAFETY: the heightfield is live; the compound settings and the decorator settings take
-    // their own references and are released after the shapes took theirs.
+/// A static compound of `children` (shape and position), holding one reference for the caller;
+/// the caller keeps its references to the children.
+fn static_compound(children: &[(*mut JPH_Shape, JPH_Vec3)]) -> *mut JPH_Shape {
+    let rotation = quat_identity();
+    // SAFETY: the children are live; the settings take their own references and are released
+    // after the compound took its own.
     let shape = unsafe {
-        let compound = JPH_StaticCompoundShapeSettings_Create();
-        JPH_CompoundShapeSettings_AddShape2(compound.cast(), &position, &rotation, height_field, 0);
+        let settings = JPH_StaticCompoundShapeSettings_Create();
+        for (child, position) in children {
+            JPH_CompoundShapeSettings_AddShape2(settings.cast(), position, &rotation, *child, 0);
+        }
         let mut error = [0_u8; 1];
-        let compound_shape =
-            JPH_ShapeSettings_CreateShapeWithError(compound.cast(), error.as_mut_ptr().cast(), 0);
-        assert!(!compound_shape.is_null());
-        let decorator = JPH_OffsetCenterOfMassShapeSettings_Create2(&offset, compound_shape);
-        let shape = JPH_OffsetCenterOfMassShapeSettings_CreateShape(decorator);
-        JPH_ShapeSettings_Destroy(decorator.cast());
-        JPH_Shape_Destroy(compound_shape);
-        JPH_ShapeSettings_Destroy(compound.cast());
-        JPH_Shape_Destroy(height_field);
+        let shape =
+            JPH_ShapeSettings_CreateShapeWithError(settings.cast(), error.as_mut_ptr().cast(), 0);
+        JPH_ShapeSettings_Destroy(settings.cast());
         shape
     };
     assert!(!shape.is_null());
-    shape.cast()
+    shape
+}
+
+/// An offset centre of mass decorator around a static compound of a box and a nested static
+/// compound of a box and `leaf`; holds one reference for the caller, who keeps its own to `leaf`.
+fn decorated_nested_compound(leaf: *mut JPH_Shape) -> *mut JPH_Shape {
+    let cube = box_shape(vec3(0.5, 0.5, 0.5));
+    let inner = static_compound(&[(cube, vec3(0.0, 0.0, 0.0)), (leaf, vec3(2.0, 0.0, 0.0))]);
+    let outer = static_compound(&[(cube, vec3(0.0, 0.0, 0.0)), (inner, vec3(0.0, 0.0, 3.0))]);
+    let offset = vec3(0.1, 0.0, 0.0);
+    // SAFETY: `outer` is live; the decorator settings take their own reference and are released
+    // after the decorator took its own. This function's references are released once each.
+    let shape = unsafe {
+        let decorator = JPH_OffsetCenterOfMassShapeSettings_Create2(&offset, outer);
+        let shape = JPH_OffsetCenterOfMassShapeSettings_CreateShape(decorator);
+        JPH_ShapeSettings_Destroy(decorator.cast());
+        shape
+    };
+    [outer, inner, cube].into_iter().for_each(release);
+    assert!(!shape.is_null());
+    let shape: *mut JPH_Shape = shape.cast();
+    assert_nested_compound(shape);
+    shape
+}
+
+/// Asserts that `shape` is the structure `decorated_nested_compound` builds: a decorator around
+/// a compound of two children, the second a compound of two children.
+fn assert_nested_compound(shape: *const JPH_Shape) {
+    // SAFETY: `shape` is live; each getter is called on a shape of the subtype it takes, checked
+    // just before, and the child pointers stay valid while their parents live.
+    unsafe {
+        assert_eq!(
+            JPH_Shape_GetSubType(shape),
+            JPH_ShapeSubType_OffsetCenterOfMass
+        );
+        let outer = JPH_DecoratedShape_GetInnerShape(shape.cast());
+        assert_eq!(JPH_Shape_GetSubType(outer), JPH_ShapeSubType_StaticCompound);
+        assert_eq!(JPH_CompoundShape_GetNumSubShapes(outer.cast()), 2);
+        let mut inner = null();
+        JPH_CompoundShape_GetSubShape(
+            outer.cast(),
+            1,
+            &mut inner,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+        assert_eq!(JPH_Shape_GetSubType(inner), JPH_ShapeSubType_StaticCompound);
+        assert_eq!(JPH_CompoundShape_GetNumSubShapes(inner.cast()), 2);
+    }
 }
 
 /// A plane shape through the origin with normal +Y, holding one reference for the caller.
@@ -253,16 +297,31 @@ fn static_and_kinematic_rigid_bodies_report_volumes() {
 #[test]
 fn shapes_without_a_volume_and_soft_bodies_report_nothing() {
     let world = TestWorld::new(1);
+    let (height_field, cube) = (height_field_shape(), box_shape(vec3(0.5, 0.5, 0.5)));
+    // The same nested compound with a box in place of the heightfield has a volume, so the
+    // refusal below comes from the heightfield alone.
+    let solid = decorated_nested_compound(cube);
+    let solid_id = create_body(&world, solid, rvec3(0.0, 0.0, 0.0), JPH_MotionType_Static);
+    let solid_volume = submerged(&world, solid_id, 10.0);
+    assert!(solid_volume.found, "{solid_volume:?}");
+    assert!(
+        (solid_volume.total - 3.0).abs() <= 1.0e-5,
+        "{solid_volume:?}"
+    );
+
     let static_only = [
         height_field_shape(),
         plane_shape(),
-        decorated_height_field_compound(),
+        decorated_nested_compound(height_field),
     ];
     let mut ids: Vec<JPH_BodyID> = static_only
         .iter()
         .map(|&shape| create_body(&world, shape, rvec3(0.0, 0.0, 0.0), JPH_MotionType_Static))
         .collect();
-    static_only.into_iter().for_each(release);
+    [solid, cube, height_field]
+        .into_iter()
+        .chain(static_only)
+        .for_each(release);
     ids.push(soft_body(&world));
 
     for id in ids {

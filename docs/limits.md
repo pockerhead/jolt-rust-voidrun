@@ -394,7 +394,10 @@ largest principal inverse inertia `λ` stay below `f32::MAX` with these margins.
 The density chain implies `V · invM >= 1e-37`, a normal `f32`, so `ρ` never divides by zero. The
 unit tests check each chain at its boundary, the two counterexamples above, NaN in every input, and
 replay Jolt's arithmetic in `f32` in source order, reversed and with fused multiply-adds for 200 000
-seeded inputs: every accepted input stays finite.
+seeded inputs: every accepted input stays finite. A second replay takes 4000 accepted inputs, raises
+`λ` to the largest value the rules accept, spreads it over three seeded principal moments under a
+seeded rotation and forms Jolt's world matrix `R · diag(d) · Rᵀ` and its products in `f32`: these
+stay finite too.
 
 The chains overlap: the density chain is part of the buoyant and drag chains, the new-velocity rule
 contains the lever and the buoyant velocity change, and the drag chain holds the relative velocity
@@ -415,16 +418,23 @@ Right after Jolt's call, under the same body lock, both velocities are written b
 `MAX_LINEAR_VELOCITY` and `MAX_ANGULAR_VELOCITY` as an impulse does. The solver never sees a
 velocity beyond those bounds. The angular change of the lever term has no refusal: it grows with
 the lever over the radius of gyration, so small bodies entering water get large spins from ordinary
-inputs, and a rule like `MAX_ANGULAR_VELOCITY_CHANGE` would refuse them. The test fixture, a 10 cm
-rod of 10 g falling at 20 m/s with one end 4 cm from its centre of mass in the water, gets an
-estimated `λ · ‖r‖ · ‖Jd‖ ≈ 1.2e5 · 0.04 · 0.12 ≈ 600 rad/s` from its drag and leaves the call at
-`MAX_ANGULAR_VELOCITY` (`velocities_are_clamped_right_after_the_call`).
+inputs, and a rule like `MAX_ANGULAR_VELOCITY_CHANGE` would refuse them. The test fixture is a
+10 cm rod of 10 g falling at 20 m/s with one end, 4 cm from its centre of mass, in the water. Its
+drag impulse, about 2.3 N·s, is clamped by Jolt to the rod's momentum `‖Jd‖ = 0.01 · 20 = 0.2 N·s`;
+with the rod's inverse inertia about a transverse axis, about `1.19e5 /(kg·m²)`, that drag turns it
+by at most `1.19e5 · 0.04 · 0.2 ≈ 950 rad/s`. This is an analytic upper estimate, not a
+measurement; what the test measures is that the rod leaves the call at `MAX_ANGULAR_VELOCITY`
+(`velocities_are_clamped_right_after_the_call`).
 
 ### Volumes and the centre of buoyancy
 
 Jolt takes the total and submerged volume of a box, capsule, cylinder or tapered shape from its
 bounding box (`ConvexShape.cpp:383-445`); spheres and convex hulls use their own, compounds sum their
-children. A fully submerged shape gets `Vs = V` and `r = 0` exactly. Near a grazing waterline Jolt
+children. A fully submerged shape gets `Vs = V`. A convex shape fully under water puts its centre
+of buoyancy at the centre of mass Jolt passes it, so a convex body by itself gets `r = 0` exactly.
+An offset centre of mass decorator passes its inner shape a frame moved back by the offset, and a
+compound weights its children's centres by their volume: such a body gets a lever and can turn
+even fully under water (`a_fully_submerged_offset_body_turns`). Near a grazing waterline Jolt
 divides by a small positive volume difference (`PolyhedronSubmergedVolumeCalculator.h`), and the
 rounding of `r` can reach the size of the shape; `r` is therefore read from Jolt and bounded, never
 assumed to lie inside the shape.

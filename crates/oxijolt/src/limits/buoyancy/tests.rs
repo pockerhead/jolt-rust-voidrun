@@ -337,10 +337,57 @@ fn product(factors: &[f32], order: Order) -> f32 {
     }
 }
 
-/// Jolt's volume overload of `Body::ApplyBuoyancyImpulse` in `f32` (unrotated body, diagonal
-/// inverse inertia of the largest moment), the intermediates it squares included: the largest
-/// magnitude among them, or `None` when one is not finite.
+/// The columns of Jolt's world inverse inertia `R · diag(d) · Rᵀ` for the rotation matrix of
+/// columns `r`, in `f32` as `MotionProperties::GetInverseInertiaForRotation` forms it.
+fn world_inverse_inertia(r: [Vec3; 3], d: [f32; 3], order: Order) -> [Vec3; 3] {
+    let row = |i: usize| {
+        let c = |k: usize| [r[k].x, r[k].y, r[k].z][i];
+        [c(0), c(1), c(2)]
+    };
+    let rows = [row(0), row(1), row(2)];
+    let entry = |i: usize, j: usize| {
+        let a = Vec3::new(rows[i][0], rows[i][1], rows[i][2]);
+        let b = Vec3::new(d[0] * rows[j][0], d[1] * rows[j][1], d[2] * rows[j][2]);
+        dot(a, b, order)
+    };
+    [0, 1, 2].map(|j| Vec3::new(entry(0, j), entry(1, j), entry(2, j)))
+}
+
+/// `m · v` for a matrix of columns `m`, as Jolt's `Mat44 * Vec3` sums the columns.
+fn transform(m: [Vec3; 3], v: Vec3, order: Order) -> Vec3 {
+    match order {
+        Order::Fused => {
+            let fused = |a: f32, b: f32, c: f32| c.mul_add(v.z, b.mul_add(v.y, a * v.x));
+            Vec3::new(
+                fused(m[0].x, m[1].x, m[2].x),
+                fused(m[0].y, m[1].y, m[2].y),
+                fused(m[0].z, m[1].z, m[2].z),
+            )
+        }
+        _ => add(add(scale(m[0], v.x), scale(m[1], v.y)), scale(m[2], v.z)),
+    }
+}
+
+/// Jolt's volume overload of `Body::ApplyBuoyancyImpulse` in `f32` for an unrotated body whose
+/// inverse inertia is the largest moment on every axis.
 fn replay(i: &BuoyancyInputs, order: Order) -> Option<f32> {
+    let lambda = i.largest_inverse_inertia;
+    let diagonal = [
+        Vec3::new(lambda, 0.0, 0.0),
+        Vec3::new(0.0, lambda, 0.0),
+        Vec3::new(0.0, 0.0, lambda),
+    ];
+    replay_with_inertia(i, diagonal, order)
+}
+
+/// Jolt's volume overload of `Body::ApplyBuoyancyImpulse` in `f32` with the world inverse
+/// inertia of columns `inverse_inertia`, the intermediates it squares included: the largest
+/// magnitude among them, or `None` when one is not finite.
+fn replay_with_inertia(
+    i: &BuoyancyInputs,
+    inverse_inertia: [Vec3; 3],
+    order: Order,
+) -> Option<f32> {
     let mut values = Vec::new();
     let inverse_mass = i.inverse_mass;
     let density = i.buoyancy / (i.total_volume * inverse_mass);
@@ -385,16 +432,20 @@ fn replay(i: &BuoyancyInputs, order: Order) -> Option<f32> {
                 * -i.angular_drag
         }
     };
-    let lambda = i.largest_inverse_inertia;
-    let mut angular_drag = scale(scale(i.angular_velocity, angular_factor), lambda);
+    let mut angular_drag = transform(
+        inverse_inertia,
+        scale(i.angular_velocity, angular_factor),
+        order,
+    );
     let spin_sq = dot(i.angular_velocity, i.angular_velocity, order);
     let angular_drag_sq = dot(angular_drag, angular_drag, order);
     if angular_drag_sq > spin_sq {
         angular_drag = scale(angular_drag, (spin_sq / angular_drag_sq).sqrt());
     }
-    let lever = scale(
+    let lever = transform(
+        inverse_inertia,
         cross(i.center_of_buoyancy, add(buoyant, drag), order),
-        lambda,
+        order,
     );
     let angular = add(i.angular_velocity, add(angular_drag, lever));
     values.extend([
@@ -471,6 +522,87 @@ fn accepted_inputs_stay_finite_in_any_association() {
     assert!(accepted > 1000 && refused > 1000, "{accepted} {refused}");
     // Accepted inputs reach far beyond everyday sizes.
     assert!(largest > 1.0e30, "{largest}");
+}
+
+/// The largest inverse inertia that `check` accepts with the rest of `inputs`, which it accepts.
+fn largest_accepted_inverse_inertia(inputs: &BuoyancyInputs) -> f32 {
+    let accepts = |lambda: f64| {
+        let mut probe = *inputs;
+        probe.largest_inverse_inertia = lambda as f32;
+        check(&probe).is_ok()
+    };
+    let (mut low, mut high) = (f64::from(inputs.largest_inverse_inertia), 1.0e30);
+    assert!(accepts(low) && !accepts(high));
+    for _ in 0..80 {
+        let middle = if low > 0.0 {
+            (low * high).sqrt()
+        } else {
+            high / 2.0
+        };
+        if accepts(middle) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    low as f32
+}
+
+/// The columns of the rotation matrix of a seeded unit quaternion, in `f32`.
+fn seeded_rotation(rng: &mut SplitMix64) -> [Vec3; 3] {
+    let q = [0; 4].map(|_| rng.unit() * 2.0 - 1.0);
+    let n = q.iter().map(|c| c * c).sum::<f64>().sqrt().max(1.0e-9);
+    let [x, y, z, w] = q.map(|c| c / n);
+    let column = |a: f64, b: f64, c: f64| Vec3::new(a as f32, b as f32, c as f32);
+    [
+        column(
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y + w * z),
+            2.0 * (x * z - w * y),
+        ),
+        column(
+            2.0 * (x * y - w * z),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z + w * x),
+        ),
+        column(
+            2.0 * (x * z + w * y),
+            2.0 * (y * z - w * x),
+            1.0 - 2.0 * (x * x + y * y),
+        ),
+    ]
+}
+
+#[test]
+fn rotated_anisotropic_inertia_at_the_bound_stays_finite() {
+    // Accepted inputs with the largest inverse inertia the rules allow, spread over three
+    // principal axes (the largest on a seeded axis, the others smaller) and rotated: Jolt's
+    // world matrix and its products with the angular drag and the lever stay finite.
+    let mut rng = SplitMix64(0x1E7E_12A5);
+    let (mut cases, mut largest) = (0, 0.0_f32);
+    while cases < 4000 {
+        let mut inputs = seeded_inputs(&mut rng);
+        if check(&inputs).is_err() {
+            continue;
+        }
+        cases += 1;
+        let lambda = largest_accepted_inverse_inertia(&inputs);
+        inputs.largest_inverse_inertia = lambda;
+        let mut moments = [0; 3].map(|_| lambda * rng.unit() as f32);
+        moments[(rng.next() % 3) as usize] = lambda;
+        let rotation = seeded_rotation(&mut rng);
+        for order in [Order::Source, Order::Reversed, Order::Fused] {
+            let inertia = world_inverse_inertia(rotation, moments, order);
+            let value = replay_with_inertia(&inputs, inertia, order);
+            assert!(
+                value.is_some(),
+                "case {cases} {order:?}: {inputs:?} {moments:?}"
+            );
+            largest = largest.max(value.unwrap_or_default());
+        }
+    }
+    // The angular velocity's square reaches the squared headroom's scale.
+    assert!(largest > 1.0e35, "{largest}");
 }
 
 #[test]

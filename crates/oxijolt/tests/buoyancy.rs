@@ -209,6 +209,38 @@ fn the_buoyant_lever_matches_the_geometry() {
 }
 
 #[test]
+fn a_fully_submerged_offset_body_turns() {
+    // A sphere of radius 0.5 whose centre of mass is moved by (0.25, 0, 0): fully under water,
+    // Jolt's centre of buoyancy is the sphere's centre, r = (-0.25, 0, 0) from the centre of
+    // mass. The lift `J = b · m · g · dt` at that lever turns it about z by
+    // `-0.25 · J / I_zz`, with `I_zz = (0.4 · 0.25 + 0.25²) · m`.
+    let sphere = Shape::new_sphere(0.5).unwrap();
+    let offset = Shape::new_offset_center_of_mass(&sphere, Vec3::new(0.25, 0.0, 0.0)).unwrap();
+    let gravity = Vec3::new(0.0, -10.0, 0.0);
+    let settings = water_at(10.0).linear_drag(0.0).angular_drag(0.0);
+    let mut turns = Vec::new();
+    for shape in [&sphere, &offset] {
+        let mut world = world(Vec3::ZERO, 1);
+        let id = world
+            .create_body(shape, &BodySettings::new_dynamic())
+            .unwrap();
+        assert!(buoy(&mut world, id, &settings, gravity).unwrap());
+        let body = world.body(id).unwrap();
+        let (v, w) = (body.linear_velocity(), body.angular_velocity());
+        let lift = 10.0 * DT;
+        assert!((v.y - lift).abs() < 1.0e-5 * lift, "{v:?}");
+        assert!(w.x.abs() < 1.0e-6 && w.y.abs() < 1.0e-6, "{w:?}");
+        turns.push(w.z);
+    }
+    let expected = -0.25 * 10.0 * DT / (0.4 * 0.25 + 0.25 * 0.25);
+    assert!(turns[0].abs() < 1.0e-6, "{turns:?}");
+    assert!(
+        (turns[1] - expected).abs() < 1.0e-4 * expected.abs(),
+        "{turns:?}"
+    );
+}
+
+#[test]
 fn velocities_are_clamped_right_after_the_call() {
     // A small cube fully under water with a buoyant velocity change just below the policy.
     let mut world = world(Vec3::ZERO, 1);
