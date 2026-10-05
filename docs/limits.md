@@ -618,7 +618,8 @@ forward and reverse; `N` the max rpm; `T` the engine's largest torque; `h` = `MA
   `κ_j = (1/I_j) / (1/I_j + r/I_i) < 1`.
 - Ground contact (`:351-407`) moves a track towards the ground's speed under a wheel over that
   wheel's radius, as far as the friction impulse allows. It is not part of the envelope; the
-  [track inertia ratio](#track-inertia-ratio) says what bounds it and what does not.
+  [track inertia ratio](#track-inertia-ratio) and the [track mass ratio](#track-mass-ratio) bound
+  it.
 
 A step that drives only track `i` thus gives `B' ≤ τ_i/I_i + κ_j·B`, one that drives both
 `B' ≤ τ_l/I_l + τ_r/I_r`, one that drives neither `B' ≤ B`. The tracks start at rest, and the
@@ -678,13 +679,66 @@ throttle and brake changing every step, in the default and the asserts build. Wi
 removed, the scene above gives NaN again in the default build and stops at the same assertion in
 the asserts build. The ratio is policy from these measurements, not a derived bound.
 
-It does not bound ground contact as a whole. The same contact solve diverged with equal inertias
-when the tracks were heavy for the chassis and the friction high: on the 4000 kg tank, inertias of
-1e5 kg·m² on 50 m wheels and of 1e4 kg·m² on 0.3 m wheels turning in place with friction 1000, and
-of 1e5 kg·m² on 1000 m wheels with friction 30, gave NaN within a few steps; so did a 1 kg chassis
-on tracks of 100 kg·m² and 1 m wheels with friction 1000. With friction up to 10, none of 480 runs
-over inertias up to 1e6 kg·m², wheels of 0.3 to 1000 m and chassis of 1 kg and 4000 kg diverged.
-No rule in `oxijolt::limits` excludes those settings ([coverage](coverage.md#not-covered)).
+It does not bound ground contact as a whole: the same solve diverged with equal inertias when
+the tracks were heavy for the chassis, which the [track mass ratio](#track-mass-ratio) bounds.
+
+## Track mass ratio
+
+Under each unbraked wheel in contact, Jolt sizes the longitudinal impulse as if the chassis stood
+still: the slip `s = ω·r − v` between the track and the ground under the wheel, times the track's
+mass at that wheel `M = I/r²` (`I` the track's inertia, `r` the wheel's radius;
+`TrackedVehicleController.cpp:394-406`). The impulse also moves the chassis: by `w` per unit of
+impulse at that point along the longitudinal direction `d`, with the chassis' inverse effective
+mass `w = 1/m + (c × d)ᵀ I⁻¹ (c × d)` (`c` the contact from the centre of mass, `I⁻¹` the chassis'
+inverse inertia; `AxisConstraintPart.h`). Leaving the synchronisation of the tracks and the
+friction limit aside, the slip after the solve is `−M·w·s`: the solver, which repeats this for
+every wheel in every velocity iteration, converges only while `M·w` stays below about 1. The
+synchronisation and the friction limit move that onset, so the bound is measured.
+
+`PhysicsWorld::create_tracked_vehicle` computes `M·w` for every wheel in `f64` from the chassis'
+inverse mass, principal inverse inertia, inertia rotation and centre of mass, and refuses the
+vehicle when any wheel's exceeds `MAX_TRACK_MASS_RATIO` (0.5). `w` is the largest the wheel can
+give:
+- `d` is the wheel's forward as Jolt builds it (`VehicleConstraint::GetWheelLocalBasis`), the
+  longitudinal direction on ground perpendicular to the wheel's up.
+- Every collision tester puts the contact within `ρ = max_length + √(r² + (width/2)²)` of the
+  attachment point `a`: the ray ends `max_length + r` along the suspension, the cast sphere's
+  centre stops `max_length + r − radius` along it, the cylinder's centre `max_length` along it with
+  its surface within `√(r² + (width/2)²)`. Since `|(c × d)|` measured with `I⁻¹` is a norm of `c`
+  across `d`, it is at most `|(a × d)| + ρ·σ`, with `σ²` the largest eigenvalue of `I⁻¹` across
+  `d`. The ratio is not tied to the tester, which can be replaced after creation.
+- With a suspension force point, Jolt pushes there and measures the slip at the contact; the
+  mixed term is at most the product of the two levers, so the larger lever is used.
+
+Measured with the rule removed, through the safe API on a tank-sized box chassis on ground with
+the wheels' friction, in the default build: a sweep of 15456 runs over equal track
+inertias of 1e-3 to 1e6 kg·m² and pairs 100 apart, wheels of 0.3 to 1000 m, chassis of 1 kg to
+1e6 kg, friction 1 to 1000, driving straight and turning in place, at 1/60 s for 300 steps and at
+`MAX_DELTA_TIME` for 60, then a fine scan of ratios 0.5 to 8 in four wheel layouts (seven wheels
+with a raised driven wheel, Jolt's `TankTest` layout, one and two wheels per track) and with tilted
+gravity. The first divergence was at a ratio of 2.70 (`TankTest` layout, 1000 m wheels, friction
+1000, straight, 1/60 s; 2.65 stayed finite); the one- and two-wheel layouts did not diverge up to
+3. The five accepted scenes that diverged before the rule had ratios of 6.7 to 354. The friction
+limit caps the impulse and delays the onset: at friction 1 nothing diverged up to ratios of 3e7,
+at friction 4 the first divergence was at 27 with 1 s steps. The rule does not count on it.
+
+`MAX_TRACK_MASS_RATIO` is 0.5, 5.4 times below the first divergence. With it, 39872 of 78784 runs
+over the axes above, a 1 g chassis, the four layouts and the heaviest accepted tracks of every
+layout, wheel size and chassis mass (with the other track equal or 100 times lighter) were
+accepted, and every one stayed finite for every step in the default and the asserts build. The
+tests find the heaviest accepted tracks by bisection (71 kg·m² on 0.3 m wheels under the 4000 kg
+tank, 1.8 kg·m² on 1000 m wheels under 1 kg) and drive them. Jolt's `TankTest` (10 kg·m² tracks on
+0.3 m wheels, 4000 kg) has a ratio of 0.070. With the rule removed, or with the `ρ·σ` term
+dropped, accepted settings give NaN again and the asserts build stops at
+`MotionProperties.inl:28` or `:38`; the inverse mass, the inertia rotation and the force point
+terms are policy that keeps the bound conservative, with no failure measured without them.
+
+Not covered:
+- Ground that tilts the longitudinal direction away from the wheel's forward (a wheel on an edge,
+  a step or a wall). Across the wheel's up the lever is longer: over every direction in the
+  forward-up plane, `TankTest`'s ratio would be 0.30. Only the margin covers it.
+- A dynamic body under the wheels: the contact constraint moves that body too, and its inverse
+  mass adds to `w`. The ratio counts the chassis alone.
 
 ## Motorcycle lean
 

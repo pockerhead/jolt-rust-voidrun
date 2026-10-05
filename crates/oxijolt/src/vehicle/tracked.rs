@@ -1,11 +1,15 @@
 //! Tracked vehicles: Jolt's `VehicleConstraint` with the tracked controller.
 
 use std::ops::Range;
+use std::ptr::NonNull;
 
 use oxijolt_sys::*;
 
+use super::settings::ChassisMass;
 use super::{TrackedVehicle, TrackedVehicleSettings, VehicleId};
-use crate::{limits, BodyId, PhysicsWorld, VehicleError, VehicleMut, VehicleRef};
+use crate::body::with_read_locked_body;
+use crate::limits::{self, PrincipalMass};
+use crate::{BodyId, PhysicsWorld, Quat, Vec3, VehicleError, VehicleMut, VehicleRef};
 
 /// What the driver asks of a tracked vehicle (Jolt `TrackedVehicleController::SetDriverInput`).
 ///
@@ -169,7 +173,9 @@ impl PhysicsWorld {
     /// The chassis works as for [`create_vehicle`](Self::create_vehicle): it stays an ordinary
     /// body the vehicle is a constraint and step listener on, and the same chassis rules and
     /// errors apply. The settings are checked as their setters state, plus the track drive
-    /// envelope of [docs/limits.md#track-drive-envelope]. Nothing is created on failure.
+    /// envelope of [docs/limits.md#track-drive-envelope]; and at every wheel, the track's inertia
+    /// must stay small against the chassis' mass and inertia
+    /// ([`limits::MAX_TRACK_MASS_RATIO`]). Nothing is created on failure.
     ///
     /// [docs/limits.md#track-drive-envelope]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-drive-envelope
     ///
@@ -222,7 +228,108 @@ impl PhysicsWorld {
     ) -> Result<VehicleId<TrackedVehicle>, VehicleError> {
         settings.validate(self.object_layer_count)?;
         self.check_chassis(body)?;
+        let track_mass_ratio = settings.largest_track_mass_ratio(&self.chassis_mass(body));
+        if !limits::is_track_mass_ratio(track_mass_ratio) {
+            return Err(VehicleError::InvalidValue(limits::TRACK_MASS_RATIO_RULE));
+        }
         let id = self.attach_vehicle(body, settings.build())?;
         Ok(VehicleId::new(id.raw, self.tag))
+    }
+
+    /// The mass properties of `body`, a chassis [`check_chassis`](Self::check_chassis) accepted.
+    fn chassis_mass(&self, body: BodyId) -> ChassisMass {
+        with_read_locked_body(self.body_lock_interface, body, |chassis| {
+            // SAFETY: the chassis is locked for reading for the call and dynamic.
+            unsafe { read_chassis_mass(chassis) }
+        })
+        .unwrap_or_else(|| unreachable!("`check_chassis` found the body and `&mut self` keeps it"))
+    }
+}
+
+/// Reads the mass properties of `chassis`.
+///
+/// # Safety
+/// `chassis` is a live dynamic body, locked for reading for the call.
+unsafe fn read_chassis_mass(chassis: NonNull<JPH_Body>) -> ChassisMass {
+    let body = chassis.as_ptr();
+    let mut inverse_inertia = Vec3::ZERO.to_jph();
+    let mut inertia_rotation = Quat::IDENTITY.to_jph();
+    let mut center_of_mass = Vec3::ZERO.to_jph();
+    // SAFETY: the caller's contract. A dynamic body has motion properties, and its shape lives
+    // as long as the body; the getters only read them and write the live locals.
+    let inverse_mass = unsafe {
+        let motion = JPH_Body_GetMotionProperties(body);
+        JPH_MotionProperties_GetInverseInertiaDiagonal(motion, &mut inverse_inertia);
+        JPH_MotionProperties_GetInertiaRotation(motion, &mut inertia_rotation);
+        JPH_Shape_GetCenterOfMass(JPH_Body_GetShape(body), &mut center_of_mass);
+        JPH_MotionProperties_GetInverseMassUnchecked(motion)
+    };
+    let inverse_inertia = Vec3::from_jph(inverse_inertia);
+    ChassisMass {
+        mass: PrincipalMass {
+            inverse_mass: f64::from(inverse_mass),
+            inverse_inertia: [inverse_inertia.x, inverse_inertia.y, inverse_inertia.z]
+                .map(f64::from),
+        },
+        // Jolt's local inverse inertia is `R D Rᵀ` with `R` the inertia rotation, so `Rᵀ` takes
+        // body space into the principal frame.
+        body_to_principal: Quat::from_jph(inertia_rotation).conjugated(),
+        center_of_mass: Vec3::from_jph(center_of_mass),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BodySettings, CompoundChild, Shape, WorldSettings};
+
+    #[test]
+    fn chassis_mass_turns_body_space_into_the_principal_frame() {
+        // A 6 kg box of half extents (2, 1, 0.5), principal inertia m/3 · (b² + c², a² + c²,
+        // a² + b²) = (2.5, 8.5, 10), turned by 30° about z inside a compound.
+        let mut world = PhysicsWorld::new(WorldSettings::default()).unwrap();
+        let angle = 30.0_f64.to_radians();
+        let (half_sin, half_cos) = (0.5 * angle).sin_cos();
+        let hull = Shape::new_box(Vec3::new(2.0, 1.0, 0.5)).unwrap();
+        let shape = Shape::new_compound(&[CompoundChild {
+            shape: &hull,
+            position: Vec3::ZERO,
+            rotation: Quat::from_xyzw(0.0, 0.0, half_sin as f32, half_cos as f32),
+            user_data: 0,
+        }])
+        .unwrap();
+        let body = world
+            .create_body(&shape, &BodySettings::new_dynamic().mass(6.0))
+            .unwrap();
+        let chassis = world.chassis_mass(body);
+        // The body-space inverse inertia the chassis mass describes, against the box's turned by
+        // the same angle.
+        let axes = [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ];
+        let principal = axes.map(|axis| {
+            let v = chassis.body_to_principal.rotate(axis);
+            [v.x, v.y, v.z].map(f64::from)
+        });
+        let (sin, cos) = angle.sin_cos();
+        let inverse = [1.0 / 2.5, 1.0 / 8.5, 1.0 / 10.0];
+        let turned = [[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]];
+        for i in 0..3 {
+            for j in 0..3 {
+                let read: f64 = (0..3)
+                    .map(|k| chassis.mass.inverse_inertia[k] * principal[i][k] * principal[j][k])
+                    .sum();
+                let expected: f64 = (0..3)
+                    .map(|k| turned[i][k] * inverse[k] * turned[j][k])
+                    .sum();
+                assert!(
+                    (read - expected).abs() < 1e-5,
+                    "{i}{j}: {read} vs {expected}"
+                );
+            }
+        }
+        assert!((chassis.mass.inverse_mass - 1.0 / 6.0).abs() < 1e-7);
     }
 }

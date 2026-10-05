@@ -199,6 +199,21 @@ pub const MAX_TRACK_INERTIA: f32 = 1.0e6;
 /// [docs/limits.md#track-inertia-ratio]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-inertia-ratio
 pub const MAX_TRACK_INERTIA_RATIO: f32 = 100.0;
 
+/// Largest track mass ratio of a tracked vehicle's wheel: its track's moment of inertia over
+/// the wheel's radius squared (the track's mass as the ground feels it at that wheel), divided by
+/// the chassis' effective mass where the wheel pushes it along its forward.
+///
+/// Jolt sizes each wheel's driving impulse for the track alone, as if the chassis did not move,
+/// so a track heavy against the chassis makes the solver overshoot and diverge.
+/// [`PhysicsWorld::create_tracked_vehicle`] computes the ratio from the chassis' mass, inertia
+/// and centre of mass and refuses a vehicle with any wheel above this bound. Jolt's `TankTest`
+/// tank has a ratio of 0.07.
+///
+/// See [docs/limits.md#track-mass-ratio].
+///
+/// [docs/limits.md#track-mass-ratio]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-mass-ratio
+pub const MAX_TRACK_MASS_RATIO: f32 = 0.5;
+
 /// Largest lever-arm ratio a world constraint may give a dynamic body: how far the point where
 /// the constraint holds the body lies from its centre of mass, measured against the body's own
 /// size.
@@ -700,6 +715,71 @@ pub(crate) fn is_track_inertia(inertia: f32) -> bool {
 /// times the smaller, the product rounded to `f32`.
 pub(crate) fn is_track_inertia_ratio(first: f32, second: f32) -> bool {
     first.max(second) <= MAX_TRACK_INERTIA_RATIO * first.min(second)
+}
+
+/// What a tracked vehicle's tracks must satisfy on their chassis ([`is_track_mass_ratio`]).
+pub(crate) const TRACK_MASS_RATIO_RULE: &str =
+    "a track is too heavy for its chassis: see limits::MAX_TRACK_MASS_RATIO";
+
+/// Whether `ratio` is at most [`MAX_TRACK_MASS_RATIO`]; false for NaN.
+pub(crate) fn is_track_mass_ratio(ratio: f64) -> bool {
+    ratio <= f64::from(MAX_TRACK_MASS_RATIO)
+}
+
+/// The inverse mass and the principal inverse inertia of a dynamic body, in `f64`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PrincipalMass {
+    pub(crate) inverse_mass: f64,
+    pub(crate) inverse_inertia: [f64; 3],
+}
+
+impl PrincipalMass {
+    /// The lever term of the body at `lever` along the unit `direction`, both in the principal
+    /// frame: `√((r × d)ᵀ I⁻¹ (r × d))`. An impulse of 1 along `d` at `r` changes the velocity
+    /// along `d` at `r` by `inverse_mass + lever²`.
+    pub(crate) fn lever(&self, lever: [f64; 3], direction: [f64; 3]) -> f64 {
+        let c = cross(lever, direction);
+        (0..3)
+            .map(|k| self.inverse_inertia[k] * c[k] * c[k])
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    /// The largest [`lever`](Self::lever) along the unit `direction` at any point within 1 m of
+    /// the centre of mass: the largest `√(wᵀ I⁻¹ w)` over unit `w` perpendicular to
+    /// `direction`, the greater eigenvalue of `I⁻¹` restricted to that plane.
+    pub(crate) fn lever_per_metre(&self, direction: [f64; 3]) -> f64 {
+        let helper = if direction[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        let e1 = normalized(cross(direction, helper));
+        let e2 = cross(direction, e1);
+        let form = |a: [f64; 3], b: [f64; 3]| {
+            (0..3)
+                .map(|k| self.inverse_inertia[k] * a[k] * b[k])
+                .sum::<f64>()
+        };
+        let (a, b, c) = (form(e1, e1), form(e1, e2), form(e2, e2));
+        let half_gap = 0.5 * (a - c);
+        (0.5 * (a + c) + (half_gap * half_gap + b * b).sqrt()).sqrt()
+    }
+}
+
+/// `a × b` in `f64`.
+pub(crate) fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// `v` scaled to unit length, in `f64`.
+pub(crate) fn normalized(v: [f64; 3]) -> [f64; 3] {
+    let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    v.map(|c| c / length)
 }
 
 /// The lever-arm ratio (see [`MAX_LEVER_ARM_RATIO`]) of a dynamic body with `inverse_mass` and

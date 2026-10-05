@@ -220,6 +220,38 @@ fn lever_arm_ratios_measure_the_lever_against_the_radius_of_gyration() {
 }
 
 #[test]
+fn principal_levers_measure_the_lever_with_the_inverse_inertia() {
+    let mass = PrincipalMass {
+        inverse_mass: 0.5,
+        inverse_inertia: [1.0, 2.0, 3.0],
+    };
+    let z = [0.0, 0.0, 1.0];
+    // r × d = (1, 0, 0), weighted by 1; the y component of a lever along d adds nothing.
+    assert!((mass.lever([0.0, 1.0, 0.0], z) - 1.0).abs() < 1e-12);
+    assert!((mass.lever([0.0, 1.0, 5.0], z) - 1.0).abs() < 1e-12);
+    // r × d = (0, -2, 0), weighted by 2: √(4 · 2).
+    assert!((mass.lever([2.0, 0.0, 0.0], z) - 8.0_f64.sqrt()).abs() < 1e-12);
+    // Per metre: the largest inverse inertia across the direction.
+    assert!((mass.lever_per_metre(z) - 2.0_f64.sqrt()).abs() < 1e-12);
+    assert!((mass.lever_per_metre([1.0, 0.0, 0.0]) - 3.0_f64.sqrt()).abs() < 1e-12);
+    let diagonal = normalized([1.0, 1.0, 0.0]);
+    assert!((mass.lever_per_metre(diagonal) - 3.0_f64.sqrt()).abs() < 1e-12);
+    // Across (0, 1, 1): 1 along x and (2 + 3) / 2 along (0, 1, -1).
+    let tilted = normalized([0.0, 1.0, 1.0]);
+    assert!((mass.lever_per_metre(tilted) - 2.5_f64.sqrt()).abs() < 1e-12);
+    // It bounds the lever of every unit vector.
+    for k in 0..64 {
+        let angle = f64::from(k) * 0.1;
+        let u = normalized([angle.cos(), angle.sin(), 0.3 * angle]);
+        assert!(mass.lever(u, tilted) <= mass.lever_per_metre(tilted) + 1e-12);
+    }
+    let bound = f64::from(MAX_TRACK_MASS_RATIO);
+    assert!(is_track_mass_ratio(bound));
+    assert!(!is_track_mass_ratio(bound.next_up()));
+    assert!(!is_track_mass_ratio(f64::NAN));
+}
+
+#[test]
 fn accelerations_are_bounded_by_the_speed_clamp_per_step() {
     let per_step = MAX_ACCELERATION * PhysicsWorld::MIN_DELTA_TIME;
     assert!((per_step - MAX_LINEAR_VELOCITY).abs() <= MAX_LINEAR_VELOCITY * 1.0e-6);

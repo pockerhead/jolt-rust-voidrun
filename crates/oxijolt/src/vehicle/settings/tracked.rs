@@ -10,10 +10,10 @@ use super::{
     VehicleEngineSettings, VehicleFrame, VehicleTransmissionSettings, WheelGeometry, WheelGuard,
     ANGULAR_VELOCITY_TO_RPM,
 };
-use crate::limits;
+use crate::limits::{self, PrincipalMass};
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
-use crate::{PhysicsWorld, Vec3, VehicleError};
+use crate::{PhysicsWorld, Quat, Vec3, VehicleError};
 
 /// One wheel of a tracked vehicle (Jolt `WheelSettings` and `WheelSettingsTV`). The wheel
 /// turns with its track; its suspension and size work as for [`WheelSettings`], whose methods
@@ -187,7 +187,8 @@ impl VehicleTrackSettings {
 
     /// Moment of inertia of the track and its wheels about the driven wheel's axle, kg·m², within
     /// [`limits::MIN_TRACK_INERTIA`]`..=`[`limits::MAX_TRACK_INERTIA`] and within a factor
-    /// [`limits::MAX_TRACK_INERTIA_RATIO`] of the other track's. Default 10.
+    /// [`limits::MAX_TRACK_INERTIA_RATIO`] of the other track's; the chassis bounds it too
+    /// ([`limits::MAX_TRACK_MASS_RATIO`]). Default 10.
     #[must_use]
     pub fn inertia(mut self, value: f32) -> Self {
         self.inertia = value;
@@ -503,6 +504,21 @@ impl TrackedVehicleSettings {
         terms
     }
 
+    /// The largest [track mass ratio](limits::MAX_TRACK_MASS_RATIO) of these validated
+    /// settings' wheels on `chassis`, as derived in [docs/limits.md#track-mass-ratio].
+    ///
+    /// [docs/limits.md#track-mass-ratio]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#track-mass-ratio
+    pub(crate) fn largest_track_mass_ratio(&self, chassis: &ChassisMass) -> f64 {
+        self.tracks()
+            .into_iter()
+            .flat_map(|track| track.wheels.iter().map(move |wheel| (track.inertia, wheel)))
+            .map(|(inertia, wheel)| {
+                let radius = f64::from(wheel.base.radius);
+                f64::from(inertia) / (radius * radius) * chassis.inverse_effective_mass(&wheel.base)
+            })
+            .fold(0.0, f64::max)
+    }
+
     fn wheel_geometry(&self) -> Vec<WheelGeometry> {
         self.tracks()
             .into_iter()
@@ -569,6 +585,46 @@ impl TrackedVehicleSettings {
             unsafe { JPH_TrackedVehicleControllerSettings_SetTrack(ptr, side as u32, &jolt_track) };
         }
         controller
+    }
+}
+
+/// A tracked vehicle's chassis as its [track mass ratio](limits::MAX_TRACK_MASS_RATIO) needs it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ChassisMass {
+    /// The chassis' inverse mass and principal inverse inertia.
+    pub(crate) mass: PrincipalMass,
+    /// The rotation from the chassis' body space into its principal frame.
+    pub(crate) body_to_principal: Quat,
+    /// The centre of mass in body space.
+    pub(crate) center_of_mass: Vec3,
+}
+
+impl ChassisMass {
+    /// The largest inverse effective mass of the chassis where `wheel` can push it along the
+    /// wheel's forward: the lever is taken at the farthest point the wheel's contact can reach,
+    /// and at the suspension force point when the wheel has one.
+    fn inverse_effective_mass(&self, wheel: &WheelBase) -> f64 {
+        let principal = |v: Vec3| {
+            let v = self.body_to_principal.rotate(v);
+            [v.x, v.y, v.z].map(f64::from)
+        };
+        let center = self.center_of_mass;
+        let from_center =
+            |p: Vec3| principal(Vec3::new(p.x - center.x, p.y - center.y, p.z - center.z));
+        // Jolt's longitudinal direction on ground perpendicular to the wheel's up
+        // (`VehicleConstraint::GetWheelLocalBasis`).
+        let up = principal(wheel.wheel_up);
+        let right = limits::normalized(limits::cross(principal(wheel.wheel_forward), up));
+        let forward = limits::normalized(limits::cross(up, right));
+        // Every tester puts the contact within this distance of the attachment point.
+        let reach = f64::from(wheel.suspension_max_length)
+            + f64::from(wheel.radius).hypot(0.5 * f64::from(wheel.width));
+        let mut lever = self.mass.lever(from_center(wheel.position), forward)
+            + reach * self.mass.lever_per_metre(forward);
+        if let Some(point) = wheel.suspension_force_point {
+            lever = lever.max(self.mass.lever(from_center(point), forward));
+        }
+        self.mass.inverse_mass + lever * lever
     }
 }
 

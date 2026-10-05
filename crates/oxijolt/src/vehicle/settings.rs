@@ -23,6 +23,7 @@ pub use drivetrain::{
     VehicleDifferentialSettings, VehicleEngineSettings, VehicleTransmissionSettings,
 };
 pub use motorcycle::MotorcycleSettings;
+pub(crate) use tracked::ChassisMass;
 pub use tracked::{TrackedVehicleSettings, TrackedWheelSettings, VehicleTrackSettings};
 pub(crate) use wheel::WheelGeometry;
 pub use wheel::{SuspensionSpring, VehicleAntiRollBar, WheelSettings};

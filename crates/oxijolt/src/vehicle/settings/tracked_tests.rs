@@ -436,3 +436,63 @@ fn tracked_drive_envelope_bounds_the_drivetrain() {
     // The max rpm sets the speed limit too.
     assert_refused(tank().engine(engine().max_rpm(1.0e20)), ENVELOPE);
 }
+
+/// A 4000 kg chassis with principal inverse inertia `inverse_inertia`, its principal frame
+/// turned from body space by `body_to_principal`, its centre of mass at `center`.
+fn chassis(inverse_inertia: [f64; 3], body_to_principal: Quat, center: Vec3) -> ChassisMass {
+    ChassisMass {
+        mass: PrincipalMass {
+            inverse_mass: 1.0 / 4000.0,
+            inverse_inertia,
+        },
+        body_to_principal,
+        center_of_mass: center,
+    }
+}
+
+#[test]
+fn track_mass_ratio_takes_the_chassis_inertia_at_the_farthest_contact() {
+    let (a, b, c) = (1.0 / 1500.0, 1.0 / 4000.0, 1.0 / 2000.0);
+    let center = Vec3::new(0.3, -0.5, 0.0);
+    // `tank()`'s wheels: x = ±1, y = −0.3, forward +Z, Jolt's 10 kg·m² tracks on 0.3 m wheels,
+    // every contact within 0.5 + √(0.3² + 0.05²) of the attachment.
+    let reach = 0.5 + 0.3_f64.hypot(0.05);
+    let track_mass = 10.0 / (0.3_f64 * 0.3);
+    for angle in [0.0_f64, 0.4, -0.4] {
+        let (half_sin, half_cos) = (0.5 * angle).sin_cos();
+        let to_principal = Quat::from_xyzw(0.0, 0.0, half_sin as f32, half_cos as f32);
+        // The body-space inverse inertia Rᵀ D R across +Z, with R the turn by `angle` about z.
+        let (sin, cos) = angle.sin_cos();
+        let xx = a * cos * cos + b * sin * sin;
+        let yy = a * sin * sin + b * cos * cos;
+        let xy = sin * cos * (b - a);
+        let across = 0.5 * (xx + yy) + (0.25 * (xx - yy) * (xx - yy) + xy * xy).sqrt();
+        let expected = [1.0_f64, -1.0]
+            .map(|x| {
+                // The lever across +Z: (r_y, −r_x) for r = attachment − centre.
+                let (u, v) = (-0.3 + 0.5, -(x - 0.3));
+                let lever =
+                    (xx * u * u + 2.0 * xy * u * v + yy * v * v).sqrt() + reach * across.sqrt();
+                track_mass * (1.0 / 4000.0 + lever * lever)
+            })
+            .into_iter()
+            .fold(0.0, f64::max);
+        let ratio = tank().largest_track_mass_ratio(&chassis([a, b, c], to_principal, center));
+        assert!(
+            (ratio - expected).abs() <= 1e-5 * expected,
+            "angle {angle}: {ratio} vs {expected}"
+        );
+    }
+    // A suspension force point far below the contacts sets the lever.
+    let mut settings = tank();
+    settings.left.wheels[0] = settings.left.wheels[0]
+        .clone()
+        .suspension_force_point(Some(Vec3::new(1.0, -5.0, 0.0)));
+    let lever = (a * 4.5 * 4.5 + b * 0.7 * 0.7).sqrt();
+    let expected = track_mass * (1.0 / 4000.0 + lever * lever);
+    let ratio = settings.largest_track_mass_ratio(&chassis([a, b, c], Quat::IDENTITY, center));
+    assert!(
+        (ratio - expected).abs() <= 1e-5 * expected,
+        "{ratio} vs {expected}"
+    );
+}

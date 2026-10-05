@@ -1,7 +1,8 @@
 //! Drivetrain bounds: overflowing torque curves and tracked drivetrains are refused, and the
 //! strongest accepted ones stay finite through a step, with every wheel, track and chassis
-//! value read back. Tracks of very unequal inertia are refused, and the widest accepted ratio
-//! stays finite on high-friction ground.
+//! value read back. Tracks of very unequal inertia, and tracks heavy against their chassis, are
+//! refused; the widest accepted inertia ratio and the heaviest accepted tracks stay finite on
+//! high-friction ground.
 
 mod common;
 
@@ -70,8 +71,9 @@ fn assert_refused<T: std::fmt::Debug>(result: Result<T, VehicleError>, rule: &st
     }
 }
 
-/// A world with gravity, a tank-sized chassis high in the air, and optionally a ground under it.
-fn tank_world(ground: bool) -> (PhysicsWorld, CarLayers, BodyId) {
+/// A world with gravity, a tank-sized chassis of `mass` high in the air, and optionally a ground
+/// under it.
+fn tank_world(ground: bool, mass: f32) -> (PhysicsWorld, CarLayers, BodyId) {
     let (mut world, layers) = car_world(GRAVITY, 1);
     let height = if ground {
         let shape = Shape::new_box(Vec3::new(100.0, 1.0, 100.0)).unwrap();
@@ -90,12 +92,7 @@ fn tank_world(ground: bool) -> (PhysicsWorld, CarLayers, BodyId) {
     let chassis = world
         .create_body(
             &tank_chassis_shape(),
-            &behaviour_chassis(
-                &layers,
-                4000.0,
-                RVec3::new(0.0, height, 0.0),
-                Quat::IDENTITY,
-            ),
+            &behaviour_chassis(&layers, mass, RVec3::new(0.0, height, 0.0), Quat::IDENTITY),
         )
         .unwrap();
     (world, layers, chassis)
@@ -165,11 +162,12 @@ fn assert_finite<K: VehicleKind>(world: &PhysicsWorld, id: VehicleId<K>, chassis
     );
 }
 
-/// Drives a tank of `settings` with each input schedule at the shortest common and the longest
-/// step, in the air and on the ground, and checks every value after each step, the tracks
-/// included. A schedule alternates its two inputs tick by tick; the last one swaps the slow track
-/// every tick, so the synchronisation moves speed from one track to the other.
-fn drive_every_way(settings: &TrackedVehicleSettings) {
+/// Drives a tank of `settings` on a chassis of `mass` with each input schedule at the shortest
+/// common and the longest step, in the air and on the ground, and checks every value after each
+/// step, the tracks included. A schedule alternates its two inputs tick by tick; the last one
+/// swaps the slow track every tick, so the synchronisation moves speed from one track to the
+/// other.
+fn drive_every_way(settings: &TrackedVehicleSettings, mass: f32) {
     let slow = 1.0 / limits::MAX_RATIO;
     let constant = |input: TrackedDriverInput| [input, input];
     let schedules = [
@@ -184,7 +182,7 @@ fn drive_every_way(settings: &TrackedVehicleSettings) {
     for ground in [false, true] {
         for schedule in schedules {
             for (dt, ticks) in [(1.0 / 60.0, 120), (PhysicsWorld::MAX_DELTA_TIME, 10)] {
-                let (mut world, _, chassis) = tank_world(ground);
+                let (mut world, _, chassis) = tank_world(ground, mass);
                 let tank = world.create_tracked_vehicle(chassis, settings).unwrap();
                 for tick in 0..ticks {
                     let input = schedule[tick % 2];
@@ -218,7 +216,7 @@ fn drive_every_way(settings: &TrackedVehicleSettings) {
 
 #[test]
 fn overflowing_tracked_drivetrains_are_refused() {
-    let (mut world, layers, chassis) = tank_world(false);
+    let (mut world, layers, chassis) = tank_world(false, 4000.0);
     let constant = vec![(0.0, 1.0)];
     // Unequal tiny track inertias: the synchronisation quotient overflowed on the second step.
     let light = tracked(
@@ -272,7 +270,7 @@ fn overflowing_tracked_drivetrains_are_refused() {
 
 #[test]
 fn the_strongest_light_tracks_stay_finite() {
-    let (mut world, layers, chassis) = tank_world(false);
+    let (mut world, layers, chassis) = tank_world(false, 4000.0);
     let settings = |torque: f32| {
         tracked(
             &layers,
@@ -284,22 +282,28 @@ fn the_strongest_light_tracks_stay_finite() {
     };
     let torque = largest_accepted_torque(&mut world, chassis, settings);
     eprintln!("largest accepted torque with unequal light tracks: {torque:e} N·m");
-    drive_every_way(&settings(torque));
+    drive_every_way(&settings(torque), 4000.0);
 }
 
 #[test]
 fn the_strongest_tracks_with_the_widest_radius_ratio_stay_finite() {
-    let (mut world, layers, chassis) = tank_world(false);
-    let wide = |x: f32| track(x, &[1.0, 1.0 / limits::MAX_RATIO]).max_brake_torque(0.0);
+    // A 0.1 mm wheel makes even the lightest track heavy at its contact: only the heaviest
+    // chassis carries it.
+    let (mut world, layers, chassis) = tank_world(false, limits::MAX_MASS);
+    let wide = |x: f32| {
+        track(x, &[1.0, 1.0 / limits::MAX_RATIO])
+            .inertia(limits::MIN_TRACK_INERTIA)
+            .max_brake_torque(0.0)
+    };
     let settings = |torque: f32| tracked(&layers, wide(1.7), wide(-1.7), vec![(0.0, 1.0)], torque);
     let torque = largest_accepted_torque(&mut world, chassis, settings);
     eprintln!("largest accepted torque with radius ratio MAX_RATIO: {torque:e} N·m");
-    drive_every_way(&settings(torque));
+    drive_every_way(&settings(torque), limits::MAX_MASS);
 }
 
 #[test]
 fn the_strongest_tracks_on_the_widest_curve_stay_finite() {
-    let (mut world, layers, chassis) = tank_world(false);
+    let (mut world, layers, chassis) = tank_world(false, 4000.0);
     let settings = |torque: f32| {
         tracked(
             &layers,
@@ -311,9 +315,9 @@ fn the_strongest_tracks_on_the_widest_curve_stay_finite() {
     };
     let torque = largest_accepted_torque(&mut world, chassis, settings);
     eprintln!("largest accepted torque on the widest curve: {torque:e} N·m");
-    drive_every_way(&settings(torque));
-    drive_every_way(&settings(1.0e-30));
-    drive_every_way(&settings(0.0));
+    drive_every_way(&settings(torque), 4000.0);
+    drive_every_way(&settings(1.0e-30), 4000.0);
+    drive_every_way(&settings(0.0), 4000.0);
 }
 
 /// A track of seven wheels of `radius` with tire friction `MAX_FRICTION` and no brake: the driven
@@ -343,6 +347,19 @@ fn high_friction_track(x: f32, radius: f32, inertia: f32) -> VehicleTrackSetting
 /// inertias `[left, right]`, and the result of creating it.
 fn high_friction_tank(
     radius: f32,
+    inertias: [f32; 2],
+) -> (
+    PhysicsWorld,
+    BodyId,
+    Result<VehicleId<TrackedVehicle>, VehicleError>,
+) {
+    high_friction_tank_of(4000.0, radius, inertias)
+}
+
+/// [`high_friction_tank`] with a chassis of `mass`.
+fn high_friction_tank_of(
+    mass: f32,
+    radius: f32,
     [left, right]: [f32; 2],
 ) -> (
     PhysicsWorld,
@@ -364,12 +381,7 @@ fn high_friction_tank(
     let chassis = world
         .create_body(
             &tank_chassis_shape(),
-            &behaviour_chassis(
-                &layers,
-                4000.0,
-                RVec3::new(0.0, height, 0.0),
-                Quat::IDENTITY,
-            ),
+            &behaviour_chassis(&layers, mass, RVec3::new(0.0, height, 0.0), Quat::IDENTITY),
         )
         .unwrap();
     let settings = tracked(
@@ -450,6 +462,141 @@ fn the_widest_track_inertia_ratio_stays_finite_on_high_friction_ground() {
             }
         }
     }
+}
+
+#[test]
+fn tracks_heavy_against_their_chassis_are_refused() {
+    // Accepted before the track mass ratio, these gave NaN tracks and chassis within four steps
+    // (the fourth on ground of friction 30 too) and Jolt's assertion `MotionProperties.inl:28` in
+    // the asserts build: tracks of 1e4 and 1e6 kg·m², of 1e5 on 50 m and on 1000 m wheels, of
+    // 1e4 on 0.3 m wheels pivoting, and of 100 kg·m² under a 1 kg chassis.
+    for (mass, radius, inertias) in [
+        (4000.0, 50.0, [1.0e4, 1.0e6]),
+        (4000.0, 50.0, [1.0e5, 1.0e5]),
+        (4000.0, 0.3, [1.0e4, 1.0e4]),
+        (4000.0, 1000.0, [1.0e5, 1.0e5]),
+        (1.0, 1.0, [100.0, 100.0]),
+    ] {
+        let (_, _, tank) = high_friction_tank_of(mass, radius, inertias);
+        assert_refused(tank, "too heavy for its chassis");
+    }
+}
+
+/// The heaviest equal track inertia, at most `MAX_TRACK_INERTIA`, that a tank of `mass` on wheels
+/// of `radius` accepts, by bisection over `f32`; `None` when even the lightest track is too heavy.
+fn heaviest_accepted_tracks(mass: f32, radius: f32) -> Option<f32> {
+    let accepts = |inertia: f32| {
+        high_friction_tank_of(mass, radius, [inertia, inertia])
+            .2
+            .is_ok()
+    };
+    if !accepts(limits::MIN_TRACK_INERTIA) {
+        return None;
+    }
+    if accepts(limits::MAX_TRACK_INERTIA) {
+        return Some(limits::MAX_TRACK_INERTIA);
+    }
+    let (mut low, mut high) = (
+        limits::MIN_TRACK_INERTIA.to_bits(),
+        limits::MAX_TRACK_INERTIA.to_bits(),
+    );
+    while high - low > 1 {
+        let middle = low + (high - low) / 2;
+        if accepts(f32::from_bits(middle)) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    Some(f32::from_bits(low))
+}
+
+#[test]
+fn the_heaviest_accepted_tracks_stay_finite_on_high_friction_ground() {
+    for mass in [1.0, 4000.0, limits::MAX_MASS] {
+        for radius in [0.3, 5.0, 50.0, 1000.0] {
+            let Some(heaviest) = heaviest_accepted_tracks(mass, radius) else {
+                continue;
+            };
+            eprintln!("{mass} kg chassis, {radius} m wheels: tracks up to {heaviest:e} kg·m²");
+            if heaviest < limits::MAX_TRACK_INERTIA {
+                let above = heaviest.next_up();
+                let (_, _, tank) = high_friction_tank_of(mass, radius, [above, above]);
+                assert_refused(tank, "too heavy for its chassis");
+            }
+            let mut pairs = vec![[heaviest, heaviest]];
+            // The lightest track within the inertia ratio of the heaviest, the product in `f32`.
+            let mut lighter = heaviest / limits::MAX_TRACK_INERTIA_RATIO;
+            if limits::MAX_TRACK_INERTIA_RATIO * lighter < heaviest {
+                lighter = lighter.next_up();
+            }
+            if lighter >= limits::MIN_TRACK_INERTIA {
+                pairs.push([heaviest, lighter]);
+            }
+            for inertias in pairs {
+                for input in [tracks(1.0, 1.0, 1.0), tracks(1.0, -1.0, 1.0)] {
+                    for (dt, ticks) in [(1.0 / 60.0, 300), (PhysicsWorld::MAX_DELTA_TIME, 30)] {
+                        let (mut world, chassis, tank) =
+                            high_friction_tank_of(mass, radius, inertias);
+                        let tank = tank.unwrap();
+                        world
+                            .vehicle_mut(tank)
+                            .unwrap()
+                            .set_driver_input(input)
+                            .unwrap();
+                        let mut contacts = 0;
+                        for _ in 0..ticks {
+                            let _ = world.step(dt).unwrap();
+                            assert_finite(&world, tank, chassis);
+                            let vehicle = world.vehicle(tank).unwrap();
+                            for state in vehicle.tracks() {
+                                assert!(
+                                    state.angular_velocity.is_finite(),
+                                    "{state:?}, mass {mass}, radius {radius}, {inertias:?}"
+                                );
+                            }
+                            contacts += vehicle
+                                .wheels()
+                                .iter()
+                                .filter(|wheel| wheel.contact.is_some())
+                                .count();
+                        }
+                        assert!(contacts > 0, "mass {mass}, radius {radius}: no contact");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn jolt_tank_tracks_are_far_inside_the_track_mass_ratio() {
+    // Jolt's TankTest: 10 kg·m² tracks on 0.3 m wheels under a 4000 kg hull have a track mass
+    // ratio of about 0.07, so the tracks may be about seven times heavier.
+    let (mut world, layers) = car_world(GRAVITY, 1);
+    let chassis = world
+        .create_body(
+            &tank_chassis_shape(),
+            &behaviour_chassis(&layers, 4000.0, RVec3::new(0.0, 2.0, 0.0), Quat::IDENTITY),
+        )
+        .unwrap();
+    let tank = |inertia: f32| {
+        TrackedVehicleSettings::new(
+            tank_track(1.7).inertia(inertia),
+            tank_track(-1.7).inertia(inertia),
+            VehicleCollisionTester::ray(layers.probe),
+        )
+    };
+    for inertia in [10.0, 70.0] {
+        let id = world
+            .create_tracked_vehicle(chassis, &tank(inertia))
+            .unwrap();
+        world.remove_vehicle(id).unwrap();
+    }
+    assert_refused(
+        world.create_tracked_vehicle(chassis, &tank(75.0)),
+        "too heavy for its chassis",
+    );
 }
 
 /// Steps a wheeled vehicle in the air at `forward` throttle and checks every value.
