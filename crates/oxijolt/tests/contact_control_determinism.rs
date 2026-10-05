@@ -435,13 +435,11 @@ fn characters_scene(threads: u32) -> Scene {
         add_box(&mut world, Vec3::new(2.0, 0.05, 2.0), &conveyor),
         CONVEYOR,
     ));
+    // Across the first character's path, clear of the others' starts.
     let ghost = BodySettings::new_static()
-        .position(RVec3::new(0.0, 1.0, 4.0))
+        .position(RVec3::new(-1.2, 1.0, 2.25))
         .user_data(GHOST);
-    user_data.push((
-        add_box(&mut world, Vec3::new(2.0, 1.0, 0.25), &ghost),
-        GHOST,
-    ));
+    user_data.push((add_box(&mut world, Vec3::new(0.8, 1.0, 0.2), &ghost), GHOST));
     let platform = BodySettings::new_kinematic().position(RVec3::new(0.0, 0.1, -4.0));
     let platform = add_box(&mut world, Vec3::new(1.5, 0.1, 1.5), &platform);
     user_data.push((platform, 0));
@@ -679,14 +677,64 @@ fn the_scenes_exercise_their_rules() {
     );
 
     let mut characters = Scene::new("characters", 2);
+    let conveyor = characters.bodies[1];
     let mut log = Vec::new();
+    let (mut rode, mut passed) = (false, false);
     for tick in 0..240 {
         characters.drive(tick, false);
         log.extend(characters.rules.as_ref().unwrap().take());
+        for &id in &characters.characters {
+            let character = characters.world.character(id).unwrap();
+            rode |= character.ground_body() == Some(conveyor)
+                && character.ground_velocity() == Vec3::new(0.0, 0.0, 1.5);
+            let p = character.position();
+            // The ghost wall spans x -2..-0.4 and z 2.05..2.45.
+            passed |= (-2.0..-0.4).contains(&p.x) && (2.05..2.45).contains(&p.z);
+        }
     }
+    assert!(rode, "a character rides the conveyor");
+    assert!(passed, "a character stands inside the ghost wall");
     assert!(log.iter().any(|line| line.starts_with("added")));
     assert!(log.iter().any(|line| line.starts_with("removed")));
     assert!(log
         .iter()
         .any(|line| line.contains("can_receive_impulses: false")));
+
+    let mut groups = Scene::new("groups", 2);
+    let bodies = groups.bodies.clone();
+    let (links, chassis, driver, cubes) = (&bodies[1..13], bodies[13], bodies[14], &bodies[15..]);
+    let parked = groups.world.body(driver).unwrap().position();
+    let mut touching = Vec::new();
+    for tick in 0..240 {
+        groups.drive(tick, false);
+        for event in groups.world.take_events().contacts {
+            if !matches!(event, ContactEvent::Removed(_)) {
+                let pair = event.pair();
+                touching.push((pair.body1, pair.body2));
+            }
+        }
+    }
+    let touched = |a: BodyId, b: BodyId| touching.contains(&(a.min(b), a.max(b)));
+    for pair in links.windows(2) {
+        assert!(!touched(pair[0], pair[1]), "chain neighbours {pair:?}");
+    }
+    assert!(links.iter().any(|&link| touched(bodies[0], link)));
+    assert!(!touched(chassis, driver));
+    assert_eq!(
+        groups.world.body(driver).unwrap().position(),
+        parked,
+        "the driver stays put"
+    );
+    let (mut same, mut different) = (false, false);
+    for (i, &a) in cubes.iter().enumerate() {
+        for (j, &b) in cubes.iter().enumerate().skip(i + 1) {
+            if i % 3 == j % 3 {
+                same |= touched(a, b);
+            } else {
+                different |= touched(a, b);
+            }
+        }
+    }
+    assert!(!same, "cubes of one group id never touch");
+    assert!(different, "cubes of different group ids do");
 }
