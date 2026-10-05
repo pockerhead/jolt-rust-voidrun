@@ -409,6 +409,14 @@ pub struct PhysicsWorld {
     /// ragdoll and constraint sets, the BodyID allocator, motion types, body shapes, rebases); a
     /// [`WorldState`](crate::WorldState) restores only at the epoch it was saved at.
     pub(crate) structure_epoch: u64,
+    /// Raw ids of the bodies whose contact cache the next simulating step invalidates
+    /// ([`BodyMut::invalidate_contact_cache`](crate::BodyMut::invalidate_contact_cache),
+    /// [`BodyMut::set_shape`](crate::BodyMut::set_shape)); part of a
+    /// [`WorldState`](crate::WorldState). Jolt saves no invalidation and its flag cannot be
+    /// cleared once set, so the flag is set natively only right before a step that runs the
+    /// simulation pass, which clears it at its end (`PhysicsSystem.cpp:2456-2457`), and inside
+    /// `set_shape`, which advances the structure epoch.
+    pub(crate) pending_cache_invalidations: BTreeSet<u32>,
 }
 
 impl Drop for PhysicsWorld {
@@ -589,6 +597,7 @@ impl PhysicsWorld {
             constraint_bodies: BTreeMap::new(),
             next_constraint_id: 1,
             structure_epoch: 0,
+            pending_cache_invalidations: BTreeSet::new(),
         })
     }
 
@@ -677,6 +686,10 @@ impl PhysicsWorld {
             return Err(StepError::InvalidDeltaTime);
         }
         self.listeners.begin_step();
+        let simulates = self.simulates();
+        if simulates {
+            self.apply_cache_invalidations();
+        }
         // SAFETY: the system, temp allocator and job system are live and owned by this world;
         // `&mut self` guarantees no other call uses them or touches a body during the update.
         let errors = unsafe {
@@ -688,6 +701,9 @@ impl PhysicsWorld {
                 self.job_system.as_ptr(),
             )
         };
+        if simulates {
+            self.pending_cache_invalidations.clear();
+        }
         let job_panic = self.job_system.finish_update();
         let listeners = self.listeners.finish_step();
         if let Some(payload) = first_payload(job_panic, listeners.panic) {
@@ -699,6 +715,32 @@ impl PhysicsWorld {
             contact_constraints_full: errors & JPH_PhysicsUpdateError_ContactConstraintsFull != 0,
             rejected_contact_settings: listeners.rejected_contact_settings,
         })
+    }
+}
+
+impl PhysicsWorld {
+    /// Whether the next update runs Jolt's simulation pass, which consumes contact-cache
+    /// invalidations; otherwise it returns early (`PhysicsSystem.cpp:188-207`). It mirrors Jolt's
+    /// check: some rigid or soft body awake, or a step listener registered, and the vehicles are
+    /// the only step listeners this crate registers.
+    fn simulates(&self) -> bool {
+        // SAFETY: the system is live and borrowed mutably; the getters count under Jolt's own
+        // lock.
+        let active = unsafe {
+            JPH_PhysicsSystem_GetNumActiveBodies(self.system.as_ptr(), JPH_BodyType_Rigid)
+                + JPH_PhysicsSystem_GetNumActiveBodies(self.system.as_ptr(), JPH_BodyType_Soft)
+        };
+        active > 0 || !self.vehicles.is_empty()
+    }
+
+    /// Sets Jolt's invalidation flag on every pending body, in id order.
+    fn apply_cache_invalidations(&mut self) {
+        for &raw in &self.pending_cache_invalidations {
+            // SAFETY: the world is borrowed mutably and this thread holds no body lock. Jolt
+            // ignores an id whose body is gone (`BodyLockWrite` fails,
+            // `BodyInterface.cpp:1092-1097`).
+            unsafe { JPH_BodyInterface_InvalidateContactCache(self.body_interface.as_ptr(), raw) };
+        }
     }
 }
 

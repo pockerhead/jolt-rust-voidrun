@@ -73,7 +73,9 @@ pub trait ContactListener: Send + Sync + 'static {
     ///
     /// A pair whose contact cache Jolt reuses (the bodies barely moved relative to each other)
     /// is not asked again and keeps its last answer, "no contact" included, until the bodies
-    /// move enough relative to each other. Soft body pairs go to [`soft_body_contact_validate`](Self::soft_body_contact_validate)
+    /// move enough relative to each other or
+    /// [`BodyMut::invalidate_contact_cache`](crate::BodyMut::invalidate_contact_cache) is called
+    /// for one of them. Soft body pairs go to [`soft_body_contact_validate`](Self::soft_body_contact_validate)
     /// instead, and character movement does not call it. `docs/events.md` (section
     /// "Validating contacts") has the details.
     ///

@@ -212,6 +212,25 @@ impl BodyMut<'_> {
         unsafe { JPH_BodyInterface_ActivateBody(self.interface(), self.id.raw) };
     }
 
+    /// Makes Jolt collide the pairs of this body afresh in the next step that simulates, instead
+    /// of reusing their cached contacts (Jolt `BodyInterface::InvalidateContactCache`), so a
+    /// [`ContactListener::contact_validate`] whose answer changed is asked again. Wakes the body,
+    /// like [`activate`](Self::activate) (a static body stays asleep; its pairs are processed
+    /// only while the other body is awake).
+    ///
+    /// The request waits for the next step in which some body is awake or a vehicle exists, the
+    /// steps in which Jolt runs its collision passes; repeated requests before it are one. Until
+    /// then it is part of the world's state: a [`WorldState`] saved meanwhile holds it, and
+    /// [`PhysicsWorld::restore_state`] replaces the pending requests with the saved ones.
+    ///
+    /// [`ContactListener::contact_validate`]: crate::ContactListener::contact_validate
+    /// [`WorldState`]: crate::WorldState
+    /// [`PhysicsWorld::restore_state`]: crate::PhysicsWorld::restore_state
+    pub fn invalidate_contact_cache(&mut self) {
+        self.world.pending_cache_invalidations.insert(self.id.raw);
+        self.activate();
+    }
+
     /// Puts the body to sleep now (Jolt `BodyInterface::DeactivateBody`) and zeroes its linear
     /// and angular velocity, also when it was asleep already.
     ///

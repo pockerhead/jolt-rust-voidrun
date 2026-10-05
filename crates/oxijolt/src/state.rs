@@ -16,7 +16,10 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 /// It holds Jolt's saved state of the physics system (bodies with their poses, velocities,
 /// forces and sleep data, soft body vertices, the contact cache, each constraint's own state,
 /// vehicles' driver input and drivetrain, tracked vehicles' track speeds and motorcycles' target
-/// lean) and every character's [`CharacterState`].
+/// lean), every character's [`CharacterState`] and the contact-cache invalidations
+/// ([`BodyMut::invalidate_contact_cache`](crate::BodyMut::invalidate_contact_cache)) that no
+/// step has applied yet, which a state of some bodies ([`PhysicsWorld::save_state_of`]) holds
+/// for every body too.
 ///
 /// A state restores only into the world that saved it, and only while that world's structure is
 /// unchanged: creating or removing a body, character, vehicle, ragdoll or constraint, setting a
@@ -47,6 +50,8 @@ pub struct WorldState {
     /// Jolt's stream, which may hold bytes without a defined value (see above).
     jolt: Vec<MaybeUninit<u8>>,
     characters: Vec<CharacterState>,
+    /// Raw ids of the bodies with a pending contact-cache invalidation, in ascending order.
+    cache_invalidations: Vec<u32>,
 }
 
 impl fmt::Debug for WorldState {
@@ -57,6 +62,7 @@ impl fmt::Debug for WorldState {
             .field("constraint_count", &self.constraint_count)
             .field("characters", &self.character_ids.len())
             .field("jolt_bytes", &self.jolt.len())
+            .field("cache_invalidations", &self.cache_invalidations.len())
             .finish_non_exhaustive()
     }
 }
@@ -151,6 +157,7 @@ impl PhysicsWorld {
         let restored = self.restore_jolt(&state.jolt);
         debug_assert!(restored, "a saved world state failed to restore");
         if restored {
+            self.pending_cache_invalidations = state.cache_invalidations.iter().copied().collect();
             Ok(())
         } else {
             Err(StateError::RestoreFailed)
@@ -181,6 +188,7 @@ impl PhysicsWorld {
             character_ids: self.characters.keys().copied().collect(),
             jolt,
             characters,
+            cache_invalidations: self.pending_cache_invalidations.iter().copied().collect(),
         }
     }
 

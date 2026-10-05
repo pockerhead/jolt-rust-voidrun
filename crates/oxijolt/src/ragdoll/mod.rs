@@ -729,6 +729,7 @@ impl PhysicsWorld {
             .collect();
         for body in &entry.bodies {
             self.ragdoll_bodies.remove(&body.to_raw());
+            self.pending_cache_invalidations.remove(&body.to_raw());
         }
         self.unregister_ragdoll(entry);
         for bounds in &bounds {

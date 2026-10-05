@@ -158,6 +158,7 @@ impl PhysicsWorld {
         // keeps anyone else from removing it in between, so the body is removed exactly once
         // (Jolt does not validate ids in `DestroyBody`). This thread holds no body lock.
         unsafe { JPH_BodyInterface_RemoveAndDestroyBody(self.body_interface.as_ptr(), id.raw) };
+        self.pending_cache_invalidations.remove(&id.raw);
         let (min, max) = corners(&bounds);
         self.wake_bodies_overlapping(min, max, None);
         Ok(())

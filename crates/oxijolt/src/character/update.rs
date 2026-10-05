@@ -176,6 +176,7 @@ impl PhysicsWorld {
         }
         if let Some(body) = entry.inner_body {
             self.inner_bodies.remove(&body.to_raw());
+            self.pending_cache_invalidations.remove(&body.to_raw());
         }
         // Other characters may keep a pointer to this one in their cached contacts. That is
         // sound: without a contact listener Jolt never dereferences a cached contact's
