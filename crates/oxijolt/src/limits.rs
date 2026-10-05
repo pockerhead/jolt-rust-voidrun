@@ -600,8 +600,8 @@ pub(crate) fn is_mass(mass: f32) -> bool {
     (MIN_MASS..=MAX_MASS).contains(&mass)
 }
 
-/// Whether `inverse_mass` is the inverse of a mass within `MIN_MASS..=MAX_MASS`, the range of
-/// a movable soft body vertex.
+/// Whether `inverse_mass` is the inverse of a mass within `MIN_MASS..=MAX_MASS`: the range of
+/// a movable soft body vertex, and of a rigid body that becomes dynamic.
 pub(crate) fn is_vertex_inverse_mass(inverse_mass: f32) -> bool {
     (1.0 / MAX_MASS..=MAX_VERTEX_INVERSE_MASS).contains(&inverse_mass)
 }

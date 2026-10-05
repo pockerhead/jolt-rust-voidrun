@@ -26,7 +26,7 @@ part of the state. So are rebases, `optimize_broad_phase`, forces and velocity w
   `max_hits_exceeded` is false.
 - **Removal and waking.** `remove_body` wakes the bodies whose exact bounds overlap the removed
   one, in id order, so it adds no hidden state; `remove_ragdoll` does the same for each part,
-  `BodyMut::set_shape` for the body's old and new bounds, and `activate_bodies_in_box` for a box.
+  `BodyMut::set_shape` for the box enclosing the body's old and new bounds, and `activate_bodies_in_box` for a box.
   The broad phase only proposes candidates; the exact bounds decide, in the caller's precision.
 - **Vehicles** run as Jolt step listeners. A fleet of 40 is spread over a different number of
   listener jobs with 1 and 4 workers.

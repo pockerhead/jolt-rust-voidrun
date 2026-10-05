@@ -181,9 +181,10 @@ impl BodyMut<'_> {
     /// are kept. With [`Activation::Activate`] the body wakes.
     ///
     /// Jolt does not wake the bodies around a body whose shape changes, so this wakes every
-    /// other non-static body whose current bounds overlap the body's old or new bounds, in
-    /// body-id order, as [`PhysicsWorld::remove_body`] does: nothing stays asleep floating above
-    /// a shrunk floor or embedded in a grown one.
+    /// other non-static body whose current bounds overlap the box enclosing the body's old and
+    /// new bounds, in body-id order, as [`PhysicsWorld::remove_body`] does: nothing stays asleep
+    /// floating above a shrunk floor or embedded in a grown one. When the old and new bounds lie
+    /// apart, bodies between them that touch neither shape wake too.
     ///
     /// Jolt does not save shapes, so every successful call, also one with the body's current
     /// shape, makes every earlier [`WorldState`](crate::WorldState) unrestorable

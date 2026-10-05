@@ -253,6 +253,33 @@ fn a_shrinking_static_floor_wakes_the_cube_on_it() {
 }
 
 #[test]
+fn set_shape_wakes_bodies_between_old_and_new_bounds() {
+    let mut world = world(GRAVITY, 1);
+    world.set_event_settings(EventSettings::default().body_activation(true));
+    add_floor(&mut world);
+    let post_at = |x| {
+        let post = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        Shape::new_compound(&[child(&post, Vec3::new(x, 0.5, 0.0), 0)]).unwrap()
+    };
+    let post = world
+        .create_body(&post_at(-10.0), &BodySettings::new_static())
+        .unwrap();
+    // Touches neither post, but lies inside the box enclosing both.
+    let cube = add_cube(&mut world, RVec3::new(0.0, 0.5, 0.0));
+    fall_asleep(&mut world, cube);
+    world.take_events();
+    world
+        .body_mut(post)
+        .unwrap()
+        .set_shape(&post_at(10.0), None, Activation::DontActivate)
+        .unwrap();
+    assert_eq!(
+        world.take_events().activations,
+        [ActivationEvent::Activated(cube)]
+    );
+}
+
+#[test]
 fn set_shape_wakes_the_same_bodies_whether_or_not_the_broad_phase_was_optimized() {
     let woken = |optimize: bool| {
         let mut world = world(GRAVITY, 1);

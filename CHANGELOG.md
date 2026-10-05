@@ -34,10 +34,11 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   (`BodySettings::sensor`, contacts reported as sensor contacts), per-body user data
   (`BodySettings::user_data`), locked axes (`BodySettings::allowed_dofs`, `AllowedDofs`) and the
   movement capability of static bodies (`BodySettings::allow_dynamic_or_kinematic`).
-- Structural changes: `BodyMut::set_motion_type` and `BodyMut::set_shape`. Every successful call,
-  also `set_shape` with the body's current shape, makes earlier `WorldState`s unrestorable; both
-  refuse bodies that a character, vehicle, ragdoll or constraint holds. A shape change wakes the
-  bodies around the body's old and new bounds.
+- Structural changes: `BodyMut::set_motion_type` and `BodyMut::set_shape`. Every successful
+  `set_shape` call, also one with the body's current shape, and every change of motion type makes
+  earlier `WorldState`s unrestorable; `set_motion_type` with the current motion type changes
+  nothing. Both refuse bodies that a character, vehicle, ragdoll or constraint holds. A shape
+  change wakes the bodies inside the box enclosing the body's old and new bounds.
 - New `BodyError` variants: `RestrictedDofs`, `NotKinematic`, `CannotMove`. Constraints, vehicles,
   ragdoll parts and rotating rebases refuse bodies with fewer than six degrees of freedom; ragdoll
   parts refuse user data, which Jolt overwrites.

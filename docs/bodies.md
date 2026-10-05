@@ -122,7 +122,8 @@ because their checks assume an unmasked body.
 ## Shape and motion type changes
 
 `BodyMut::set_shape` gives a body a new shape and the mass properties a body created with it would
-have; it wakes the bodies around the old and new bounds. `BodyMut::set_motion_type` switches a body
+have; it wakes the bodies inside the box that encloses the old and new bounds, which includes
+bodies between the two shapes when they lie apart. `BodyMut::set_motion_type` switches a body
 between static, kinematic and dynamic. A body created static changes only when created with
 `BodySettings::allow_dynamic_or_kinematic(true)`. Both refuse bodies that a character, vehicle,
 ragdoll or constraint holds.
