@@ -152,6 +152,7 @@ check it at its boundary.
 | `BodySettings::sensor` | discrete motion quality; no static-only shape | `sensors.rs`: `sensor_rules_refuse_static_only_shapes_and_linear_cast` |
 | `BodySettings::allow_dynamic_or_kinematic` | zero initial velocities; the shape and inertia rules of a kinematic body | `body_structure.rs`: `a_movable_static_body_needs_zero_initial_velocities`, `allow_dynamic_or_kinematic_pays_the_moving_rules_at_creation` |
 | `BodyMut::set_motion_type` to dynamic | mass within `MIN_MASS..=MAX_MASS`; no static-only shape | `body_structure.rs`: `light_kinematic_body_cannot_become_dynamic`, `kinematic_mesh_body_cannot_become_dynamic` |
+| `BodyMut::set_shape` | `mass` within `MIN_MASS..=MAX_MASS`; the shape and inertia rules of `create_body` for the body's motion type, movement capability and sensor flag; no pending forces on a dynamic body | `shape_changes.rs`: `set_shape_applies_the_creation_rules_per_motion_type`, `set_shape_refuses_pending_forces` |
 | `BodyMut::reset_forces` | none | `reset_forces_ignores_static_and_kinematic_bodies` |
 | `CharacterSettings::mass` | `0..=MAX_MASS` | `character_settings_and_setters_are_bounded` |
 | `CharacterSettings::shape_offset` | `MAX_SHAPE_EXTENT` per axis | `character_settings_and_setters_are_bounded` |

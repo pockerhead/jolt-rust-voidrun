@@ -19,8 +19,9 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 ///
 /// A state restores only into the world that saved it, and only while that world's structure is
 /// unchanged: creating or removing a body, character, vehicle, ragdoll or constraint, setting a
-/// body's or a ragdoll's motion type, or a [`rebase`](PhysicsWorld::rebase) that moves anything
-/// makes every earlier state unrestorable ([`StateError::WorldChanged`]). Calls that fail their
+/// body's or a ragdoll's motion type, setting a body's shape, or a
+/// [`rebase`](PhysicsWorld::rebase) that moves anything makes every earlier state unrestorable
+/// ([`StateError::WorldChanged`]). Calls that fail their
 /// checks keep states restorable.
 ///
 /// Configuration Jolt does not save, such as constraint limits, motor settings, a vehicle's

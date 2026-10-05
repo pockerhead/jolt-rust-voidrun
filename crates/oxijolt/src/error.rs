@@ -610,7 +610,8 @@ pub enum StateError {
     WrongWorld,
     /// The world's structure has changed since the state was saved: a body, character, vehicle,
     /// ragdoll or constraint was created or removed, a body's or ragdoll's motion type was
-    /// changed, or the world was rebased (a rebase that changes nothing does not count). Jolt saves neither
+    /// changed, a body's shape was set, or the world was rebased (a rebase that changes nothing
+    /// does not count). Jolt saves neither
     /// which objects exist nor its body id allocator, so even a create followed by a remove
     /// leaves earlier states unrestorable.
     WorldChanged,

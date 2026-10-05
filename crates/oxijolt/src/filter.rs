@@ -252,7 +252,8 @@ impl<'q> FilterState<'q> {
         // lock before the narrow phase calls the shape filter (`NarrowPhaseQuery.cpp`), so taking
         // it again here does not deadlock. joltc returns the pointer after releasing its
         // temporary reference; the body's own reference keeps the shape alive, because nothing
-        // can remove a body or replace its shape while `&PhysicsWorld` is borrowed.
+        // can remove a body or replace its shape while `&PhysicsWorld` is borrowed (`remove_body`
+        // and `BodyMut::set_shape` need `&mut PhysicsWorld`).
         let root = unsafe { JPH_BodyInterface_GetShape(self.world.body_interface.as_ptr(), body) };
         let root = NonNull::new(root.cast_mut())?;
         self.root_cache.set(Some((body, root)));

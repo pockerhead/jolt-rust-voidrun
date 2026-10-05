@@ -1,17 +1,18 @@
-//! Structural changes of one body: its motion type, and the rules a body's shape and mass meet
-//! at creation and after a change.
+//! Structural changes of one body: its motion type and its shape, and the rules a body's shape
+//! and mass meet at creation and after a change.
 
 use oxijolt_sys::*;
 
+use super::access::corners;
 use super::load::require;
 use super::{
-    has_finite_inverse, mass_properties, with_read_locked_body, Activation, BodyMut, MotionType,
-    INERTIA_RULE, KINEMATIC_MESH_MASS_RULE, MESH_DYNAMIC_RULE, SENSOR_SHAPE_RULE,
-    STATIC_SHAPE_RULE,
+    has_finite_inverse, mass_properties, with_locked_body, with_read_locked_body, Activation,
+    BodyMut, MotionType, INERTIA_RULE, KINEMATIC_MESH_MASS_RULE, MESH_DYNAMIC_RULE,
+    SENSOR_SHAPE_RULE, STATIC_SHAPE_RULE,
 };
 use crate::limits::{is_mass, is_vertex_inverse_mass, MASS_RULE};
 use crate::shape::static_only_leaves_are_meshes_of;
-use crate::{BodyError, Shape};
+use crate::{BodyError, RVec3, Shape, Vec3};
 
 /// How a body uses a shape: what decides which shapes and masses it may take.
 #[derive(Clone, Copy, Debug)]
@@ -61,6 +62,33 @@ pub(crate) fn check_shape_for(
     }
     Ok(Some(properties))
 }
+
+/// What [`BodyMut::set_shape`] reads of the body before it changes anything.
+struct ShapeChange {
+    motion_type: MotionType,
+    can_move: bool,
+    sensor: bool,
+    /// Whether the body uses the new shape already, in which case Jolt's `SetShape` changes
+    /// nothing.
+    same_shape: bool,
+    /// Whether a dynamic body holds forces or torques added since the last step.
+    pending_load: bool,
+    bounds: JPH_AABox,
+}
+
+/// An empty box for a getter to fill.
+const NO_BOUNDS: JPH_AABox = JPH_AABox {
+    min: JPH_Vec3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    },
+    max: JPH_Vec3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    },
+};
 
 /// Why a body cannot become dynamic or kinematic: its shape or mass.
 enum MotionBlock {
@@ -140,6 +168,159 @@ impl BodyMut<'_> {
             )
         };
         Ok(())
+    }
+
+    /// Gives the body a new shape (Jolt `BodyInterface::SetShape`). The body takes its own
+    /// reference to `shape`, so the caller may drop it, and Jolt releases the old one.
+    ///
+    /// The body origin stays where it is and the centre of mass moves with the shape. A body
+    /// that can move gets the mass properties a body created with `shape` and `mass` would have
+    /// ([`BodySettings::mass`]): `Some(m)` scales the shape's inertia to the mass `m`, `None`
+    /// takes the shape's own mass and inertia. A static body that cannot move ignores `mass`,
+    /// which is still checked. Velocities, forces, the motion type and the degrees of freedom
+    /// are kept. With [`Activation::Activate`] the body wakes.
+    ///
+    /// Jolt does not wake the bodies around a body whose shape changes, so this wakes every
+    /// other non-static body whose current bounds overlap the body's old or new bounds, in
+    /// body-id order, as [`PhysicsWorld::remove_body`] does: nothing stays asleep floating above
+    /// a shrunk floor or embedded in a grown one.
+    ///
+    /// Jolt does not save shapes, so every successful call, also one with the body's current
+    /// shape, makes every earlier [`WorldState`](crate::WorldState) unrestorable
+    /// ([`StateError::WorldChanged`]). A character touching the body keeps the sub-shape ids it
+    /// read from the old shape until its next update, so
+    /// [`CharacterRef::ground_compound_child`] and [`CharacterRef::contact_compound_child`] read
+    /// them against the new shape meanwhile.
+    ///
+    /// Fails, changing nothing, with:
+    /// - [`BodyError::OwnedByCharacter`], [`BodyError::UsedByVehicle`],
+    ///   [`BodyError::OwnedByRagdoll`] or [`BodyError::UsedByConstraint`] for a body that a
+    ///   character, vehicle, ragdoll or constraint holds;
+    /// - [`BodyError::SoftBody`] for a soft body;
+    /// - [`BodyError::InvalidValue`] when the body's motion type, movement capability or sensor
+    ///   flag refuses the shape or mass, as [`PhysicsWorld::create_body`] would refuse them, or
+    ///   when a dynamic body holds forces or torques added since the last step (call
+    ///   [`reset_forces`](Self::reset_forces) first).
+    ///
+    /// [`BodySettings::mass`]: crate::BodySettings::mass
+    /// [`PhysicsWorld::remove_body`]: crate::PhysicsWorld::remove_body
+    /// [`PhysicsWorld::create_body`]: crate::PhysicsWorld::create_body
+    /// [`StateError::WorldChanged`]: crate::StateError::WorldChanged
+    /// [`CharacterRef::ground_compound_child`]: crate::CharacterRef::ground_compound_child
+    /// [`CharacterRef::contact_compound_child`]: crate::CharacterRef::contact_compound_child
+    pub fn set_shape(
+        &mut self,
+        shape: &Shape,
+        mass: Option<f32>,
+        activation: Activation,
+    ) -> Result<(), BodyError> {
+        let id = self.inner.id;
+        self.world.check_not_owned(id)?;
+        self.reject_soft_body()?;
+        if let Some(mass) = mass {
+            require(is_mass(mass), MASS_RULE)?;
+        }
+        let before = self.shape_change(shape)?;
+        require(
+            !before.pending_load,
+            "a body with pending forces cannot change shape; reset_forces first",
+        )?;
+        let properties = check_shape_for(
+            shape,
+            ShapeUse {
+                motion_type: before.motion_type,
+                can_move: before.can_move,
+                sensor: before.sensor,
+                mass,
+            },
+        )?;
+
+        // Jolt does not save shapes.
+        self.world.note_structure_change();
+        // SAFETY: the world is borrowed mutably through this view and holds the body, a rigid
+        // body; `shape` is live for the call and the body takes its own reference to it. Jolt
+        // keeps the old mass properties here; they are replaced below. This thread holds no
+        // body lock.
+        unsafe {
+            JPH_BodyInterface_SetShape(
+                self.interface(),
+                id.raw,
+                shape.as_ptr(),
+                false,
+                Activation::DontActivate.to_jph(),
+            )
+        };
+        let after = with_locked_body(self.inner.body_lock_interface, id, |body| {
+            let body = body.as_ptr();
+            let mut bounds = NO_BOUNDS;
+            // SAFETY: `body` is locked for writing for the duration of the closure. A body
+            // with mass properties to write has motion properties (`check_shape_for` returns
+            // them only then), which the unchecked getter reads without the assertion of the
+            // checked one on a static body that may move. The properties are those of a body
+            // created with this shape and mass, checked to have finite inverses, and the
+            // degrees of freedom are the body's own. `bounds` is a live local.
+            unsafe {
+                if let Some(properties) = &properties {
+                    let motion = JPH_Body_GetMotionPropertiesUnchecked(body);
+                    let dofs = JPH_MotionProperties_GetAllowedDOFs(motion);
+                    JPH_MotionProperties_SetMassProperties(motion, dofs, properties);
+                }
+                JPH_Body_GetWorldSpaceBounds(body, &mut bounds);
+            }
+            bounds
+        })
+        .unwrap_or_else(|| unreachable!("`&mut` keeps the body in the world"));
+        if before.same_shape {
+            // Jolt's `SetShape` left the contact cache alone for the same shape, but the mass
+            // may have changed.
+            // SAFETY: as for `SetShape`.
+            unsafe { JPH_BodyInterface_InvalidateContactCache(self.interface(), id.raw) };
+        }
+        if activation == Activation::Activate {
+            self.activate();
+        }
+        let (old_min, old_max) = corners(&before.bounds);
+        let (new_min, new_max) = corners(&after);
+        let lower = |a: RVec3, b: RVec3| RVec3::new(a.x.min(b.x), a.y.min(b.y), a.z.min(b.z));
+        let upper = |a: RVec3, b: RVec3| RVec3::new(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z));
+        self.world.wake_bodies_overlapping(
+            lower(old_min, new_min),
+            upper(old_max, new_max),
+            Some(id),
+        );
+        Ok(())
+    }
+
+    /// Reads what [`set_shape`](Self::set_shape) checks, under a read lock that is released
+    /// before it returns.
+    fn shape_change(&self, shape: &Shape) -> Result<ShapeChange, BodyError> {
+        with_read_locked_body(self.inner.body_lock_interface, self.inner.id, |body| {
+            let body = body.as_ptr();
+            let mut bounds = NO_BOUNDS;
+            let (mut force, mut torque) = (Vec3::ZERO.to_jph(), Vec3::ZERO.to_jph());
+            // SAFETY: `body` is locked for reading for the duration of the closure; the getters
+            // only read it and write the live locals. The accumulated force and torque are read
+            // only from a dynamic body, which has motion properties.
+            unsafe {
+                let dynamic = JPH_Body_IsDynamic(body);
+                if dynamic {
+                    JPH_Body_GetAccumulatedForce(body, &mut force);
+                    JPH_Body_GetAccumulatedTorque(body, &mut torque);
+                }
+                JPH_Body_GetWorldSpaceBounds(body, &mut bounds);
+                ShapeChange {
+                    motion_type: MotionType::from_jph(JPH_Body_GetMotionType(body)),
+                    can_move: JPH_Body_CanBeKinematicOrDynamic(body),
+                    sensor: JPH_Body_IsSensor(body),
+                    same_shape: std::ptr::eq(JPH_Body_GetShape(body), shape.as_ptr()),
+                    pending_load: dynamic
+                        && (Vec3::from_jph(force) != Vec3::ZERO
+                            || Vec3::from_jph(torque) != Vec3::ZERO),
+                    bounds,
+                }
+            }
+        })
+        .ok_or(BodyError::NotFound(self.inner.id))
     }
 
     /// What keeps the body, which has motion properties, from becoming `motion_type`
