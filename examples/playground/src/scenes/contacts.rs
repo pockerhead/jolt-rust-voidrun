@@ -418,6 +418,10 @@ impl Scene for Contacts {
         &self.world
     }
 
+    fn world_mut(&mut self) -> &mut PhysicsWorld {
+        &mut self.world
+    }
+
     fn camera(&self) -> CameraHint {
         CameraHint::new([0.0, 1.0, 0.0], 0.0, 0.55, 15.0)
     }

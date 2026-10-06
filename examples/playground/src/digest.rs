@@ -82,7 +82,7 @@ impl Digest {
     /// it: the raw id, the motion type, whether the body is active, its position, rotation and
     /// linear and angular velocity, and for a soft body each vertex's position, velocity and
     /// inverse mass.
-    pub fn world(&mut self, world: &PhysicsWorld) -> Result<()> {
+    pub fn world(&mut self, world: &mut PhysicsWorld) -> Result<()> {
         let ids = world.body_ids();
         self.u64(ids.len() as u64);
         let mut vertices = Vec::new();
@@ -184,7 +184,7 @@ mod tests {
         (world, cube, soft)
     }
 
-    fn digest_of(world: &PhysicsWorld) -> u64 {
+    fn digest_of(world: &mut PhysicsWorld) -> u64 {
         let mut digest = Digest::default();
         digest.world(world).unwrap();
         digest.finish()
@@ -197,28 +197,28 @@ mod tests {
 
     #[test]
     fn the_world_digest_repeats_for_the_same_state() {
-        let (first, _, _) = fixture();
-        let (second, _, _) = fixture();
-        assert_eq!(digest_of(&first), digest_of(&second));
+        let (mut first, _, _) = fixture();
+        let (mut second, _, _) = fixture();
+        assert_eq!(digest_of(&mut first), digest_of(&mut second));
     }
 
     #[test]
     fn a_velocity_change_alone_changes_the_world_digest() {
         let (mut world, cube, _) = fixture();
-        let (before, at) = (digest_of(&world), pose(&world, cube));
+        let (before, at) = (digest_of(&mut world), pose(&world, cube));
         world
             .body_mut(cube)
             .unwrap()
             .set_angular_velocity(Vec3::new(0.0, 1.0e-3, 0.0))
             .unwrap();
         assert_eq!(pose(&world, cube), at);
-        assert_ne!(digest_of(&world), before);
+        assert_ne!(digest_of(&mut world), before);
     }
 
     #[test]
     fn an_activation_change_alone_changes_the_world_digest() {
         let (mut world, cube, _) = fixture();
-        let (before, at) = (digest_of(&world), pose(&world, cube));
+        let (before, at) = (digest_of(&mut world), pose(&world, cube));
         assert!(world.body(cube).unwrap().is_active());
         world.body_mut(cube).unwrap().deactivate().unwrap();
         let reading = world.body(cube).unwrap();
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!((reading.position(), reading.rotation()), at);
         assert_eq!(reading.linear_velocity(), Vec3::ZERO);
         assert_eq!(reading.angular_velocity(), Vec3::ZERO);
-        assert_ne!(digest_of(&world), before);
+        assert_ne!(digest_of(&mut world), before);
     }
 
     #[test]
@@ -236,13 +236,13 @@ mod tests {
             let vertices = world.soft_body(soft).unwrap().vertices();
             vertices.iter().map(|vertex| vertex.position).collect()
         };
-        let (before, at) = (digest_of(&world), positions(&world));
+        let (before, at) = (digest_of(&mut world), positions(&world));
         world
             .soft_body_mut(soft)
             .unwrap()
             .set_vertex_velocity(2, Vec3::new(1.0e-3, 0.0, 0.0))
             .unwrap();
         assert_eq!(positions(&world), at);
-        assert_ne!(digest_of(&world), before);
+        assert_ne!(digest_of(&mut world), before);
     }
 }

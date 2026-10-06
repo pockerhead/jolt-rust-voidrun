@@ -394,6 +394,10 @@ impl Scene for Vehicles {
         &self.world
     }
 
+    fn world_mut(&mut self) -> &mut PhysicsWorld {
+        &mut self.world
+    }
+
     fn camera(&self) -> CameraHint {
         let target = match self.driven_body() {
             Some(body) => self.tracked.pose(body).map(|(p, _)| position_f32(p)),

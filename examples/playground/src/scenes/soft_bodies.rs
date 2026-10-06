@@ -415,6 +415,10 @@ impl Scene for SoftBodies {
         &self.world
     }
 
+    fn world_mut(&mut self) -> &mut PhysicsWorld {
+        &mut self.world
+    }
+
     fn camera(&self) -> CameraHint {
         CameraHint::new([0.0, 1.3, 0.0], 0.25, 0.4, 10.0)
     }

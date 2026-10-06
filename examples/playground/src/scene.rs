@@ -84,6 +84,8 @@ pub trait Scene {
     fn visuals(&self) -> &Visuals;
     /// The scene's world.
     fn world(&self) -> &PhysicsWorld;
+    /// The scene's world, for reads that need it exclusively, such as its body list.
+    fn world_mut(&mut self) -> &mut PhysicsWorld;
     /// Where the interactive camera starts and what it follows.
     fn camera(&self) -> CameraHint;
     /// The scripted input of tick `tick`, for the headless and record modes.

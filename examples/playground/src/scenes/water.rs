@@ -251,6 +251,10 @@ impl Scene for Water {
         &self.world
     }
 
+    fn world_mut(&mut self) -> &mut PhysicsWorld {
+        &mut self.world
+    }
+
     fn camera(&self) -> CameraHint {
         CameraHint::new([0.0, -0.3, 0.0], 0.3, 0.55, 13.0)
     }

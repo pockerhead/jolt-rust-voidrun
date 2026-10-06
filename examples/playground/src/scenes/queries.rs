@@ -400,6 +400,10 @@ impl Scene for Queries {
         &self.world
     }
 
+    fn world_mut(&mut self) -> &mut PhysicsWorld {
+        &mut self.world
+    }
+
     fn camera(&self) -> CameraHint {
         let [x, y, z] = self.origin;
         CameraHint::new([x, y + 1.0, z], 0.3, 0.5, 13.0)

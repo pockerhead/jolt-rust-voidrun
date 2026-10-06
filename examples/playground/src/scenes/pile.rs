@@ -346,6 +346,10 @@ impl Scene for Pile {
         &self.world
     }
 
+    fn world_mut(&mut self) -> &mut PhysicsWorld {
+        &mut self.world
+    }
+
     fn camera(&self) -> CameraHint {
         CameraHint::new([0.0, 1.0, 0.0], 0.6, 0.55, 14.0)
     }

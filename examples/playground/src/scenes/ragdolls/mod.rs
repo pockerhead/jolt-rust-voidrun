@@ -358,6 +358,10 @@ impl Scene for Ragdolls {
         &self.world
     }
 
+    fn world_mut(&mut self) -> &mut PhysicsWorld {
+        &mut self.world
+    }
+
     fn camera(&self) -> CameraHint {
         CameraHint::new([0.5, 0.8, 0.0], 0.45, 0.4, 9.0)
     }

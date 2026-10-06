@@ -103,8 +103,8 @@ impl Session {
 
     /// Folds the run's state into `digest`: every body of the world as the binding reports it,
     /// then the scene's own state.
-    pub fn write_state(&self, digest: &mut Digest) -> Result<()> {
-        digest.world(self.scene.world())?;
+    pub fn write_state(&mut self, digest: &mut Digest) -> Result<()> {
+        digest.world(self.scene.world_mut())?;
         self.scene.write_state(digest)
     }
 
