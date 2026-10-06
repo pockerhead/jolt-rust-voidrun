@@ -3,13 +3,15 @@
 //! and each brick falls on as a body. What is left splits into pieces of bricks that touch face
 //! to face; the largest stays in the wall's body, every other piece becomes a body of its own,
 //! and physics decides whether a piece stands, topples or falls. A piece that lands hard on the
-//! ground or on another piece breaks where they touch, as if a cannonball had hit it there.
+//! ground or on another piece breaks at the point that hit hardest, as if a cannonball had hit
+//! it there.
 
 use std::collections::VecDeque;
 
 use oxijolt::{
-    Activation, BodyId, BodySettings, CompoundChild, ContactEvent, EventSettings, MotionQuality,
-    MutableCompound, PhysicsWorld, Quat, QueryFilter, RVec3, RayCast, SubShapeId, Vec3,
+    Activation, BodyId, BodySettings, CompoundChild, ContactEvent, ContactManifold, EventSettings,
+    MotionQuality, MutableCompound, PhysicsWorld, Quat, QueryFilter, RVec3, RayCast, SubShapeId,
+    Vec3,
 };
 
 use crate::camera::CameraHint;
@@ -32,8 +34,8 @@ const WALL_AT: [f32; 3] = [0.0, 0.0, 0.0];
 /// Impulse in N·s from which a cannonball's hit knocks bricks out.
 const BREAKING_IMPULSE: f32 = 150.0;
 /// The impact speed in m/s from which a piece that lands on the ground or meets another piece
-/// breaks where they touch. A piece resting on the ground meets it at `g · dt` (0.16 m/s) when
-/// its contacts are new, as after each republication.
+/// breaks where they touch: the speed along the contact normal at which a contact point
+/// approached before the step and that the step took away (see [`Destruction::impact`]).
 const IMPACT_BREAKING_SPEED: f32 = 0.75;
 /// The most impacts that break pieces in one step, and in all since the scene was built.
 const MAX_IMPACT_BREAKS_PER_STEP: usize = 1;
@@ -57,6 +59,9 @@ const CONTROLS: &[(&str, &str)] = &[
 
 /// A brick: its id, which is its place in the laid wall, and its centre in its piece's body.
 type Brick = (u32, [f32; 3]);
+
+/// How each piece moved at one moment: its body, its motion and its centre of mass.
+type PieceMotions = Vec<(BodyId, Motion, glam::Vec3)>;
 
 /// A piece of the wall: a dynamic body whose shape its own mutable compound publishes.
 struct Piece {
@@ -125,6 +130,7 @@ impl Destruction {
     pub fn new(config: &SceneConfig, generation: u64) -> Result<Self> {
         let events = EventSettings::default()
             .contacts(true)
+            .persisted_contacts(true)
             .collision_estimates(true);
         let (mut world, layers) = new_world(config, 3, events)?;
         let mut visuals = Visuals::new(generation);
@@ -256,36 +262,43 @@ impl Destruction {
         Some(child.user_data)
     }
 
-    /// The bricks the step's new contacts knock out, decoded against each piece's current
-    /// shape, with the velocity they fly off with: those around a brick that a cannonball hit
-    /// hard, and those around where the pieces of a hard impact touch (see
-    /// [`impact_speed`](Self::impact_speed)), for at most [`MAX_IMPACT_BREAKS_PER_STEP`]
-    /// impacts in the order of the events while fewer than [`MAX_IMPACT_BREAKS`] broke pieces.
-    fn hit_bricks(&mut self, contacts: &[ContactEvent]) -> Result<Vec<(u32, Vec3)>> {
+    /// The bricks the step's contacts knock out, decoded against each piece's current shape,
+    /// with the velocity they fly off with: those around a brick that a cannonball hit hard in
+    /// a new contact, and those around the hardest-hit point of a hard impact between pieces or
+    /// a piece and the ground (see [`impact`](Self::impact)), for at most
+    /// [`MAX_IMPACT_BREAKS_PER_STEP`] impacts in the order of the events while fewer than
+    /// [`MAX_IMPACT_BREAKS`] broke pieces. `before` is how the pieces moved before the step.
+    fn hit_bricks(
+        &mut self,
+        contacts: &[ContactEvent],
+        before: &PieceMotions,
+    ) -> Result<Vec<(u32, Vec3)>> {
+        let after = self.piece_motions()?;
         let mut hits = Vec::new();
         let mut impacts = 0;
         for event in contacts {
-            let ContactEvent::Added {
-                manifold,
-                estimate: Some(estimate),
-                ..
-            } = event
-            else {
-                continue;
+            let (manifold, estimate) = match event {
+                ContactEvent::Added {
+                    manifold, estimate, ..
+                } => (manifold, estimate.as_ref()),
+                ContactEvent::Persisted { manifold, .. } => (manifold, None),
+                ContactEvent::Removed(_) => continue,
             };
-            let impulse: f32 = estimate.contact_impulses.iter().sum();
             let pair = manifold.pair;
-            for (piece, sub_shape, ball) in [
-                (pair.body1, pair.sub_shape1, pair.body2),
-                (pair.body2, pair.sub_shape2, pair.body1),
-            ] {
-                if impulse >= BREAKING_IMPULSE && self.balls.contains(&ball) {
-                    if let Some(brick) = self.brick_of(piece, sub_shape) {
-                        hits.extend(self.blasted_away_from(brick, ball));
+            if let Some(estimate) = estimate {
+                let impulse: f32 = estimate.contact_impulses.iter().sum();
+                for (piece, sub_shape, ball) in [
+                    (pair.body1, pair.sub_shape1, pair.body2),
+                    (pair.body2, pair.sub_shape2, pair.body1),
+                ] {
+                    if impulse >= BREAKING_IMPULSE && self.balls.contains(&ball) {
+                        if let Some(brick) = self.brick_of(piece, sub_shape) {
+                            hits.extend(self.blasted_away_from(brick, ball));
+                        }
                     }
                 }
             }
-            let Some(speed) = self.impact_speed(pair.body1, pair.body2, impulse) else {
+            let Some((point, speed)) = self.impact(manifold, before, &after) else {
                 continue;
             };
             if speed < IMPACT_BREAKING_SPEED
@@ -296,15 +309,9 @@ impl Destruction {
             }
             impacts += 1;
             self.impact_breaks += 1;
-            for (piece, on1) in [(pair.body1, true), (pair.body2, false)] {
-                let points = manifold.points.iter().map(|point| {
-                    if on1 {
-                        point.point_on1
-                    } else {
-                        point.point_on2
-                    }
-                });
-                if let Some(brick) = self.brick_nearest(piece, points)? {
+            let point = &manifold.points[point];
+            for (piece, at) in [(pair.body1, point.point_on1), (pair.body2, point.point_on2)] {
+                if let Some(brick) = brick_nearest(&self.pieces, before, piece, at) {
                     hits.extend(self.shaken_loose(piece, brick)?);
                 }
             }
@@ -312,20 +319,65 @@ impl Destruction {
         Ok(hits)
     }
 
-    /// The speed in m/s at which `body1` and `body2` met in a new contact with `impulse`, when
-    /// one is a piece and the other a piece or the ground: the impulse over their reduced mass,
-    /// which leaves out how the bodies turn. Loose bricks and cannonballs make no impacts.
-    fn impact_speed(&self, body1: BodyId, body2: BodyId, impulse: f32) -> Option<f32> {
-        let inverse_mass = |body: BodyId| {
-            if body == self.ground {
-                Some(0.0)
-            } else {
-                self.piece_of_body(body)
-                    .map(|piece| 1.0 / piece_mass(piece))
+    /// Each piece's motion and centre of mass now, in piece order.
+    fn piece_motions(&self) -> Result<PieceMotions> {
+        self.pieces
+            .iter()
+            .map(|piece| {
+                let motion = Motion::of(&self.world, piece.body)?;
+                Ok((piece.body, motion, motion.at(centroid(&piece.bricks))))
+            })
+            .collect()
+    }
+
+    /// The velocity of `body`'s point at `point` in `motions`: zero for the ground, `None`
+    /// for a body that is not a piece there, such as a loose brick or a cannonball.
+    fn velocity_at(
+        &self,
+        motions: &PieceMotions,
+        body: BodyId,
+        point: glam::Vec3,
+    ) -> Option<glam::Vec3> {
+        if body == self.ground {
+            return Some(glam::Vec3::ZERO);
+        }
+        motions
+            .iter()
+            .find(|(piece, ..)| *piece == body)
+            .map(|(_, motion, centre)| motion.velocity_at(point, *centre))
+    }
+
+    /// The hardest-hit point of `manifold`, a contact between two pieces or a piece and the
+    /// ground that moved as `before` and `after` say, by its index in the manifold, with its
+    /// impact speed in m/s: the speed along the normal at which its two sides approached
+    /// before the step, as far as the step took it away. A resting contact has none, a
+    /// landing about the speed it landed with, and a point the step pulls apart none either.
+    /// The first of equally hard points wins. `None` when a side is neither a piece nor the
+    /// ground, or a piece is new since `before`.
+    fn impact(
+        &self,
+        manifold: &ContactManifold,
+        before: &PieceMotions,
+        after: &PieceMotions,
+    ) -> Option<(usize, f32)> {
+        let pair = manifold.pair;
+        let normal = glam(manifold.normal);
+        let mut hardest: Option<(usize, f32)> = None;
+        for (index, point) in manifold.points.iter().enumerate() {
+            let at = position(point.point_on1);
+            // How fast body 2 moves out of body 1 at the point, along the normal.
+            let separating = |motions: &PieceMotions| -> Option<f32> {
+                let relative = self.velocity_at(motions, pair.body2, at)?
+                    - self.velocity_at(motions, pair.body1, at)?;
+                Some(relative.dot(normal))
+            };
+            let (was, is) = (separating(before)?, separating(after)?);
+            let speed = (-was).min(is - was);
+            if hardest.is_none_or(|(_, hardest)| speed > hardest) {
+                hardest = Some((index, speed));
             }
-        };
-        let inverse = inverse_mass(body1)? + inverse_mass(body2)?;
-        (inverse > 0.0).then_some(impulse * inverse)
+        }
+        hardest
     }
 
     /// `brick` and its neighbours, flying away from `ball`, which hit it; the ball may already
@@ -341,34 +393,6 @@ impl Destruction {
                 (brick, vec3(away * KNOCK_SPEED))
             })
             .collect()
-    }
-
-    /// The brick of `piece` whose centre is nearest to the middle of `points`, points of the
-    /// piece in world space. A contact of a piece with one body that touches it with several
-    /// bricks is one manifold, named after only one of them.
-    fn brick_nearest(
-        &self,
-        piece: BodyId,
-        points: impl Iterator<Item = RVec3>,
-    ) -> Result<Option<u32>> {
-        let Some(bricks) = self.piece_of_body(piece).map(|piece| &piece.bricks) else {
-            return Ok(None);
-        };
-        let motion = Motion::of(&self.world, piece)?;
-        let (sum, count) = points.fold((glam::Vec3::ZERO, 0), |(sum, count), point| {
-            (sum + position(point), count + 1)
-        });
-        if count == 0 {
-            return Ok(None);
-        }
-        let middle = motion.rotation.inverse() * (sum / count as f32 - motion.position);
-        Ok(bricks
-            .iter()
-            .min_by(|(_, a), (_, b)| {
-                let a = glam::Vec3::from(*a).distance_squared(middle);
-                a.total_cmp(&glam::Vec3::from(*b).distance_squared(middle))
-            })
-            .map(|&(id, _)| id))
     }
 
     /// `brick` of `piece` and its neighbours, moving on as those points of the piece move.
@@ -651,6 +675,26 @@ fn touching_groups(bricks: &[Brick]) -> Vec<Vec<u32>> {
     groups
 }
 
+/// The brick of `piece` whose centre is nearest to `point`, a point of the piece in world
+/// space, placed as the piece was in `motions`; `None` when `piece` is not a piece there.
+fn brick_nearest(
+    pieces: &[Piece],
+    motions: &PieceMotions,
+    piece: BodyId,
+    point: RVec3,
+) -> Option<u32> {
+    let bricks = &pieces.iter().find(|p| p.body == piece)?.bricks;
+    let (_, motion, _) = motions.iter().find(|(body, ..)| *body == piece)?;
+    let local = motion.rotation.inverse() * (position(point) - motion.position);
+    bricks
+        .iter()
+        .min_by(|(_, a), (_, b)| {
+            let a = glam::Vec3::from(*a).distance_squared(local);
+            a.total_cmp(&glam::Vec3::from(*b).distance_squared(local))
+        })
+        .map(|&(id, _)| id)
+}
+
 /// The mass of `piece`, kg.
 fn piece_mass(piece: &Piece) -> f32 {
     BRICK_MASS * piece.bricks.len() as f32
@@ -681,11 +725,12 @@ impl Scene for Destruction {
                 self.knock_out(vec![(brick, vec3(away))])?;
             }
         }
+        let before = self.piece_motions()?;
         step(&mut self.world)?;
         let events = self.world.take_events();
         self.tracked.sync(&self.world, &events);
         // Decode the hits against the shapes the step collided with, before any edit.
-        let hits = self.hit_bricks(&events.contacts)?;
+        let hits = self.hit_bricks(&events.contacts, &before)?;
         self.knock_out(hits)?;
         self.clear_fallen()
     }

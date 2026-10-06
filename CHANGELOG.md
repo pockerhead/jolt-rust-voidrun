@@ -5,7 +5,7 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 ## Unreleased
 
 - Playground: in `destruction`, a wall piece that lands hard on the ground or on another piece
-  breaks where they touch, from the contact's collision estimate.
+  breaks at the contact point that hit hardest, also when it tips over an edge it stands on.
 
 ## 1.0.0 — 2026-10-06
 

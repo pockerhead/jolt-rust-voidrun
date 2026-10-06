@@ -70,9 +70,10 @@ fn destroying_every_brick_removes_the_wall() {
 
 /// Without its bottom row but the rightmost brick, the wall stands on one brick at its
 /// right end, its centre of mass far beside that support, and falls over to the left until
-/// its open end lies on the ground.
+/// its open end lies on the ground. It lands there inside the contact it already has with the
+/// ground and breaks its left end, not where it still stands.
 #[test]
-fn a_wall_on_one_brick_falls_over() {
+fn a_wall_on_one_brick_falls_over_and_breaks_where_it_lands() {
     let mut scene = scene();
     let wall = scene.pieces[0].body;
     let bottom: Vec<(u32, Vec3)> = (0..WALL[0] - 1).map(|brick| (brick, OUT)).collect();
@@ -86,6 +87,12 @@ fn a_wall_on_one_brick_falls_over() {
     let motion = Motion::of(&scene.world, wall).unwrap();
     assert!(motion.at(open_end).y < 0.03, "{}", motion.at(open_end));
     assert!(tilt(&scene, wall) > 0.05, "{}", tilt(&scene, wall));
+    assert_eq!(scene.impact_breaks, 1);
+    assert!(scene.piece_of_brick(8).is_none(), "its open end broke");
+    assert!(
+        scene.piece_of_brick(7).is_some(),
+        "the brick it stands on is whole"
+    );
 }
 
 /// Bricks cut out around the top right corner leave it a piece of its own, which falls as
@@ -122,9 +129,9 @@ fn a_cut_loose_corner_falls_as_one_body_and_breaks_where_it_lands() {
 }
 
 /// Without its three lower rows, the top of the wall falls flat onto the ground from
-/// 0.72 m and breaks through where it lands, in the middle, into two pieces.
+/// 0.72 m and breaks at an end of its lowest row, where a corner of the contact hit hardest.
 #[test]
-fn a_falling_wall_splits_where_it_lands() {
+fn a_falling_wall_breaks_where_it_lands() {
     let mut scene = scene();
     let lower: Vec<(u32, Vec3)> = (0..3 * WALL[0]).map(|brick| (brick, OUT)).collect();
     scene.knock_out(lower).unwrap();
@@ -137,14 +144,39 @@ fn a_falling_wall_splits_where_it_lands() {
         ticks += 1;
     }
     assert_eq!(scene.impact_breaks, 1, "it landed within {ticks} ticks");
-    let sizes: Vec<usize> = scene
-        .pieces
-        .iter()
-        .map(|piece| piece.bricks.len())
-        .collect();
-    assert!(sizes.len() >= 2, "{sizes:?}");
-    let middle = scene.piece_of_brick(27).is_none() && scene.piece_of_brick(28).is_none();
-    assert!(middle, "the middle of its lowest row broke out");
+    assert!(scene.brick_count() < 24, "{}", scene.brick_count());
+    let an_end = scene.piece_of_brick(24).is_none() || scene.piece_of_brick(31).is_none();
+    assert!(an_end, "an end of its lowest row broke out");
+}
+
+/// The top row and the two outer columns, one arch, dropped from a metre, land on both
+/// feet at once. The break is at one foot, where the arch touched the ground, not in the
+/// span between the feet.
+#[test]
+fn a_falling_arch_breaks_at_a_foot() {
+    let mut scene = scene();
+    let span = (0..5 * WALL[0]).filter(|id| id % WALL[0] != 0 && id % WALL[0] != WALL[0] - 1);
+    scene.knock_out(span.map(|id| (id, OUT)).collect()).unwrap();
+    clear_debris(&mut scene);
+    assert_eq!(scene.pieces.len(), 1);
+    let arch = scene.pieces[0].body;
+    let raised = rvec([0.0, 1.0, 0.0]);
+    scene
+        .world
+        .body_mut(arch)
+        .unwrap()
+        .set_position(raised, Activation::Activate)
+        .unwrap();
+    let mut ticks = 0;
+    while scene.impact_breaks == 0 && ticks < 90 {
+        run(&mut scene, 1);
+        ticks += 1;
+    }
+    assert_eq!(scene.impact_breaks, 1, "it landed within {ticks} ticks");
+    let feet = [0, WALL[0] - 1].map(|id| scene.piece_of_brick(id).is_none());
+    assert!(feet[0] != feet[1], "one foot broke: {feet:?}");
+    let top = 5 * WALL[0]..6 * WALL[0];
+    assert!(top.into_iter().all(|id| scene.piece_of_brick(id).is_some()));
 }
 
 /// Without its three lower rows but the brick at their bottom right corner, the top of the
@@ -201,6 +233,55 @@ fn impacts_stop_breaking_pieces_after_the_last_allowed_one() {
     run(&mut scene, 60);
     assert_eq!(scene.impact_breaks, MAX_IMPACT_BREAKS);
     assert_eq!((scene.pieces.len(), scene.brick_count()), (1, 24));
+}
+
+/// Two hard impacts in one step break once: the corner of the wall lands on the stub with
+/// every contact reported twice, and only the first spends the step's impact, the last one
+/// allowed. That impact breaks both pieces where they touch.
+#[test]
+fn one_impact_per_step_breaks_pieces_the_last_allowed_one_included() {
+    let mut scene = scene();
+    scene
+        .knock_out(CORNER_CUT.map(|brick| (brick, OUT)).to_vec())
+        .unwrap();
+    clear_debris(&mut scene);
+    let (wall, corner) = (scene.pieces[0].body, scene.pieces[1].body);
+    scene.impact_breaks = MAX_IMPACT_BREAKS - 1;
+    for _ in 0..60 {
+        let before = scene.piece_motions().unwrap();
+        step(&mut scene.world).unwrap();
+        let events = scene.world.take_events();
+        scene.tracked.sync(&scene.world, &events);
+        let once = scene.hit_bricks(&events.contacts, &before).unwrap();
+        if scene.impact_breaks == MAX_IMPACT_BREAKS - 1 {
+            scene.knock_out(once).unwrap();
+            continue;
+        }
+        scene.impact_breaks = MAX_IMPACT_BREAKS - 1;
+        let twice = [events.contacts.clone(), events.contacts].concat();
+        let hits = scene.hit_bricks(&twice, &before).unwrap();
+        assert_eq!(scene.impact_breaks, MAX_IMPACT_BREAKS);
+        let ids = |hits: &[(u32, Vec3)]| {
+            let mut ids: Vec<u32> = hits.iter().map(|&(id, _)| id).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        };
+        assert_eq!(ids(&hits), ids(&once));
+        let broken: Vec<BodyId> = ids(&hits)
+            .into_iter()
+            .map(|id| scene.piece_of_brick(id).unwrap().0.body)
+            .collect();
+        assert!(
+            broken.contains(&wall) && broken.contains(&corner),
+            "{broken:?}"
+        );
+        scene.knock_out(hits).unwrap();
+        run(&mut scene, 60);
+        assert_eq!(scene.impact_breaks, MAX_IMPACT_BREAKS);
+        return;
+    }
+    panic!("the corner never landed hard");
 }
 
 #[test]

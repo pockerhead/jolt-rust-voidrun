@@ -83,7 +83,7 @@ Everything planned for 1.0 is done; what works today, with links to the guides, 
 - [ ] Same results across operating systems, checked in CI
 - [ ] Prebuilt native libraries downloaded by the build script
 - [ ] Constraint force readout and breakable constraints
-- [ ] Playground: debris that breaks again when it hits the ground
+- [x] Playground: debris that breaks again when it hits the ground
 
 ## Status
 

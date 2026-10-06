@@ -188,14 +188,16 @@ they meet; the arch that is left topples and breaks where it lands.*
 A wall of 48 bricks stands on the ground as one dynamic body. It loses the bricks that cannonballs
 or clicks hit, and each brick falls on as a body. What is left splits into pieces of bricks that
 touch face to face: the largest stays in the wall's body, every other piece becomes a body of its
-own, and a piece that lost its support topples or falls. A piece that lands on the ground or on
-another piece at 0.75 m/s or more breaks where they touch, as at a cannonball's hit; the speed is
-the impulse of the new contact's `CollisionEstimate` over the reduced mass of the two, and at most
-one such impact per step, and twelve in all, breaks pieces. A piece that tips over an edge that
-stays on the ground lands inside the contact it already has, since Jolt merges a body pair's
-contacts that share a normal into one manifold, so such a landing breaks nothing. It uses
-`MutableCompound`, `to_shape`, `BodyMut::set_shape` with a mass, `compound_sub_shape`,
-`CollisionEstimate` with the contact points, and `cast_ray` with `compound_child`.
+own, and a piece that lost its support topples or falls. A piece that hits the ground or another
+piece hard breaks at the contact point that hit hardest, as at a cannonball's hit. How hard is the
+normal speed at which the point approached before the step and that the step took away, from the
+pieces' velocities before and after it; from 0.75 m/s a point breaks the piece. This sees a
+landing in a new contact and one inside a contact the piece already has, as when a piece tips over
+an edge that stays on the ground: Jolt merges a body pair's contacts that share a normal into one
+manifold, so that landing arrives as a persisted contact. At most one impact per step, and twelve
+in all, breaks pieces. It uses `MutableCompound`, `to_shape`, `BodyMut::set_shape` with a mass,
+`compound_sub_shape`, `CollisionEstimate` for the cannonballs, persisted contact events with their
+points, and `cast_ray` with `compound_child`.
 
 | Keys | Action |
 |---|---|
