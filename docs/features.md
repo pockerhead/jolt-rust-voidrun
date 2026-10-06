@@ -56,7 +56,8 @@ what is planned next.
   ([api-guidelines.md](api-guidelines.md)), and Rust 1.88 as the minimum version, checked in CI.
 
 The [playground](playground.md) shows them in twelve small scenes with a window, and runs the same
-scenes headless.
+scenes headless. In its breakable wall, pieces that land hard break again where they hit
+([scene](playground.md#8-breakable-wall-destruction)).
 
 The raw layer, `oxijolt-sys`, has the joltc functions for all of them.
 [coverage.md](coverage.md) lists every bound feature with the tests that check it, and
