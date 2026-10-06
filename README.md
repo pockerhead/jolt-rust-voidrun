@@ -108,7 +108,7 @@ The full list of what works today, with links to the guides, is in
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
 - [ ] Rollback helpers: reusable state buffer, filtered restore
-- [ ] Real meshes from open sources tested in CI, and shape cooking (save and load built shapes)
+- [x] Real meshes from open sources tested in CI, and shape cooking (save and load built shapes)
 - [ ] API review and freeze for 1.0
 - [ ] Same results across operating systems, checked in CI
 
@@ -160,12 +160,13 @@ API is not complete yet; the [roadmap](#roadmap) says what is missing.
   car and a ragdoll, run as doctests.
 - Topic guides: [constraints](docs/constraints.md), [soft bodies](docs/soft-bodies.md),
   [events](docs/events.md), [save and restore](docs/state.md), [job systems](docs/job-system.md),
-  [determinism](docs/determinism.md), [building](docs/building.md).
+  [determinism](docs/determinism.md), [shape cooking](docs/shape-cooking.md),
+  [building](docs/building.md).
 - [Limits](docs/limits.md) and [coverage](docs/coverage.md); [benchmarks](docs/benchmarks.md)
-  against a game's budgets.
+  against a game's budgets; [real meshes](docs/real-meshes.md) from open sources.
 - [Character study](docs/character-study.md): which character laws CharacterVirtual's settings
   carry, and at what cost.
-- [Playground](docs/playground.md): ten scenes with a window, headless runs and recorded clips.
+- [Playground](docs/playground.md): twelve scenes with a window, headless runs and recorded clips.
 - API docs: `cargo doc -p oxijolt --open`. Example: `cargo run -p oxijolt --example hello_world`.
 - [CHANGELOG](CHANGELOG.md).
 

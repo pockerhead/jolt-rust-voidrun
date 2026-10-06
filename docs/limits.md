@@ -305,6 +305,37 @@ Three seeded stress runs of 10 000 cases each around both boundaries (tapers wit
 case, radius ratios down to 1e-6, larger radii down to 1e-20 m) created, dropped and stepped them
 without an assertion.
 
+## Shape binary state
+
+`Shape::restore_binary_state` reads bytes Jolt does not validate. Jolt's restore indexes its table of
+shape constructors with the type byte without a range check (`Shape.h:177`), writes as many
+compound children as the record names with only an assertion (`CompoundShape.cpp:362-367`),
+reads a decorator's child without checking it exists (`DecoratedShape.cpp:68-72`), lets child ids
+point forward to form cycles (`Shape.cpp:177-178`) and creates materials through its RTTI factory
+from a hash in the stream (`StreamUtils.h:34-42`). The joltc extension therefore walks the graph
+itself and checks, before Jolt reads a record: every length inside the data, the type among the
+sixteen kinds it saves and equal to Jolt's first byte, child indices naming earlier records,
+material indices naming existing materials; after Jolt read it: exactly its bytes read, one child
+for a decorator, the compound's own sub-shape count, one material for a convex shape or a plane.
+Materials are rebuilt from their kind and user data, never through the factory. An empty shape
+keeps its centre of mass, which Jolt's `EmptyShape` does not save.
+
+What stays unchecked is the inside of Jolt's records: array lengths that Jolt resizes to before
+reading (`StreamIn.h:43-53`), mesh tree offsets (`NodeCodecQuadTreeHalfFloat.h:231-318`), hull face
+and vertex indices, static compound nodes and heightfield block sizes. The checksum refuses every
+accidental change, so the contract of the `unsafe` restore is that the bytes come from a save of
+the same build and were not crafted.
+
+The saved bytes reach Rust as `Vec<u8>`, so every one of them must have a value. Jolt grows its
+byte buffers without initialising them (`Array.h:197-206`, `ByteBuffer::Allocate`), so the
+sixteen kinds' `SaveBinaryState` were read for bytes no code writes: the mesh tree's node, block,
+index and vertex records are written whole and its header's padding is zero-initialised; the
+heightfield's sample and edge buffers are cleared before they are filled and every range block is
+written; hull points, faces and planes and static compound nodes have no padding and every field
+written; mutable compound bounds are written per block of four. None was found, so no
+zero-filling allocator is installed; `tests/shape_binary_state.rs` checks that two processes save
+equal bytes and that a restored shape saves the bytes it came from.
+
 ## Accelerations
 
 `MAX_ACCELERATION` is `MAX_LINEAR_VELOCITY / PhysicsWorld::MIN_DELTA_TIME`, about 5e8 m/s². A larger

@@ -39,6 +39,9 @@ what is planned next.
   velocity per contact, or rejects contacts before they form (one-way platforms), and Jolt's
   estimate of each new contact's impulses for impact sounds and damage ([guide](events.md)).
 - Saving and restoring a world's state for rollback and replays ([guide](state.md)).
+- Shape cooking: built shapes with their children and materials saved to bytes and restored,
+  checked against the build that wrote them ([guide](shape-cooking.md)); meshes and hulls tested
+  on real models from open sources ([report](real-meshes.md)).
 - A floating origin (`PhysicsWorld::rebase`) and optional `f64` world positions.
 - Jolt's jobs on Jolt's thread pool or on your own, such as Rayon ([guide](job-system.md)).
 - Debug wireframes as line data (feature `debug-renderer`); nothing is drawn.
@@ -48,7 +51,7 @@ what is planned next.
 - `oxijolt::prelude` for the common types, and `oxijolt::error::{Error, Result}` that wraps the
   error of every area.
 
-The [playground](playground.md) shows them in ten small scenes with a window, and runs the same
+The [playground](playground.md) shows them in twelve small scenes with a window, and runs the same
 scenes headless.
 
 The raw layer, `oxijolt-sys`, has the joltc functions for all of them.

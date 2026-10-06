@@ -286,6 +286,11 @@ pub struct StateGuide;
 #[doc = include_str!("../../../docs/job-system.md")]
 pub struct JobSystemGuide;
 
+/// The shape cooking guide, `docs/shape-cooking.md`.
+#[cfg(doctest)]
+#[doc = include_str!("../../../docs/shape-cooking.md")]
+pub struct ShapeCookingGuide;
+
 /// The vehicles guide, `docs/vehicles.md`.
 #[cfg(doctest)]
 #[doc = include_str!("../../../docs/vehicles.md")]
