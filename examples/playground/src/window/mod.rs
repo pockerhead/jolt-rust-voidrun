@@ -27,7 +27,7 @@ const MAX_TICKS_PER_FRAME: u32 = 4;
 
 /// The keys every scene shares, for the help panel.
 const GLOBAL_KEYS: &[(&str, &str)] = &[
-    ("1-9, 0", "choose a scene"),
+    ("1-9, 0, -, =", "choose a scene"),
     ("R", "reset the scene"),
     ("P", "pause"),
     ("N", "one tick while paused"),
@@ -54,12 +54,13 @@ pub fn run(mode: Mode) -> ! {
     };
     Window::from_config(conf, async move {
         let code = match mode {
-            Mode::Interactive { scene } => interactive(scene).await,
+            Mode::Interactive { scene, config } => interactive(scene, config).await,
             Mode::Record {
                 scenes,
                 out,
                 frames,
-            } => record::record_all(scenes, out, frames).await,
+                config,
+            } => record::record_all(scenes, out, frames, config).await,
             Mode::Headless { .. } | Mode::Help => 2,
         };
         std::process::exit(code);
@@ -70,6 +71,8 @@ pub fn run(mode: Mode) -> ! {
 /// The interactive loop's state.
 struct App {
     session: Session,
+    /// What every scene is built with, from the command line.
+    config: SceneConfig,
     camera: CameraHint,
     paused: bool,
     help: bool,
@@ -80,11 +83,12 @@ struct App {
 }
 
 impl App {
-    fn new(kind: SceneKind) -> Result<Self, String> {
-        let session = Session::new(kind, SceneConfig::default()).map_err(|e| e.to_string())?;
+    fn new(kind: SceneKind, config: SceneConfig) -> Result<Self, String> {
+        let session = Session::new(kind, config.clone()).map_err(|e| e.to_string())?;
         let camera = session.scene().camera();
         Ok(Self {
             session,
+            config,
             camera,
             paused: false,
             help: true,
@@ -98,7 +102,7 @@ impl App {
     /// Switches to `kind`, or rebuilds the current scene for `None`.
     fn rebuild(&mut self, kind: Option<SceneKind>) {
         let result = match kind {
-            Some(kind) => Session::new(kind, SceneConfig::default()).map(|session| {
+            Some(kind) => Session::new(kind, self.config.clone()).map(|session| {
                 self.session = session;
             }),
             None => self.session.reset(),
@@ -134,8 +138,10 @@ impl App {
             KeyCode::Key8,
             KeyCode::Key9,
             KeyCode::Key0,
+            KeyCode::Minus,
+            KeyCode::Equal,
         ];
-        for (key, digit) in digits.into_iter().zip("1234567890".chars()) {
+        for (key, digit) in digits.into_iter().zip("1234567890-=".chars()) {
             if is_key_pressed(key) {
                 if let Some(kind) = SceneKind::ALL.into_iter().find(|kind| kind.key() == digit) {
                     self.rebuild(Some(kind));
@@ -305,8 +311,8 @@ impl App {
 }
 
 /// The interactive loop, until Esc or a failed build of the first scene.
-async fn interactive(kind: SceneKind) -> i32 {
-    let mut app = match App::new(kind) {
+async fn interactive(kind: SceneKind, config: SceneConfig) -> i32 {
+    let mut app = match App::new(kind, config) {
         Ok(app) => app,
         Err(error) => {
             eprintln!("{error}");

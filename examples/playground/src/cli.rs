@@ -2,24 +2,28 @@
 
 use std::path::PathBuf;
 
-use crate::scene::SceneKind;
+use crate::scene::{SceneConfig, SceneKind};
 
 /// What the program was asked to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Mode {
     /// Open the window on a scene.
-    Interactive { scene: SceneKind },
+    Interactive {
+        scene: SceneKind,
+        config: SceneConfig,
+    },
     /// Run scenes' scripts without a window and print their summaries.
     Headless {
         scenes: Vec<SceneKind>,
         frames: u32,
-        threads: Option<u32>,
+        config: SceneConfig,
     },
     /// Record scenes' clips into GIFs.
     Record {
         scenes: Vec<SceneKind>,
         out: PathBuf,
         frames: Option<u32>,
+        config: SceneConfig,
     },
     /// Print the usage.
     Help,
@@ -38,6 +42,9 @@ usage:
   playground --record <name|all> [--out DIR] [--frames N]
                                                    record GIFs
   playground --help
+
+  --model PATH   the OBJ or glTF file of the model scene (default: the committed track tile)
+  --models DIR   the directory scripts/fetch_models.py filled, for the meshes scene
 
 scenes: ";
 
@@ -80,6 +87,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
     let mut frames = None;
     let mut threads = None;
     let mut out = None;
+    let mut config = SceneConfig::default();
     while let Some(arg) = args.next() {
         let mut value = |flag: &str| args.next().ok_or_else(|| format!("{flag} needs a value"));
         match arg.as_str() {
@@ -90,6 +98,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
             "--frames" => frames = Some(number("--frames", &value("--frames")?)?),
             "--threads" => threads = Some(number("--threads", &value("--threads")?)?),
             "--out" => out = Some(PathBuf::from(value("--out")?)),
+            "--model" => config.model = Some(PathBuf::from(value("--model")?)),
+            "--models" => config.models = Some(PathBuf::from(value("--models")?)),
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
@@ -100,10 +110,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 return Err("--out belongs to --record".to_owned());
             }
             let name = scene.ok_or("--headless needs --scene <name|all>")?;
+            config.worker_threads = threads;
             Ok(Mode::Headless {
                 scenes: scenes(&name)?,
                 frames: frames.unwrap_or(DEFAULT_FRAMES),
-                threads,
+                config,
             })
         }
         (false, Some(name)) => {
@@ -114,6 +125,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 scenes: scenes(&name)?,
                 out: out.unwrap_or_else(default_media_dir),
                 frames,
+                config,
             })
         }
         (false, None) => {
@@ -125,7 +137,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 Some(_) => return Err("the window shows one scene at a time".to_owned()),
                 None => SceneKind::ALL[0],
             };
-            Ok(Mode::Interactive { scene })
+            Ok(Mode::Interactive { scene, config })
         }
     }
 }
@@ -140,23 +152,31 @@ mod tests {
 
     #[test]
     fn every_form_parses() {
+        let default = SceneConfig::default;
         assert_eq!(
             parse_str(""),
             Ok(Mode::Interactive {
-                scene: SceneKind::ALL[0]
+                scene: SceneKind::ALL[0],
+                config: default()
             })
         );
         let pile = SceneKind::from_name("pile").unwrap();
         assert_eq!(
             parse_str("--scene pile"),
-            Ok(Mode::Interactive { scene: pile })
+            Ok(Mode::Interactive {
+                scene: pile,
+                config: default()
+            })
         );
         assert_eq!(
             parse_str("--headless --scene all --frames 300 --threads 4"),
             Ok(Mode::Headless {
                 scenes: SceneKind::ALL.to_vec(),
                 frames: 300,
-                threads: Some(4)
+                config: SceneConfig {
+                    worker_threads: Some(4),
+                    ..default()
+                }
             })
         );
         assert_eq!(
@@ -164,7 +184,7 @@ mod tests {
             Ok(Mode::Headless {
                 scenes: vec![pile],
                 frames: DEFAULT_FRAMES,
-                threads: None
+                config: default()
             })
         );
         assert_eq!(
@@ -172,7 +192,8 @@ mod tests {
             Ok(Mode::Record {
                 scenes: vec![pile],
                 out: PathBuf::from("media"),
-                frames: Some(10)
+                frames: Some(10),
+                config: default()
             })
         );
         assert_eq!(
@@ -180,7 +201,31 @@ mod tests {
             Ok(Mode::Record {
                 scenes: SceneKind::ALL.to_vec(),
                 out: default_media_dir(),
-                frames: None
+                frames: None,
+                config: default()
+            })
+        );
+        let model = SceneKind::from_name("model").unwrap();
+        assert_eq!(
+            parse_str("--scene model --model a/b.glb"),
+            Ok(Mode::Interactive {
+                scene: model,
+                config: SceneConfig {
+                    model: Some(PathBuf::from("a/b.glb")),
+                    ..default()
+                }
+            })
+        );
+        assert_eq!(
+            parse_str("--headless --scene meshes --models fetched --threads 2"),
+            Ok(Mode::Headless {
+                scenes: vec![SceneKind::from_name("meshes").unwrap()],
+                frames: DEFAULT_FRAMES,
+                config: SceneConfig {
+                    worker_threads: Some(2),
+                    models: Some(PathBuf::from("fetched")),
+                    ..default()
+                }
             })
         );
         assert_eq!(parse_str("--help"), Ok(Mode::Help));
@@ -196,6 +241,8 @@ mod tests {
             "--headless --scene pile --frames ten",
             "--headless --scene pile --threads",
             "--headless --scene pile --out x",
+            "--scene model --model",
+            "--scene meshes --models",
             "--headless --record pile",
             "--record pile --threads 2",
             "--record pile --scene pile",

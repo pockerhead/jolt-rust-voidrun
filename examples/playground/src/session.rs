@@ -49,7 +49,7 @@ impl Session {
     /// Rebuilds the scene from scratch: tick 0, nothing pending, the wireframe kept as it was.
     pub fn reset(&mut self) -> Result<()> {
         let wireframe = self.wireframe;
-        *self = Self::new(self.kind, self.config)?;
+        *self = Self::new(self.kind, self.config.clone())?;
         self.wireframe = wireframe;
         Ok(())
     }

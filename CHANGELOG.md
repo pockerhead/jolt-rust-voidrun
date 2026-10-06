@@ -14,6 +14,31 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - Changed: `save_state_of` takes a `BodySelection` instead of `&[BodyId]` and returns
   `StateError`; a foreign or removed id is `StateError::Body` (was `BodyError`). Migration:
   `save_state_of(&ids)` becomes `save_state_of(BodySelection::Only(&ids))`.
+- Shape cooking ([guide](docs/shape-cooking.md)): `Shape::save_binary_state` and `unsafe
+  Shape::restore_binary_state` save a built shape with its children and materials to bytes and
+  restore it, so level meshes are built once at asset-build time. The bytes carry a versioned,
+  checksummed header that names the build (Jolt and joltc commits, extension revision, precision,
+  determinism mode, byte order); bytes of another build or damaged bytes are refused with
+  `ShapeError::BinaryState(BinaryStateError)`. Restoring is `unsafe` because Jolt does not validate
+  the inside of its records: the bytes must come from a save of the same build.
+- joltc extension: `JPH_Shape_SaveBinaryState`, `JPH_Shape_RestoreBinaryState`,
+  `JPH_ShapeBinaryState_GetSize`, `_CopyData`, `_Destroy` and `JPH_Shape_GetBinaryStateVersion`,
+  which walk the shape graph themselves and check every record before Jolt reads it.
+  `JOLTC_EXT_REVISION` is 21: a `JOLTC_LIB_DIR` prefix built before this change is refused until
+  the next release's archives. `oxijolt-sys` exports `JOLT_COMMIT`, `JOLTC_COMMIT`,
+  `JOLTC_EXT_REVISION` and `CROSS_PLATFORM_DETERMINISTIC_ENABLED`.
+- Real meshes from open sources tested in CI ([report](docs/real-meshes.md)): CC0 and
+  public-domain models (Kenney props and level pieces, Crane's oloid and spot, the Khronos
+  ScatteringSkull) with their sources, licences and SHA-256 in `assets/models/models.tsv`,
+  `scripts/fetch_models.py` for the large ones, and a `real-meshes` CI job with and without
+  assertions. Findings: the default `max_convex_extent` (1100 m) drops 0.75 % of a 30 cm radio's
+  area (its bevels), and the 0.25 m skull's triangles are too small for Jolt at their own size.
+- Playground: the scenes `meshes` (the real models with bodies raining onto them) and `model`
+  (any OBJ or glTF file given with `--model PATH`); `--models DIR` adds the downloaded models.
+- Thin dynamic hulls on a floor ([limits](docs/limits.md#thin-dynamic-hulls-on-a-floor)): the
+  sinking reported earlier is the impact of a wide thin hull that tips over and slaps down faster
+  than Jolt's discrete step resolves, not its hull or convex radius. It sinks deep into box floors
+  and can pass through mesh floors; `LinearCast` and shorter steps reduce it.
 
 ## 0.7.0 — 2026-10-06
 

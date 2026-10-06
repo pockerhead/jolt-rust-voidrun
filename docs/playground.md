@@ -1,6 +1,6 @@
 # Playground
 
-`examples/playground` is a program with a window that shows what `oxijolt` does, in ten small
+`examples/playground` is a program with a window that shows what `oxijolt` does, in twelve small
 scenes. Each scene owns its own `PhysicsWorld`, built fresh when the scene is chosen or reset. The
 same scenes run without a window, for tests and CI, and record the clips on this page.
 
@@ -36,7 +36,7 @@ These keys work in every scene:
 
 | Keys | Action |
 |---|---|
-| 1 to 9, 0 | choose a scene |
+| 1 to 9, 0, -, = | choose a scene |
 | R | reset the scene |
 | P | pause |
 | N | one tick while paused |
@@ -232,6 +232,42 @@ pushing and toggling crates, saving and restoring, moving the origin, the collid
 | T | the last clicked crate: kinematic or dynamic |
 | K, L | save the world, restore it |
 | B | move the origin to the point under the cursor |
+
+### - Real models as meshes (`meshes`)
+
+![Spheres and boxes rain onto a racing track tile, a dungeon corridor, furniture and an oloid](media/meshes.gif)
+
+*Bodies rain onto the real models of `assets/models`: a racing track tile, a dungeon corridor whose
+floor has both faces, a radio, a fridge, a bathtub, a bookcase and Crane's oloid. Sleeping bodies
+turn grey; at the cut, a burst drops two bodies over every model.*
+
+The committed models of the [real-mesh tests](real-meshes.md), read with `crates/mesh-import`,
+built with `Shape::new_mesh` and placed on a ground plane. With `--models DIR`, the directory
+`scripts/fetch_models.py` filled, the scene adds Crane's spot and the ScatteringSkull as a 2.5 m
+statue. The HUD counts the triangles Jolt was handed and those dropped as too thin.
+
+| Keys | Action |
+|---|---|
+| Space | drop a burst of bodies |
+
+### = A model from the command line (`model`)
+
+![Spheres and boxes rain onto the racing track tile and come to rest](media/model.gif)
+
+*The default model, the track tile, with spheres and boxes raining onto it and falling asleep.*
+
+Any OBJ, glTF or GLB file given with `--model PATH` (by default the committed track tile) as a
+static mesh, standing on the ground plane, with bodies raining onto it:
+
+```sh
+cargo run -p playground --release -- --scene model --model path/to/level.glb
+```
+
+The HUD shows the file's triangle count and how many the mesh constructor dropped.
+
+| Keys | Action |
+|---|---|
+| Space | drop a burst of bodies |
 
 What is not shown, because it has nothing to draw: Jolt's jobs on a caller's thread pool, `f64`
 positions, the `glam` and `mint` conversions, the prelude and the error type.

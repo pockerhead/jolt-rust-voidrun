@@ -11,6 +11,7 @@ use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
 
+mod binary_state;
 mod compound;
 mod create;
 mod geometry;

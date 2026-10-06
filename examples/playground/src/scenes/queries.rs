@@ -505,6 +505,7 @@ mod tests {
         Queries::new(
             &SceneConfig {
                 worker_threads: Some(1),
+                ..SceneConfig::default()
             },
             1,
         )

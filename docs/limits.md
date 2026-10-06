@@ -132,11 +132,31 @@ sharpest edges (`ConvexHullShape.cpp:269-345`).
 
 ### Thin dynamic hulls on a floor
 
-Observed, under investigation: flat cones 0.4 to 7 cm thick of the families in
-[Clouds the hull builder asserts on](#clouds-the-hull-builder-asserts-on), built without asserts,
-do not come to rest as dynamic bodies dropped onto a box floor, whether or not they assert with
-asserts. After 2 s they still sink at about 0.3 to 0.6 m/s, with their origin about 7 cm below the floor's
-top (1.4 m in one case).
+The cause is the impact, not the hull. Flat cones and domes 0.4 to 7 cm thick and 1 to 14 m
+wide, set down 1 cm above a box floor base down or dome down, come to rest within 0.5 mm of the
+floor and fall asleep; convex radius 0 and 0.05 behave alike. Dropped tilted from 3 m, such a
+hull lands on its rim, tips over and slaps down: its far edge moves at the radius times the
+angular velocity (about 5 m/s for a 4 m dome), while Jolt's discrete step reacts to an approach
+only within its speculative contact distance (`mSpeculativeContactDistance`, 2 cm per step) and
+`MotionQuality::LinearCast` sweeps the centre of mass's translation, not the rotation.
+
+Measured with twelve random tilts per hull, 60 Hz, no convex radius (`tests/thin_hulls.rs` keeps
+the 4 m wide, 1 cm thick dome as its gate):
+
+- Box or plane floor: the slapping edge of the 1 cm dome sinks up to 24 cm, of the 1 cm flat
+  cone up to 13 cm. Flat cones then recover to the penetration slop (2 cm). Six of twelve domes
+  stay wedged about 11 cm deep after 6 s, rocking with a vertical velocity near 0.5 m/s: the
+  sinking seen first.
+- Flat mesh floor (a surface with nothing behind it): the edge passes through and the hull
+  falls. 7 to 12 of twelve cones and domes 0.4 to 7 cm thick fell through, one of twelve 20 cm
+  thick 4 m wide flat cones, and 3 and 6 of twelve 50 cm thick 14 m wide cones and domes; 20 cm
+  thick 1 m wide ones did not.
+- With `MotionQuality::LinearCast` none of the twelve 1 cm, 4 m domes stayed wedged in the box
+  floor (one of twelve 3 cm, 14 m domes did), and 6 of twelve instead of 11 fell through the
+  mesh. Four steps of 1/240 s per frame left none wedged and let 7 of twelve through the mesh.
+
+Wide thin dynamic shapes therefore belong on box or convex floors rather than meshes;
+`LinearCast` and shorter steps reduce, but do not remove, the slap's depth.
 
 ## Triangle meshes
 
@@ -284,6 +304,37 @@ half as tall as `2 · MAX_SHAPE_EXTENT`.
 Three seeded stress runs of 10 000 cases each around both boundaries (tapers within 1e-8 of the sphere
 case, radius ratios down to 1e-6, larger radii down to 1e-20 m) created, dropped and stepped them
 without an assertion.
+
+## Shape binary state
+
+`Shape::restore_binary_state` reads bytes Jolt does not validate. Jolt's restore indexes its table of
+shape constructors with the type byte without a range check (`Shape.h:177`), writes as many
+compound children as the record names with only an assertion (`CompoundShape.cpp:362-367`),
+reads a decorator's child without checking it exists (`DecoratedShape.cpp:68-72`), lets child ids
+point forward to form cycles (`Shape.cpp:177-178`) and creates materials through its RTTI factory
+from a hash in the stream (`StreamUtils.h:34-42`). The joltc extension therefore walks the graph
+itself and checks, before Jolt reads a record: every length inside the data, the type among the
+sixteen kinds it saves and equal to Jolt's first byte, child indices naming earlier records,
+material indices naming existing materials; after Jolt read it: exactly its bytes read, one child
+for a decorator, the compound's own sub-shape count, one material for a convex shape or a plane.
+Materials are rebuilt from their kind and user data, never through the factory. An empty shape
+keeps its centre of mass, which Jolt's `EmptyShape` does not save.
+
+What stays unchecked is the inside of Jolt's records: array lengths that Jolt resizes to before
+reading (`StreamIn.h:43-53`), mesh tree offsets (`NodeCodecQuadTreeHalfFloat.h:231-318`), hull face
+and vertex indices, static compound nodes and heightfield block sizes. The checksum refuses every
+accidental change, so the contract of the `unsafe` restore is that the bytes come from a save of
+the same build and were not crafted.
+
+The saved bytes reach Rust as `Vec<u8>`, so every one of them must have a value. Jolt grows its
+byte buffers without initialising them (`Array.h:197-206`, `ByteBuffer::Allocate`), so the
+sixteen kinds' `SaveBinaryState` were read for bytes no code writes: the mesh tree's node, block,
+index and vertex records are written whole and its header's padding is zero-initialised; the
+heightfield's sample and edge buffers are cleared before they are filled and every range block is
+written; hull points, faces and planes and static compound nodes have no padding and every field
+written; mutable compound bounds are written per block of four. None was found, so no
+zero-filling allocator is installed; `tests/shape_binary_state.rs` checks that two processes save
+equal bytes and that a restored shape saves the bytes it came from.
 
 ## Accelerations
 

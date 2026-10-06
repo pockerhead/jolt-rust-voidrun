@@ -4,6 +4,8 @@ pub mod character;
 pub mod constraints;
 pub mod contacts;
 pub mod destruction;
+pub mod meshes;
+pub mod model;
 pub mod pile;
 pub mod queries;
 pub mod ragdolls;

@@ -25,8 +25,13 @@ const TARGET: [u32; 2] = [2 * GIF_SIZE[0] as u32, 2 * GIF_SIZE[1] as u32];
 const LINE_PIXELS: f32 = 3.0;
 
 /// Records `scenes` into `out` and checks the media limits; returns the process exit code.
-pub async fn record_all(scenes: Vec<SceneKind>, out: PathBuf, frames: Option<u32>) -> i32 {
-    match record_scenes(&scenes, &out, frames).await {
+pub async fn record_all(
+    scenes: Vec<SceneKind>,
+    out: PathBuf,
+    frames: Option<u32>,
+    config: SceneConfig,
+) -> i32 {
+    match record_scenes(&scenes, &out, frames, &config).await {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("{error}");
@@ -35,7 +40,12 @@ pub async fn record_all(scenes: Vec<SceneKind>, out: PathBuf, frames: Option<u32
     }
 }
 
-async fn record_scenes(scenes: &[SceneKind], out: &Path, frames: Option<u32>) -> Result<()> {
+async fn record_scenes(
+    scenes: &[SceneKind],
+    out: &Path,
+    frames: Option<u32>,
+    config: &SceneConfig,
+) -> Result<()> {
     fs::create_dir_all(out)?;
     let lut = Lut::new();
     let mut renderer = Renderer::default();
@@ -49,7 +59,7 @@ async fn record_scenes(scenes: &[SceneKind], out: &Path, frames: Option<u32>) ->
     );
     let mut total = 0;
     for &kind in scenes {
-        let bytes = record(kind, frames, out, &lut, &mut renderer, &target).await?;
+        let bytes = record(kind, frames, config, out, &lut, &mut renderer, &target).await?;
         println!("{}: {} bytes", kind.name(), bytes);
         if bytes > MAX_GIF_BYTES {
             return Err(format!(
@@ -70,12 +80,13 @@ async fn record_scenes(scenes: &[SceneKind], out: &Path, frames: Option<u32>) ->
 async fn record(
     kind: SceneKind,
     frames: Option<u32>,
+    config: &SceneConfig,
     out: &Path,
     lut: &Lut,
     renderer: &mut Renderer,
     target: &RenderTarget,
 ) -> Result<u64> {
-    let mut session = Session::new(kind, SceneConfig::default())?;
+    let mut session = Session::new(kind, config.clone())?;
     let ticks = frames.unwrap_or_else(|| session.scene().record_ticks());
     let [width, height] = TARGET.map(|size| size as usize);
     let gif_path = out.join(format!("{}.gif", kind.name()));

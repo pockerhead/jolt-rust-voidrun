@@ -37,6 +37,8 @@ mint = { version = "0.5", optional = true, default-features = false }
 
 [dev-dependencies]
 rayon = "1.11"
+# The real-mesh tests' OBJ and glTF reader; not published, so cargo drops it on publish.
+mesh-import = { path = "../mesh-import" }
 
 [[bench]]
 name = "budgets"

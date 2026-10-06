@@ -16,6 +16,7 @@ use playground::visual::{Shaped, Visuals};
 fn threads(n: u32) -> SceneConfig {
     SceneConfig {
         worker_threads: Some(n),
+        ..SceneConfig::default()
     }
 }
 
