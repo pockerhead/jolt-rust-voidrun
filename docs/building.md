@@ -5,7 +5,8 @@ Release, and links them statically. The Rust bindings are committed, so a build 
 
 ## Requirements
 
-- Rust stable.
+- Rust 1.88 or newer (the `rust-version` of both crates, checked in CI). Raising it is a
+  minor release, noted in the changelog.
 - A C++ toolchain: MSVC on Windows, GCC or Clang elsewhere.
 - CMake 3.20 or newer.
 

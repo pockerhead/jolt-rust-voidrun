@@ -243,3 +243,55 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all --check
+
+  # The oldest Rust both crates declare (`rust-version`), checked with every target. The native
+  # library is the test job's default one on Linux, so the two jobs share the cache entry.
+  msrv:
+    name: MSRV (Rust 1.88)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      NATIVE_MANIFEST: oxijolt-sys-manifest.txt
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@1.88
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+
+      - name: Check pinned commits
+        id: pins
+        run: |
+          joltc=$(git rev-parse HEAD:crates/oxijolt-sys/vendor/joltc)
+          jolt=$(git rev-parse HEAD:crates/oxijolt-sys/vendor/JoltPhysics)
+          echo "joltc=$joltc" >> "$GITHUB_OUTPUT"
+          echo "jolt=$jolt" >> "$GITHUB_OUTPUT"
+
+      - name: Restore native library
+        id: native
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/joltc-prefix
+          key: joltc-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.joltc }}-${{ steps.pins.outputs.jolt }}-default-${{ hashFiles('crates/oxijolt-sys/native/**', 'crates/oxijolt-sys/build.rs', 'crates/oxijolt-sys/build/**') }}
+
+      - name: Build native library
+        if: steps.native.outputs.cache-hit != 'true'
+        run: |
+          CARGO_TARGET_DIR="$RUNNER_TEMP/native" cargo build -p oxijolt-sys
+          shopt -s nullglob
+          dirs=("$RUNNER_TEMP"/native/debug/build/oxijolt-sys-*/out/joltc)
+          [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/joltc-prefix"
+          cp -r "${dirs[0]}/lib" "${dirs[0]}/include" "${dirs[0]}/$NATIVE_MANIFEST" "$RUNNER_TEMP/joltc-prefix/"
+
+      - name: Use the native library
+        run: echo "JOLTC_LIB_DIR=$RUNNER_TEMP/joltc-prefix" >> "$GITHUB_ENV"
+
+      - run: cargo check --workspace --exclude playground --all-targets
