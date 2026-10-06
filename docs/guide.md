@@ -712,6 +712,63 @@ factor, initial velocity) at the part's bind pose in world space, and the joint 
   try for high falls.
 - **Lifecycle.** `remove_ragdoll` removes the parts and wakes what rested on them; `remove_body`
   refuses a part.
+- **Animation skeletons.** A `SkeletonMapper` (Jolt's `SkeletonMapper`) maps poses between the
+  ragdoll's skeleton and a detailed animation skeleton. Joints are matched by name, and the
+  animation skeleton keeps the ragdoll's hierarchy; it may add joints between the ragdoll's, above
+  its root and below its leaves. `map_reverse` turns an animation pose into a ragdoll pose from the
+  matched joints only: a target for `set_pose` and both drives. `map` turns the simulated
+  `RagdollRef::pose` and the animation's local pose into an animation pose to render. Unmatched
+  joints between a ragdoll joint and one of its children form a chain: the chain's start turns so
+  that the chain points at the child's ragdoll joint. Jolt builds one chain per start joint, along
+  the longest path (on a tie, toward the lowest ragdoll joint index); the joints between the start
+  and its other children keep their local transforms, as do extra roots (relative to the root
+  offset) and leaves. `TranslationLocks` keep animation joints at their neutral offset from their
+  parent, which hides the joints' stretch under load; Jolt applies them after the unmatched joints,
+  so an unmatched child of a locked joint follows the joint's unlocked position. Both neutral poses
+  describe the character standing in one place. A chain shorter than
+  `limits::MIN_MAPPED_CHAIN_LENGTH` is refused with `RagdollError::DegenerateChain`; far from the
+  pose's root offset, rounding makes the allowance larger
+  ([limits.md](limits.md#skeleton-mapper-chains)).
+
+```rust
+use oxijolt::*;
+
+# fn main() -> Result<(), RagdollError> {
+let joint = |name, parent| SkeletonJoint { name, parent };
+let ragdoll = Skeleton::new(&[joint("pelvis", None), joint("chest", Some(0))])?;
+let animation = Skeleton::new(&[
+    joint("pelvis", None),
+    joint("spine", Some(0)),
+    joint("chest", Some(1)),
+])?;
+// Joints along +Y at these heights above a root offset 1 m up.
+let pose = |heights: &[f32]| SkeletonPose {
+    root_offset: RVec3::new(0.0, 1.0, 0.0),
+    joints: heights
+        .iter()
+        .map(|&y| JointTransform {
+            translation: Vec3::new(0.0, y, 0.0),
+            rotation: Quat::IDENTITY,
+        })
+        .collect(),
+};
+let mapper = SkeletonMapper::new(
+    MappedSkeleton { skeleton: &ragdoll, neutral_pose: &pose(&[0.0, 0.5]) },
+    MappedSkeleton { skeleton: &animation, neutral_pose: &pose(&[0.0, 0.25, 0.5]) },
+    TranslationLocks::None,
+)?;
+
+// Animation to ragdoll: a target for `set_pose` or the drives.
+let target = mapper.map_reverse(&pose(&[0.0, 0.3, 0.6]))?;
+assert_eq!(target.joints.len(), 2);
+
+// Ragdoll to animation: the local pose (each joint relative to its parent) lays out the spine.
+let local = pose(&[0.0, 0.25, 0.25]).joints;
+let shown = mapper.map(&target, &local)?;
+assert_eq!(shown.joints.len(), 3);
+# Ok(())
+# }
+```
 
 ## A car and a ragdoll
 

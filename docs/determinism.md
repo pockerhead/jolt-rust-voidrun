@@ -98,6 +98,11 @@ Other gates of the same kind:
 - `tests/body_poses.rs` compares `PhysicsWorld::active_body_poses`, which returns the awake bodies
   in ascending `BodyId` order, for 1 and 4 workers and for caller job systems while a grid of
   cubes wakes and falls asleep again.
+- `tests/skeleton_mapper_determinism.rs` drops a humanoid onto a floor under the caller's gravity
+  while its motors follow the reverse-mapped pose of an animated skeleton every tick, and records
+  the bodies and both mapped poses, with 1 and 4 workers, in one process and in two; a changed
+  animation joint must change the digest from its tick on, and the bodies, recorded apart from
+  the mapped poses, in that tick.
 - `crates/oxijolt-sys/tests/determinism.rs` checks the raw layer with 1 and 4 workers.
 
 CI runs all of them in each of its configurations (default, `cross-platform-deterministic`,

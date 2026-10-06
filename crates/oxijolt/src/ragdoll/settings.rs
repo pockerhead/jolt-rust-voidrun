@@ -135,6 +135,18 @@ impl Skeleton {
             .position(|joint| joint == name)
             .map(|index| index as u32)
     }
+
+    pub(super) fn as_ptr(&self) -> *mut JPH_Skeleton {
+        self.skeleton.as_ptr()
+    }
+
+    pub(super) fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    pub(super) fn parents(&self) -> &[Option<u32>] {
+        &self.parents
+    }
 }
 
 /// The constraint that joins a ragdoll part to its parent part.
@@ -487,23 +499,27 @@ fn effective_mass_bound(parts: &[RagdollPart<'_>], stabilize: bool) -> f64 {
     }
 }
 
-/// One joint of a [`SkeletonPose`]: a translation relative to the pose's root offset and a world
-/// rotation.
+/// The rigid transform of one skeleton joint. In a [`SkeletonPose`] it is the joint's
+/// translation relative to the pose's root offset and its world rotation; in a local pose (the
+/// animation pose [`SkeletonMapper::map`](crate::SkeletonMapper::map) takes) it is relative to
+/// the parent joint.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JointTransform {
-    /// Position of the part's body origin relative to [`SkeletonPose::root_offset`], metres.
+    /// Translation, metres.
     pub translation: Vec3,
-    /// The part's rotation in world space, a unit quaternion.
+    /// Rotation, a unit quaternion.
     pub rotation: Quat,
 }
 
-/// A pose of every part of a ragdoll, in joint order (Jolt `Ragdoll::SetPose` and `GetPose`).
+/// A pose of every joint of a skeleton in model space, in joint order (Jolt
+/// `Ragdoll::SetPose` and `GetPose`, and the poses of a [`SkeletonMapper`](crate::SkeletonMapper)).
 ///
-/// Each part's body origin is at `root_offset + translation` with its world `rotation`. The
-/// split into an offset and `f32` translations keeps a pose far from the origin precise in
-/// double precision. [`RagdollRef::pose`](crate::RagdollRef::pose) puts the root offset at
-/// part 0, so a pose read back equals one set with a nonzero root joint translation in the
-/// world transforms it describes, not field by field.
+/// Each joint is at `root_offset + translation` with its world `rotation`; for a ragdoll each
+/// joint is a part's body origin. The split into an offset and `f32` translations keeps a pose
+/// far from the origin precise in double precision.
+/// [`RagdollRef::pose`](crate::RagdollRef::pose) puts the root offset at part 0, so a pose read
+/// back equals one set with a nonzero root joint translation in the world transforms it
+/// describes, not field by field.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkeletonPose {
     /// World position the translations are relative to, metres.
@@ -523,12 +539,13 @@ impl SkeletonPose {
         )
     }
 
-    /// Checks the pose for a ragdoll of `joint_count` parts: one finite transform per joint with
-    /// a unit rotation, and a root offset and world positions within [`limits::MAX_POSITION`].
+    /// Checks the pose for a skeleton of `joint_count` joints: one finite transform per joint
+    /// with a unit rotation, and a root offset and world positions within
+    /// [`limits::MAX_POSITION`].
     pub(crate) fn validate(&self, joint_count: usize) -> Result<(), RagdollError> {
         let invalid = |what| Err(RagdollError::InvalidValue(what));
         if self.joints.len() != joint_count {
-            return invalid("a pose has exactly one transform per ragdoll part");
+            return invalid("a pose has exactly one transform per skeleton joint");
         }
         if !limits::is_in_frame(self.root_offset) {
             return invalid("pose root offset must be finite and within limits::MAX_POSITION");
@@ -546,6 +563,32 @@ impl SkeletonPose {
         }
         Ok(())
     }
+}
+
+/// Checks a local pose of a skeleton of `joint_count` joints: one transform per joint, each
+/// with a unit rotation and every translation component within [`limits::MAX_POSITION`].
+pub(crate) fn validate_local(
+    joints: &[JointTransform],
+    joint_count: usize,
+) -> Result<(), RagdollError> {
+    let invalid = |what| Err(RagdollError::InvalidValue(what));
+    if joints.len() != joint_count {
+        return invalid("a pose has exactly one transform per skeleton joint");
+    }
+    for joint in joints {
+        let t = joint.translation;
+        if !limits::is_in_frame(RVec3::new(
+            Real::from(t.x),
+            Real::from(t.y),
+            Real::from(t.z),
+        )) {
+            return invalid("local translations must be finite and within limits::MAX_POSITION");
+        }
+        if !joint.rotation.is_valid_rotation() {
+            return invalid("pose rotations must be finite unit quaternions");
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

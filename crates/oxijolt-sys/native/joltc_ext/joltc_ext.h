@@ -421,4 +421,45 @@ JPH_CAPI JPH_BodyID JPH_SoftBodyManifold_GetContactBodyID(const JPH_SoftBodyMani
 JPH_CAPI uint32_t JPH_SoftBodyManifold_GetNumSensorContacts(const JPH_SoftBodyManifold* manifold);
 JPH_CAPI JPH_BodyID JPH_SoftBodyManifold_GetSensorContactBodyID(const JPH_SoftBodyManifold* manifold, uint32_t index);
 
+/* SkeletonMapper */
+/* Like joltc's JPH_SkeletonMapper_Initialize, _LockAllTranslations, _LockTranslations, _Map and
+   _MapReverse, for JPH_Mat4 arrays of any alignment: every array is copied through 16-byte aligned
+   storage. Outputs are written only on success and only after every input was copied, so an output
+   may alias an input. Each function returns false, and changes and writes nothing, for an input that
+   would make Jolt assert or read out of bounds; the cases are listed per function. The mapper keeps
+   no pointer to the skeletons or poses. Skeleton 1 is the ragdoll (low detail) skeleton, skeleton 2
+   the animation skeleton; poses are matrices whose bottom row is exactly (0, 0, 0, 1).
+   Preconditions, not checked: live handles, arrays of at least count elements (lockedTranslations:
+   count2 bools), count2 small enough for the bool array LockAllTranslations allocates on the stack,
+   and the same skeleton 2 for every call on one mapper (indices are range-checked, their meaning is
+   not). */
+/* false unless 1 <= count1 <= count2, the counts equal the skeletons' joint counts, both skeletons
+   list parents first, every matrix is finite with that bottom row, and the mapper was never
+   initialised. Joints are mapped by name. */
+JPH_CAPI bool JPH_SkeletonMapper_Initialize2(JPH_SkeletonMapper* mapper, const JPH_Skeleton* skeleton1, const JPH_Mat4* neutralPose1, uint32_t count1, const JPH_Skeleton* skeleton2, const JPH_Mat4* neutralPose2, uint32_t count2);
+/* false unless count2 is skeleton 2's joint count, the skeleton lists parents first, every matrix is
+   finite with that bottom row, the mapper has a mapping whose skeleton 2 joint is below count2, and
+   it has no locked translations yet. */
+JPH_CAPI bool JPH_SkeletonMapper_LockAllTranslations2(JPH_SkeletonMapper* mapper, const JPH_Skeleton* skeleton2, const JPH_Mat4* neutralPose2, uint32_t count2);
+/* As JPH_SkeletonMapper_LockAllTranslations2, with these joints of skeleton 2 instead of every
+   descendant of the first mapped joint; false also when a root (a joint without parent) is flagged,
+   because Map sets a locked joint from its parent, and when the mapper was never initialised. */
+JPH_CAPI bool JPH_SkeletonMapper_LockTranslations2(JPH_SkeletonMapper* mapper, const JPH_Skeleton* skeleton2, const bool* lockedTranslations, const JPH_Mat4* neutralPose2, uint32_t count2);
+/* Pose 1 (model space) and pose 2 (local space) to pose 2 (model space). *outDegenerateJoint1 (may be
+   null) is -1, or the skeleton 1 joint at the end of a chain this call refused. false unless the
+   mapper has a mapping, every index it stores is below the counts and every stored transform is
+   finite with that bottom row, each skeleton 2 joint is mapped at most once, every input matrix is
+   finite with that bottom row, and every chain is usable: its desired direction (between the skeleton
+   1 joints) is exactly zero or at least 1 mm long, its actual direction (along the skeleton 2 chain)
+   is at least 1 mm long after an allowance for rounding, both are at most 1e18 long (the actual one
+   with its allowance), their lengths' product is at most 4e18, and a norm bound on the chain's
+   products stays below 1e30. The derivation is in docs/limits.md of the oxijolt repository, section
+   "Skeleton mapper chains". */
+JPH_CAPI bool JPH_SkeletonMapper_Map2(const JPH_SkeletonMapper* mapper, const JPH_Mat4* pose1ModelSpace, uint32_t count1, const JPH_Mat4* pose2LocalSpace, uint32_t count2, JPH_Mat4* outPose2ModelSpace, int* outDegenerateJoint1);
+/* Pose 2 (model space) to pose 1 (model space) through the direct mappings; a skeleton 1 joint
+   without a mapping comes back as identity. false unless the mapper has a mapping, every mapping is
+   below the counts with finite transforms of that bottom row, and every input matrix is finite with
+   that bottom row. */
+JPH_CAPI bool JPH_SkeletonMapper_MapReverse2(const JPH_SkeletonMapper* mapper, const JPH_Mat4* pose2ModelSpace, uint32_t count2, JPH_Mat4* outPose1ModelSpace, uint32_t count1);
+
 #endif /* JOLT_C_EXT_H_ */

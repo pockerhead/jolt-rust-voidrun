@@ -259,6 +259,16 @@ pub const MAX_LEVER_ARM_RATIO: f32 = 1000.0;
 /// [docs/limits.md#soft-body-edge-length]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#soft-body-edge-length
 pub const MIN_SOFT_BODY_EDGE_LENGTH: f32 = 1.0e-3;
 
+/// Shortest direction of a skeleton mapper chain, in metres: the ragdoll joints at its ends must
+/// be exactly together or at least this far apart, and the animation chain between them at least
+/// this long. A constant of the native mapper, not a setting; shorter chains give
+/// [`RagdollError::DegenerateChain`](crate::RagdollError::DegenerateChain).
+///
+/// See [docs/limits.md#skeleton-mapper-chains].
+///
+/// [docs/limits.md#skeleton-mapper-chains]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#skeleton-mapper-chains
+pub const MIN_MAPPED_CHAIN_LENGTH: f32 = 1.0e-3;
+
 /// Largest compliance (inverse stiffness) of a soft body constraint, in the units of the
 /// constraint's own equation; 0 is rigid. It keeps Jolt's compliance terms finite; it does not
 /// make the solver stable at every compliance.

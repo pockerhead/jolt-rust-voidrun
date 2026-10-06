@@ -3,6 +3,7 @@
 // Each test file compiles this module on its own and uses a different subset.
 #![allow(dead_code)]
 
+pub mod animation;
 pub mod constraint_kinds;
 pub mod controls;
 pub mod determinism;

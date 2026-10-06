@@ -84,7 +84,7 @@ pub use crate::{CollideShape, CollideShapeHit, PointHit, QueryFilter, RayCast, R
 pub use crate::{CompoundChild, HeightFieldSettings, PhysicsMaterial, Shape, SubShapeId};
 pub use crate::{DroppedTriangles, MeshBuildQuality, MeshSettings};
 pub use crate::{PhysicsWorld, StepReport, WorldSettings, WorldState};
-pub use crate::{RagdollId, RagdollSettings, Skeleton};
+pub use crate::{RagdollId, RagdollSettings, Skeleton, SkeletonMapper};
 pub use crate::{ShapeCastHit, SoftBodySettings, SoftBodySharedSettings};
 
 /// The math types: [`Vec3`](crate::Vec3), [`RVec3`](crate::RVec3), [`Quat`](crate::Quat) and
