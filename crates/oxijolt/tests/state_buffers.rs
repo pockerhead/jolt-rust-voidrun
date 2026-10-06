@@ -1,10 +1,12 @@
-//! Rollback with reused state buffers: `save_state_into` gives the same states as `save_state`,
-//! a buffer belongs to the world that saved into it last, and a ring of buffers rolls back over
-//! a mispredicted detour and replays bit for bit with 1 and 4 workers.
+//! Rollback with reused state buffers and selected bodies: `save_state_into` gives the same
+//! states as `save_state`, a buffer belongs to the world that saved into it last, a ring of
+//! buffers rolls back over a mispredicted detour and replays bit for bit with 1 and 4 workers,
+//! movable states leave static bodies out, and `restore_state_of` restores the selected bodies
+//! only, the same way with 1 and 4 workers in two processes.
 
 mod common;
 
-use common::determinism::{assert_same, Digest};
+use common::determinism::{assert_same, child_request, digest_in_child, finish_child, Digest};
 use common::rollback::{Inputs, RollbackScene};
 use oxijolt::*;
 
@@ -337,5 +339,267 @@ fn a_movable_state_replays_like_a_full_one() {
             &first,
             &from_movable,
         );
+    }
+}
+
+/// Every body of `scene` with its bits now, as [`RollbackScene::body_bits`] writes them.
+fn bits_by_body(scene: &RollbackScene) -> Vec<(BodyId, Vec<u8>)> {
+    scene
+        .all_bodies()
+        .into_iter()
+        .zip(scene.body_bits())
+        .collect()
+}
+
+/// Asserts that every body of `scene` has the bits `expected` gives for it.
+fn assert_bits(scene: &RollbackScene, expected: impl Fn(BodyId) -> Vec<u8>) {
+    for (id, bits) in bits_by_body(scene) {
+        assert!(bits == expected(id), "{id:?}");
+    }
+}
+
+/// The bits of `id` in `bits`.
+fn bits_of(bits: &[(BodyId, Vec<u8>)], id: BodyId) -> Vec<u8> {
+    bits.iter().find(|(body, _)| *body == id).unwrap().1.clone()
+}
+
+/// A scene run to the save point and saved whole, then taken through a detour and a few
+/// mispredicted ticks: the scene, the state and the bits at the save.
+fn saved_and_moved_on() -> (RollbackScene, WorldState, Vec<(BodyId, Vec<u8>)>) {
+    let mut scene = RollbackScene::new(1);
+    for _ in 0..BEFORE {
+        scene.tick(Inputs::PLAYED);
+    }
+    let state = scene.world.save_state();
+    let at_save = bits_by_body(&scene);
+    scene.detour();
+    for _ in 0..10 {
+        scene.tick(Inputs::PREDICTED);
+    }
+    (scene, state, at_save)
+}
+
+#[test]
+fn restoring_some_bodies_leaves_the_others_bit_for_bit() {
+    let (mut scene, state, at_save) = saved_and_moved_on();
+    let restored = [scene.bodies[2], scene.sleeper];
+    let inner = scene.inner_body();
+    let now = bits_by_body(&scene);
+    assert_ne!(
+        bits_of(&now, scene.bodies[2]),
+        bits_of(&at_save, scene.bodies[2])
+    );
+    assert!(!scene.world.body(scene.sleeper).unwrap().is_sleeping());
+    scene
+        .world
+        .restore_state_of(&state, BodySelection::Only(&restored))
+        .unwrap();
+    assert_bits(&scene, |id| {
+        if restored.contains(&id) || id == inner {
+            bits_of(&at_save, id)
+        } else {
+            bits_of(&now, id)
+        }
+    });
+    assert!(scene.world.body(scene.sleeper).unwrap().is_sleeping());
+}
+
+#[test]
+fn restoring_movable_bodies_keeps_static_bodies_where_they_are() {
+    let (mut scene, state, at_save) = saved_and_moved_on();
+    let moved = RVec3::new(-9.0, 1.0, 5.0);
+    scene
+        .world
+        .body_mut(scene.wall)
+        .unwrap()
+        .set_position(moved, Activation::DontActivate)
+        .unwrap();
+    let now = bits_by_body(&scene);
+    scene
+        .world
+        .restore_state_of(&state, BodySelection::Movable)
+        .unwrap();
+    let statics = scene.static_bodies();
+    assert_bits(&scene, |id| {
+        if statics.contains(&id) {
+            bits_of(&now, id)
+        } else {
+            bits_of(&at_save, id)
+        }
+    });
+    assert_eq!(scene.world.body(scene.wall).unwrap().position(), moved);
+}
+
+#[test]
+fn a_selected_body_the_state_does_not_hold_keeps_its_state() {
+    let mut scene = RollbackScene::new(1);
+    for _ in 0..BEFORE {
+        scene.tick(Inputs::PLAYED);
+    }
+    let (held, not_held) = (scene.bodies[2], scene.bodies[3]);
+    let state = scene
+        .world
+        .save_state_of(BodySelection::Only(&[held]))
+        .unwrap();
+    let at_save = bits_by_body(&scene);
+    scene.detour();
+    let now = bits_by_body(&scene);
+    scene
+        .world
+        .restore_state_of(&state, BodySelection::Only(&[not_held]))
+        .unwrap();
+    let inner = scene.inner_body();
+    assert_bits(&scene, |id| {
+        if id == inner {
+            bits_of(&at_save, id)
+        } else {
+            bits_of(&now, id)
+        }
+    });
+}
+
+#[test]
+fn inner_bodies_follow_their_characters() {
+    let (mut scene, state, at_save) = saved_and_moved_on();
+    let inner = scene.inner_body();
+    assert_ne!(
+        bits_of(&bits_by_body(&scene), inner),
+        bits_of(&at_save, inner)
+    );
+    scene
+        .world
+        .restore_state_of(&state, BodySelection::Only(&[scene.bodies[2]]))
+        .unwrap();
+    assert_eq!(
+        bits_of(&bits_by_body(&scene), inner),
+        bits_of(&at_save, inner)
+    );
+}
+
+#[test]
+fn a_refused_filtered_restore_changes_nothing() {
+    let mut scene = RollbackScene::new(1);
+    let removed = add_extra_cube(&mut scene);
+    scene.world.remove_body(removed).unwrap();
+    for _ in 0..5 {
+        scene.tick(Inputs::PLAYED);
+    }
+    let state = scene.world.save_state();
+    let other = RollbackScene::new(1);
+    let foreign_state = other.world.save_state();
+    scene.tick(Inputs::PREDICTED);
+    let now = scene.body_bits();
+    let foreign = other.bodies[1];
+    let cube = scene.bodies[1];
+    let refusals = [
+        (
+            scene
+                .world
+                .restore_state_of(&foreign_state, BodySelection::Movable),
+            StateError::WrongWorld,
+        ),
+        (
+            scene
+                .world
+                .restore_state_of(&WorldState::new(), BodySelection::Only(&[cube])),
+            StateError::WrongWorld,
+        ),
+        (
+            scene
+                .world
+                .restore_state_of(&state, BodySelection::Only(&[cube, removed])),
+            StateError::Body(BodyError::NotFound(removed)),
+        ),
+        (
+            scene
+                .world
+                .restore_state_of(&state, BodySelection::Only(&[foreign])),
+            StateError::Body(BodyError::WrongWorld(foreign)),
+        ),
+    ];
+    for (result, error) in refusals {
+        assert_eq!(result, Err(error));
+    }
+    assert!(scene.body_bits() == now, "a refusal changed the world");
+}
+
+#[test]
+fn a_filtered_restore_after_a_structural_change_is_refused() {
+    let mut scene = RollbackScene::new(1);
+    scene.tick(Inputs::PLAYED);
+    let state = scene.world.save_state();
+    add_extra_cube(&mut scene);
+    let now = scene.body_bits();
+    for selection in [
+        BodySelection::Movable,
+        BodySelection::Only(&[scene.sleeper]),
+    ] {
+        assert_eq!(
+            scene.world.restore_state_of(&state, selection),
+            Err(StateError::WorldChanged)
+        );
+    }
+    assert!(scene.body_bits() == now, "the refusal changed the world");
+}
+
+#[test]
+fn restoring_all_bodies_is_restore_state() {
+    let (mut scene, state, at_save) = saved_and_moved_on();
+    scene
+        .world
+        .restore_state_of(&state, BodySelection::All)
+        .unwrap();
+    assert!(bits_by_body(&scene) == at_save);
+}
+
+/// The filtered rollback the cross-process gate runs: a full save, a detour, a restore of the
+/// `variant` selection (`movable` or `only`), then 120 recorded ticks.
+fn filtered_rollback(threads: u32, variant: &str) -> Digest {
+    let mut scene = RollbackScene::new(threads);
+    for _ in 0..BEFORE {
+        scene.tick(Inputs::PLAYED);
+    }
+    let state = scene.world.save_state();
+    scene.detour();
+    for _ in 0..10 {
+        scene.tick(Inputs::PREDICTED);
+    }
+    let only = [
+        scene.bodies[1],
+        scene.bodies[5],
+        scene.sleeper,
+        scene.platform,
+    ];
+    let selection = match variant {
+        "movable" => BodySelection::Movable,
+        "only" => BodySelection::Only(&only),
+        _ => panic!("unknown variant {variant}"),
+    };
+    scene.world.restore_state_of(&state, selection).unwrap();
+    recorded_run(&mut scene, Inputs::PLAYED, 120)
+}
+
+#[test]
+#[ignore = "child process of the filtered rollback gate"]
+fn state_buffers_child() {
+    let Some((scenario, threads, variant)) = child_request() else {
+        return;
+    };
+    assert_eq!(scenario, "filtered", "unknown scenario");
+    finish_child(&filtered_rollback(threads, &variant));
+}
+
+#[test]
+fn a_filtered_restore_replays_identically_across_processes() {
+    for variant in ["movable", "only"] {
+        let one = digest_in_child("state_buffers_child", "filtered", 1, variant);
+        let four = digest_in_child("state_buffers_child", "filtered", 4, variant);
+        assert_eq!(one.ticks.len(), 120);
+        assert_same(
+            &format!("filtered restore ({variant}), 1 vs 4 workers in two processes"),
+            &one,
+            &four,
+        );
+        assert_ne!(one.ticks[0], one.ticks[119], "the scene moves");
     }
 }

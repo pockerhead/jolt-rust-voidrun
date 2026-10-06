@@ -1,14 +1,15 @@
-//! Which bodies a world state saves: [`BodySelection`] and the id lists it resolves to.
+//! Which bodies a world state saves or restores: [`BodySelection`] and the id lists it resolves to.
 
 use oxijolt_sys::*;
 
 use crate::body::INVALID_BODY_ID;
 use crate::{BodyId, MotionType, PhysicsWorld, StateError};
 
-/// Which bodies [`PhysicsWorld::save_state_of`] and [`PhysicsWorld::save_state_into`] save.
+/// Which bodies [`PhysicsWorld::save_state_of`] and [`PhysicsWorld::save_state_into`] save, and
+/// which bodies [`PhysicsWorld::restore_state_of`] restores.
 ///
 /// Global state, contacts, constraints, characters and pending contact-cache invalidations are
-/// saved whole whatever the selection.
+/// saved and restored whole whatever the selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BodySelection<'a> {
@@ -68,6 +69,13 @@ impl PhysicsWorld {
             unsafe { JPH_PhysicsSystem_GetBodies(self.system.as_ptr(), ids.as_mut_ptr(), count) };
         }
         ids.sort_unstable();
+    }
+
+    /// Writes the raw ids of the bodies outside `selected` (ascending raw ids) into `ids`,
+    /// ascending, leaving out characters' inner bodies, which follow their characters.
+    pub(super) fn unselected_body_ids_into(&self, selected: &[u32], ids: &mut Vec<u32>) {
+        self.all_body_ids_into(ids);
+        ids.retain(|raw| selected.binary_search(raw).is_err() && !self.inner_bodies.contains(raw));
     }
 
     /// The motion type of the body with the raw id `raw`, one of this world's bodies.

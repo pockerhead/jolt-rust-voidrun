@@ -210,6 +210,74 @@ impl PhysicsWorld {
     /// not saved left aside; the tests check this with 1 and 4 worker threads, in one process
     /// and across two.
     pub fn restore_state(&mut self, state: &WorldState) -> Result<(), StateError> {
+        self.check_restorable(state)?;
+        self.restore_checked(state)
+    }
+
+    /// Returns the world to `state` for the bodies `bodies` selects; every other body keeps its
+    /// current state bit for bit. Global state, contacts, constraints, characters and pending
+    /// contact-cache invalidations come from `state` whole, as in
+    /// [`restore_state`](Self::restore_state). A character's inner body always counts as
+    /// selected, because restoring the character moves it. A selected body that `state` does not
+    /// hold (see [`save_state_of`](Self::save_state_of)) keeps its current state too.
+    ///
+    /// Calls that are the same give the same result for any number of worker threads, but the
+    /// world is not one that never left `state`: the restored contacts were made at the saved
+    /// poses, also for bodies that now stay where they are. [`BodySelection::All`] is
+    /// [`restore_state`](Self::restore_state).
+    ///
+    /// Fails like `restore_state`, and with [`StateError::Body`] for an id of another world or a
+    /// removed body; the world is unchanged then.
+    ///
+    /// ```
+    /// use oxijolt::*;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    /// let ball_shape = Shape::new_sphere(0.5)?;
+    /// let settings = BodySettings::new_dynamic().position(RVec3::new(0.0, 2.0, 0.0));
+    /// let ball = world.create_body(&ball_shape, &settings)?;
+    /// let other = world.create_body(&ball_shape, &settings.position(RVec3::new(3.0, 2.0, 0.0)))?;
+    ///
+    /// let saved = world.save_state();
+    /// assert!(world.step(1.0 / 60.0)?.is_complete());
+    /// let other_now = world.body(other)?.position();
+    ///
+    /// world.restore_state_of(&saved, BodySelection::Only(&[ball]))?;
+    /// assert_eq!(world.body(ball)?.position(), RVec3::new(0.0, 2.0, 0.0));
+    /// assert_eq!(world.body(other)?.position(), other_now);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn restore_state_of(
+        &mut self,
+        state: &WorldState,
+        bodies: BodySelection<'_>,
+    ) -> Result<(), StateError> {
+        self.check_restorable(state)?;
+        let mut selection = Vec::new();
+        let Some(selected) = self.select_bodies(bodies, &mut selection)? else {
+            return self.restore_checked(state);
+        };
+        let mut kept = Vec::new();
+        self.unselected_body_ids_into(selected, &mut kept);
+        let mut current = Vec::new();
+        self.record_bodies_into(&kept, &mut current);
+
+        self.restore_checked(state)?;
+        // SAFETY: `current` was recorded above from this world, and `restore_checked` adds and
+        // removes nothing.
+        let restored = unsafe { self.restore_jolt(&current) };
+        debug_assert!(restored, "the unselected bodies failed to restore");
+        if restored {
+            Ok(())
+        } else {
+            Err(StateError::RestoreFailed)
+        }
+    }
+
+    /// `Ok` if `state` restores into this world now: saved by it at the current structure.
+    fn check_restorable(&self, state: &WorldState) -> Result<(), StateError> {
         if state.world != Some(self.tag) {
             return Err(StateError::WrongWorld);
         }
@@ -221,7 +289,11 @@ impl PhysicsWorld {
         {
             return Err(StateError::WorldChanged);
         }
+        Ok(())
+    }
 
+    /// Restores `state`, which [`check_restorable`](Self::check_restorable) accepted.
+    fn restore_checked(&mut self, state: &WorldState) -> Result<(), StateError> {
         // The characters go first, so that the system restore has the last word on their inner
         // bodies: restoring a character moves its inner body to the character's pose, which
         // resets that body's sleep timer. Inner bodies are kinematic and Jolt runs no sleep test
@@ -239,7 +311,10 @@ impl PhysicsWorld {
             self.retain_contact_materials(id);
         }
 
-        let restored = self.restore_jolt(&state.jolt);
+        // SAFETY: `state` was saved by this world (`record_into`, the only writer of a
+        // `WorldState`'s stream) at the current structure epoch, which `check_restorable`
+        // checked.
+        let restored = unsafe { self.restore_jolt(&state.jolt) };
         debug_assert!(restored, "a saved world state failed to restore");
         if restored {
             self.pending_cache_invalidations = state.cache_invalidations.iter().copied().collect();
