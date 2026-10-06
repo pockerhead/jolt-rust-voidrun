@@ -187,13 +187,58 @@ fn neutral_poses_are_validated() {
     assert_invalid(build(&ragdoll_neutral(), &out_of_frame));
 
     // Root offsets at opposite edges of the frame: re-expressed translations of 2 *
-    // MAX_POSITION are accepted (mapping across that distance rounds in `f32`, so the neutral
-    // poses belong in one place).
+    // MAX_POSITION are accepted, but the first map of the ragdoll's neutral pose turns a chain
+    // 2 * MAX_POSITION from the root offset. Jolt's `f32` transforms round that to millimetres
+    // with `f32` positions and to metres with the `double-precision` feature, where the guard
+    // refuses the half-metre chain.
     let mut far_ragdoll = ragdoll_neutral();
     far_ragdoll.root_offset.x = -limits::MAX_POSITION;
     let mut far_animation = animation_neutral();
     far_animation.root_offset.x = limits::MAX_POSITION;
-    assert!(build(&far_ragdoll, &far_animation).is_ok());
+    let far = build(&far_ragdoll, &far_animation).unwrap();
+    let first = far.map(&far_ragdoll, &animation_local());
+    if core::mem::size_of::<Real>() == 8 {
+        assert_eq!(first.err(), Some(RagdollError::DegenerateChain(1)));
+    } else {
+        assert!(first.is_ok(), "{first:?}");
+    }
+}
+
+#[test]
+fn reexpressed_translations_round_past_twice_the_frame_by_ulps() {
+    // Neutral positions at the frame's edge with root offsets at its opposite edges; the
+    // animation's offset is one ulp inside, and with `f32` positions a 0.7 mm translation that
+    // rounds away in its world position. Re-expressing rounds past 2 * MAX_POSITION there, within
+    // the documented envelope, and the mapper accepts it.
+    let edge = limits::MAX_POSITION;
+    // `Real` is `f32` without the `double-precision` feature, so the cast is a no-op there.
+    #[allow(clippy::unnecessary_cast)]
+    let twice = (2.0 * edge) as f32;
+    let mut far_ragdoll = ragdoll_neutral();
+    far_ragdoll.root_offset.x = -edge;
+    for joint in &mut far_ragdoll.joints {
+        joint.translation.x = twice;
+    }
+    let single = core::mem::size_of::<Real>() == 4;
+    let mut far_animation = animation_neutral();
+    far_animation.root_offset.x = edge - edge * Real::EPSILON;
+    for joint in &mut far_animation.joints {
+        joint.translation.x = if single { 0.0007 } else { 0.0 };
+    }
+    let reexpressed = reexpress(&far_animation, far_ragdoll.root_offset);
+    let envelope = twice * (1.0 + 2.0_f32.powi(-22));
+    for joint in &reexpressed {
+        assert!(joint.translation.x <= envelope, "{:?}", joint.translation);
+        if single {
+            assert!(joint.translation.x > twice, "{:?}", joint.translation);
+        }
+    }
+    assert!(mapper_with(
+        (&ragdoll(), &far_ragdoll),
+        (&animation(), &far_animation),
+        TranslationLocks::None,
+    )
+    .is_ok());
 }
 
 #[test]

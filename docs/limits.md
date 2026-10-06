@@ -1143,6 +1143,25 @@ direction came out of `Map` as NaN rotations. Jolt is built with `/fp:fast` on M
 `Mat44::sRotation`'s `IsNormalized` assert did not fire for the NaN quaternion, so an asserts build
 does not catch it either.
 
+## Skeleton mapper neutral poses
+
+`SkeletonMapper::new` re-expresses the animation's neutral pose relative to the ragdoll neutral
+pose's root offset: `(o − r) + t` per component, with both root offsets and every world position
+`o + t` within `MAX_POSITION` (the poses' own check). Exactly, that is a difference of two positions
+in the frame, at most `2 MAX_POSITION`. The computed value rounds twice in `Real` and once to `f32`
+and the world position it was checked through rounded too, so it is at most
+`2 MAX_POSITION (1 + 2^-22)` and finite, and can exceed `2 MAX_POSITION` by a few ulps: with `f32`
+positions, root offsets −5000 and 4999.99951171875 m and an animation translation of 0.7 mm (its
+world position rounds to 5000 m) give 10000.0009765625 m
+(`reexpressed_translations_round_past_twice_the_frame_by_ulps`). Nothing is refused for it.
+
+`new` does not check that `map` can turn the chains of the neutral poses. Neutral poses far apart
+put their distance into the transforms between the skeletons, so a mapped chain lies that far from
+the root offset, where the chain allowance above grows. With the root offsets at opposite edges of
+the frame, the first `map` of the ragdoll's neutral pose turns a half-metre chain 2 `MAX_POSITION`
+from the root offset: accepted with `f32` positions, refused as `DegenerateChain` with the
+`double-precision` feature (`neutral_poses_are_validated`).
+
 ## Six-DOF translation limits
 
 Jolt corrects a violated limit by the distance beyond it times the effective mass

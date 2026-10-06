@@ -28,7 +28,14 @@ pub struct MappedSkeleton<'a> {
     pub skeleton: &'a Skeleton,
     /// The skeleton in its neutral pose, in model space. The two neutral poses describe the
     /// character standing in one place, so that joints of the same name are where they belong
-    /// to each other.
+    /// to each other. [`SkeletonMapper::new`] does not check that they are close: neutral poses
+    /// far apart put long translations into the transforms between the skeletons, and
+    /// [`SkeletonMapper::map`] then refuses chains it can no longer turn reliably
+    /// ([`RagdollError::DegenerateChain`]).
+    ///
+    /// See [docs/limits.md#skeleton-mapper-neutral-poses].
+    ///
+    /// [docs/limits.md#skeleton-mapper-neutral-poses]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#skeleton-mapper-neutral-poses
     pub neutral_pose: &'a SkeletonPose,
 }
 
@@ -334,8 +341,9 @@ fn lock_mask(joints: &[u32], mapped_root: u32, count: usize) -> Result<Vec<bool>
 }
 
 /// `pose`'s joints relative to `root_offset` instead of its own root offset. Both poses were
-/// validated, so every component is a difference of two positions in the frame: at most
-/// `2 * limits::MAX_POSITION`, finite as `f32`.
+/// validated, so every component is a difference of two positions in the frame plus rounding:
+/// at most `2 * limits::MAX_POSITION * (1 + 2^-22)`, finite as `f32` (docs/limits.md, "Skeleton
+/// mapper neutral poses").
 fn reexpress(pose: &SkeletonPose, root_offset: RVec3) -> Vec<JointTransform> {
     let o = pose.root_offset;
     // `Real` is `f32` without the `double-precision` feature, so the cast is a no-op there.
