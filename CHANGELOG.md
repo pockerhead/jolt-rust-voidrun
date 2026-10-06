@@ -17,6 +17,8 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - `VehicleRef::wheel_world_transform(index)`: a wheel's centre and rotation in world space (Jolt's
   `GetWheelWorldTransform`) for a wheel model whose axle is its local Y, so a renderer can draw
   wheels from what the binding reports.
+- `PhysicsWorld::body_ids()`: every body of the world in ascending id order (Jolt's
+  `PhysicsSystem::GetBodies`), soft bodies, ragdoll parts and characters' inner bodies included.
 - Playground (`examples/playground`, [guide](docs/playground.md)): ten scenes in a window that show
   the binding's features, a headless mode that runs every scene's script and prints a digest
   (compared with 1 and 4 worker threads in CI), and a record mode that makes the README's GIFs and

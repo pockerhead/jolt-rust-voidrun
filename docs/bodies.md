@@ -16,6 +16,10 @@ body and its shape together. In the playground every body is created next to the
 description of its shape for drawing, so such a call would remove no line there, and it would hide
 the sharing.
 
+`PhysicsWorld::body_ids()` lists every body of the world in ascending id order, soft bodies,
+ragdoll parts and characters' inner bodies included, for example to fold the whole world into a
+digest that compares runs.
+
 ## Impulses and forces
 
 A force (`add_force`) acts over the next step and is cleared after it. An impulse changes the

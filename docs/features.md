@@ -10,7 +10,8 @@ what is planned next.
   (`MutableCompound`); physics materials with user data;
   forces, sleeping, continuous collision; impulses, kinematic moves, waking and sleeping on demand,
   sensors, per-body user data, locked axes (allowed degrees of freedom), shape and motion type
-  changes, contact-cache invalidation, and buoyancy and drag in a fluid ([guide](bodies.md)).
+  changes, contact-cache invalidation, buoyancy and drag in a fluid, and the list of every body
+  of a world (`PhysicsWorld::body_ids`) ([guide](bodies.md)).
 - Collision groups: tables of sub groups that say which pairs collide, given to rigid and soft
   bodies at creation, for ragdolls, chains and vehicles that ignore their driver
   ([guide](bodies.md#collision-groups)).

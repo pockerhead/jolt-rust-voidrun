@@ -54,6 +54,36 @@ fn ids_follow_insertion_order() {
 }
 
 #[test]
+fn body_ids_list_every_body_in_id_order() {
+    let mut world = world(Vec3::ZERO, 1);
+    assert!(world.body_ids().is_empty());
+    let [a, _, c, d] = id_history(&mut world);
+    // `d` reuses the freed index 1 with sequence 2, so its raw id sorts after `c`'s.
+    assert_eq!(world.body_ids(), [a, c, d]);
+
+    let inner_shape = Shape::new_capsule(0.6, 0.3).unwrap();
+    let settings = CharacterSettings::humanoid(1.8, 0.3)
+        .unwrap()
+        .inner_body(Some(InnerBody {
+            shape: &inner_shape,
+            object_layer: ObjectLayer::MOVING,
+        }));
+    world
+        .create_character(&settings, RVec3::new(20.0, 0.0, 0.0), Quat::IDENTITY)
+        .unwrap();
+    let ids = world.body_ids();
+    assert_eq!(ids.len() as u32, world.body_count());
+    assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+    let inner: Vec<BodyId> = ids
+        .iter()
+        .copied()
+        .filter(|id| ![a, c, d].contains(id))
+        .collect();
+    assert_eq!(inner.len(), 1, "the character's inner body is listed");
+    assert!(world.body(inner[0]).is_ok());
+}
+
+#[test]
 fn foreign_and_stale_ids_are_rejected() {
     let mut a = world(Vec3::ZERO, 1);
     let mut b = world(Vec3::ZERO, 1);
