@@ -115,11 +115,13 @@ pub enum SceneKind {
     Vehicles,
     /// A dynamic body pile with impact estimates and sleeping.
     Pile,
+    /// Ragdolls that settle, and a puppet driven through a skeleton mapper.
+    Ragdolls,
 }
 
 impl SceneKind {
     /// Every scene in menu order.
-    pub const ALL: [Self; 3] = [Self::Character, Self::Vehicles, Self::Pile];
+    pub const ALL: [Self; 4] = [Self::Character, Self::Vehicles, Self::Pile, Self::Ragdolls];
 
     /// The command-line name, the number key and the menu title.
     fn about(self) -> (&'static str, char, &'static str) {
@@ -127,6 +129,7 @@ impl SceneKind {
             Self::Character => ("character", '1', "Character on terrain"),
             Self::Vehicles => ("vehicles", '2', "Car, tank and motorcycle"),
             Self::Pile => ("pile", '3', "Body pile and impacts"),
+            Self::Ragdolls => ("ragdolls", '4', "Ragdolls and a mapped puppet"),
         }
     }
 
@@ -156,6 +159,7 @@ impl SceneKind {
             Self::Character => Box::new(scenes::character::Character::new(config, generation)?),
             Self::Vehicles => Box::new(scenes::vehicles::Vehicles::new(config, generation)?),
             Self::Pile => Box::new(scenes::pile::Pile::new(config, generation)?),
+            Self::Ragdolls => Box::new(scenes::ragdolls::Ragdolls::new(config, generation)?),
         })
     }
 }
