@@ -90,8 +90,8 @@ impl MotorcycleSettings {
     /// The sample's chassis is a 240 kg box of half extents (0.2, 0.3, 0.4) with its centre of
     /// mass moved 0.3 m down, and wheels at `(0, -0.27, 0.75)` of radius 0.31.
     /// [`PhysicsWorld::create_motorcycle`](crate::PhysicsWorld::create_motorcycle) validates the
-    /// settings; it refuses wheels at one point along forward, which here is `z = -0.125`, where
-    /// the end of the front's raked suspension is level with the rear's.
+    /// settings; it refuses wheels at one point along forward, which here is about
+    /// `z = -0.125`, where the end of the front's raked suspension is level with the rear's.
     pub fn bike(
         front_wheel: Vec3,
         wheel_radius: f32,

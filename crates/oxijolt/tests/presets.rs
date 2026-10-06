@@ -317,10 +317,13 @@ fn bike_preset_values_are_validated() {
     const RADIUS_RULE: &str = "wheel radius must be positive and at most limits::MAX_SHAPE_EXTENT";
     let (mut world, layers, chassis) = bike_world();
     let tester = bike_tester(&layers);
-    // At z = -0.125 the front's suspension, raked 30° and 0.5 long, ends at z = 0.125, level
-    // with the rear's: no wheel base.
+    // The front suspension is raked 30° and 0.5 long, so it ends 0.5 sin 30° ahead of its
+    // attachment. At z = -0.25 sin 30° that end is level with the rear wheel at z = 0.25 sin 30°:
+    // no wheel base. The sine is computed as the preset computes it, so both ends round alike.
+    let rake = 30.0_f32.to_radians().tan();
+    let sin_rake = rake / (1.0 + rake * rake).sqrt();
     let cases = [
-        (Vec3::new(0.0, -0.27, -0.125), 0.31, APART_RULE),
+        (Vec3::new(0.0, -0.27, -0.25 * sin_rake), 0.31, APART_RULE),
         (Vec3::new(0.0, -0.27, 0.75), 0.0, RADIUS_RULE),
     ];
     for (front, radius, rule) in cases {
