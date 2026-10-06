@@ -154,9 +154,9 @@ impl fmt::Display for MeshError {
 
 impl std::error::Error for MeshError {}
 
-/// Why [`Shape::new_scaled`](crate::Shape::new_scaled) refused a scale: a stored triangle of a mesh or
-/// heightfield inside the shape, scaled, would be too thin for Jolt to collide with convex shapes
-/// up to `max_convex_extent`.
+/// Why [`Shape::new_scaled`](crate::Shape::new_scaled) refused a scale: a stored triangle of a mesh
+/// or heightfield inside the shape, scaled, would be too thin for Jolt to collide with convex
+/// shapes up to `max_convex_extent`.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct ThinTrianglesError {

@@ -47,6 +47,8 @@ what is planned next.
   (`PhysicsWorld::active_body_poses`).
 - `oxijolt::prelude` for the common types, and `oxijolt::error::{Error, Result}` that wraps the
   error of every area.
+- One set of API rules for names, constructors, settings, errors and derives
+  ([api-guidelines.md](api-guidelines.md)), and Rust 1.88 as the minimum version, checked in CI.
 
 The [playground](playground.md) shows them in ten small scenes with a window, and runs the same
 scenes headless.

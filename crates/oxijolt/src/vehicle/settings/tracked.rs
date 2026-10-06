@@ -341,7 +341,8 @@ impl TrackedVehicleSettings {
         self
     }
 
-    /// See [`WheeledVehicleSettings::max_pitch_roll_angle`](crate::WheeledVehicleSettings::max_pitch_roll_angle).
+    /// See
+    /// [`WheeledVehicleSettings::max_pitch_roll_angle`](crate::WheeledVehicleSettings::max_pitch_roll_angle).
     #[must_use]
     pub fn max_pitch_roll_angle(mut self, radians: f32) -> Self {
         self.frame.max_pitch_roll_angle = radians;

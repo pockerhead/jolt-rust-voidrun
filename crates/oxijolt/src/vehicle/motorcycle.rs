@@ -172,10 +172,10 @@ fn lean_angle(world_up: Wide, direction: Wide, forward: Wide) -> f32 {
 impl PhysicsWorld {
     /// Attaches a motorcycle to the dynamic body `body`, its chassis, and returns its id.
     ///
-    /// The chassis works as for [`create_wheeled_vehicle`](Self::create_wheeled_vehicle), with the same rules
-    /// and errors. The settings are checked as their setters state, and the lean spring against
-    /// this chassis' largest principal inverse inertia: [`VehicleError::InvalidValue`] when it
-    /// could exceed [`limits::MAX_ANGULAR_ACCELERATION`], and
+    /// The chassis works as for [`create_wheeled_vehicle`](Self::create_wheeled_vehicle), with the
+    /// same rules and errors. The settings are checked as their setters state, and the lean spring
+    /// against this chassis' largest principal inverse inertia: [`VehicleError::InvalidValue`] when
+    /// it could exceed [`limits::MAX_ANGULAR_ACCELERATION`], and
     /// [`VehicleError::LeanSpringIntegrationNotSaved`] for an integration coefficient other than
     /// 0. Nothing is created on failure.
     ///

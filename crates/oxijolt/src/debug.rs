@@ -84,10 +84,10 @@ pub struct DebugLine {
 /// A buffer of debug lines, returned by [`PhysicsWorld::debug_lines`] or refilled by
 /// [`PhysicsWorld::debug_lines_into`].
 ///
-/// Each `debug_lines_into` call clears the buffer and refills it, keeping its capacity, so drawing every frame
-/// allocates only when the line count grows. [`release`](Self::release) or dropping the buffer
-/// frees the line storage. Jolt's own per-shape debug geometry (built for heightfields and meshes
-/// on their first draw) stays with the shape and is not affected.
+/// Each `debug_lines_into` call clears the buffer and refills it, keeping its capacity, so drawing
+/// every frame allocates only when the line count grows. [`release`](Self::release) or dropping the
+/// buffer frees the line storage. Jolt's own per-shape debug geometry (built for heightfields and
+/// meshes on their first draw) stays with the shape and is not affected.
 #[derive(Debug, Default)]
 pub struct DebugLines {
     lines: Vec<DebugLine>,

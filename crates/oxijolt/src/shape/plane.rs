@@ -39,12 +39,12 @@ impl Shape {
     /// small, for the broad phase).
     ///
     /// Only static bodies, and compounds or decorators on static bodies, may use a plane: Jolt
-    /// marks it `MustBeStatic`, it has no volume or mass, and Jolt cannot collide it with
-    /// meshes, heightfields or other planes. It collides with convex shapes (also as compound
-    /// or decorated children), soft bodies and characters, and ray and shape casts hit it. It
-    /// cannot be scaled ([`new_scaled`](Self::new_scaled) refuses it), and query, character and ragdoll
-    /// shapes refuse it. A ray that starts behind the plane hits it at fraction 0 (solid,
-    /// `<= 0`), while a point query reports only points strictly behind it (`< 0`).
+    /// marks it `MustBeStatic`, it has no volume or mass, and Jolt cannot collide it with meshes,
+    /// heightfields or other planes. It collides with convex shapes (also as compound or decorated
+    /// children), soft bodies and characters, and ray and shape casts hit it. It cannot be scaled
+    /// ([`new_scaled`](Self::new_scaled) refuses it), and query, character and ragdoll shapes
+    /// refuse it. A ray that starts behind the plane hits it at fraction 0 (solid, `<= 0`), while a
+    /// point query reports only points strictly behind it (`< 0`).
     ///
     /// `normal` must be a finite unit vector, `constant` finite and at most
     /// [`limits::MAX_SHAPE_EXTENT`] in absolute value, `half_extent` positive and at most

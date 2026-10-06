@@ -316,8 +316,8 @@ impl Shape {
 
     /// Keeps `extent` in the new mesh's Jolt user data (`Shape::mUserData`), with
     /// [`CONVEX_EXTENT_TAG`] in the high half and the bits of `extent` in the low half, so that
-    /// [`Shape::new_scaled`] checks the mesh against the extent it was built for. The safe API does not
-    /// expose a shape's user data otherwise.
+    /// [`Shape::new_scaled`] checks the mesh against the extent it was built for. The safe API does
+    /// not expose a shape's user data otherwise.
     fn record_convex_extent(&self, extent: f32) {
         let data = CONVEX_EXTENT_TAG | u64::from(extent.to_bits());
         // SAFETY: the mesh is live and was just created by the caller, which has not handed it

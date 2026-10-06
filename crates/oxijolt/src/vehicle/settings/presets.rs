@@ -19,11 +19,11 @@ impl WheeledVehicleSettings {
     /// one differential; the hand brake holds the rear wheels. Anti-roll bars join the front pair
     /// and the rear pair. The wheels find the ground with `collision_tester`.
     ///
-    /// The values suit a chassis like the one the tests drive: a 1500 kg box of half extents
-    /// (0.9, 0.3, 2.0) with its centre of mass moved 0.3 m down, and wheels at
-    /// `(0.9, -0.1, 1.4)` of radius 0.35. Nothing is checked here:
-    /// [`PhysicsWorld::create_wheeled_vehicle`](crate::PhysicsWorld::create_wheeled_vehicle) validates the
-    /// settings and refuses, for example, a radius that is not positive.
+    /// The values suit a chassis like the one the tests drive: a 1500 kg box of half extents (0.9,
+    /// 0.3, 2.0) with its centre of mass moved 0.3 m down, and wheels at `(0.9, -0.1, 1.4)` of
+    /// radius 0.35. Nothing is checked here:
+    /// [`PhysicsWorld::create_wheeled_vehicle`](crate::PhysicsWorld::create_wheeled_vehicle)
+    /// validates the settings and refuses, for example, a radius that is not positive.
     ///
     /// # Example
     /// ```

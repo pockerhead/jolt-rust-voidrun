@@ -44,8 +44,8 @@
 //!   [`CharacterSettings::humanoid`].
 //! - Wheeled and tracked vehicles and motorcycles on a chassis body:
 //!   [`PhysicsWorld::create_wheeled_vehicle`], [`PhysicsWorld::create_tracked_vehicle`] and
-//!   [`PhysicsWorld::create_motorcycle`], with ready settings from [`WheeledVehicleSettings::car`] and
-//!   [`MotorcycleSettings::bike`] and wheel poses for drawing from
+//!   [`PhysicsWorld::create_motorcycle`], with ready settings from [`WheeledVehicleSettings::car`]
+//!   and [`MotorcycleSettings::bike`] and wheel poses for drawing from
 //!   [`VehicleRef::wheel_world_transform`].
 //! - Ragdolls: [`PhysicsWorld::create_ragdoll`].
 //! - Constraints of twelve kinds between two bodies: [`PhysicsWorld::create_constraint`]

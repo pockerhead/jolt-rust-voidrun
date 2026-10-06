@@ -419,11 +419,11 @@ impl PhysicsWorld {
     ///
     /// Fails with [`ConstraintError::InvalidValue`] when a setting or a lever-arm ratio is out of
     /// range, with [`ConstraintError::NotDynamic`] as above, with
-    /// [`ConstraintError::Body`]`(`[`BodyError::NotRigidBody`]`)` for a soft body (Jolt's constraints
-    /// cannot operate on soft bodies; pin a vertex and move it instead), with
-    /// [`ConstraintError::NotFound`] or [`ConstraintError::WrongWorld`] for a referenced
-    /// constraint that is not in this world, and with [`ConstraintError::TooManyConstraints`]
-    /// when the world has run out of ids. Nothing changes on failure.
+    /// [`ConstraintError::Body`]`(`[`BodyError::NotRigidBody`]`)` for a soft body (Jolt's
+    /// constraints cannot operate on soft bodies; pin a vertex and move it instead), with
+    /// [`ConstraintError::NotFound`] or [`ConstraintError::WrongWorld`] for a referenced constraint
+    /// that is not in this world, and with [`ConstraintError::TooManyConstraints`] when the world
+    /// has run out of ids. Nothing changes on failure.
     ///
     /// # Example
     /// ```

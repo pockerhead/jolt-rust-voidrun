@@ -342,15 +342,16 @@ impl WheelSettings {
     }
 
     /// Friction coefficient over longitudinal slip ratio, as `(slip, friction)` points with
-    /// strictly increasing slip. Default [`DEFAULT_LONGITUDINAL_FRICTION`](Self::DEFAULT_LONGITUDINAL_FRICTION).
+    /// strictly increasing slip. Default
+    /// [`DEFAULT_LONGITUDINAL_FRICTION`](Self::DEFAULT_LONGITUDINAL_FRICTION).
     #[must_use]
     pub fn longitudinal_friction(mut self, points: Vec<(f32, f32)>) -> Self {
         self.longitudinal_friction = points;
         self
     }
 
-    /// Friction coefficient over slip angle in degrees, as `(angle, friction)` points with
-    /// strictly increasing angle. Default [`DEFAULT_LATERAL_FRICTION`](Self::DEFAULT_LATERAL_FRICTION).
+    /// Friction coefficient over slip angle in degrees, as `(angle, friction)` points with strictly
+    /// increasing angle. Default [`DEFAULT_LATERAL_FRICTION`](Self::DEFAULT_LATERAL_FRICTION).
     #[must_use]
     pub fn lateral_friction(mut self, points: Vec<(f32, f32)>) -> Self {
         self.lateral_friction = points;

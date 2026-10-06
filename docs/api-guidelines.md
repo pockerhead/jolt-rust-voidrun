@@ -38,8 +38,10 @@ breaks one needs a reason written next to it. The Rust API Guidelines
   returns `Result<<Object>Mut, <Area>Error>`.
 - Getters have no `get_` prefix. Boolean getters start with `is_`, `has_` or `can_`.
 - Setters on live objects are `set_<field>` and return `Result` when they check their input.
-- Each world collection has `<object>_ids()` returning `impl Iterator<Item = <Object>Id> + '_`,
-  `<object>_count()` and `contains_<object>(id)`.
+- A world collection lists its ids with `<object>_ids()`, which returns an iterator
+  (`impl Iterator<Item = <Object>Id>`), counts them with `<object>_count()` and tests one with
+  `contains_<object>(id)`. Calls of these shapes that do not exist yet are added under these
+  names.
 
 ## R5. Conversions and buffers
 

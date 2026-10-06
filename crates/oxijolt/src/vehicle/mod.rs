@@ -154,13 +154,13 @@ impl PhysicsWorld {
     /// [`gravity_factor(0.0)`](crate::BodySettings::gravity_factor), and set the gravity at the
     /// vehicle every tick.
     ///
-    /// Fails with [`VehicleError::InvalidValue`] when a setting is out of range (see the setters
-    /// of [`WheeledVehicleSettings`] and the types it holds), with [`VehicleError::Body`] when `body`
+    /// Fails with [`VehicleError::InvalidValue`] when a setting is out of range (see the setters of
+    /// [`WheeledVehicleSettings`] and the types it holds), with [`VehicleError::Body`] when `body`
     /// is not in this world, is the inner body of a character, a ragdoll part or a soft body, or
-    /// has fewer than six degrees of freedom, with
-    /// [`VehicleError::NotDynamic`], with [`VehicleError::AlreadyHasVehicle`] when the body
-    /// carries a vehicle already, and with [`VehicleError::TooManyVehicles`] when the world has
-    /// run out of ids. Nothing is created on failure.
+    /// has fewer than six degrees of freedom, with [`VehicleError::NotDynamic`], with
+    /// [`VehicleError::AlreadyHasVehicle`] when the body carries a vehicle already, and with
+    /// [`VehicleError::TooManyVehicles`] when the world has run out of ids. Nothing is created on
+    /// failure.
     ///
     /// # Example
     /// ```

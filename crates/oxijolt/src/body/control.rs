@@ -234,15 +234,14 @@ impl BodyMut<'_> {
     /// Puts the body to sleep now (Jolt `BodyInterface::DeactivateBody`) and zeroes its linear
     /// and angular velocity, also when it was asleep already.
     ///
-    /// Only a body that was awake records [`ActivationEvent::Deactivated`]. Forces added since
-    /// the last step stay until the body wakes and steps. The body stays asleep until something
-    /// wakes it (a contact with an awake body, a setter that activates, [`activate`](Self::activate)),
+    /// Only a body that was awake records [`ActivationEvent::Deactivated`]. Forces added since the
+    /// last step stay until the body wakes and steps. The body stays asleep until something wakes
+    /// it (a contact with an awake body, a setter that activates, [`activate`](Self::activate)),
     /// also when it may not fall asleep on its own. A sleeping sensor no longer looks for contacts
     /// itself, but awake bodies still produce sensor contacts with it, so this does not turn a
-    /// sensor off.
-    /// [`PhysicsWorld::restore_state`] puts bodies back to sleep or wakes them without
-    /// activation events. Static bodies ignore it; fails with [`BodyError::NotRigidBody`] for a soft
-    /// body.
+    /// sensor off. [`PhysicsWorld::restore_state`] puts bodies back to sleep or wakes them without
+    /// activation events. Static bodies ignore it; fails with [`BodyError::NotRigidBody`] for a
+    /// soft body.
     ///
     /// [`ActivationEvent::Deactivated`]: crate::ActivationEvent::Deactivated
     /// [`PhysicsWorld::restore_state`]: crate::PhysicsWorld::restore_state

@@ -37,16 +37,16 @@ impl Shape {
 
     /// The convex hull of `points` (shape space, metres) with a convex radius in metres.
     ///
-    /// Needs at least 4 points ([`ConvexHullError::TooFewPoints`]), each finite with every component
-    /// at most [`limits::MAX_SHAPE_EXTENT`] in absolute value, and a convex radius that is
-    /// finite and not negative ([`ShapeError::InvalidValue`]). Points on or close to a line
-    /// or in one spot are refused as [`ConvexHullError::Degenerate`], points on or close to a plane as
-    /// [`ConvexHullError::Coplanar`]: a flat hull has no volume, so Jolt would give a dynamic body made
-    /// of it zero mass and a meaningless inertia, and Jolt's single-precision hull builder cannot
-    /// build very thin needles and slabs reliably. "Close" grows with the cloud's length and its
-    /// distance from the shape origin; [docs/limits.md#convex-hulls] gives the rules. Use a
-    /// mesh, a capsule or a thin box instead. Whatever else Jolt's hull builder refuses comes
-    /// back as [`ShapeError::Rejected`].
+    /// Needs at least 4 points ([`ConvexHullError::TooFewPoints`]), each finite with every
+    /// component at most [`limits::MAX_SHAPE_EXTENT`] in absolute value, and a convex radius that
+    /// is finite and not negative ([`ShapeError::InvalidValue`]). Points on or close to a line or
+    /// in one spot are refused as [`ConvexHullError::Degenerate`], points on or close to a plane as
+    /// [`ConvexHullError::Coplanar`]: a flat hull has no volume, so Jolt would give a dynamic body
+    /// made of it zero mass and a meaningless inertia, and Jolt's single-precision hull builder
+    /// cannot build very thin needles and slabs reliably. "Close" grows with the cloud's length and
+    /// its distance from the shape origin; [docs/limits.md#convex-hulls] gives the rules. Use a
+    /// mesh, a capsule or a thin box instead. Whatever else Jolt's hull builder refuses comes back
+    /// as [`ShapeError::Rejected`].
     ///
     /// With the `asserts` feature Jolt's hull builder can abort the process on some clouds with
     /// many nearly coplanar faces: densely sampled faces a few coplanar distances off their

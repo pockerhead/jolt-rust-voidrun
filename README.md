@@ -109,7 +109,7 @@ The full list of what works today, with links to the guides, is in
 - [ ] macOS in CI and in releases
 - [ ] Rollback helpers: reusable state buffer, filtered restore
 - [ ] Real meshes from open sources tested in CI, and shape cooking (save and load built shapes)
-- [ ] API review and freeze for 1.0
+- [x] API review and freeze for 1.0
 - [ ] Same results across operating systems, checked in CI
 
 ## Status
@@ -119,6 +119,8 @@ The full list of what works today, with links to the guides, is in
   default, `cross-platform-deterministic`, `double-precision`, `debug-renderer` and `asserts`.
   The bindings are committed for 64-bit Windows, Linux, macOS and Android targets; only the two
   CI targets are tested.
+- Rust 1.88 or newer (checked in CI). The public API follows the rules in
+  [docs/api-guidelines.md](docs/api-guidelines.md).
 - Building needs a C++ toolchain and CMake, not LLVM. Jolt and joltc are compiled from pinned
   submodules; `JOLTC_LIB_DIR` links a prebuilt native library instead
   ([building](docs/building.md)).
