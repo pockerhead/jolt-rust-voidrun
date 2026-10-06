@@ -75,7 +75,7 @@ fn add_primitive(
         Some(indices) => indices.into_u32().collect(),
         None => (0..positions.len() as u32).collect(),
     };
-    if indices.len() % 3 != 0 || indices.iter().any(|&i| i as usize >= positions.len()) {
+    if !indices.len().is_multiple_of(3) || indices.iter().any(|&i| i as usize >= positions.len()) {
         return Err(Error::Unsupported(
             "a triangle list whose indices are incomplete or out of range".into(),
         ));
