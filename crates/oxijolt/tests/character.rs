@@ -153,7 +153,7 @@ fn invalid_settings_and_poses_are_rejected_without_side_effects() {
         ));
     }
     assert_eq!(world.body_count(), 1);
-    assert!(world.contains(floor));
+    assert!(world.contains_body(floor));
     assert_eq!(world.character_ids().count(), 0);
 
     let id = world
@@ -208,7 +208,7 @@ fn invalid_settings_and_poses_are_rejected_without_side_effects() {
             &extended,
             &QueryFilter::new().object_layers(&unknown)
         ),
-        Err(CharacterError::InvalidValue(_))
+        Err(CharacterError::Query(QueryError::UnknownObjectLayer(_)))
     ));
     let mut character = world.character_mut(id).unwrap();
     assert!(character.set_up(Vec3::new(0.0, 0.5, 0.0)).is_err());
@@ -666,7 +666,7 @@ fn an_inner_body_is_a_body_of_the_world_owned_by_its_character() {
         .unwrap();
     assert_eq!(world.body_count(), 2);
     let inner = world.character(id).unwrap().inner_body().unwrap();
-    assert!(world.contains(inner));
+    assert!(world.contains_body(inner));
     assert!(world.is_inner_body(inner));
     assert!(!world.is_inner_body(floor));
     assert_eq!(
@@ -676,7 +676,7 @@ fn an_inner_body_is_a_body_of_the_world_owned_by_its_character() {
     // Queries find it, in its layer.
     let hit = world
         .cast_ray(
-            RayCast::new(RVec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -10.0, 0.0)),
+            &RayCast::new(RVec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -10.0, 0.0)),
             &QueryFilter::new(),
         )
         .unwrap()
@@ -715,11 +715,11 @@ fn an_inner_body_is_a_body_of_the_world_owned_by_its_character() {
         world.remove_body(inner),
         Err(BodyError::OwnedByCharacter(inner))
     );
-    assert!(world.contains(inner));
+    assert!(world.contains_body(inner));
     let count = world.body_count();
     world.remove_character(id).unwrap();
     assert_eq!(world.body_count(), count - 1);
-    assert!(!world.contains(inner));
+    assert!(!world.contains_body(inner));
     assert!(!world.is_inner_body(inner));
 
     let without = world
@@ -881,7 +881,7 @@ fn record(world: &PhysicsWorld, id: CharacterId) -> Record {
         position: v3(character.position()).map(f64::to_bits).to_vec(),
         velocity: velocity.map(f32::to_bits).to_vec(),
         ground: character.ground_state(),
-        state: character.save_state().as_bytes(),
+        state: character.save_state().to_bytes(),
         contacts: character
             .active_contacts()
             .iter()

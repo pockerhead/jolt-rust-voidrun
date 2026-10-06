@@ -46,6 +46,7 @@ Layers, bottom to top:
 - **Idiomatic Rust in the safe layer.** Builders and settings structs with `Default`, newtypes for ids,
   `Result` for fallible calls, iterators instead of out-buffers, RAII instead of manual destroy, no raw
   pointers in public signatures. Keep Jolt's vocabulary in names so Jolt's docs still map onto the API.
+  API rules: [docs/api-guidelines.md](docs/api-guidelines.md).
 - **One feature per commit.** Small reviewable steps; C-wrapper additions kept separable so they can be
   offered to the wrapper's upstream.
 - **Data over constants for tuning**, laws as constants: physical tuning numbers belong to the caller,

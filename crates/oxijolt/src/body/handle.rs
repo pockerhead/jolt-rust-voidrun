@@ -34,6 +34,14 @@ pub struct BodyRef<'w> {
     pub(super) _world: PhantomData<&'w PhysicsWorld>,
 }
 
+impl std::fmt::Debug for BodyRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BodyRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl BodyRef<'_> {
     /// The body's id.
     pub fn id(&self) -> BodyId {
@@ -212,6 +220,14 @@ pub struct BodyMut<'w> {
     pub(super) world: &'w mut PhysicsWorld,
 }
 
+impl std::fmt::Debug for BodyMut<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BodyMut")
+            .field("id", &self.inner.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'w> Deref for BodyMut<'w> {
     type Target = BodyRef<'w>;
 
@@ -292,7 +308,7 @@ impl BodyMut<'_> {
     /// (Jolt would clamp a faster one; it is rejected, as at creation). Wakes the body when the
     /// velocity is not near zero.
     ///
-    /// Fails with [`BodyError::SoftBody`] for a soft body, whose velocity is stored per vertex
+    /// Fails with [`BodyError::NotRigidBody`] for a soft body, whose velocity is stored per vertex
     /// and which Jolt ignores this for (`Docs/Architecture.md:460`); use
     /// [`SoftBodyMut::set_vertex_velocity`](crate::SoftBodyMut::set_vertex_velocity).
     pub fn set_linear_velocity(&mut self, velocity: Vec3) -> Result<(), BodyError> {
@@ -308,7 +324,7 @@ impl BodyMut<'_> {
     /// long (Jolt would clamp a faster one; it is rejected, as at creation). Wakes the body when
     /// the velocity is not near zero.
     ///
-    /// Fails with [`BodyError::SoftBody`] for a soft body, which Jolt ignores this for.
+    /// Fails with [`BodyError::NotRigidBody`] for a soft body, which Jolt ignores this for.
     pub fn set_angular_velocity(&mut self, velocity: Vec3) -> Result<(), BodyError> {
         self.reject_soft_body()?;
         require(is_angular_velocity(velocity), ANGULAR_VELOCITY_RULE)?;
@@ -358,7 +374,7 @@ impl BodyMut<'_> {
     /// [`BodyError::InvalidValue`] is returned and nothing changes. [docs/limits.md#impulses]
     /// has the rounding bound.
     ///
-    /// Fails with [`BodyError::SoftBody`] for a soft body: Jolt would add the torque as well,
+    /// Fails with [`BodyError::NotRigidBody`] for a soft body: Jolt would add the torque as well,
     /// and a soft body never clears its torque (it resets only the force after a step), so the
     /// torque would stay in the body and in its saved state. Use [`add_force`](Self::add_force)
     /// or set vertex velocities instead.
@@ -388,7 +404,7 @@ impl BodyMut<'_> {
     /// times the largest principal inverse inertia); otherwise [`BodyError::InvalidValue`] is
     /// returned and nothing changes.
     ///
-    /// Fails with [`BodyError::SoftBody`] for a soft body, which Jolt ignores torque for and
+    /// Fails with [`BodyError::NotRigidBody`] for a soft body, which Jolt ignores torque for and
     /// never clears it on.
     pub fn add_torque(&mut self, torque: Vec3) -> Result<(), BodyError> {
         self.reject_soft_body()?;
@@ -400,10 +416,10 @@ impl BodyMut<'_> {
         Ok(())
     }
 
-    /// Fails with [`BodyError::SoftBody`] when the body is a soft body.
+    /// Fails with [`BodyError::NotRigidBody`] when the body is a soft body.
     pub(super) fn reject_soft_body(&self) -> Result<(), BodyError> {
         if self.is_soft_body() {
-            Err(BodyError::SoftBody(self.id))
+            Err(BodyError::NotRigidBody(self.id))
         } else {
             Ok(())
         }

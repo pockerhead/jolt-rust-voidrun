@@ -159,7 +159,7 @@ Configuration Jolt does not save stays as it is when a state is restored. A call
 during a run and rolls back must set it back and replay those calls, as Jolt's rollback
 documentation asks for body friction. These setters change such configuration:
 - hinge: `set_motor_settings`, `set_limits`, `set_limits_spring`, `set_max_friction_torque`;
-- slider: `set_motor_settings`, `set_limits`, `set_limits_spring`, `set_max_friction_force`;
+- slider: `set_motor_settings`, `set_limits`, `remove_limits`, `set_limits_spring`, `set_max_friction_force`;
 - distance: `set_distance`, `set_limits_spring`;
 - pulley: `set_length`;
 - cone: `set_half_cone_angle`;
@@ -188,7 +188,7 @@ Each step sets the world up to the opposite of the gravity the vehicle uses (wor
 `VehicleMut::set_gravity`). In zero gravity a step keeps the world up it had. So after a restore
 in zero gravity, the vehicle keeps the world up the abandoned run ended with. If that run had
 gravity in another direction, a vehicle with a pitch and roll limit
-(`VehicleSettings::max_pitch_roll_angle` below π) replays differently, and so does a motorcycle,
+(`WheeledVehicleSettings::max_pitch_roll_angle` below π) replays differently, and so does a motorcycle,
 whose lean controller uses the world up even with the limit off.
 
 A motorcycle's integrated lean angle is not saved either (Jolt's `MotorcycleController::SaveState`

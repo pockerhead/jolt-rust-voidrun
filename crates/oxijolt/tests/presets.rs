@@ -171,8 +171,8 @@ fn preset_car() -> (PhysicsWorld, CarLayers, BodyId, VehicleId) {
         )
         .unwrap();
     let tester = VehicleCollisionTester::cast_sphere(layers.probe, 0.2);
-    let settings = VehicleSettings::car(Vec3::new(0.9, -0.1, 1.4), 0.35, tester);
-    let car = world.create_vehicle(chassis, &settings).unwrap();
+    let settings = WheeledVehicleSettings::car(Vec3::new(0.9, -0.1, 1.4), 0.35, tester);
+    let car = world.create_wheeled_vehicle(chassis, &settings).unwrap();
     drive_car(&mut world, car, DriverInput::default(), 30);
     (world, layers, chassis, car)
 }
@@ -282,9 +282,9 @@ fn car_preset_values_are_validated() {
         (Vec3::new(0.9, -0.1, 1.4), -1.0, RADIUS_RULE),
     ];
     for (front_left, radius, rule) in cases {
-        let settings = VehicleSettings::car(front_left, radius, tester);
+        let settings = WheeledVehicleSettings::car(front_left, radius, tester);
         assert_eq!(
-            world.create_vehicle(chassis, &settings),
+            world.create_wheeled_vehicle(chassis, &settings),
             Err(VehicleError::InvalidValue(rule)),
             "{front_left:?}, radius {radius}"
         );

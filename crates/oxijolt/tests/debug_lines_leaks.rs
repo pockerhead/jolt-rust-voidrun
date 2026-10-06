@@ -42,7 +42,7 @@ fn debug_lines_do_not_leak() {
         for _ in 0..calls {
             scene
                 .world
-                .debug_lines(&settings, &filter, &mut lines)
+                .debug_lines_into(&settings, &filter, &mut lines)
                 .unwrap();
             total += lines.lines().len();
         }

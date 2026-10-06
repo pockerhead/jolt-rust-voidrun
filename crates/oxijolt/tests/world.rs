@@ -14,7 +14,7 @@ fn world_and_shape_are_send_and_sync() {
     assert_send_sync::<Shape>();
     assert_send_sync::<BodyId>();
     assert_send_sync::<RayCast>();
-    assert_send_sync::<RayHit>();
+    assert_send_sync::<RayCastHit>();
     assert_send_sync::<SubShapeId>();
     assert_send_sync::<CompoundSubShape>();
     assert_send_sync::<HeightFieldSettings>();
@@ -57,7 +57,7 @@ fn invalid_settings_are_rejected() {
         assert!(
             matches!(
                 result,
-                Err(WorldError::InvalidSettings(_) | WorldError::InvalidLayers(_))
+                Err(WorldError::InvalidValue(_) | WorldError::InvalidLayers(_))
             ),
             "{settings:?} was accepted"
         );
@@ -255,7 +255,7 @@ fn rays_are_cast_from_many_threads() {
         rays.iter()
             .map(|&ray| {
                 let hit = world
-                    .cast_ray(ray, &QueryFilter::new())
+                    .cast_ray(&ray, &QueryFilter::new())
                     .unwrap()
                     .expect("every ray hits the floor");
                 (hit.body, hit.fraction.to_bits())
@@ -270,4 +270,26 @@ fn rays_are_cast_from_many_threads() {
             assert_eq!(caster.join().unwrap(), expected);
         }
     });
+}
+
+/// Every world collection lists its ids as an iterator. The body ids are copied before
+/// `body_ids` returns, so the world can be changed while they are iterated.
+#[test]
+fn ids_are_iterators() {
+    fn ids<T>(iterator: impl Iterator<Item = T>) -> Vec<T> {
+        iterator.collect()
+    }
+    let mut world = world(Vec3::ZERO, 1);
+    let floor = add_floor(&mut world);
+    for id in world.body_ids() {
+        world.body_mut(id).unwrap().activate();
+        assert!(world.contains_body(id));
+    }
+    assert_eq!(ids(world.body_ids()), [floor]);
+    assert_eq!(ids(world.character_ids()), []);
+    assert_eq!(ids(world.constraint_ids()), []);
+    assert_eq!(ids(world.constraints_of_body(floor)), []);
+    assert_eq!(ids(world.vehicle_ids()), []);
+    assert_eq!(ids(world.ragdoll_ids()), []);
+    assert_eq!(world.constraint_count(), 0_u32);
 }

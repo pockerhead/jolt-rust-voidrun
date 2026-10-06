@@ -141,6 +141,14 @@ pub struct RagdollRef<'w> {
     entry: &'w RagdollEntry,
 }
 
+impl fmt::Debug for RagdollRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RagdollRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl RagdollRef<'_> {
     /// The ragdoll's id.
     pub fn id(&self) -> RagdollId {
@@ -309,6 +317,12 @@ pub struct RagdollMut<'w> {
     entry: &'w mut RagdollEntry,
     body_interface: NonNull<JPH_BodyInterface>,
     structure_epoch: &'w mut u64,
+}
+
+impl fmt::Debug for RagdollMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RagdollMut").finish_non_exhaustive()
+    }
 }
 
 /// What the motion type of a ragdoll part must satisfy: not static.

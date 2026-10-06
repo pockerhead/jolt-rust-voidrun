@@ -115,7 +115,7 @@ fn humanoid_refuses_bad_dimensions() {
     ];
     for (height, radius, rule) in cases {
         match CharacterSettings::humanoid(height, radius) {
-            Err(ShapeError::InvalidDimensions(what)) => {
+            Err(ShapeError::InvalidValue(what)) => {
                 assert_eq!(what, rule, "height {height}, radius {radius}");
             }
             other => panic!("height {height}, radius {radius}: {:?}", other.err()),

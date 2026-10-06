@@ -59,7 +59,7 @@ fn main() -> oxijolt::error::Result<()> {
 
     // A ray cast down from above hits the ball first.
     let ray = RayCast::new(RVec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -20.0, 0.0));
-    let hit = world.cast_ray(ray, &QueryFilter::new())?.expect("the ray hits");
+    let hit = world.cast_ray(&ray, &QueryFilter::new())?.expect("the ray hits");
     assert_eq!(hit.body, ball);
     Ok(())
 }
@@ -91,7 +91,7 @@ The full list of what works today, with links to the guides, is in
 - [x] Debug wireframes as line data
 - [x] Same results for any worker thread count
 - [x] Builds without LLVM; Windows and Linux in CI; prebuilt libraries in releases
-- [x] `glam` and `mint` conversions
+- [x] `glam` (feature `glam032`) and `mint` conversions
 - [x] One-call pose readout, a crate-wide error type, a prelude
 - [x] Convex hull, triangle mesh, scaled and tapered shapes
 - [x] Body controls: impulses, kinematic moves, activation, sensors, user data, changing shape
@@ -109,7 +109,7 @@ The full list of what works today, with links to the guides, is in
 - [ ] macOS in CI and in releases
 - [x] Rollback helpers: reusable state buffer, filtered restore
 - [x] Real meshes from open sources tested in CI, and shape cooking (save and load built shapes)
-- [ ] API review and freeze for 1.0
+- [x] API review and freeze for 1.0
 - [ ] Same results across operating systems, checked in CI
 
 ## Status
@@ -119,6 +119,8 @@ The full list of what works today, with links to the guides, is in
   default, `cross-platform-deterministic`, `double-precision`, `debug-renderer` and `asserts`.
   The bindings are committed for 64-bit Windows, Linux, macOS and Android targets; only the two
   CI targets are tested.
+- Rust 1.88 or newer (checked in CI). The public API follows the rules in
+  [docs/api-guidelines.md](docs/api-guidelines.md).
 - Building needs a C++ toolchain and CMake, not LLVM. Jolt and joltc are compiled from pinned
   submodules; `JOLTC_LIB_DIR` links a prebuilt native library instead
   ([building](docs/building.md)).

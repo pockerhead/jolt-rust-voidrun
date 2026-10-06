@@ -70,7 +70,7 @@ fn constraint_round(scene: &mut Scene, round: usize) {
     let world = &mut scene.world;
     let p = |world: &PhysicsWorld, i: usize| world.body(b[i]).unwrap().position();
 
-    let fixed = FixedConstraintSettings::default().auto_detect_point();
+    let fixed = FixedConstraintSettings::default().auto_detect_point(true);
     ids.push(
         world
             .create_constraint(anchor, b[0], &fixed)
@@ -106,7 +106,7 @@ fn constraint_round(scene: &mut Scene, round: usize) {
     let mut motor = world.constraint_mut(hinge1).unwrap();
     motor.set_target_angular_velocity(1.0).unwrap();
     motor.set_motor_state(MotorState::Velocity);
-    let gear = GearConstraintSettings::new(Z, Z, 2.0).hinges(hinge1, hinge2);
+    let gear = GearConstraintSettings::new(Z, Z, 2.0).constraints(hinge1, hinge2);
     let gear = world.create_constraint(b[4], b[5], &gear).unwrap();
 
     let slider = SliderConstraintSettings::new(p(world, 6), X, Y);

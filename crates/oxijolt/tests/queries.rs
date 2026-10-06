@@ -30,7 +30,7 @@ fn ray_hits_chunk_and_terrain_from_twenty_metres() {
     let ground = add_static_in(&mut world, &flat_height_field(), RVec3::ZERO, terrain);
 
     let hit = world
-        .cast_ray(down_from(-3.0, 20.0, 2.0, 40.0), &ALL)
+        .cast_ray(&down_from(-3.0, 20.0, 2.0, 40.0), &ALL)
         .unwrap()
         .expect("the terrain is hit");
     assert_eq!(hit.body, ground);
@@ -40,7 +40,7 @@ fn ray_hits_chunk_and_terrain_from_twenty_metres() {
     assert_eq!(hit.compound_child, None);
 
     let hit = world
-        .cast_ray(down_from(6.0, 20.0, 0.0, 40.0), &ALL)
+        .cast_ray(&down_from(6.0, 20.0, 0.0, 40.0), &ALL)
         .unwrap()
         .expect("the chunk is hit");
     assert!((hit.distance - 18.0).abs() <= 1.0e-4, "{hit:?}");
@@ -66,7 +66,7 @@ fn wall_blocks_line_of_sight_until_removed() {
         .unwrap();
     let sight = RayCast::new(RVec3::new(0.0, 1.0, 0.0), Vec3::new(10.0, 0.0, 0.0));
     let hit = world
-        .cast_ray(sight, &ALL)
+        .cast_ray(&sight, &ALL)
         .unwrap()
         .expect("the wall blocks");
     assert_eq!(hit.body, wall);
@@ -74,7 +74,7 @@ fn wall_blocks_line_of_sight_until_removed() {
     assert!((hit.distance - 4.75).abs() <= 1.0e-5, "{hit:?}");
 
     world.remove_body(wall).unwrap();
-    assert_eq!(world.cast_ray(sight, &ALL), Ok(None));
+    assert_eq!(world.cast_ray(&sight, &ALL), Ok(None));
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn ray_starting_inside_hits_at_exactly_zero() {
     let structure_only = QueryFilter::new().child_groups(1 << Groups::STRUCTURE);
     for filter in [ALL, structure_only] {
         let hit = world
-            .cast_ray(down_from(0.1, 0.2, 0.0, 5.0), &filter)
+            .cast_ray(&down_from(0.1, 0.2, 0.0, 5.0), &filter)
             .unwrap()
             .expect("the box is hit");
         assert_eq!(hit.body, block);
@@ -110,7 +110,7 @@ fn ray_starting_inside_hits_at_exactly_zero() {
         assert_eq!(hit.distance, 0.0);
 
         let hit = world
-            .cast_ray(down_from(10.1, 0.2, 0.0, 5.0), &filter)
+            .cast_ray(&down_from(10.1, 0.2, 0.0, 5.0), &filter)
             .unwrap()
             .expect("the compound child is hit");
         assert_eq!(hit.body, chunk);
@@ -140,7 +140,7 @@ fn spawn_ground_ignores_canopy_by_group() {
     let ground = QueryFilter::new()
         .object_layers(&layers)
         .child_groups(1 << Groups::TERRAIN | 1 << Groups::STRUCTURE);
-    let hit = world.cast_ray(ray, &ground).unwrap().expect("ground");
+    let hit = world.cast_ray(&ray, &ground).unwrap().expect("ground");
     let y = ray.point_at(hit.fraction).y;
     assert!((y - 1.0).abs() <= 0.01, "porch top expected, hit at {y}");
     assert_eq!(hit.body, house_body);
@@ -149,7 +149,7 @@ fn spawn_ground_ignores_canopy_by_group() {
         Some(Groups::STRUCTURE)
     );
 
-    let hit = world.cast_ray(ray, &ALL).unwrap().expect("canopy");
+    let hit = world.cast_ray(&ray, &ALL).unwrap().expect("canopy");
     let y = ray.point_at(hit.fraction).y;
     assert!((y - 3.5).abs() <= 0.01, "canopy top expected, hit at {y}");
     assert_eq!(
@@ -174,7 +174,7 @@ fn group_filter_keeps_root_call_for_power_of_two_children() {
         .unwrap();
     let structure = QueryFilter::new().child_groups(1 << Groups::STRUCTURE);
     let hit = world
-        .cast_ray(down_from(0.0, 5.0, 0.0, 10.0), &structure)
+        .cast_ray(&down_from(0.0, 5.0, 0.0, 10.0), &structure)
         .unwrap()
         .expect("child 0 is hit");
     assert_eq!(
@@ -185,7 +185,7 @@ fn group_filter_keeps_root_call_for_power_of_two_children() {
         })
     );
     assert_eq!(
-        world.cast_ray(down_from(6.0, 5.0, 0.0, 10.0), &structure),
+        world.cast_ray(&down_from(6.0, 5.0, 0.0, 10.0), &structure),
         Ok(None)
     );
 }
@@ -201,8 +201,8 @@ fn group_filter_on_one_child_and_nested_compounds() {
     let structure = QueryFilter::new().child_groups(1 << Groups::STRUCTURE);
     let feature = QueryFilter::new().child_groups(1 << Groups::FEATURE);
     let ray = down_from(0.0, 5.0, 0.0, 10.0);
-    assert!(world.cast_ray(ray, &structure).unwrap().is_some());
-    assert_eq!(world.cast_ray(ray, &feature), Ok(None));
+    assert!(world.cast_ray(&ray, &structure).unwrap().is_some());
+    assert_eq!(world.cast_ray(&ray, &feature), Ok(None));
 
     let inner = Shape::new_compound(&[
         child(&unit_box, Vec3::new(-0.5, 0.0, 0.0), Groups::FEATURE),
@@ -221,7 +221,7 @@ fn group_filter_on_one_child_and_nested_compounds() {
         )
         .unwrap();
     let hit = world
-        .cast_ray(down_from(20.5, 5.0, 0.0, 10.0), &structure)
+        .cast_ray(&down_from(20.5, 5.0, 0.0, 10.0), &structure)
         .unwrap()
         .expect("the top-level group governs the nested children");
     assert_eq!(
@@ -232,11 +232,11 @@ fn group_filter_on_one_child_and_nested_compounds() {
         })
     );
     assert_eq!(
-        world.cast_ray(down_from(20.5, 5.0, 0.0, 10.0), &feature),
+        world.cast_ray(&down_from(20.5, 5.0, 0.0, 10.0), &feature),
         Ok(None)
     );
     assert!(world
-        .cast_ray(down_from(24.0, 5.0, 0.0, 10.0), &feature)
+        .cast_ray(&down_from(24.0, 5.0, 0.0, 10.0), &feature)
         .unwrap()
         .is_some());
 }
@@ -249,21 +249,21 @@ fn object_layer_selection_skips_other_layers() {
     let lower = add_static_in(&mut world, &slab, RVec3::new(0.0, 1.0, 0.0), chunk);
     let ray = down_from(0.0, 10.0, 0.0, 20.0);
 
-    let hit = world.cast_ray(ray, &ALL).unwrap().unwrap();
+    let hit = world.cast_ray(&ray, &ALL).unwrap().unwrap();
     assert_eq!((hit.body, hit.object_layer), (upper, feature));
     let chunk_only = [chunk];
     let hit = world
-        .cast_ray(ray, &QueryFilter::new().object_layers(&chunk_only))
+        .cast_ray(&ray, &QueryFilter::new().object_layers(&chunk_only))
         .unwrap()
         .unwrap();
     assert_eq!((hit.body, hit.object_layer), (lower, chunk));
     let terrain_only = [terrain];
     assert_eq!(
-        world.cast_ray(ray, &QueryFilter::new().object_layers(&terrain_only)),
+        world.cast_ray(&ray, &QueryFilter::new().object_layers(&terrain_only)),
         Ok(None)
     );
     assert_eq!(
-        world.cast_ray(ray, &QueryFilter::new().object_layers(&[])),
+        world.cast_ray(&ray, &QueryFilter::new().object_layers(&[])),
         Ok(None)
     );
 }
@@ -289,10 +289,10 @@ fn excluded_body_is_skipped() {
         .unwrap();
     let ray = down_from(0.0, 1.2, 0.0, 10.0);
 
-    let hit = world.cast_ray(ray, &ALL).unwrap().unwrap();
+    let hit = world.cast_ray(&ray, &ALL).unwrap().unwrap();
     assert_eq!((hit.body, hit.fraction), (own, 0.0));
     let hit = world
-        .cast_ray(ray, &QueryFilter::new().exclude_body(own))
+        .cast_ray(&ray, &QueryFilter::new().exclude_body(own))
         .unwrap()
         .unwrap();
     assert_eq!(hit.body, floor);
@@ -306,15 +306,14 @@ fn filter_rejects_unknown_layer_and_foreign_body() {
     let foreign = add_floor(&mut other);
     let ray = down_from(0.0, 5.0, 0.0, 10.0);
     let unknown = [ObjectLayer::new(5)];
-    for filter in [
-        QueryFilter::new().object_layers(&unknown),
-        QueryFilter::new().exclude_body(foreign),
-    ] {
-        assert!(matches!(
-            world.cast_ray(ray, &filter),
-            Err(QueryError::InvalidValue(_))
-        ));
-    }
+    assert_eq!(
+        world.cast_ray(&ray, &QueryFilter::new().object_layers(&unknown)),
+        Err(QueryError::UnknownObjectLayer(unknown[0]))
+    );
+    assert_eq!(
+        world.cast_ray(&ray, &QueryFilter::new().exclude_body(foreign)),
+        Err(QueryError::WrongWorld(foreign))
+    );
 }
 
 #[test]
@@ -336,18 +335,18 @@ fn ray_normals_point_out_of_the_hit_surface() {
         .unwrap();
 
     let hit = world
-        .cast_ray(down_from(-5.0, 5.0, 0.0, 10.0), &ALL)
+        .cast_ray(&down_from(-5.0, 5.0, 0.0, 10.0), &ALL)
         .unwrap()
         .unwrap();
     assert!(hit.normal.y > 0.99, "floor: {hit:?}");
 
     let from_minus_x = RayCast::new(RVec3::new(-5.0, 1.0, 0.0), Vec3::new(10.0, 0.0, 0.0));
-    let hit = world.cast_ray(from_minus_x, &ALL).unwrap().unwrap();
+    let hit = world.cast_ray(&from_minus_x, &ALL).unwrap().unwrap();
     assert!(hit.normal.x < -0.99, "wall: {hit:?}");
 
     let up = Vec3::new(0.0, 10.0, 0.0);
     let from_below = RayCast::new(RVec3::new(300.5, -5.0, 0.5), up);
-    let hit = world.cast_ray(from_below, &ALL).unwrap().unwrap();
+    let hit = world.cast_ray(&from_below, &ALL).unwrap().unwrap();
     assert_eq!(hit.body, terrain);
     assert!(dot(hit.normal, up) > 0.0, "heightfield underside: {hit:?}");
 }
@@ -358,23 +357,26 @@ fn queries_see_created_moved_and_removed_bodies_without_a_step() {
     let unit_box = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
     let at_origin = down_from(0.0, 5.0, 0.0, 10.0);
     let at_ten = down_from(10.0, 5.0, 0.0, 10.0);
-    assert_eq!(world.cast_ray(at_origin, &ALL), Ok(None));
+    assert_eq!(world.cast_ray(&at_origin, &ALL), Ok(None));
 
     let body = world
         .create_body(&unit_box, &BodySettings::new_static())
         .unwrap();
-    assert_eq!(world.cast_ray(at_origin, &ALL).unwrap().unwrap().body, body);
+    assert_eq!(
+        world.cast_ray(&at_origin, &ALL).unwrap().unwrap().body,
+        body
+    );
 
     world
         .body_mut(body)
         .unwrap()
         .set_position(RVec3::new(10.0, 0.0, 0.0), Activation::DontActivate)
         .unwrap();
-    assert_eq!(world.cast_ray(at_origin, &ALL), Ok(None));
-    assert_eq!(world.cast_ray(at_ten, &ALL).unwrap().unwrap().body, body);
+    assert_eq!(world.cast_ray(&at_origin, &ALL), Ok(None));
+    assert_eq!(world.cast_ray(&at_ten, &ALL).unwrap().unwrap().body, body);
 
     world.remove_body(body).unwrap();
-    assert_eq!(world.cast_ray(at_ten, &ALL), Ok(None));
+    assert_eq!(world.cast_ray(&at_ten, &ALL), Ok(None));
 }
 
 // Shape casts. The capsule is 2 * (0.70845 + 0.4) = 2.2169 m tall.
@@ -852,7 +854,7 @@ fn filtered_queries_run_in_parallel() {
     let run = |i: usize| {
         let x = -3.0 + 0.012 * i as Real;
         let ray = world
-            .cast_ray(down_from(x, 6.0, 0.5, 10.0), &ground)
+            .cast_ray(&down_from(x, 6.0, 0.5, 10.0), &ground)
             .unwrap();
         let cast = ShapeCast::new(&ball, RVec3::new(x, 6.0, 0.5), Quat::IDENTITY, down(10.0));
         let cast = world.cast_shape(&cast, &ground).unwrap();
@@ -890,7 +892,7 @@ fn optimize_broad_phase_keeps_query_results() {
             .map(|i| {
                 let x = 0.37 * i as Real;
                 let ray = down_from(x, 10.0, 0.21 * i as Real, 20.0);
-                world.cast_ray(ray, &ALL).unwrap()
+                world.cast_ray(&ray, &ALL).unwrap()
             })
             .collect();
         let casts: Vec<_> = (0..10)
@@ -906,4 +908,16 @@ fn optimize_broad_phase_keeps_query_results() {
     assert!(before.0.iter().filter(|hit| hit.is_some()).count() > 10);
     world.optimize_broad_phase();
     assert!(queries(&world) == before);
+}
+
+/// A ray keeps the origin and direction it was built with; `point_at` spans them.
+#[test]
+fn ray_cast_builder_defaults() {
+    let origin = RVec3::new(1.0, 2.0, 3.0);
+    let direction = Vec3::new(0.0, -4.0, 0.5);
+    let ray = RayCast::new(origin, direction);
+    assert_eq!(ray.origin(), origin);
+    assert_eq!(ray.direction(), direction);
+    assert_eq!(ray.point_at(0.0), origin);
+    assert_eq!(ray.point_at(1.0), RVec3::new(1.0, -2.0, 3.5));
 }

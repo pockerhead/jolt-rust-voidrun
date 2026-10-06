@@ -27,18 +27,7 @@ pub use motorcycle::MotorcycleSettings;
 pub(crate) use tracked::ChassisMass;
 pub use tracked::{TrackedVehicleSettings, TrackedWheelSettings, VehicleTrackSettings};
 pub(crate) use wheel::WheelGeometry;
-pub use wheel::{SuspensionSpring, VehicleAntiRollBar, WheelSettings};
-/// Jolt's default longitudinal friction curve of a wheel (`WheelSettingsWV`): friction
-/// coefficient over longitudinal slip ratio.
-pub const DEFAULT_LONGITUDINAL_FRICTION: [(f32, f32); 3] = [(0.0, 0.0), (0.06, 1.2), (0.2, 1.0)];
-
-/// Jolt's default lateral friction curve of a wheel (`WheelSettingsWV`): friction coefficient
-/// over slip angle in degrees.
-pub const DEFAULT_LATERAL_FRICTION: [(f32, f32); 3] = [(0.0, 0.0), (3.0, 1.2), (20.0, 1.0)];
-
-/// Jolt's default normalized torque curve of an engine (`VehicleEngineSettings`): fraction of
-/// the maximum torque over fraction of the maximum rpm.
-pub const DEFAULT_NORMALIZED_TORQUE: [(f32, f32); 3] = [(0.0, 0.8), (0.66, 1.0), (1.0, 0.8)];
+pub use wheel::{VehicleAntiRollBar, WheelSettings};
 
 /// The settings of a wheeled vehicle (Jolt `VehicleConstraintSettings` with a
 /// `WheeledVehicleControllerSettings`).
@@ -48,7 +37,7 @@ pub const DEFAULT_NORMALIZED_TORQUE: [(f32, f32); 3] = [(0.0, 0.8), (0.66, 1.0),
 /// forward +Z, put the left wheels at +X and the right wheels at −X; a differential's
 /// `left_wheel` and an anti-roll bar's `left_wheel` name the wheel on the left in that sense.
 #[derive(Clone, Debug, PartialEq)]
-pub struct VehicleSettings {
+pub struct WheeledVehicleSettings {
     pub(crate) wheels: Vec<WheelSettings>,
     pub(crate) differentials: Vec<VehicleDifferentialSettings>,
     pub(crate) collision_tester: VehicleCollisionTester,
@@ -59,7 +48,7 @@ pub struct VehicleSettings {
     differential_limited_slip_ratio: f32,
 }
 
-impl VehicleSettings {
+impl WheeledVehicleSettings {
     /// A vehicle with `wheels`, the engine driving them through `differentials` (at least one
     /// is needed for the vehicle to move), and wheels that find the ground with
     /// `collision_tester`.

@@ -385,7 +385,7 @@ fn max_concurrency_is_bounded() {
         });
         let result = PhysicsWorld::new(WorldSettings::default().job_system(jobs.clone()));
         assert!(
-            matches!(result, Err(WorldError::InvalidSettings(_))),
+            matches!(result, Err(WorldError::InvalidValue(_))),
             "{value}"
         );
         assert_eq!(jobs.reads.load(Ordering::Relaxed), 1, "{value}");

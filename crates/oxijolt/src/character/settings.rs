@@ -411,7 +411,7 @@ impl CharacterSettings<'static> {
     /// that far above the ground.
     ///
     /// # Errors
-    /// [`ShapeError::InvalidDimensions`] when `radius` is not finite and positive, when `height`
+    /// [`ShapeError::InvalidValue`] when `radius` is not finite and positive, when `height`
     /// is not finite and more than twice `radius`, or when the capsule is larger than
     /// [`Shape::new_capsule`] accepts.
     ///
@@ -435,12 +435,12 @@ impl CharacterSettings<'static> {
     /// ```
     pub fn humanoid(height: f32, radius: f32) -> Result<Self, ShapeError> {
         if !(radius.is_finite() && radius > 0.0) {
-            return Err(ShapeError::InvalidDimensions(
+            return Err(ShapeError::InvalidValue(
                 "humanoid radius must be finite and positive",
             ));
         }
         if !(height.is_finite() && height > 2.0 * radius) {
-            return Err(ShapeError::InvalidDimensions(
+            return Err(ShapeError::InvalidValue(
                 "humanoid height must be finite and more than twice its radius",
             ));
         }

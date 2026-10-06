@@ -24,6 +24,14 @@ pub struct CharacterRef<'w> {
     pub(super) character: NonNull<JPH_CharacterVirtual>,
 }
 
+impl std::fmt::Debug for CharacterRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CharacterRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl CharacterRef<'_> {
     fn ptr(&self) -> *mut JPH_CharacterVirtual {
         self.character.as_ptr()
@@ -157,7 +165,7 @@ impl CharacterRef<'_> {
     pub fn contact_object_layer(&self, contact: &CharacterContact) -> Option<ObjectLayer> {
         let body = contact.body?;
         self.world
-            .contains(body)
+            .contains_body(body)
             .then(|| self.world.object_layer_of(body))
     }
 
@@ -225,6 +233,12 @@ impl CharacterRef<'_> {
 pub struct CharacterMut<'w> {
     pub(super) character: NonNull<JPH_CharacterVirtual>,
     pub(super) _world: PhantomData<&'w mut PhysicsWorld>,
+}
+
+impl std::fmt::Debug for CharacterMut<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CharacterMut").finish_non_exhaustive()
+    }
 }
 
 impl CharacterMut<'_> {
@@ -327,6 +341,9 @@ impl CharacterMut<'_> {
     /// before stay alive until the character's next update, refresh or removal
     /// ([`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) releases them at
     /// once).
+    ///
+    /// # Errors
+    /// [`CharacterError::RestoreFailed`] when Jolt could not read the state.
     pub fn restore_state(&mut self, state: &CharacterState) -> Result<(), CharacterError> {
         // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
         let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
@@ -355,9 +372,7 @@ impl CharacterMut<'_> {
         };
         debug_assert!(!failed, "a saved character state failed to restore");
         if failed {
-            return Err(CharacterError::InvalidValue(
-                "character state stream failed",
-            ));
+            return Err(CharacterError::RestoreFailed);
         }
         Ok(())
     }

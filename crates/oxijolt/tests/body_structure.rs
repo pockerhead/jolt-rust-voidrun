@@ -316,7 +316,7 @@ fn motion_type_changes_refuse_owned_bodies() {
     for (id, error) in [
         (part, BodyError::OwnedByRagdoll(part)),
         (inner, BodyError::OwnedByCharacter(inner)),
-        (cloth, BodyError::SoftBody(cloth)),
+        (cloth, BodyError::NotRigidBody(cloth)),
     ] {
         for motion_type in [
             MotionType::Static,
@@ -395,7 +395,7 @@ fn a_static_body_that_may_move_joins_a_fixed_constraint_with_an_automatic_point(
         .create_constraint(
             post,
             cube,
-            &FixedConstraintSettings::default().auto_detect_point(),
+            &FixedConstraintSettings::default().auto_detect_point(true),
         )
         .unwrap();
     step(&mut world, 30);

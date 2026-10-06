@@ -56,6 +56,15 @@ pub struct Skeleton {
     parents: Vec<Option<u32>>,
 }
 
+impl std::fmt::Debug for Skeleton {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Skeleton")
+            .field("names", &self.names)
+            .field("parents", &self.parents)
+            .finish_non_exhaustive()
+    }
+}
+
 // SAFETY: the Jolt skeleton is never changed after `new`, and `RefTarget` counts references
 // atomically, so it may be used and released from any thread
 // (https://jrouwe.github.io/JoltPhysicsDocs/5.6.0/index.html#memory-management).
@@ -217,7 +226,7 @@ impl JointKind {
 /// activation is ignored: [`PhysicsWorld::create_ragdoll`](crate::PhysicsWorld::create_ragdoll)
 /// takes one for the whole ragdoll. A part may be a sensor; it keeps all six degrees of freedom
 /// and takes no user data, which Jolt sets to the ragdoll's (0).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RagdollPart<'a> {
     /// The part's collision shape. The settings keep their own reference.
     pub shape: &'a Shape,
@@ -256,6 +265,15 @@ pub struct RagdollSettings {
     parents: Vec<Option<u32>>,
     joints: Vec<Option<JointKind>>,
     object_layers: Vec<ObjectLayer>,
+}
+
+impl std::fmt::Debug for RagdollSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RagdollSettings")
+            .field("parents", &self.parents)
+            .field("object_layers", &self.object_layers)
+            .finish_non_exhaustive()
+    }
 }
 
 // SAFETY: the Jolt settings are never changed after construction, `CreateRagdoll` only reads them

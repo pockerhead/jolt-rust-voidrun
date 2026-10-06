@@ -29,13 +29,14 @@ pub struct SubShapeIdPair {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContactPoint {
     /// The point on body 1.
-    pub on1: RVec3,
+    pub point_on1: RVec3,
     /// The point on body 2.
-    pub on2: RVec3,
+    pub point_on2: RVec3,
 }
 
 /// The contact between two sub-shapes in one step (Jolt `ContactManifold`).
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct ContactManifold {
     /// The bodies and sub-shapes that touch.
     pub pair: SubShapeIdPair,
@@ -65,10 +66,10 @@ pub struct ContactManifold {
 pub struct ContactSettings {
     combined_friction: f32,
     combined_restitution: f32,
-    inv_mass_scale1: f32,
-    inv_inertia_scale1: f32,
-    inv_mass_scale2: f32,
-    inv_inertia_scale2: f32,
+    inverse_mass_scale1: f32,
+    inverse_inertia_scale1: f32,
+    inverse_mass_scale2: f32,
+    inverse_inertia_scale2: f32,
     is_sensor: bool,
     relative_linear_surface_velocity: Vec3,
     relative_angular_surface_velocity: Vec3,
@@ -93,10 +94,10 @@ impl ContactSettings {
         Self {
             combined_friction: settings.combinedFriction,
             combined_restitution: settings.combinedRestitution,
-            inv_mass_scale1: settings.invMassScale1,
-            inv_inertia_scale1: settings.invInertiaScale1,
-            inv_mass_scale2: settings.invMassScale2,
-            inv_inertia_scale2: settings.invInertiaScale2,
+            inverse_mass_scale1: settings.invMassScale1,
+            inverse_inertia_scale1: settings.invInertiaScale1,
+            inverse_mass_scale2: settings.invMassScale2,
+            inverse_inertia_scale2: settings.invInertiaScale2,
             is_sensor: settings.isSensor != 0,
             relative_linear_surface_velocity: Vec3::from_jph(
                 settings.relativeLinearSurfaceVelocity,
@@ -123,13 +124,13 @@ impl ContactSettings {
             ContactSettingsError::Restitution,
         )?;
         check(
-            limits::is_contact_scale(self.inv_mass_scale1)
-                && limits::is_contact_scale(self.inv_mass_scale2),
+            limits::is_contact_scale(self.inverse_mass_scale1)
+                && limits::is_contact_scale(self.inverse_mass_scale2),
             ContactSettingsError::InverseMassScale,
         )?;
         check(
-            limits::is_contact_scale(self.inv_inertia_scale1)
-                && limits::is_contact_scale(self.inv_inertia_scale2),
+            limits::is_contact_scale(self.inverse_inertia_scale1)
+                && limits::is_contact_scale(self.inverse_inertia_scale2),
             ContactSettingsError::InverseInertiaScale,
         )?;
         check(
@@ -153,10 +154,10 @@ impl ContactSettings {
     pub(super) fn write_to(&self, settings: &mut JPH_ContactSettings) {
         settings.combinedFriction = self.combined_friction;
         settings.combinedRestitution = self.combined_restitution;
-        settings.invMassScale1 = self.inv_mass_scale1;
-        settings.invInertiaScale1 = self.inv_inertia_scale1;
-        settings.invMassScale2 = self.inv_mass_scale2;
-        settings.invInertiaScale2 = self.inv_inertia_scale2;
+        settings.invMassScale1 = self.inverse_mass_scale1;
+        settings.invInertiaScale1 = self.inverse_inertia_scale1;
+        settings.invMassScale2 = self.inverse_mass_scale2;
+        settings.invInertiaScale2 = self.inverse_inertia_scale2;
         settings.isSensor = u32::from(self.is_sensor);
         settings.relativeLinearSurfaceVelocity = self.relative_linear_surface_velocity.to_jph();
         settings.relativeAngularSurfaceVelocity = self.relative_angular_surface_velocity.to_jph();
@@ -168,10 +169,10 @@ impl ContactSettings {
             self.combined_friction,
             self.combined_restitution,
             [
-                self.inv_mass_scale1,
-                self.inv_inertia_scale1,
-                self.inv_mass_scale2,
-                self.inv_inertia_scale2,
+                self.inverse_mass_scale1,
+                self.inverse_inertia_scale1,
+                self.inverse_mass_scale2,
+                self.inverse_inertia_scale2,
             ],
             self.is_sensor,
             self.relative_linear_surface_velocity,
@@ -210,66 +211,66 @@ impl ContactSettings {
     }
 
     /// Factor on body 1's inverse mass for this contact; 1 by default.
-    pub fn inv_mass_scale1(&self) -> f32 {
-        self.inv_mass_scale1
+    pub fn inverse_mass_scale1(&self) -> f32 {
+        self.inverse_mass_scale1
     }
 
     /// Sets the factor on body 1's inverse mass, 0 or [`limits::MIN_CONTACT_SCALE`]`..=1`: 0
     /// makes body 1 immovable for this contact. When no dynamic body of the contact keeps a
     /// factor above 0, Jolt drops the contact and the bodies pass through each other.
-    pub fn set_inv_mass_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+    pub fn set_inverse_mass_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
             limits::is_contact_scale(value),
             ContactSettingsError::InverseMassScale,
         )?;
-        self.inv_mass_scale1 = value;
+        self.inverse_mass_scale1 = value;
         Ok(())
     }
 
     /// Factor on body 1's inverse inertia for this contact; 1 by default.
-    pub fn inv_inertia_scale1(&self) -> f32 {
-        self.inv_inertia_scale1
+    pub fn inverse_inertia_scale1(&self) -> f32 {
+        self.inverse_inertia_scale1
     }
 
     /// Sets the factor on body 1's inverse inertia, 0 or
     /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
-    pub fn set_inv_inertia_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+    pub fn set_inverse_inertia_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
             limits::is_contact_scale(value),
             ContactSettingsError::InverseInertiaScale,
         )?;
-        self.inv_inertia_scale1 = value;
+        self.inverse_inertia_scale1 = value;
         Ok(())
     }
 
     /// Factor on body 2's inverse mass for this contact; 1 by default.
-    pub fn inv_mass_scale2(&self) -> f32 {
-        self.inv_mass_scale2
+    pub fn inverse_mass_scale2(&self) -> f32 {
+        self.inverse_mass_scale2
     }
 
     /// Sets the factor on body 2's inverse mass, 0 or [`limits::MIN_CONTACT_SCALE`]`..=1`.
-    pub fn set_inv_mass_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+    pub fn set_inverse_mass_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
             limits::is_contact_scale(value),
             ContactSettingsError::InverseMassScale,
         )?;
-        self.inv_mass_scale2 = value;
+        self.inverse_mass_scale2 = value;
         Ok(())
     }
 
     /// Factor on body 2's inverse inertia for this contact; 1 by default.
-    pub fn inv_inertia_scale2(&self) -> f32 {
-        self.inv_inertia_scale2
+    pub fn inverse_inertia_scale2(&self) -> f32 {
+        self.inverse_inertia_scale2
     }
 
     /// Sets the factor on body 2's inverse inertia, 0 or
     /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
-    pub fn set_inv_inertia_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+    pub fn set_inverse_inertia_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
             limits::is_contact_scale(value),
             ContactSettingsError::InverseInertiaScale,
         )?;
-        self.inv_inertia_scale2 = value;
+        self.inverse_inertia_scale2 = value;
         Ok(())
     }
 
@@ -355,10 +356,10 @@ impl fmt::Debug for ContactSettings {
         f.debug_struct("ContactSettings")
             .field("combined_friction", &self.combined_friction)
             .field("combined_restitution", &self.combined_restitution)
-            .field("inv_mass_scale1", &self.inv_mass_scale1)
-            .field("inv_inertia_scale1", &self.inv_inertia_scale1)
-            .field("inv_mass_scale2", &self.inv_mass_scale2)
-            .field("inv_inertia_scale2", &self.inv_inertia_scale2)
+            .field("inverse_mass_scale1", &self.inverse_mass_scale1)
+            .field("inverse_inertia_scale1", &self.inverse_inertia_scale1)
+            .field("inverse_mass_scale2", &self.inverse_mass_scale2)
+            .field("inverse_inertia_scale2", &self.inverse_inertia_scale2)
             .field("is_sensor", &self.is_sensor)
             .field(
                 "relative_linear_surface_velocity",
@@ -433,6 +434,7 @@ impl ContactEvent {
 /// contact it was called for, such as a value kept from another contact (see
 /// [`ContactSettings`]). Jolt resolved the contact with its own settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ContactSettingsRejection {
     /// The contact the listener was called for.
     pub pair: SubShapeIdPair,
@@ -470,8 +472,8 @@ unsafe fn read_manifold(
                 JPH_ContactManifold_GetWorldSpaceContactPointOn1(manifold, index, &mut on1);
                 JPH_ContactManifold_GetWorldSpaceContactPointOn2(manifold, index, &mut on2);
                 ContactPoint {
-                    on1: RVec3::from_jph(on1),
-                    on2: RVec3::from_jph(on2),
+                    point_on1: RVec3::from_jph(on1),
+                    point_on2: RVec3::from_jph(on2),
                 }
             })
             .collect();
@@ -604,7 +606,7 @@ unsafe fn lever_arm(body1: *const JPH_Body, manifold: &ContactManifold) -> f64 {
     manifold
         .points
         .iter()
-        .flat_map(|point| [point.on1, point.on2])
+        .flat_map(|point| [point.point_on1, point.point_on2])
         .map(|point| {
             let [x, y, z] = real_coordinates(point);
             let [dx, dy, dz] = [x - com[0], y - com[1], z - com[2]];

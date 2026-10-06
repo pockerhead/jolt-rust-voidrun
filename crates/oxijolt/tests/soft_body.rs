@@ -386,7 +386,7 @@ fn body_level_velocity_torque_and_point_force_refuse_soft_bodies() {
     let id = loose_cloth(&mut world, SoftBodySettings::default().gravity_factor(0.0));
     let before = world.soft_body(id).unwrap().vertices();
     let mut body = world.body_mut(id).unwrap();
-    let refused = Err(BodyError::SoftBody(id));
+    let refused = Err(BodyError::NotRigidBody(id));
     let push = Vec3::new(1.0, 0.0, 0.0);
     assert_eq!(body.set_linear_velocity(push), refused);
     assert_eq!(body.set_angular_velocity(push), refused);
@@ -421,13 +421,13 @@ fn constraints_and_vehicles_refuse_soft_bodies() {
     for (a, b) in [(id, cube), (cube, id)] {
         assert_eq!(
             world.create_constraint(a, b, &settings).err(),
-            Some(ConstraintError::Body(BodyError::SoftBody(id)))
+            Some(ConstraintError::Body(BodyError::NotRigidBody(id)))
         );
     }
     let vehicle = common::vehicle::car_settings(VehicleCollisionTester::ray(ObjectLayer::MOVING));
     assert_eq!(
-        world.create_vehicle(id, &vehicle).err(),
-        Some(VehicleError::Body(BodyError::SoftBody(id)))
+        world.create_wheeled_vehicle(id, &vehicle).err(),
+        Some(VehicleError::Body(BodyError::NotRigidBody(id)))
     );
 }
 
@@ -516,7 +516,7 @@ fn soft_bodies_are_removed_and_a_full_world_refuses_one_cleanly() {
     let second = world
         .create_soft_body(&shared, &SoftBodySettings::default())
         .unwrap();
-    assert!(world.contains(second) && !world.contains(first));
+    assert!(world.contains_body(second) && !world.contains_body(first));
 }
 
 #[test]
@@ -532,7 +532,7 @@ fn queries_find_a_cloth() {
         )
         .unwrap();
     let ray = RayCast::new(RVec3::new(0.1, 3.0, 0.1), Vec3::new(0.0, -5.0, 0.0));
-    let hit = world.cast_ray(ray, &ALL).unwrap().expect("the cloth");
+    let hit = world.cast_ray(&ray, &ALL).unwrap().expect("the cloth");
     assert_eq!(hit.body, id);
     assert!(finite(hit.normal));
     assert!((hit.distance - 2.0).abs() < 1.0e-3, "{}", hit.distance);

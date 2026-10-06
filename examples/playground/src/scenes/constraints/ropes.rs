@@ -86,7 +86,7 @@ impl Ropes {
         world.create_constraint(
             left,
             right,
-            &FixedConstraintSettings::default().auto_detect_point(),
+            &FixedConstraintSettings::default().auto_detect_point(true),
         )?;
 
         Ok(Self {

@@ -5,6 +5,7 @@ version = "0.7.0+jolt-5.6.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/pockerhead/oxijolt"
 edition = "2021"
+rust-version = "1.88"
 links = "joltc"
 keywords = ["physics", "jolt", "ffi", "gamedev"]
 categories = ["external-ffi-bindings", "game-development", "simulation"]

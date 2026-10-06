@@ -73,6 +73,15 @@ pub struct SoftBodySharedSettings {
     pub(super) mass_distribution: SoftBodyMassDistribution,
 }
 
+impl std::fmt::Debug for SoftBodySharedSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SoftBodySharedSettings")
+            .field("vertex_count", &self.vertex_count())
+            .field("face_count", &self.face_count())
+            .finish_non_exhaustive()
+    }
+}
+
 // SAFETY: the settings are never changed after `build` returns (no method takes `&mut self`, and
 // Jolt requires shared settings to stay constant while bodies use them, `Docs/Architecture.md:427`),
 // no Jolt member of `SoftBodySharedSettings` is `mutable`, and `RefTarget` counts references

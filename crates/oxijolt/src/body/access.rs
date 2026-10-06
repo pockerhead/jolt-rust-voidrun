@@ -94,8 +94,8 @@ impl PhysicsWorld {
         }
     }
 
-    /// Whether `id` names a body that is in this world now.
-    pub fn contains(&self, id: BodyId) -> bool {
+    /// Whether `id` names a body that is in this world now (Jolt `BodyInterface::IsAdded`).
+    pub fn contains_body(&self, id: BodyId) -> bool {
         self.check(id).is_ok()
     }
 
@@ -103,7 +103,8 @@ impl PhysicsWorld {
     /// bodies, ragdoll parts and characters' inner bodies (Jolt `PhysicsSystem::GetBodies`).
     ///
     /// It borrows the world mutably although it changes nothing: joltc copies as many ids as it
-    /// is asked for, so the body count must not change between counting and copying.
+    /// is asked for, so the body count must not change between counting and copying. The ids
+    /// are copied before this returns, so the iterator does not borrow the world.
     ///
     /// ```
     /// use oxijolt::*;
@@ -113,11 +114,14 @@ impl PhysicsWorld {
     /// let shape = Shape::new_sphere(0.5)?;
     /// let a = world.create_body(&shape, &BodySettings::new_dynamic())?;
     /// let b = world.create_body(&shape, &BodySettings::new_static())?;
-    /// assert_eq!(world.body_ids(), [a, b]);
+    /// assert!(world.body_ids().eq([a, b]));
+    /// for id in world.body_ids() {
+    ///     world.body_mut(id)?.activate();
+    /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub fn body_ids(&mut self) -> Vec<BodyId> {
+    pub fn body_ids(&mut self) -> impl Iterator<Item = BodyId> {
         let count = self.body_count();
         let mut raw = vec![INVALID_BODY_ID; count as usize];
         if count > 0 {
@@ -129,9 +133,8 @@ impl PhysicsWorld {
             unsafe { JPH_PhysicsSystem_GetBodies(self.system.as_ptr(), raw.as_mut_ptr(), count) };
         }
         raw.sort_unstable();
-        raw.into_iter()
-            .map(|raw| BodyId::new(raw, self.tag))
-            .collect()
+        let tag = self.tag;
+        raw.into_iter().map(move |raw| BodyId::new(raw, tag))
     }
 
     /// Read access to a body.

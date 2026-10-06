@@ -239,7 +239,7 @@ fn a_solver_excluded_body_is_still_found_by_queries_and_blocks_characters() {
         )
         .unwrap();
     let ray = RayCast::new(RVec3::new(0.0, 1.0, 0.0), Vec3::new(10.0, 0.0, 0.0));
-    let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap().unwrap();
+    let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap().unwrap();
     assert_eq!(hit.body, wall);
 
     let capsule = Shape::new_capsule(0.7, 0.4).unwrap();

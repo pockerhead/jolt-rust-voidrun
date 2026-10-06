@@ -16,7 +16,9 @@ fn lines_near(
 ) -> DebugLines {
     let mut lines = DebugLines::new();
     let settings = DebugLineSettings::new(RVec3::ZERO, radius).max_lines(max_lines);
-    world.debug_lines(&settings, filter, &mut lines).unwrap();
+    world
+        .debug_lines_into(&settings, filter, &mut lines)
+        .unwrap();
     lines
 }
 
@@ -154,7 +156,7 @@ fn off_releases_buffers() {
     let mut lines = DebugLines::new();
     scene
         .world
-        .debug_lines(&settings, &filter, &mut lines)
+        .debug_lines_into(&settings, &filter, &mut lines)
         .unwrap();
     assert_eq!(lines.lines().len(), 10);
     assert!(lines.is_truncated());
@@ -166,7 +168,7 @@ fn off_releases_buffers() {
     let uncapped = DebugLineSettings::new(RVec3::ZERO, 20.0);
     scene
         .world
-        .debug_lines(&uncapped, &filter, &mut lines)
+        .debug_lines_into(&uncapped, &filter, &mut lines)
         .unwrap();
     assert_eq!(
         lines.lines(),
@@ -202,6 +204,9 @@ fn same_calls_give_identical_lines() {
     let rebuilt = fingerprint(&lines_near(&other.world, 20.0, usize::MAX, &filter));
     assert_eq!(first, second);
     assert_eq!(first, rebuilt);
+    let settings = DebugLineSettings::new(RVec3::ZERO, 20.0);
+    let allocated = scene.world.debug_lines(&settings, &filter).unwrap();
+    assert_eq!(fingerprint(&allocated), first);
 }
 
 #[test]
@@ -211,10 +216,12 @@ fn invalid_input_is_rejected() {
     let mut lines = DebugLines::new();
     let settings = DebugLineSettings::new(RVec3::ZERO, 20.0);
     let foreign = QueryFilter::new().exclude_body(other.capsule);
-    assert!(matches!(
-        scene.world.debug_lines(&settings, &foreign, &mut lines),
-        Err(QueryError::InvalidValue(_))
-    ));
+    assert_eq!(
+        scene
+            .world
+            .debug_lines_into(&settings, &foreign, &mut lines),
+        Err(QueryError::WrongWorld(other.capsule))
+    );
     for settings in [
         DebugLineSettings::new(RVec3::ZERO, -1.0),
         DebugLineSettings::new(RVec3::ZERO, f32::NAN),
@@ -223,7 +230,7 @@ fn invalid_input_is_rejected() {
         assert!(matches!(
             scene
                 .world
-                .debug_lines(&settings, &QueryFilter::new(), &mut lines),
+                .debug_lines_into(&settings, &QueryFilter::new(), &mut lines),
             Err(QueryError::InvalidValue(_))
         ));
     }
@@ -244,7 +251,7 @@ fn center_and_radius_are_bounded_by_the_frame() {
     for settings in accepted {
         scene
             .world
-            .debug_lines(&settings, &QueryFilter::new(), &mut lines)
+            .debug_lines_into(&settings, &QueryFilter::new(), &mut lines)
             .unwrap();
     }
     let rejected = [
@@ -255,7 +262,7 @@ fn center_and_radius_are_bounded_by_the_frame() {
         assert!(matches!(
             scene
                 .world
-                .debug_lines(&settings, &QueryFilter::new(), &mut lines),
+                .debug_lines_into(&settings, &QueryFilter::new(), &mut lines),
             Err(QueryError::InvalidValue(_))
         ));
     }
@@ -282,7 +289,7 @@ fn radius_edge_far_from_origin() {
     );
     let mut lines = DebugLines::new();
     world
-        .debug_lines(
+        .debug_lines_into(
             &DebugLineSettings::new(center, radius),
             &QueryFilter::new(),
             &mut lines,
@@ -503,7 +510,7 @@ fn compound_child_beyond_radius_is_skipped_and_nested_compounds_keep_top_group()
     let mut far = DebugLines::new();
     let settings = DebugLineSettings::new(RVec3::new(50.0, 0.0, 0.0), 1.0);
     world
-        .debug_lines(&settings, &QueryFilter::new(), &mut far)
+        .debug_lines_into(&settings, &QueryFilter::new(), &mut far)
         .unwrap();
     assert_eq!(far.lines().len(), 36);
     assert!(far
@@ -601,10 +608,10 @@ fn new_shapes_are_drawn_within_their_bounds() {
     let points = common::meshes::irregular_points();
     let hull = add(
         &mut world,
-        &Shape::new_convex_hull(&points, 0.05).unwrap(),
+        &Shape::new_convex_hull_with_convex_radius(&points, 0.05).unwrap(),
         BodySettings::new_dynamic().position(RVec3::new(0.0, 3.0, 0.0)),
     );
-    let scaled_box = Shape::scaled(&cube_shape(), Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    let scaled_box = Shape::new_scaled(&cube_shape(), Vec3::new(1.0, 2.0, 3.0)).unwrap();
     let scaled = add(
         &mut world,
         &scaled_box,

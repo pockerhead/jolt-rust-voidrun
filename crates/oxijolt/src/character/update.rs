@@ -238,7 +238,10 @@ impl PhysicsWorld {
     /// - `gravity` is not finite or longer than [`limits::MAX_ACCELERATION`];
     /// - the character's mass times the length of `gravity` times `delta_time` exceeds
     ///   [`limits::MAX_WEIGHT_IMPULSE`];
-    /// - `settings` are invalid, or a layer of `filter` is not in this world.
+    /// - `settings` are invalid.
+    ///
+    /// Returns [`CharacterError::Query`] and changes nothing when `filter` names an object layer
+    /// this world does not have or a body of another world.
     ///
     /// A [`CharacterContactListener`](crate::CharacterContactListener) set with
     /// [`set_character_contact_listener`](Self::set_character_contact_listener) is called
@@ -446,7 +449,5 @@ impl PhysicsWorld {
 
 /// A query filter error as a character error.
 fn query_error(error: crate::QueryError) -> CharacterError {
-    match error {
-        crate::QueryError::InvalidValue(what) => CharacterError::InvalidValue(what),
-    }
+    CharacterError::Query(error)
 }

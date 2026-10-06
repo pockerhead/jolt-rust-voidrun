@@ -31,22 +31,31 @@ mod point;
 
 pub use cast::{ShapeCast, ShapeCastHit};
 pub use collide::{CollideShape, CollideShapeHit};
-pub use point::PointHit;
+pub use point::CollidePointHit;
 
-/// A ray from `origin` along `direction`. The direction's length is the ray's length; hits
-/// report the fraction along it, in `[0, 1]`.
+/// A ray from `origin` along `direction` (Jolt `RRayCast`). The direction's length is the ray's
+/// length; hits report the fraction along it, in `[0, 1]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RayCast {
-    /// Start of the ray in world space, metres.
-    pub origin: RVec3,
-    /// Direction and length of the ray, metres.
-    pub direction: Vec3,
+    origin: RVec3,
+    direction: Vec3,
 }
 
 impl RayCast {
-    /// A ray from `origin` covering `direction`.
+    /// A ray from `origin` (world space, metres) covering `direction` (metres). Both are checked
+    /// by [`PhysicsWorld::cast_ray`].
     pub fn new(origin: RVec3, direction: Vec3) -> Self {
         Self { origin, direction }
+    }
+
+    /// Start of the ray in world space, metres.
+    pub fn origin(&self) -> RVec3 {
+        self.origin
+    }
+
+    /// Direction and length of the ray, metres.
+    pub fn direction(&self) -> Vec3 {
+        self.direction
     }
 
     /// The point `origin + direction * fraction`, computed as Jolt does
@@ -66,7 +75,7 @@ impl RayCast {
 /// Triangle back faces are hit, so a heightfield is hit from below too.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
-pub struct RayHit {
+pub struct RayCastHit {
     /// The body that was hit.
     pub body: BodyId,
     /// Fraction along the ray's direction where it hit, in `[0, 1]`.
@@ -134,17 +143,19 @@ impl PhysicsWorld {
     ///
     /// Convex shapes are solid: a ray that starts inside one hits it at fraction `0.0` exactly.
     /// Triangle back faces are hit, so a heightfield is hit from below. Rays see a box's sharp
-    /// faces whatever its convex radius. [`RayHit::normal`] is the outward normal of the hit
+    /// faces whatever its convex radius. [`RayCastHit::normal`] is the outward normal of the hit
     /// face.
     ///
     /// The origin must be finite with every component at most [`limits::MAX_POSITION`] in
-    /// absolute value, the direction finite and not zero, and the filter valid for this world;
-    /// otherwise [`QueryError::InvalidValue`] is returned.
+    /// absolute value and the direction finite and not zero; otherwise
+    /// [`QueryError::InvalidValue`] is returned.
+    /// A filter that names an object layer this world does not have, or a body of another
+    /// world, gives [`QueryError::UnknownObjectLayer`] or [`QueryError::WrongWorld`].
     pub fn cast_ray(
         &self,
-        ray: RayCast,
+        ray: &RayCast,
         filter: &QueryFilter<'_>,
-    ) -> Result<Option<RayHit>, QueryError> {
+    ) -> Result<Option<RayCastHit>, QueryError> {
         if !limits::is_in_frame(ray.origin) {
             return Err(QueryError::InvalidValue(
                 "ray origin must be finite and within limits::MAX_POSITION",
@@ -211,9 +222,9 @@ impl PhysicsWorld {
                 let layer = unsafe { JPH_Body_GetObjectLayer(locked.as_ptr()) };
                 (Vec3::from_jph(normal), ObjectLayer::new(layer))
             })
-            .ok_or(QueryError::InvalidValue("the hit body could not be read"))?;
+            .ok_or(QueryError::AllocationFailed)?;
         let sub_shape_id = SubShapeId::new(hit.subShapeID2);
-        Ok(Some(RayHit {
+        Ok(Some(RayCastHit {
             body,
             fraction: hit.fraction,
             sub_shape_id,

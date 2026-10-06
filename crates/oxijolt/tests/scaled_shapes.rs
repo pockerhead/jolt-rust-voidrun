@@ -19,13 +19,18 @@ fn non_uniformly_scaled_hull_and_box_rest_on_a_mesh() {
     world
         .create_body(&flat_grid(16, 1.0), &BodySettings::new_static())
         .unwrap();
-    let hull = Shape::new_convex_hull(&box_corners(Vec3::new(0.5, 0.5, 0.5)), 0.05).unwrap();
+    let hull =
+        Shape::new_convex_hull_with_convex_radius(&box_corners(Vec3::new(0.5, 0.5, 0.5)), 0.05)
+            .unwrap();
     let block = Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap();
     // Shape and resting height of the body origin: half of the scaled y extent.
     let cases = [
-        (Shape::scaled(&hull, Vec3::new(2.0, 0.6, 1.0)).unwrap(), 0.3),
         (
-            Shape::scaled(&block, Vec3::new(0.5, 1.6, 3.0)).unwrap(),
+            Shape::new_scaled(&hull, Vec3::new(2.0, 0.6, 1.0)).unwrap(),
+            0.3,
+        ),
+        (
+            Shape::new_scaled(&block, Vec3::new(0.5, 1.6, 3.0)).unwrap(),
             0.8,
         ),
     ];
@@ -58,7 +63,7 @@ fn scaled_mesh_with_a_far_centre_of_mass_carries_a_cube() {
     let (vertices, triangles) = grid(4, 0.5, |_, _| 0.0);
     let (mesh, _) = Shape::new_mesh(&vertices, &triangles).unwrap();
     let away = Shape::new_offset_center_of_mass(&mesh, Vec3::new(-1300.0, 0.0, 0.0)).unwrap();
-    let ground = Shape::scaled(&away, Vec3::new(1.5, 1.0, 1.5)).unwrap();
+    let ground = Shape::new_scaled(&away, Vec3::new(1.5, 1.0, 1.5)).unwrap();
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
     world
         .create_body(&ground, &BodySettings::new_static())
@@ -73,7 +78,7 @@ fn scaled_mesh_with_a_far_centre_of_mass_carries_a_cube() {
 
 #[test]
 fn mirrored_mesh_faces_the_other_way() {
-    let mirrored = Shape::scaled(&flat_grid(4, 1.0), Vec3::new(1.0, -1.0, 1.0)).unwrap();
+    let mirrored = Shape::new_scaled(&flat_grid(4, 1.0), Vec3::new(1.0, -1.0, 1.0)).unwrap();
     let mut world = world(Vec3::ZERO, 1);
     let ground = world
         .create_body(&mirrored, &BodySettings::new_static())
@@ -99,7 +104,7 @@ fn mirrored_mesh_faces_the_other_way() {
 #[test]
 fn kinematic_scaled_mesh_carries_a_box() {
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
-    let platform_shape = Shape::scaled(&flat_grid(2, 1.0), Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let platform_shape = Shape::new_scaled(&flat_grid(2, 1.0), Vec3::new(2.0, 2.0, 2.0)).unwrap();
     let platform = world
         .create_body(
             &platform_shape,
@@ -136,7 +141,7 @@ fn kinematic_scaled_mesh_carries_a_box() {
 
 #[test]
 fn scaled_mesh_is_refused_as_dynamic() {
-    let scaled = Shape::scaled(&flat_grid(2, 1.0), Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let scaled = Shape::new_scaled(&flat_grid(2, 1.0), Vec3::new(2.0, 2.0, 2.0)).unwrap();
     let mut world = world(Vec3::ZERO, 1);
     assert_eq!(
         world.create_body(&scaled, &BodySettings::new_dynamic().mass(5.0)),
@@ -150,7 +155,7 @@ fn scaled_mesh_is_refused_as_dynamic() {
 /// seconds.
 fn sphere_on_scaled_field(scale: Vec3) -> f32 {
     let field = Shape::new_height_field(5, &[0.0; 25], &HeightFieldSettings::default()).unwrap();
-    let scaled = Shape::scaled(&field, scale).unwrap();
+    let scaled = Shape::new_scaled(&field, scale).unwrap();
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
     world
         .create_body(&scaled, &BodySettings::new_static())

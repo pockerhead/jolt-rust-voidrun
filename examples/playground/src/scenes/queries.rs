@@ -170,7 +170,7 @@ impl Queries {
     fn query(&mut self, aim: RayCast) -> Result<()> {
         let filter = QueryFilter::new();
         let mut found = Found::default();
-        if let Some(hit) = self.world.cast_ray(aim, &filter)? {
+        if let Some(hit) = self.world.cast_ray(&aim, &filter)? {
             let point = aim.point_at(hit.fraction);
             found.hit = Some((hit.body, position_f32(point), <[f32; 3]>::from(hit.normal)));
             self.milestones.reach("ray hit");
@@ -199,10 +199,15 @@ impl Queries {
                 .map(|hit| hit.body)
                 .collect();
         }
-        let cast = ShapeCast::new(&self.probe.shape, aim.origin, Quat::IDENTITY, aim.direction);
+        let cast = ShapeCast::new(
+            &self.probe.shape,
+            aim.origin(),
+            Quat::IDENTITY,
+            aim.direction(),
+        );
         if let Some(stop) = self.world.cast_shape(&cast, &filter)? {
-            let travelled = glam(aim.direction) * stop.fraction;
-            found.cast_stop = Some((position(aim.origin) + travelled).to_array());
+            let travelled = glam(aim.direction()) * stop.fraction;
+            found.cast_stop = Some((position(aim.origin()) + travelled).to_array());
             self.milestones.reach("shape cast stopped");
         }
         self.found = found;
@@ -229,7 +234,7 @@ impl Queries {
 
     /// Pushes the body under a click and remembers a crate as the one T toggles.
     fn push(&mut self, ray: RayCast) -> Result<()> {
-        let Some(hit) = self.world.cast_ray(ray, &QueryFilter::new())? else {
+        let Some(hit) = self.world.cast_ray(&ray, &QueryFilter::new())? else {
             return Ok(());
         };
         if !self.crates.contains(&hit.body) {
@@ -238,7 +243,7 @@ impl Queries {
         self.picked = Some(hit.body);
         let mut body = self.world.body_mut(hit.body)?;
         if body.motion_type() == MotionType::Dynamic {
-            let push = glam(ray.direction).normalize() * 60.0;
+            let push = glam(ray.direction()).normalize() * 60.0;
             body.add_impulse_at_point(vec3(push), ray.point_at(hit.fraction))?;
         }
         Ok(())
@@ -271,7 +276,7 @@ impl Queries {
         let hit = match aim {
             Some(ray) => self
                 .world
-                .cast_ray(ray, &QueryFilter::new())?
+                .cast_ray(&ray, &QueryFilter::new())?
                 .map(|hit| position_f32(ray.point_at(hit.fraction))),
             None => None,
         };
@@ -330,8 +335,8 @@ impl Scene for Queries {
             // The cursor ray was taken before the move; it moves along, like the camera.
             aim = aim.map(|ray| {
                 RayCast::new(
-                    rvec((position(ray.origin) + shift).to_array()),
-                    ray.direction,
+                    rvec((position(ray.origin()) + shift).to_array()),
+                    ray.direction(),
                 )
             });
         }
@@ -516,7 +521,7 @@ mod tests {
     fn static_hit(scene: &Queries, ray: RayCast) -> [f32; 3] {
         let hit = scene
             .world
-            .cast_ray(ray, &QueryFilter::new())
+            .cast_ray(&ray, &QueryFilter::new())
             .unwrap()
             .expect("the ray hits");
         let body = scene.world.body(hit.body).unwrap();

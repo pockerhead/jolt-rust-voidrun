@@ -12,59 +12,59 @@ use crate::{limits, BodyId, ContactSettingsError, Quat, RVec3, Real, Vec3};
 /// `SoftBodyContactSettings`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SoftBodyContactSettings {
-    inv_mass_scale1: f32,
-    inv_mass_scale2: f32,
-    inv_inertia_scale2: f32,
+    inverse_mass_scale1: f32,
+    inverse_mass_scale2: f32,
+    inverse_inertia_scale2: f32,
     is_sensor: bool,
 }
 
 impl SoftBodyContactSettings {
     pub(super) fn from_jph(settings: &JPH_SoftBodyContactSettings) -> Self {
         Self {
-            inv_mass_scale1: settings.invMassScale1,
-            inv_mass_scale2: settings.invMassScale2,
-            inv_inertia_scale2: settings.invInertiaScale2,
+            inverse_mass_scale1: settings.invMassScale1,
+            inverse_mass_scale2: settings.invMassScale2,
+            inverse_inertia_scale2: settings.invInertiaScale2,
             is_sensor: settings.isSensor,
         }
     }
 
     fn write_to(&self, settings: &mut JPH_SoftBodyContactSettings) {
-        settings.invMassScale1 = self.inv_mass_scale1;
-        settings.invMassScale2 = self.inv_mass_scale2;
-        settings.invInertiaScale2 = self.inv_inertia_scale2;
+        settings.invMassScale1 = self.inverse_mass_scale1;
+        settings.invMassScale2 = self.inverse_mass_scale2;
+        settings.invInertiaScale2 = self.inverse_inertia_scale2;
         settings.isSensor = self.is_sensor;
     }
 
     /// Sets the factor on the soft body's vertex inverse masses, 0 or
     /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
-    pub fn set_inv_mass_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+    pub fn set_inverse_mass_scale1(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
             limits::is_contact_scale(value),
             ContactSettingsError::InverseMassScale,
         )?;
-        self.inv_mass_scale1 = value;
+        self.inverse_mass_scale1 = value;
         Ok(())
     }
 
     /// Sets the factor on the other body's inverse mass, 0 or
     /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
-    pub fn set_inv_mass_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+    pub fn set_inverse_mass_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
             limits::is_contact_scale(value),
             ContactSettingsError::InverseMassScale,
         )?;
-        self.inv_mass_scale2 = value;
+        self.inverse_mass_scale2 = value;
         Ok(())
     }
 
     /// Sets the factor on the other body's inverse inertia, 0 or
     /// [`limits::MIN_CONTACT_SCALE`]`..=1`.
-    pub fn set_inv_inertia_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
+    pub fn set_inverse_inertia_scale2(&mut self, value: f32) -> Result<(), ContactSettingsError> {
         check(
             limits::is_contact_scale(value),
             ContactSettingsError::InverseInertiaScale,
         )?;
-        self.inv_inertia_scale2 = value;
+        self.inverse_inertia_scale2 = value;
         Ok(())
     }
 
@@ -74,18 +74,18 @@ impl SoftBodyContactSettings {
     }
 
     /// Factor on the soft body's vertex inverse masses for these contacts; 1 by default.
-    pub fn inv_mass_scale1(&self) -> f32 {
-        self.inv_mass_scale1
+    pub fn inverse_mass_scale1(&self) -> f32 {
+        self.inverse_mass_scale1
     }
 
     /// Factor on the other body's inverse mass; 1 by default.
-    pub fn inv_mass_scale2(&self) -> f32 {
-        self.inv_mass_scale2
+    pub fn inverse_mass_scale2(&self) -> f32 {
+        self.inverse_mass_scale2
     }
 
     /// Factor on the other body's inverse inertia; 1 by default.
-    pub fn inv_inertia_scale2(&self) -> f32 {
-        self.inv_inertia_scale2
+    pub fn inverse_inertia_scale2(&self) -> f32 {
+        self.inverse_inertia_scale2
     }
 
     /// Whether the other body only reports and does not push the vertices; by default when it
@@ -109,6 +109,7 @@ pub enum SoftBodyValidateResult {
 /// Jolt may report one pair twice in a step: once in the soft body's own collision pass and
 /// once while the other body moves with continuous collision detection.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct SoftBodyValidation {
     /// The soft body.
     pub soft_body: BodyId,
@@ -122,6 +123,7 @@ pub struct SoftBodyValidation {
 
 /// One vertex of a soft body touching another body in a step.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct SoftBodyVertexContact {
     /// Index of the vertex in the soft body's shared settings.
     pub vertex: u32,
@@ -140,6 +142,7 @@ pub struct SoftBodyVertexContact {
 /// only way to see them; [`were_bodies_in_contact`](crate::PhysicsWorld::were_bodies_in_contact)
 /// is false for soft bodies.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct SoftBodyContacts {
     /// The soft body.
     pub soft_body: BodyId,

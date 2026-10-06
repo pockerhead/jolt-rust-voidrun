@@ -67,7 +67,7 @@ fn rays_follow_the_triangle_surface() {
             RVec3::new(x as Real, 5.0, z as Real),
             Vec3::new(0.0, -10.0, 0.0),
         );
-        let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap().unwrap();
+        let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap().unwrap();
         assert_eq!(hit.body, ground);
         let y = f32_of(ray.point_at(hit.fraction).y);
         let expected = grid_surface(x, z);
@@ -79,7 +79,7 @@ fn rays_follow_the_triangle_surface() {
     }
     // Closest-hit rays hit back faces: from below the mesh is hit too.
     let up = RayCast::new(RVec3::new(0.1, -5.0, 0.2), Vec3::new(0.0, 10.0, 0.0));
-    let hit = world.cast_ray(up, &QueryFilter::new()).unwrap().unwrap();
+    let hit = world.cast_ray(&up, &QueryFilter::new()).unwrap().unwrap();
     assert_eq!(hit.body, ground);
     let y = f32_of(up.point_at(hit.fraction).y);
     assert!((y - grid_surface(0.1, 0.2)).abs() <= tolerance, "{y}");
@@ -134,7 +134,8 @@ fn dynamic_shapes_rest_on_a_mesh() {
         (Shape::new_sphere(0.5).unwrap(), Quat::IDENTITY, 0.5),
         (Shape::new_capsule(0.5, 0.3).unwrap(), lying, 0.3),
         (
-            Shape::new_convex_hull(&box_corners(Vec3::new(0.4, 0.4, 0.4)), 0.05).unwrap(),
+            Shape::new_convex_hull_with_convex_radius(&box_corners(Vec3::new(0.4, 0.4, 0.4)), 0.05)
+                .unwrap(),
             Quat::IDENTITY,
             0.4,
         ),
@@ -251,7 +252,7 @@ fn thin_strips_of_a_wide_level_mesh_carry_a_cube() {
             RVec3::new(x as Real, 1.0, z as Real),
             Vec3::new(0.0, -2.0, 0.0),
         );
-        let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap().unwrap();
+        let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap().unwrap();
         assert_eq!(hit.body, floor);
         assert!(
             f32_of(ray.point_at(hit.fraction).y).abs() < 1.0e-4,

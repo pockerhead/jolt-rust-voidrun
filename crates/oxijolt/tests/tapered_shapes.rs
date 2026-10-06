@@ -19,7 +19,7 @@ fn tapered_capsule_and_cone_rest_on_a_mesh() {
         .create_body(&flat_grid(16, 1.0), &BodySettings::new_static())
         .unwrap();
     let capsule = Shape::new_tapered_capsule(0.4, 0.15, 0.3).unwrap();
-    let cone = Shape::new_tapered_cylinder(0.5, 0.0, 0.4, 0.05).unwrap();
+    let cone = Shape::new_tapered_cylinder_with_convex_radius(0.5, 0.0, 0.4, 0.05).unwrap();
     let ids = [(&capsule, -2.0), (&cone, 2.0)].map(|(shape, x)| {
         world
             .create_body(
@@ -45,7 +45,7 @@ fn tapered_capsule_and_cone_rest_on_a_mesh() {
 fn queries_hit_tapered_shapes() {
     let mut world = world(Vec3::ZERO, 1);
     let capsule = Shape::new_tapered_capsule(0.4, 0.15, 0.3).unwrap();
-    let cone = Shape::new_tapered_cylinder(0.5, 0.0, 0.4, 0.0).unwrap();
+    let cone = Shape::new_tapered_cylinder_with_convex_radius(0.5, 0.0, 0.4, 0.0).unwrap();
     let ids = [(&capsule, -2.0), (&cone, 2.0)].map(|(shape, x)| {
         world
             .create_body(
@@ -57,7 +57,7 @@ fn queries_hit_tapered_shapes() {
     // The top of the capsule's upper sphere is at 0.4 + 0.15; the cone's tip at 0.5.
     for (id, x, top) in [(ids[0], -2.0, 0.55), (ids[1], 2.0, 0.5)] {
         let ray = RayCast::new(RVec3::new(x, 3.0, 0.0), Vec3::new(0.0, -5.0, 0.0));
-        let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap().unwrap();
+        let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap().unwrap();
         assert_eq!(hit.body, id);
         let y = f32_of(ray.point_at(hit.fraction).y);
         assert!((y - top).abs() < 1.0e-3, "{y} vs {top}");

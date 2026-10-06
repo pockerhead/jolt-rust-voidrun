@@ -42,7 +42,7 @@ pub fn tank_track_wheels(x: f32) -> Vec<TrackedWheelSettings> {
                 .width(0.1)
                 .suspension_min_length(0.3)
                 .suspension_max_length(if end { 0.3 } else { 0.5 })
-                .suspension_spring(SuspensionSpring::FrequencyAndDamping {
+                .suspension_spring(SpringSettings::FrequencyAndDamping {
                     frequency: 1.0,
                     damping: 0.5,
                 })
@@ -122,7 +122,7 @@ pub const BIKE_MASS: f32 = 240.0;
 /// z = ±0.75, the front one steering up to 30° about an axis raked 30° (caster), the rear one
 /// driven through a differential of ratio 4.825; a 150 N·m engine up to 10000 rpm, six gears;
 /// a pitch and roll limit of 60°.
-pub fn bike_vehicle_settings(tester: VehicleCollisionTester) -> VehicleSettings {
+pub fn bike_vehicle_settings(tester: VehicleCollisionTester) -> WheeledVehicleSettings {
     let rake = 30.0_f32.to_radians().tan();
     let length = (1.0 + rake * rake).sqrt();
     let suspension = Vec3::new(0.0, -1.0 / length, rake / length);
@@ -132,7 +132,7 @@ pub fn bike_vehicle_settings(tester: VehicleCollisionTester) -> VehicleSettings 
             .width(0.05)
             .suspension_min_length(0.3)
             .suspension_max_length(0.5)
-            .suspension_spring(SuspensionSpring::FrequencyAndDamping {
+            .suspension_spring(SpringSettings::FrequencyAndDamping {
                 frequency,
                 damping: 0.5,
             })
@@ -143,7 +143,7 @@ pub fn bike_vehicle_settings(tester: VehicleCollisionTester) -> VehicleSettings 
         .suspension_direction(suspension)
         .steering_axis(Vec3::new(0.0, 1.0 / length, -rake / length));
     let rear = wheel(-0.75, 2.0, 250.0).max_steer_angle(0.0);
-    VehicleSettings::new(
+    WheeledVehicleSettings::new(
         vec![front, rear],
         vec![VehicleDifferentialSettings::new(None, Some(1)).differential_ratio(1.93 * 40.0 / 16.0)],
         tester,

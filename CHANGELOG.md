@@ -39,6 +39,76 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   sinking reported earlier is the impact of a wide thin hull that tips over and slaps down faster
   than Jolt's discrete step resolves, not its hull or convex radius. It sinks deep into box floors
   and can pass through mesh floors; `LinearCast` and shorter steps reduce it.
+- The public API follows one set of rules, written down in
+  [docs/api-guidelines.md](docs/api-guidelines.md). The changes below apply them to the 0.7 API.
+- Both crates declare `rust-version = "1.88"`, the first Rust with `<[T]>::as_chunks`, and CI
+  checks the workspace with that toolchain. Raising it will be a minor release.
+- Every public type implements `Debug`. `WorldSettings::MAX_BODIES` (2^23),
+  `CollisionLayers::MAX_OBJECT_LAYERS` (65535), `WheelSettings::DEFAULT_SUSPENSION_SPRING`,
+  `RayCast::origin`/`direction`, `PhysicsWorld::debug_lines` (allocating),
+  `SliderConstraint`'s `remove_limits`, `SixDofAxis::default()` (`Free`),
+  `QueryError::{WrongWorld, UnknownObjectLayer, AllocationFailed}`,
+  `CharacterError::{Query, RestoreFailed}` and `CollisionGroupError` in the prelude are new.
+
+### Migration to 1.0
+
+Every rename and reshape of this release, old to new. Calls not listed keep their name and
+shape.
+
+| 0.7 | 1.0 |
+|---|---|
+| `RayHit` | `RayCastHit` |
+| `PointHit` | `CollidePointHit` |
+| `RayCast { origin, direction }`, `ray.origin`, `ray.direction` | `RayCast::new(origin, direction)`, `ray.origin()`, `ray.direction()` |
+| `world.cast_ray(ray, &filter)` | `world.cast_ray(&ray, &filter)` |
+| `HullError` | `ConvexHullError` |
+| `BodyError::SoftBody(id)` | `BodyError::NotRigidBody(id)` |
+| `WorldError::InvalidSettings(_)`, `ShapeError::InvalidSettings(_)`, `ShapeError::InvalidDimensions(_)` | `WorldError::InvalidValue(_)`, `ShapeError::InvalidValue(_)` |
+| `QueryError::InvalidValue(_)` for a filter's body of another world, its unknown object layer, or a native object joltc could not create | `QueryError::WrongWorld(id)`, `QueryError::UnknownObjectLayer(layer)`, `QueryError::AllocationFailed` |
+| `CharacterError::InvalidValue(_)` for an update's or refresh's filter | `CharacterError::Query(QueryError)` |
+| `CharacterError::InvalidValue(_)` from `CharacterMut::restore_state` | `CharacterError::RestoreFailed` |
+| `world.contains(id)` | `world.contains_body(id)` |
+| `world.body_ids()` returns `Vec<BodyId>` | an iterator that does not borrow the world (`.collect::<Vec<_>>()` for a vector) |
+| `world.constraints_of_body(body)` returns `Vec<AnyConstraintId>` | an iterator |
+| `world.constraint_count()` returns `usize` | `u32`, like `body_count` |
+| `world.debug_lines(&settings, &filter, &mut lines)` | `world.debug_lines_into(&settings, &filter, &mut lines)`, or `let lines = world.debug_lines(&settings, &filter)?` |
+| `CharacterState::as_bytes()` | `CharacterState::to_bytes()` |
+| `Shape::scaled(&shape, scale)` | `Shape::new_scaled(&shape, scale)` |
+| `Shape::new_convex_hull(&points, radius)` | `Shape::new_convex_hull_with_convex_radius(&points, radius)`; `new_convex_hull(&points)` takes Jolt's 0.05 m |
+| `Shape::new_tapered_cylinder(half_height, top, bottom, radius)` | `Shape::new_tapered_cylinder_with_convex_radius(..)`; `new_tapered_cylinder(half_height, top, bottom)` takes Jolt's 0.05 m |
+| `Shape::new_height_field_with_materials(n, &samples, &settings, &list, &indices)` | `Shape::new_height_field(n, &samples, &settings.materials(&list, &indices))`; `HeightFieldSettings` has a lifetime, `HeightFieldSettings<'static>` without materials |
+| `FixedConstraintSettings::auto_detect_point()`, `SliderConstraintSettings::auto_detect_point()` | `auto_detect_point(true)` |
+| `GearConstraintSettings::hinges(hinge1, hinge2)` | `constraints(hinge1, hinge2)` |
+| slider `set_limits(Some((min, max)))`, `set_limits(None)` | `set_limits(min, max)`, `remove_limits()` |
+| `VehicleSettings`, `VehicleSettings::car` | `WheeledVehicleSettings`, `WheeledVehicleSettings::car` |
+| `world.create_vehicle(body, &settings)` | `world.create_wheeled_vehicle(body, &settings)` |
+| `SuspensionSpring::{FrequencyAndDamping, StiffnessAndDamping}` | `SpringSettings::{FrequencyAndDamping, StiffnessAndDamping}` |
+| `SuspensionSpring::default()` (1.5 Hz, 0.5) | `WheelSettings::DEFAULT_SUSPENSION_SPRING`; `SpringSettings::default()` is 0 Hz, which a wheel refuses |
+| `oxijolt::DEFAULT_LATERAL_FRICTION`, `oxijolt::DEFAULT_LONGITUDINAL_FRICTION` | `WheelSettings::DEFAULT_LATERAL_FRICTION`, `WheelSettings::DEFAULT_LONGITUDINAL_FRICTION` |
+| `oxijolt::DEFAULT_NORMALIZED_TORQUE` | `VehicleEngineSettings::DEFAULT_NORMALIZED_TORQUE` |
+| `*vehicle.collision_tester()` (a reference) | `vehicle.collision_tester()` (a copy) |
+| `ContactPoint { on1, on2 }` | `ContactPoint { point_on1, point_on2 }` |
+| `ContactSettings::inv_mass_scale1`, `set_inv_mass_scale1` and the other `inv_*` scales, also on `SoftBodyContactSettings` | `inverse_mass_scale1`, `set_inverse_mass_scale1`, ... |
+| struct literals or exhaustive patterns of `DebugLine`, `ContactManifold`, `ContactSettingsRejection`, `SoftBodyVertexState`, `SoftBodyContacts`, `SoftBodyVertexContact`, `SoftBodyValidation` | patterns with `..`; these readouts are `#[non_exhaustive]` |
+| feature `glam` | feature `glam032` (`oxijolt = { version = "1", features = ["glam032"] }`) |
+
+Changed behaviour without a rename:
+
+- A query whose filter names a body of another world or an object layer the world does not have
+  returns the typed `QueryError::WrongWorld` or `UnknownObjectLayer`, and a native object joltc
+  could not create returns `QueryError::AllocationFailed`; all three were `InvalidValue` before.
+- `ShapeError::ConvexHull`, `Mesh` and `ThinTriangles` and `CharacterError::Query` return the
+  error they wrap from `source()`, so `oxijolt::error::Error::source` reports it too.
+- `Shape::new_convex_hull(&points)` and `Shape::new_tapered_cylinder(h, top, bottom)` are new
+  calls with Jolt's default convex radius: code that passed `0.05` by position compiles only after
+  the rename above, and gets the same shape.
+
+The game port in `voidrun_physics` uses six of these: `cast_ray(&RayCast::new(..), ..)`,
+`debug_lines_into` (or the allocating `debug_lines`), `WheeledVehicleSettings` and
+`create_wheeled_vehicle` (also as the argument of `MotorcycleSettings::new`),
+`SpringSettings::StiffnessAndDamping` for the suspension, and the `WheelSettings::` and
+`VehicleEngineSettings::` default curves in its vehicle tests. It builds `RagdollJoint` values,
+which stay constructible, and does not use the `glam` feature.
 
 ## 0.7.0 — 2026-10-06
 

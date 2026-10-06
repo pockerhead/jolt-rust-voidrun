@@ -172,10 +172,10 @@ fn lean_angle(world_up: Wide, direction: Wide, forward: Wide) -> f32 {
 impl PhysicsWorld {
     /// Attaches a motorcycle to the dynamic body `body`, its chassis, and returns its id.
     ///
-    /// The chassis works as for [`create_vehicle`](Self::create_vehicle), with the same rules
-    /// and errors. The settings are checked as their setters state, and the lean spring against
-    /// this chassis' largest principal inverse inertia: [`VehicleError::InvalidValue`] when it
-    /// could exceed [`limits::MAX_ANGULAR_ACCELERATION`], and
+    /// The chassis works as for [`create_wheeled_vehicle`](Self::create_wheeled_vehicle), with the
+    /// same rules and errors. The settings are checked as their setters state, and the lean spring
+    /// against this chassis' largest principal inverse inertia: [`VehicleError::InvalidValue`] when
+    /// it could exceed [`limits::MAX_ANGULAR_ACCELERATION`], and
     /// [`VehicleError::LeanSpringIntegrationNotSaved`] for an integration coefficient other than
     /// 0. Nothing is created on failure.
     ///
@@ -200,7 +200,7 @@ impl PhysicsWorld {
     /// let wheel = |z: f32| WheelSettings::new(Vec3::new(0.0, -0.27, z)).radius(0.31).width(0.05);
     /// let front = wheel(0.75).max_steer_angle(30.0_f32.to_radians());
     /// let rear = wheel(-0.75).max_steer_angle(0.0);
-    /// let bike = VehicleSettings::new(
+    /// let bike = WheeledVehicleSettings::new(
     ///     vec![front, rear],
     ///     vec![VehicleDifferentialSettings::new(None, Some(1))],
     ///     VehicleCollisionTester::cast_cylinder(ObjectLayer::MOVING),

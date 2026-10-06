@@ -153,7 +153,7 @@ impl Scene {
             record_body(&self.world, id, &mut tick.state);
         }
         let character = self.world.character(self.character).unwrap().save_state();
-        tick.state.extend(character.as_bytes());
+        tick.state.extend(character.to_bytes());
         record_vehicle(&self.world, self.car, &mut tick.state);
     }
 
@@ -187,7 +187,7 @@ impl Scene {
             record_body(&self.world, id, &mut bytes);
         }
         if let Some(character) = character {
-            bytes.extend(character.save_state().as_bytes());
+            bytes.extend(character.save_state().to_bytes());
         }
         bytes
     }
@@ -506,7 +506,10 @@ fn restore_after_a_structural_change_is_refused_and_changes_nothing() {
         |scene, chassis| {
             let settings =
                 common::vehicle::car_settings(VehicleCollisionTester::ray(scene.layers.probe));
-            scene.world.create_vehicle(chassis, &settings).unwrap();
+            scene
+                .world
+                .create_wheeled_vehicle(chassis, &settings)
+                .unwrap();
         },
     );
     assert_refused_after(
@@ -677,7 +680,7 @@ fn a_vehicle_in_zero_gravity_keeps_its_world_up_across_a_restore() {
         )
         .unwrap();
     let car = world
-        .create_vehicle(
+        .create_wheeled_vehicle(
             chassis,
             &car_settings(VehicleCollisionTester::ray(layers.probe)).max_pitch_roll_angle(0.2),
         )

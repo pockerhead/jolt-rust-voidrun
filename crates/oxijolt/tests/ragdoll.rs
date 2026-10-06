@@ -109,7 +109,7 @@ fn surface_height(world: &PhysicsWorld, layer: ObjectLayer, x: f64, z: f64) -> f
     let layers = [layer];
     let ray = down_ray(x, z);
     let hit = world
-        .cast_ray(ray, &QueryFilter::new().object_layers(&layers))
+        .cast_ray(&ray, &QueryFilter::new().object_layers(&layers))
         .unwrap()
         .unwrap_or_else(|| panic!("no static surface below ({x}, {z})"));
     v3(ray.point_at(hit.fraction))[1]
@@ -222,7 +222,7 @@ fn settled_scene() -> (Scene, RagdollId, Settled) {
 
 fn ray_bits(world: &PhysicsWorld, x: f64, z: f64) -> u32 {
     let hit = world
-        .cast_ray(down_ray(x, z), &QueryFilter::new())
+        .cast_ray(&down_ray(x, z), &QueryFilter::new())
         .unwrap()
         .unwrap();
     hit.fraction.to_bits()
@@ -280,8 +280,8 @@ fn humanoid_settles_on_a_heightfield_in_a_second_world() {
 
     assert_eq!(scene.main.body_count(), main_bodies);
     assert_eq!(ray_bits(&scene.main, 1.0, 2.0), main_ray);
-    assert!(scene.main.contains(scene.main_statics.terrain));
-    assert!(scene.main.contains(scene.main_statics.compound));
+    assert!(scene.main.contains_body(scene.main_statics.terrain));
+    assert!(scene.main.contains_body(scene.main_statics.compound));
 }
 
 // Jolt solves contacts after constraints, so when the humanoid hits the ground the contacts win
@@ -402,13 +402,13 @@ fn an_environment_ray_passes_through_a_resting_part() {
     let fixed = [scene.layers.fixed];
     let environment = scene
         .world
-        .cast_ray(ray, &QueryFilter::new().object_layers(&fixed))
+        .cast_ray(&ray, &QueryFilter::new().object_layers(&fixed))
         .unwrap()
         .unwrap();
     assert_eq!(environment.body, scene.statics.terrain);
     let anything = scene
         .world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .unwrap();
     assert_eq!(scene.world.ragdoll_of_body(anything.body), Some(ragdoll));
@@ -725,13 +725,13 @@ fn ragdoll_parts_and_ids_are_guarded() {
         world.remove_body(part),
         Err(BodyError::OwnedByRagdoll(part))
     );
-    let vehicle = VehicleSettings::new(
+    let vehicle = WheeledVehicleSettings::new(
         vec![WheelSettings::new(Vec3::new(0.0, -0.2, 0.0))],
         vec![VehicleDifferentialSettings::new(Some(0), None)],
         VehicleCollisionTester::ray(layers.fixed),
     );
     assert!(matches!(
-        world.create_vehicle(part, &vehicle),
+        world.create_wheeled_vehicle(part, &vehicle),
         Err(VehicleError::Body(BodyError::OwnedByRagdoll(id))) if id == part
     ));
 

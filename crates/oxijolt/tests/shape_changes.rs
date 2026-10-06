@@ -476,7 +476,7 @@ fn set_shape_refuses_owned_bodies() {
     for (id, error) in [
         (part, BodyError::OwnedByRagdoll(part)),
         (inner, BodyError::OwnedByCharacter(inner)),
-        (cloth, BodyError::SoftBody(cloth)),
+        (cloth, BodyError::NotRigidBody(cloth)),
     ] {
         assert_eq!(
             world
@@ -522,7 +522,7 @@ fn a_dropped_shape_lives_on_in_its_body() {
     assert!((y - 0.7).abs() < 0.03, "{y}");
     let hit = world
         .cast_ray(
-            RayCast::new(RVec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -10.0, 0.0)),
+            &RayCast::new(RVec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -10.0, 0.0)),
             &QueryFilter::new(),
         )
         .unwrap()

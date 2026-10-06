@@ -5,7 +5,8 @@ Release, and links them statically. The Rust bindings are committed, so a build 
 
 ## Requirements
 
-- Rust stable.
+- Rust 1.88 or newer (the `rust-version` of both crates, checked in CI). Raising it is a
+  minor release, noted in the changelog.
 - A C++ toolchain: MSVC on Windows, GCC or Clang elsewhere.
 - CMake 3.20 or newer.
 
@@ -75,7 +76,7 @@ by default, the static one (`/MT`) with `-C target-feature=+crt-static`.
 |---|---|
 | `double-precision` | world positions in `f64` (`Real`, `RVec3`) |
 | `cross-platform-deterministic` | builds Jolt with `CROSS_PLATFORM_DETERMINISTIC` ([determinism.md](determinism.md#across-machines)); slower |
-| `debug-renderer` | compiles Jolt's debug renderer; enables `PhysicsWorld::debug_lines` |
+| `debug-renderer` | compiles Jolt's debug renderer; enables `PhysicsWorld::debug_lines` and `debug_lines_into` |
 | `asserts` | compiles Jolt with its debug assertions; with `oxijolt`, a failed assertion prints its message and aborts the process, except the physics-update-error assertion, which `step` reports in its `StepReport` |
 | `bindgen` | generates the bindings with libclang at build time instead of using the committed ones; it adds no target |
 

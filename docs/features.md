@@ -24,7 +24,7 @@ what is planned next.
   `CharacterSettings::humanoid(height, radius)`.
 - Wheeled vehicles with suspension, engine, automatic transmission, differentials and anti-roll
   bars; tracked vehicles (tanks) with two tracks; motorcycles with a lean controller
-  ([guide](vehicles.md)); presets for a car and a motorcycle (`VehicleSettings::car`,
+  ([guide](vehicles.md)); presets for a car and a motorcycle (`WheeledVehicleSettings::car`,
   `MotorcycleSettings::bike`), and each wheel's pose in world space for drawing
   (`VehicleRef::wheel_world_transform`).
 - Ragdolls from a skeleton, posed, motor-driven or kinematic, with settle detection, and a skeleton
@@ -47,11 +47,13 @@ what is planned next.
 - A floating origin (`PhysicsWorld::rebase`) and optional `f64` world positions.
 - Jolt's jobs on Jolt's thread pool or on your own, such as Rayon ([guide](job-system.md)).
 - Debug wireframes as line data (feature `debug-renderer`); nothing is drawn.
-- Optional `glam` and `mint` features with exact conversions for `Vec3`, `RVec3` and `Quat`.
+- Optional `glam032` and `mint` features with exact conversions for `Vec3`, `RVec3` and `Quat`.
 - The poses of every awake body in one call, in a deterministic order
   (`PhysicsWorld::active_body_poses`).
 - `oxijolt::prelude` for the common types, and `oxijolt::error::{Error, Result}` that wraps the
   error of every area.
+- One set of API rules for names, constructors, settings, errors and derives
+  ([api-guidelines.md](api-guidelines.md)), and Rust 1.88 as the minimum version, checked in CI.
 
 The [playground](playground.md) shows them in twelve small scenes with a window, and runs the same
 scenes headless.

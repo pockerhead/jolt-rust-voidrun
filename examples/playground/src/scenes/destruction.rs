@@ -132,9 +132,9 @@ impl Destruction {
                 self.tracked.remove(&mut self.world, oldest)?;
             }
         }
-        let direction = glam(ray.direction).normalize();
+        let direction = glam(ray.direction()).normalize();
         let settings = BodySettings::new_dynamic()
-            .position(rvec((position(ray.origin) + direction).to_array()))
+            .position(rvec((position(ray.origin()) + direction).to_array()))
             .linear_velocity(vec3(direction * 25.0))
             .motion_quality(MotionQuality::LinearCast)
             .object_layer(self.layers.moving)
@@ -311,7 +311,7 @@ impl Destruction {
         let Some((wall, _)) = self.wall else {
             return Ok(None);
         };
-        let hit = self.world.cast_ray(ray, &QueryFilter::new())?;
+        let hit = self.world.cast_ray(&ray, &QueryFilter::new())?;
         Ok(hit
             .filter(|hit| hit.body == wall)
             .and_then(|hit| hit.compound_child)
@@ -360,7 +360,7 @@ impl Scene for Destruction {
         }
         if let Some(ray) = input.edges.pick {
             if let Some(brick) = self.picked_brick(ray)? {
-                let away = glam(ray.direction).normalize() * KNOCK_SPEED;
+                let away = glam(ray.direction()).normalize() * KNOCK_SPEED;
                 self.knock_out(vec![(brick, vec3(away))])?;
             }
         }

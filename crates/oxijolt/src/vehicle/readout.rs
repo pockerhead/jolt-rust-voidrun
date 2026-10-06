@@ -72,6 +72,14 @@ pub struct VehicleRef<'w, K: VehicleKind = super::WheeledVehicle> {
     pub(super) entry: &'w VehicleEntry,
 }
 
+impl<K: VehicleKind> std::fmt::Debug for VehicleRef<'_, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VehicleRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<K: VehicleKind> VehicleRef<'_, K> {
     pub(super) fn ptr(&self) -> *mut JPH_VehicleConstraint {
         self.entry.constraint.as_ptr()
@@ -250,7 +258,7 @@ impl<K: VehicleKind> VehicleRef<'_, K> {
     }
 
     /// The collision tester the wheels use.
-    pub fn collision_tester(&self) -> &VehicleCollisionTester {
-        &self.entry.collision_tester
+    pub fn collision_tester(&self) -> VehicleCollisionTester {
+        self.entry.collision_tester
     }
 }

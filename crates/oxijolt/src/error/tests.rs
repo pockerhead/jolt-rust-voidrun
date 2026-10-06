@@ -3,7 +3,7 @@ use std::error::Error as _;
 use super::*;
 
 const WORLD: WorldError = WorldError::InitFailed;
-const SHAPE: ShapeError = ShapeError::ConvexHull(HullError::Coplanar);
+const SHAPE: ShapeError = ShapeError::ConvexHull(ConvexHullError::Coplanar);
 const BODY: BodyError = BodyError::TooManyBodies;
 const STEP: StepError = StepError::InvalidDeltaTime;
 const QUERY: QueryError = QueryError::InvalidValue("ray direction");
@@ -72,18 +72,43 @@ fn display_is_the_wrapped_errors() {
 #[test]
 fn source_is_the_wrapped_errors_source() {
     for (error, _, wrapped_has_source) in every_area() {
-        assert!(!wrapped_has_source, "{error:?}");
-        assert!(error.source().is_none(), "{error:?}");
+        assert_eq!(error.source().is_some(), wrapped_has_source, "{error:?}");
+    }
+    assert!(Error::from(BodyError::TooManyBodies).source().is_none());
+    let body = BodyError::InvalidValue("mass");
+    let source = Error::from(VehicleError::Body(body))
+        .source()
+        .map(|s| s.to_string());
+    assert_eq!(source, Some(body.to_string()));
+}
+
+/// Every area error that wraps another one returns it from `source`.
+#[test]
+fn sources_are_reported() {
+    fn source_of<E: std::error::Error, S: std::error::Error + Copy + 'static>(
+        error: E,
+    ) -> Option<S> {
+        error.source()?.downcast_ref::<S>().copied()
     }
     let body = BodyError::InvalidValue("mass");
-    for error in [
-        Error::from(VehicleError::Body(body)),
-        Error::from(RagdollError::Body(body)),
-        Error::from(ConstraintError::Body(body)),
-    ] {
-        let source = error.source().expect("the wrapped error has a source");
-        assert_eq!(source.downcast_ref::<BodyError>(), Some(&body), "{error:?}");
-    }
+    assert_eq!(source_of(VehicleError::Body(body)), Some(body));
+    assert_eq!(source_of(RagdollError::Body(body)), Some(body));
+    assert_eq!(source_of(ConstraintError::Body(body)), Some(body));
+    let query = QueryError::AllocationFailed;
+    assert_eq!(source_of(CharacterError::Query(query)), Some(query));
+    let hull = ConvexHullError::Coplanar;
+    assert_eq!(source_of(ShapeError::ConvexHull(hull)), Some(hull));
+    let mesh = MeshError::NoTriangles;
+    assert_eq!(source_of(ShapeError::Mesh(mesh)), Some(mesh));
+    let thin = ThinTrianglesError {
+        scale: Vec3::new(1.0, 0.1, 1.0),
+        max_convex_extent: 2.0,
+    };
+    assert_eq!(source_of(ShapeError::ThinTriangles(thin)), Some(thin));
+    assert_eq!(
+        source_of::<_, BodyError>(ShapeError::AllocationFailed),
+        None
+    );
 }
 
 #[test]
@@ -104,15 +129,15 @@ fn errors_stay_small() {
 #[test]
 fn shape_error_variants_display_their_payload() {
     assert_eq!(
-        ShapeError::ConvexHull(HullError::TooFewPoints).to_string(),
+        ShapeError::ConvexHull(ConvexHullError::TooFewPoints).to_string(),
         "invalid convex hull: a convex hull needs at least 4 points"
     );
     assert_eq!(
-        ShapeError::ConvexHull(HullError::Degenerate).to_string(),
+        ShapeError::ConvexHull(ConvexHullError::Degenerate).to_string(),
         "invalid convex hull: the points lie on or close to a line"
     );
     assert_eq!(
-        ShapeError::ConvexHull(HullError::Coplanar).to_string(),
+        ShapeError::ConvexHull(ConvexHullError::Coplanar).to_string(),
         "invalid convex hull: the points lie on or close to a plane; thicken the cloud or centre \
          it on the shape origin"
     );

@@ -56,10 +56,10 @@ fn ids_follow_insertion_order() {
 #[test]
 fn body_ids_list_every_body_in_id_order() {
     let mut world = world(Vec3::ZERO, 1);
-    assert!(world.body_ids().is_empty());
+    assert_eq!(world.body_ids().next(), None);
     let [a, _, c, d] = id_history(&mut world);
     // `d` reuses the freed index 1 with sequence 2, so its raw id sorts after `c`'s.
-    assert_eq!(world.body_ids(), [a, c, d]);
+    assert!(world.body_ids().eq([a, c, d]));
 
     let inner_shape = Shape::new_capsule(0.6, 0.3).unwrap();
     let settings = CharacterSettings::humanoid(1.8, 0.3)
@@ -71,7 +71,7 @@ fn body_ids_list_every_body_in_id_order() {
     world
         .create_character(&settings, RVec3::new(20.0, 0.0, 0.0), Quat::IDENTITY)
         .unwrap();
-    let ids = world.body_ids();
+    let ids: Vec<BodyId> = world.body_ids().collect();
     assert_eq!(ids.len() as u32, world.body_count());
     assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
     let inner: Vec<BodyId> = ids
@@ -91,7 +91,7 @@ fn foreign_and_stale_ids_are_rejected() {
     let in_b = add_cube(&mut b, RVec3::new(0.0, 0.0, 0.0));
     assert_eq!(in_a.to_raw(), in_b.to_raw());
 
-    assert!(!b.contains(in_a));
+    assert!(!b.contains_body(in_a));
     assert_eq!(b.body(in_a).err(), Some(BodyError::WrongWorld(in_a)));
     assert_eq!(b.body_mut(in_a).err(), Some(BodyError::WrongWorld(in_a)));
     assert_eq!(b.remove_body(in_a), Err(BodyError::WrongWorld(in_a)));
@@ -99,7 +99,7 @@ fn foreign_and_stale_ids_are_rejected() {
 
     a.remove_body(in_a).unwrap();
     assert_eq!(a.body_count(), 0);
-    assert!(!a.contains(in_a));
+    assert!(!a.contains_body(in_a));
     assert_eq!(a.body(in_a).err(), Some(BodyError::NotFound(in_a)));
     assert_eq!(a.body_mut(in_a).err(), Some(BodyError::NotFound(in_a)));
     assert_eq!(a.remove_body(in_a), Err(BodyError::NotFound(in_a)));
@@ -107,10 +107,10 @@ fn foreign_and_stale_ids_are_rejected() {
     // The new body takes the old index; the old id must still not resolve to it.
     let reused = add_cube(&mut a, RVec3::new(1.0, 2.0, 3.0));
     assert_eq!(reused.index(), in_a.index());
-    assert!(!a.contains(in_a));
+    assert!(!a.contains_body(in_a));
     assert_eq!(a.body(in_a).err(), Some(BodyError::NotFound(in_a)));
     assert_eq!(a.remove_body(in_a), Err(BodyError::NotFound(in_a)));
-    assert!(a.contains(reused));
+    assert!(a.contains_body(reused));
     assert_eq!(
         a.body(reused).unwrap().position(),
         RVec3::new(1.0, 2.0, 3.0)

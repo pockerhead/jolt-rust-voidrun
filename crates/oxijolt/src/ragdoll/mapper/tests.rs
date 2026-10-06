@@ -87,12 +87,6 @@ fn assert_invalid<T: std::fmt::Debug>(result: Result<T, RagdollError>) {
     );
 }
 
-impl std::fmt::Debug for SkeletonMapper {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("SkeletonMapper")
-    }
-}
-
 #[test]
 fn a_mapper_matches_joints_by_name() {
     let mapper = mapper(TranslationLocks::None).unwrap();

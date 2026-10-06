@@ -26,7 +26,7 @@ const MEASURED_ROUNDS: usize = 100_000;
 const MAX_GROWTH: usize = 2 * 1024 * 1024;
 
 /// The vehicle of a round: every joltc settings object the safe layer builds.
-fn round_settings(layers: &CarLayers) -> VehicleSettings {
+fn round_settings(layers: &CarLayers) -> WheeledVehicleSettings {
     let wheels = WHEEL_POSITIONS
         .iter()
         .map(|&position| {
@@ -36,7 +36,7 @@ fn round_settings(layers: &CarLayers) -> VehicleSettings {
                 .lateral_friction(vec![(0.0, 0.0), (4.0, 1.1), (15.0, 0.9)])
         })
         .collect();
-    VehicleSettings::new(
+    WheeledVehicleSettings::new(
         wheels,
         vec![
             VehicleDifferentialSettings::new(Some(0), Some(1)).engine_torque_ratio(0.5),
@@ -64,7 +64,7 @@ fn vehicle_round(world: &mut PhysicsWorld, layers: &CarLayers, shape: &Shape, ro
         )
         .unwrap();
     let car = world
-        .create_vehicle(chassis, &round_settings(layers))
+        .create_wheeled_vehicle(chassis, &round_settings(layers))
         .unwrap();
     let mut vehicle = world.vehicle_mut(car).unwrap();
     vehicle

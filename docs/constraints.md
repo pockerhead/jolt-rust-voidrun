@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (disc2, hinge2) = hinged_disc(3.0)?;
 
     // Gear 2 turns half as fast as gear 1, the other way. The hinges let Jolt correct drift.
-    let gear = GearConstraintSettings::new(z, z, 2.0).hinges(hinge1, hinge2);
+    let gear = GearConstraintSettings::new(z, z, 2.0).constraints(hinge1, hinge2);
     world.create_constraint(disc1, disc2, &gear)?;
 
     // Drive gear 1 at 2 rad/s with the hinge's velocity motor.

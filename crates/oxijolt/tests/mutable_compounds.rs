@@ -55,23 +55,17 @@ fn commit(
 }
 
 /// The first hit of a ray straight down through `(x, z)` from 10 m up.
-fn ray_down(world: &PhysicsWorld, x: Real, z: Real) -> Option<RayHit> {
-    let ray = RayCast {
-        origin: RVec3::new(x, 10.0, z),
-        direction: Vec3::new(0.0, -20.0, 0.0),
-    };
-    world.cast_ray(ray, &QueryFilter::new()).unwrap()
+fn ray_down(world: &PhysicsWorld, x: Real, z: Real) -> Option<RayCastHit> {
+    let ray = RayCast::new(RVec3::new(x, 10.0, z), Vec3::new(0.0, -20.0, 0.0));
+    world.cast_ray(&ray, &QueryFilter::new()).unwrap()
 }
 
 /// The compound child of `body` at `(x, 0)` in the tiles' height: a ray from inside a tile
 /// hits that tile at its start, below anything resting on it.
 fn child_below(world: &PhysicsWorld, body: BodyId, x: Real) -> Option<CompoundSubShape> {
-    let ray = RayCast {
-        origin: RVec3::new(x, LEDGE_Y + 0.1, 0.0),
-        direction: Vec3::new(0.0, -0.2, 0.0),
-    };
+    let ray = RayCast::new(RVec3::new(x, LEDGE_Y + 0.1, 0.0), Vec3::new(0.0, -0.2, 0.0));
     world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .filter(|hit| hit.body == body)
         .and_then(|hit| hit.compound_child)
@@ -294,7 +288,7 @@ fn a_commit_reaches_only_the_body_it_is_set_on() {
     ])
     .unwrap();
     let first = editor.to_shape().unwrap();
-    let scaled = Shape::scaled(&first, Vec3::new(1.5, 1.5, 1.5)).unwrap();
+    let scaled = Shape::new_scaled(&first, Vec3::new(1.5, 1.5, 1.5)).unwrap();
 
     let mut world = world(GRAVITY, 1);
     world.set_event_settings(EventSettings::default().contacts(true));
@@ -544,7 +538,7 @@ fn commits_follow_the_body_rules_of_set_shape() {
             None,
             Activation::Activate
         ),
-        Err(BodyError::SoftBody(cloth))
+        Err(BodyError::NotRigidBody(cloth))
     );
     let capsule = Shape::new_capsule(0.7, 0.4).unwrap();
     let character = world
@@ -598,7 +592,7 @@ fn editing_and_publishing_do_not_touch_the_world() {
         .unwrap();
     assert!(matches!(
         editor.to_shape(),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
     world.restore_state(&saved).unwrap();
 
@@ -756,8 +750,8 @@ fn a_committed_shape_nests_and_scales() {
         child(&tile, Vec3::new(10.0, 0.0, 0.0), 1),
     ])
     .unwrap();
-    Shape::scaled(&published, Vec3::new(2.0, 2.0, 2.0)).unwrap();
-    Shape::scaled(&published, Vec3::new(2.0, 1.0, 1.0)).unwrap();
+    Shape::new_scaled(&published, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    Shape::new_scaled(&published, Vec3::new(2.0, 1.0, 1.0)).unwrap();
 
     // A non-uniform scale needs children turned onto the scale's axes.
     let turned = MutableCompound::from_children(&[CompoundChild {
@@ -768,8 +762,8 @@ fn a_committed_shape_nests_and_scales() {
     .to_shape()
     .unwrap();
     assert!(matches!(
-        Shape::scaled(&turned, Vec3::new(2.0, 1.0, 1.0)),
-        Err(ShapeError::InvalidSettings(_))
+        Shape::new_scaled(&turned, Vec3::new(2.0, 1.0, 1.0)),
+        Err(ShapeError::InvalidValue(_))
     ));
 
     // Nested past 32 bits: a two-child publication is 1 bit wide and Jolt refuses 33.
@@ -795,7 +789,7 @@ fn a_committed_shape_nests_and_scales() {
             nested = next.unwrap();
         } else {
             assert!(
-                matches!(next, Err(ShapeError::InvalidSettings(_))),
+                matches!(next, Err(ShapeError::InvalidValue(_))),
                 "{:?}",
                 next.err()
             );

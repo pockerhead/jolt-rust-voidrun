@@ -30,10 +30,10 @@ pub(super) fn index_bits(count: u32) -> u32 {
 /// quaternion.
 pub(super) fn check_child_pose(position: Vec3, rotation: Quat) -> Result<(), ShapeError> {
     if !limits::is_local_offset(position) {
-        return Err(ShapeError::InvalidSettings(CHILD_POSITION_RULE));
+        return Err(ShapeError::InvalidValue(CHILD_POSITION_RULE));
     }
     if !rotation.is_valid_rotation() {
-        return Err(ShapeError::InvalidSettings(CHILD_ROTATION_RULE));
+        return Err(ShapeError::InvalidValue(CHILD_ROTATION_RULE));
     }
     Ok(())
 }
@@ -190,10 +190,10 @@ pub(super) struct RawCompoundChild {
 /// The compound of `children`: a `StaticCompoundShape` for two or more, a
 /// `MutableCompoundShape` for one (see [`Shape::new_compound`]).
 ///
-/// Fails with [`ShapeError::InvalidSettings`] for no children or ids Jolt cannot form, with
+/// Fails with [`ShapeError::InvalidValue`] for no children or ids Jolt cannot form, with
 /// [`ShapeError::TooManySubShapes`] above [`limits::MAX_EXPANDED_SUB_SHAPES`], with
 /// [`ShapeError::Rejected`] when Jolt refuses the settings (a hierarchy wider than 32 bits), and
-/// with [`ShapeError::InvalidDimensions`] when the compound's bounds, after Jolt moved its
+/// with [`ShapeError::InvalidValue`] when the compound's bounds, after Jolt moved its
 /// centre of mass, leave [`limits::MAX_SHAPE_EXTENT`].
 ///
 /// # Safety
@@ -201,14 +201,14 @@ pub(super) struct RawCompoundChild {
 /// `u32::MAX` children.
 pub(super) unsafe fn build_compound(children: &[RawCompoundChild]) -> Result<Shape, ShapeError> {
     if children.is_empty() {
-        return Err(ShapeError::InvalidSettings(EMPTY_COMPOUND_RULE));
+        return Err(ShapeError::InvalidValue(EMPTY_COMPOUND_RULE));
     }
     let ids = compound_ids(
         children.iter().map(|child| child.ids),
         children.len() as u32,
     );
     if !fits_jolt_ids(ids) {
-        return Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
+        return Err(ShapeError::InvalidValue(SUB_SHAPE_ID_RULE));
     }
     // Jolt's constructor walks the expanded tree (`StaticCompoundShape.cpp`).
     check_expanded(ids.expanded)?;

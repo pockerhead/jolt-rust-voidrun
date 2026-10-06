@@ -117,7 +117,7 @@ impl Mechanisms {
         world.create_constraint(
             gear1,
             gear2,
-            &GearConstraintSettings::new(Z, Z, 2.0).hinges(hinge1, hinge2),
+            &GearConstraintSettings::new(Z, Z, 2.0).constraints(hinge1, hinge2),
         )?;
         {
             let mut motor = world.constraint_mut(hinge1)?;

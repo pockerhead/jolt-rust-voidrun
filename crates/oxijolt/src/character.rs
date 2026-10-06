@@ -218,7 +218,7 @@ pub struct CharacterState {
 impl CharacterState {
     /// The state as bytes, for digests: Jolt's stream, then the bits of up's three components
     /// in little-endian order. The bytes are specific to this build; there is no way back.
-    pub fn as_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = self.jolt.clone();
         for bits in self.up {
             bytes.extend_from_slice(&bits.to_le_bytes());

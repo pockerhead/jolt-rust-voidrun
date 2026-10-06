@@ -86,8 +86,8 @@ mod tests {
     fn the_centre_ray_hits_the_target() {
         let camera = CameraHint::new([1.0, 2.0, 3.0], 0.7, 0.4, 10.0);
         let ray = camera.ray([0.0, 0.0], 16.0 / 9.0);
-        let origin = Vec3::from(crate::math::position_f32(ray.origin));
-        let direction = Vec3::from(<[f32; 3]>::from(ray.direction));
+        let origin = Vec3::from(crate::math::position_f32(ray.origin()));
+        let direction = Vec3::from(<[f32; 3]>::from(ray.direction()));
         let at_target = origin + direction * (10.0 / RAY_LENGTH);
         assert!(at_target.distance(Vec3::new(1.0, 2.0, 3.0)) < 1e-4);
     }

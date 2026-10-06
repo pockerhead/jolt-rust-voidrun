@@ -79,8 +79,8 @@ the motorcycle from behind as it leans into a turn. The white spokes turn with t
 binding reports.*
 
 A car, a tank and a motorcycle on rolling terrain, and a walker; Tab switches which one the keys
-drive. It uses `VehicleSettings::car`, `TrackedVehicleSettings`, `MotorcycleSettings::bike`,
-`create_vehicle`, `create_tracked_vehicle`, `create_motorcycle`, `set_driver_input`,
+drive. It uses `WheeledVehicleSettings::car`, `TrackedVehicleSettings`, `MotorcycleSettings::bike`,
+`create_wheeled_vehicle`, `create_tracked_vehicle`, `create_motorcycle`, `set_driver_input`,
 `wheel_world_transform`, `current_gear`, `lean` and `Shape::new_offset_center_of_mass`.
 
 | Keys | Action |
@@ -98,7 +98,7 @@ drive. It uses `VehicleSettings::car`, `TrackedVehicleSettings`, `MotorcycleSett
 the bin asleep in grey, and one more layer.*
 
 400 bodies of nine shape kinds fall into a bin; estimated impacts flash, sleeping bodies turn grey.
-It uses boxes, spheres, capsules, cylinders, tapered shapes, convex hulls, `Shape::scaled`,
+It uses boxes, spheres, capsules, cylinders, tapered shapes, convex hulls, `Shape::new_scaled`,
 `MotionQuality::LinearCast`, `EventSettings::collision_estimates`, `ActivationEvent` and
 `active_body_poses_into`.
 

@@ -66,11 +66,14 @@ fn rounded_and_hull_shapes_hold_within_a_tenth_of_a_millimetre() {
     near(&cylinder, Vec3::new(0.0, 0.5, 0.0), UP);
     // A sharp cylinder edge: just inside both the side and the top.
     assert!(inside(&cylinder, Vec3::new(0.2999, 0.4999, 0.0)));
-    let tapered = Shape::new_tapered_cylinder(0.5, 0.2, 0.4, 0.05).unwrap();
+    let tapered = Shape::new_tapered_cylinder_with_convex_radius(0.5, 0.2, 0.4, 0.05).unwrap();
     near(&tapered, Vec3::new(0.0, 0.5, 0.0), UP);
     near(&tapered, Vec3::new(0.3, 0.0, 0.0), x);
-    let hull = Shape::new_convex_hull(&common::meshes::box_corners(Vec3::new(1.0, 0.5, 0.5)), 0.05)
-        .unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(
+        &common::meshes::box_corners(Vec3::new(1.0, 0.5, 0.5)),
+        0.05,
+    )
+    .unwrap();
     near(&hull, Vec3::new(1.0, 0.1, 0.2), x);
     near(&hull, Vec3::new(0.3, 0.5, -0.1), UP);
 
@@ -190,7 +193,11 @@ fn heightfields_contain_nothing() {
 }
 
 /// The ids and compound children `world` reports for `point`.
-fn world_hits(world: &PhysicsWorld, point: RVec3, filter: &QueryFilter<'_>) -> Vec<PointHit> {
+fn world_hits(
+    world: &PhysicsWorld,
+    point: RVec3,
+    filter: &QueryFilter<'_>,
+) -> Vec<CollidePointHit> {
     world.collide_point(point, filter).unwrap()
 }
 
@@ -274,7 +281,7 @@ fn compounds_report_every_child_that_holds_the_point() {
 #[test]
 fn shape_points_are_in_the_shapes_own_frame() {
     // A hull far off its origin: its centre of mass is at x = 2.5.
-    let offset_hull = Shape::new_convex_hull(
+    let offset_hull = Shape::new_convex_hull_with_convex_radius(
         &common::meshes::box_corners(Vec3::new(0.5, 0.5, 0.5))
             .iter()
             .map(|c| Vec3::new(c.x + 2.5, c.y, c.z))
@@ -309,7 +316,7 @@ fn shape_points_are_in_the_shapes_own_frame() {
     }
 
     // Mirrored along x, the offset hull sits at x = -2.5.
-    let mirrored = Shape::scaled(&offset_hull, Vec3::new(-1.0, 1.0, 1.0)).unwrap();
+    let mirrored = Shape::new_scaled(&offset_hull, Vec3::new(-1.0, 1.0, 1.0)).unwrap();
     assert!(inside(&mirrored, Vec3::new(-2.9, 0.0, 0.0)));
     assert!(!inside(&mirrored, Vec3::new(2.9, 0.0, 0.0)));
 }
