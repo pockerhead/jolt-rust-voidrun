@@ -3,7 +3,7 @@
 use oxijolt_sys::*;
 
 use super::{engine_and_transmission, VehicleCollisionTester, VehicleEntry, VehicleKind};
-use crate::{BodyId, PhysicsWorld, RVec3, SubShapeId, Vec3, VehicleId};
+use crate::{BodyId, PhysicsWorld, Quat, RVec3, Real, SubShapeId, Vec3, VehicleId};
 
 /// Jolt's invalid `BodyID` value.
 const INVALID_BODY_ID: u32 = 0xffff_ffff;
@@ -153,6 +153,67 @@ impl<K: VehicleKind> VehicleRef<'_, K> {
         (0..self.wheel_count())
             .filter_map(|index| self.wheel(index))
             .collect()
+    }
+
+    /// The pose of wheel `index` in world space, for drawing it: its centre and its rotation,
+    /// or `None` when there is no such wheel.
+    ///
+    /// Like Jolt's `GetWheelWorldTransform`, the pose combines the chassis pose now with the
+    /// suspension length, steer angle and rotation angle of the last step. The rotation turns a
+    /// wheel model whose axle runs along its local Y and whose up is its local X, the axis of
+    /// [`Shape::new_cylinder`](crate::Shape::new_cylinder), into the wheel: model Y becomes the
+    /// wheel's axle pointing to the vehicle's right, and the model turns about it as the wheel
+    /// rolls.
+    pub fn wheel_world_transform(&self, index: u32) -> Option<(RVec3, Quat)> {
+        if index >= self.wheel_count() {
+            return None;
+        }
+        let model_right = Vec3::new(0.0, 1.0, 0.0).to_jph();
+        let model_up = Vec3::new(1.0, 0.0, 0.0).to_jph();
+        let column = JPH_Vec4 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
+        };
+        let mut local = JPH_Mat4 {
+            column: [column; 4],
+        };
+        let mut translation = Vec3::ZERO.to_jph();
+        let mut rotation = Quat::IDENTITY.to_jph();
+        // SAFETY: the world borrowed here owns the constraint and no step can run while it is
+        // borrowed; `index` is below the wheel count, as Jolt asserts. The two directions are
+        // orthonormal, so Jolt's basis is a rotation. joltc copies the matrices with `memcpy`
+        // and writes only the live locals.
+        unsafe {
+            JPH_VehicleConstraint_GetWheelLocalTransform(
+                self.ptr(),
+                index,
+                &model_right,
+                &model_up,
+                &mut local,
+            );
+            JPH_Mat4_GetTranslation(&local, &mut translation);
+            JPH_Mat4_GetQuaternion(&local, &mut rotation);
+        }
+        let chassis = self.world.body(self.body()).ok()?;
+        let (position, chassis_rotation) = (chassis.position(), chassis.rotation());
+        let local_centre = RVec3::new(
+            Real::from(translation.x),
+            Real::from(translation.y),
+            Real::from(translation.z),
+        );
+        let offset = chassis_rotation.rotate_real(local_centre);
+        let centre = RVec3::new(
+            position.x + offset.x,
+            position.y + offset.y,
+            position.z + offset.z,
+        );
+        let wheel_rotation = Quat::from_jph(rotation).normalized();
+        Some((
+            centre,
+            chassis_rotation.product(wheel_rotation).normalized(),
+        ))
     }
 
     /// The gravity override of [`VehicleMut::set_gravity`](crate::VehicleMut::set_gravity),

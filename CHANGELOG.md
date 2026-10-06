@@ -12,6 +12,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - `MotorcycleSettings::bike(front_wheel, wheel_radius, tester)`: the motorcycle of Jolt's
   `MotorcycleTest` sample (raked front suspension, rear drive, six gears), validated by
   `create_motorcycle`.
+- `VehicleRef::wheel_world_transform(index)`: a wheel's centre and rotation in world space (Jolt's
+  `GetWheelWorldTransform`) for a wheel model whose axle is its local Y, so a renderer can draw
+  wheels from what the binding reports.
 
 ## 0.6.0 — 2026-10-06
 
