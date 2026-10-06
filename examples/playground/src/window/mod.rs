@@ -1,13 +1,14 @@
 //! The window: keys and mouse into the session's input, a fixed-step loop, the scene drawn from
 //! its draw list, and the menu and help text.
 
+mod record;
 mod render;
 
 use macroquad::conf::Conf;
 use macroquad::prelude::{
-    clear_background, draw_rectangle, draw_text, get_frame_time, is_key_down, is_key_pressed,
-    is_mouse_button_down, is_mouse_button_pressed, mouse_delta_position, mouse_position,
-    mouse_wheel, next_frame, screen_height, screen_width, Color, KeyCode, MouseButton,
+    draw_rectangle, draw_text, get_frame_time, is_key_down, is_key_pressed, is_mouse_button_down,
+    is_mouse_button_pressed, mouse_delta_position, mouse_position, mouse_wheel, next_frame,
+    screen_height, screen_width, Color, KeyCode, MouseButton,
 };
 use macroquad::Window;
 
@@ -54,10 +55,12 @@ pub fn run(mode: Mode) -> ! {
     Window::from_config(conf, async move {
         let code = match mode {
             Mode::Interactive { scene } => interactive(scene).await,
-            _ => {
-                eprintln!("recording is not available in this build");
-                2
-            }
+            Mode::Record {
+                scenes,
+                out,
+                frames,
+            } => record::record_all(scenes, out, frames).await,
+            Mode::Headless { .. } | Mode::Help => 2,
         };
         std::process::exit(code);
     });
@@ -237,7 +240,6 @@ impl App {
     }
 
     fn draw(&mut self) {
-        clear_background(Color::new(0.55, 0.68, 0.8, 1.0));
         if let Err(error) = self.session.draw(&mut self.list) {
             self.fail(error.to_string());
         }
@@ -245,6 +247,7 @@ impl App {
             camera: self.camera,
             target: None,
             aspect: None,
+            clear: true,
         };
         self.renderer
             .draw_world(&self.list, self.session.scene().visuals(), &view);

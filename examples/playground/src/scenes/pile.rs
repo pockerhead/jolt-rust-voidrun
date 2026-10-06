@@ -189,6 +189,11 @@ impl Pile {
         Ok(())
     }
 
+    /// Whether `body` is one of the pile's bodies or balls, not the bin.
+    fn is_dynamic(&self, body: BodyId) -> bool {
+        self.pile.contains(&body) || self.balls.contains(&body)
+    }
+
     fn remove(&mut self, body: BodyId) -> Result<()> {
         self.tracked.remove(&mut self.world, body)?;
         self.asleep.remove(&body);
@@ -226,7 +231,7 @@ impl Pile {
             if change >= LOUD_IMPACT {
                 let pair = event.pair();
                 for body in [pair.body1, pair.body2] {
-                    if self.tracked.contains(body) {
+                    if self.is_dynamic(body) {
                         self.flashes.insert(body, FLASH_TICKS);
                     }
                 }
@@ -241,7 +246,7 @@ impl Pile {
             match *event {
                 ActivationEvent::Activated(body) => self.asleep.remove(&body),
                 ActivationEvent::Deactivated(body) => {
-                    self.tracked.contains(body) && self.asleep.insert(body)
+                    self.is_dynamic(body) && self.asleep.insert(body)
                 }
             };
         }
@@ -321,10 +326,15 @@ impl Scene for Pile {
         CameraHint::new([0.0, 1.0, 0.0], 0.6, 0.55, 14.0)
     }
 
+    fn record_camera(&self, _tick: u32) -> CameraHint {
+        CameraHint::new([0.0, 1.2, 0.0], 0.6, 0.6, 10.5)
+    }
+
     fn script(&self, tick: u32) -> Input {
         let mut input = Input::default();
-        input.held.aim =
-            Some(CameraHint::new([0.0, 1.0, 0.0], 0.6, 0.35, 12.0).ray([0.0, 0.0], 16.0 / 9.0));
+        // Aimed above the pile: the ball drops about a metre on its way.
+        let aim = CameraHint::new([0.0, 2.2, 0.0], 0.6, 0.3, 12.0);
+        input.held.aim = Some(aim.ray([0.0, 0.0], 16.0 / 9.0));
         input.edges = Edges {
             fire: matches!(tick, 150 | 200),
             jump: tick == 230,

@@ -6,36 +6,37 @@ use crate::visual::VisualKey;
 /// A colour, red, green and blue in `[0, 1]`.
 pub type Colour = [f32; 3];
 
-/// Colours the scenes share.
+/// Colours the scenes share, in steps of 0.2, which the GIF palette holds exactly where a face
+/// is lit fully.
 pub mod colours {
     use super::Colour;
 
     /// Static ground.
-    pub const GROUND: Colour = [0.45, 0.5, 0.42];
+    pub const GROUND: Colour = [0.4, 0.6, 0.4];
     /// Static structures: walls, stairs, ramps.
-    pub const STRUCTURE: Colour = [0.62, 0.6, 0.56];
+    pub const STRUCTURE: Colour = [0.6, 0.6, 0.6];
     /// Dynamic bodies at rest colour.
-    pub const BODY: Colour = [0.85, 0.55, 0.25];
+    pub const BODY: Colour = [1.0, 0.6, 0.2];
     /// A second body colour.
-    pub const BODY_ALT: Colour = [0.3, 0.55, 0.85];
+    pub const BODY_ALT: Colour = [0.2, 0.6, 1.0];
     /// A third body colour.
-    pub const BODY_THIRD: Colour = [0.55, 0.75, 0.35];
+    pub const BODY_THIRD: Colour = [0.6, 0.8, 0.2];
     /// Kinematic bodies.
-    pub const KINEMATIC: Colour = [0.75, 0.35, 0.75];
+    pub const KINEMATIC: Colour = [0.8, 0.4, 0.8];
     /// The controlled character or vehicle.
-    pub const PLAYER: Colour = [0.95, 0.85, 0.3];
+    pub const PLAYER: Colour = [1.0, 0.8, 0.2];
     /// A highlight: a hit, an impact, a sensor.
-    pub const HIGHLIGHT: Colour = [1.0, 0.25, 0.2];
+    pub const HIGHLIGHT: Colour = [1.0, 0.2, 0.2];
     /// Sleeping bodies.
-    pub const ASLEEP: Colour = [0.45, 0.45, 0.6];
+    pub const ASLEEP: Colour = [0.6, 0.6, 0.8];
     /// Water.
-    pub const WATER: Colour = [0.2, 0.45, 0.8];
+    pub const WATER: Colour = [0.2, 0.4, 0.8];
     /// Debug wireframe lines.
     pub const WIREFRAME: Colour = [0.2, 1.0, 0.4];
     /// Lines of query results.
-    pub const QUERY: Colour = [1.0, 1.0, 0.3];
+    pub const QUERY: Colour = [1.0, 1.0, 0.2];
     /// Cloth and soft bodies.
-    pub const SOFT: Colour = [0.85, 0.35, 0.45];
+    pub const SOFT: Colour = [0.8, 0.4, 0.6];
 }
 
 /// A shape description drawn at a pose.

@@ -2,8 +2,8 @@
 //! and sent in draw calls within macroquad's capacity, then lines, then translucent surfaces.
 
 use macroquad::prelude::{
-    draw_line_3d, draw_mesh, set_camera, set_default_camera, Camera3D, Color, Mesh, RenderTarget,
-    Vec2, Vec3, Vec4, Vertex,
+    clear_background, draw_line_3d, draw_mesh, set_camera, set_default_camera, Camera3D, Color,
+    Mesh, RenderTarget, Vec2, Vec3, Vec4, Vertex,
 };
 
 use playground::camera::CameraHint;
@@ -13,6 +13,9 @@ use playground::visual::Visuals;
 
 /// What macroquad is configured to take per draw call, vertices and indices alike.
 pub const DRAW_CALL_CAPACITY: usize = 60_000;
+
+/// The sky behind every scene.
+pub const BACKGROUND: Color = Color::new(0.6, 0.8, 1.0, 1.0);
 
 /// Alpha of translucent surfaces.
 const TRANSLUCENT_ALPHA: u8 = 140;
@@ -25,6 +28,8 @@ pub struct View {
     pub target: Option<RenderTarget>,
     /// The aspect ratio; the screen's or the target's when `None`.
     pub aspect: Option<f32>,
+    /// Whether to clear to [`BACKGROUND`] first.
+    pub clear: bool,
 }
 
 /// Turns draw lists into macroquad draw calls, keeping the meshes of the scene's descriptions
@@ -53,6 +58,9 @@ impl Renderer {
             z_far: 1000.0,
             ..Camera3D::default()
         });
+        if view.clear {
+            clear_background(BACKGROUND);
+        }
 
         self.opaque.clear();
         self.translucent.clear();

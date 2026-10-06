@@ -6,6 +6,7 @@
 //! headless; the binary adds the window and the recorder behind the `window` feature.
 
 pub mod camera;
+pub mod capture;
 pub mod cli;
 pub mod digest;
 pub mod draw;
