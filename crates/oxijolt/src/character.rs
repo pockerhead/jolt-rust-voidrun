@@ -202,8 +202,13 @@ impl CharacterContact {
 /// contacts the character collided with) and the character's up, which Jolt does not save.
 /// It does not hold the settings, the shape or the contacts without collision, and Jolt does not
 /// restore a contact's character pointer, material or user data, nor the ground's material or
-/// user data. None of these feed the next update: before moving, Jolt reads only the normals and
-/// velocities of contacts with collision, and the move rebuilds the contacts.
+/// user data: restored contacts and ground carry Jolt's default material and user data 0. None
+/// of these feed an update that moves the character: before moving, Jolt reads only the normals
+/// and velocities of contacts with collision, and the move rebuilds the contacts. An update
+/// shorter than [`CharacterSettings::min_time_remaining`] moves nothing and takes its ground from
+/// the restored contacts, with the default material and user data 0.
+///
+/// [`CharacterSettings::min_time_remaining`]: crate::CharacterSettings::min_time_remaining
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CharacterState {
     jolt: Vec<u8>,
