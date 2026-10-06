@@ -275,6 +275,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Compound edits
+
+Destruction and building change compounds at run time. Shapes never change, so the edits go to a
+`MutableCompound`, an editor that adds, removes, moves and replaces children and publishes the
+current children as a new `Shape` with `to_shape`. A publication equals `Shape::new_compound` of
+the same children, including the centre of mass Jolt moves to the children's mass-weighted centre
+and the extent rule that applies after that move.
+
+A publication reaches a body only through `BodyMut::set_shape`, which applies every rule of a shape
+change above: the body rules, fresh mass properties and the wake of the bodies inside the box around
+the old and new bounds. On a large compound that box can hold many sleeping bodies. Each `set_shape`
+changes one body; when a publication goes to several bodies and a later one refuses it, the earlier
+ones keep it. Bodies, worlds and scaled shapes that hold an earlier publication keep it unchanged.
+A body that a constraint, character, vehicle or ragdoll holds refuses the change; remove the
+constraint, install the publication and create the constraint again.
+
+Children are numbered in order. Removing one moves the later ones down by one, and a child count
+that crosses a power of two changes the width of every child index, so a sub-shape id from before a
+publication (a contact removal, a character's ground, a stored hit) may name another child, or
+none, afterwards; the decoders (`compound_sub_shape` and the readers built on it) check the range,
+so such an id gives another child or `None`.
+
+The editor is the caller's state: `WorldState` does not hold it, and a state saved before an
+installed publication no longer restores. A rollback that should replay an edit saves after the
+`set_shape` and before the next step ([state.md](state.md)).
+
+```rust
+use oxijolt::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    let floor = Shape::new_box(Vec3::new(10.0, 0.5, 10.0))?;
+    world.create_body(&floor, &BodySettings::new_static().position(RVec3::new(0.0, -0.5, 0.0)))?;
+
+    // A ledge of two tiles at y = 2, a crate resting on the second.
+    let tile = Shape::new_box(Vec3::new(1.0, 0.25, 1.0))?;
+    let child = |x: f32, user_data| CompoundChild {
+        shape: &tile,
+        position: Vec3::new(x, 0.0, 0.0),
+        rotation: Quat::IDENTITY,
+        user_data,
+    };
+    let mut ledge = MutableCompound::from_children(&[child(0.0, 0), child(2.5, 1)])?;
+    let body = world.create_body(
+        &ledge.to_shape()?,
+        &BodySettings::new_static().position(RVec3::new(0.0, 2.0, 0.0)),
+    )?;
+    let crate_shape = Shape::new_box(Vec3::new(0.5, 0.5, 0.5))?;
+    let falling = world.create_body(
+        &crate_shape,
+        &BodySettings::new_dynamic().position(RVec3::new(2.5, 2.75, 0.0)),
+    )?;
+
+    // The second tile breaks away.
+    ledge.remove_shape(1)?;
+    world.body_mut(body)?.set_shape(&ledge.to_shape()?, None, Activation::DontActivate)?;
+    for _ in 0..90 {
+        assert!(world.step(1.0 / 60.0)?.is_complete());
+    }
+    assert!(world.body(falling)?.position().y < 1.0);
+    Ok(())
+}
+```
+
 ## Fixed at creation
 
 The sensor flag, user data, locked axes, movement capability and collision group have no setters, so

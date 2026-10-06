@@ -17,7 +17,9 @@ not a Jolt assertion threshold.
 
 `MAX_SHAPE_EXTENT` follows Jolt's "Conventions and Limits" documentation, which recommends static
 objects of 0.1 to 2000 m; the bound applies on each side of the centre of mass. It bounds a shape's
-inertia to at most `6 · mass · MAX_SHAPE_EXTENT²`.
+inertia to at most `6 · mass · MAX_SHAPE_EXTENT²`. A compound, also one a `MutableCompound`
+publishes, is checked after Jolt moved its centre of mass to the children's mass-weighted centre,
+so children whose positions are each within the bound can still leave it.
 
 A plane (`Shape::new_plane`) is bounded through its local bounds like any other shape. Jolt puts
 them around the square of `2 · half_extent` metres centred on `-constant · normal` and the same

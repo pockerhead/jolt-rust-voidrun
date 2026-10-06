@@ -53,6 +53,8 @@ projectile that passes its shooter), a `ContactListener` validates contacts
   `half_extent` deep. Nothing collides beyond that square. Only static bodies take a plane.
 - `Shape::new_compound` places children with their own pose and user data. Child order is part of
   the shape.
+- `MutableCompound` edits a compound's children at run time and publishes new shapes, which
+  `BodyMut::set_shape` installs ([bodies.md](bodies.md#compound-edits)).
 - A dynamic or kinematic body needs an inertia tensor Jolt can decompose. When the tensor is not
   exactly diagonal (a rotated compound child, an offset centre of mass), a slender part is refused
   past about 54 times longer than wide for a square box and about 47 times longer than its

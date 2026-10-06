@@ -98,6 +98,9 @@ setters change only poses and velocities, which are saved, and the shape and mot
 count as structural changes. The sensor flag, user data, allowed degrees of freedom and movement
 capability and collision group of `BodySettings` are fixed at creation, so no restore can find them
 changed.
+A `MutableCompound` is the caller's state, not the world's: its edits change no body until a
+publication is installed with `set_shape`, which counts as a structural change
+([bodies.md](bodies.md#compound-edits)).
 Impulses, kinematic moves, activation and deactivation change only velocities and sleep state,
 which are saved. A target changed after a save, such as a
 hinge's target angle, is part of the saved state and is undone.

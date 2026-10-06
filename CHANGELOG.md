@@ -4,6 +4,11 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Compound edits at run time ([guide](docs/bodies.md#compound-edits)): `MutableCompound` adds,
+  removes, moves and replaces compound children, checks every edit before Jolt sees it, and
+  publishes the current children as a new `Shape` (equal to `Shape::new_compound` of them) that
+  `BodyMut::set_shape` installs on one body at a time. `ShapeError::NoSubShape` reports an index
+  past the last child.
 - joltc extension: `JPH_PhysicsMaterial_AddRef` and `JPH_PhysicsMaterial_GetRefCount`.
   `JOLTC_EXT_REVISION` is 18: a `JOLTC_LIB_DIR` prefix built before this change is refused until the
   next release's archives.
