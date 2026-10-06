@@ -10,6 +10,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - Fixed: a character could reference a freed physics material when an update shorter than its
   `min_time_remaining` reused contacts with a body whose shape was replaced or removed. Characters
   now keep the materials of their cached contacts alive.
+- Changed: `Shape::new_compound` refuses a hierarchy in which Jolt would form a sub-shape id past
+  its 32 bits (a one-child compound under 32 bits of parents), which Jolt accepted and then shifted
+  out of range.
 
 - Plane shapes ([guide](docs/guide.md#shapes)): `Shape::new_plane` and `new_plane_with_material`, a
   static ground plane cut to a square of a half extent; static bodies only, like meshes and

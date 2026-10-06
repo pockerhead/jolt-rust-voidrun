@@ -279,3 +279,118 @@ fn out_of_range_sub_shape_ids_are_rejected() {
     }
     assert_eq!(unit_box.compound_sub_shape(SubShapeId::new(0)), None);
 }
+
+/// `levels` nested two-child compounds, each holding the previous level and a box, around
+/// `innermost`; `None` once a level is refused, with that level's error.
+fn nested_pairs(innermost: Shape, levels: u32) -> Result<Shape, (u32, ShapeError)> {
+    let unit_box = unit_box();
+    let mut shape = innermost;
+    for level in 1..=levels {
+        shape = Shape::new_compound(&[child(&shape, 0.0, level), child(&unit_box, 2.0, 0)])
+            .map_err(|error| (level, error))?;
+    }
+    Ok(shape)
+}
+
+fn id_bits(shape: &Shape) -> u32 {
+    // SAFETY: the shape is live; the getter only reads it.
+    unsafe { JPH_Shape_GetSubShapeIDBitsRecursive(shape.as_ptr()) }
+}
+
+#[test]
+fn a_one_child_compound_at_bit_32_is_refused() {
+    let cube = unit_box();
+    let single = || Shape::new_compound(&[child(&cube, 0.0, 7)]).unwrap();
+    let refused = Err((32, ShapeError::InvalidSettings(compound::SUB_SHAPE_ID_RULE)));
+
+    let at_31 = nested_pairs(single(), 31).unwrap();
+    assert_eq!(id_bits(&at_31), 31);
+    assert_eq!(nested_pairs(single(), 32).map(|_| ()), refused);
+
+    // Without the one-child compound the same depth is exactly Jolt's 32 bits.
+    let plain = nested_pairs(unit_box(), 32).unwrap();
+    assert_eq!(id_bits(&plain), 32);
+
+    // Decorators push no index: the one-child compound still starts at bit 32.
+    let scaled = Shape::scaled(&single(), Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    assert_eq!(nested_pairs(scaled, 32).map(|_| ()), refused);
+    let offset = Shape::new_offset_center_of_mass(&single(), Vec3::new(0.0, 0.1, 0.0)).unwrap();
+    assert_eq!(nested_pairs(offset, 32).map(|_| ()), refused);
+}
+
+#[test]
+fn sub_shape_id_arithmetic_follows_jolt() {
+    use compound::{compound_ids, fits_jolt_ids, index_bits, SubShapeIds};
+
+    let expected = [(1, 0), (2, 1), (3, 2), (4, 2), (5, 3), (64, 6), (65, 7)];
+    for (count, bits) in expected {
+        assert_eq!(index_bits(count), bits, "{count} children");
+    }
+    assert_eq!(index_bits(u32::MAX), 32);
+
+    let leaf = SubShapeIds {
+        width: 0,
+        zero_width_at: None,
+    };
+    let single = compound_ids([leaf].into_iter(), 1);
+    assert_eq!(single.zero_width_at, Some(0));
+    // A pair of a one-child compound and a leaf puts the inner push one bit further.
+    let pair = compound_ids([single, leaf].into_iter(), 2);
+    assert_eq!(
+        pair,
+        SubShapeIds {
+            width: 1,
+            zero_width_at: Some(1)
+        }
+    );
+    let at = |bit| SubShapeIds {
+        width: bit,
+        zero_width_at: Some(bit),
+    };
+    assert!(fits_jolt_ids(at(31)));
+    assert!(!fits_jolt_ids(at(32)));
+    assert!(fits_jolt_ids(SubShapeIds {
+        width: 32,
+        zero_width_at: None
+    }));
+}
+
+/// A compound of `deep` at the origin and `count - 1` boxes in a row beyond it.
+fn widened(deep: &Shape, count: u32, user_data: u32) -> Shape {
+    let unit_box = unit_box();
+    let mut children = vec![child(deep, 0.0, user_data)];
+    children.extend((1..count).map(|i| child(&unit_box, 20.0 + 1.5 * i as f32, i)));
+    Shape::new_compound(&children).unwrap()
+}
+
+#[test]
+fn height_field_ids_reach_exactly_32_bits() {
+    let settings = HeightFieldSettings::default().offset(Vec3::new(-16.0, 0.0, -16.0));
+    let field = Shape::new_height_field(33, &[0.0; 33 * 33], &settings).unwrap();
+    // 33 samples are stored as 34: 2 * 6 bits for the cell and 1 for the triangle.
+    assert_eq!(id_bits(&field), 13);
+    let inner = widened(&field, 64, 101);
+    let middle = widened(&inner, 64, 102);
+    let outer = widened(&middle, 128, 103);
+    assert_eq!(id_bits(&outer), 32);
+
+    let mut world = crate::PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+    world
+        .create_body(&outer, &crate::BodySettings::new_static())
+        .unwrap();
+    let ray = crate::RayCast {
+        origin: crate::RVec3::new(1.3, 5.0, 2.7),
+        direction: Vec3::new(0.0, -10.0, 0.0),
+    };
+    let hit = world
+        .cast_ray(ray, &crate::QueryFilter::new())
+        .unwrap()
+        .expect("the ray hits the heightfield");
+    assert_eq!(
+        outer.compound_sub_shape(hit.sub_shape_id),
+        Some(CompoundSubShape {
+            index: 0,
+            user_data: 103
+        })
+    );
+}

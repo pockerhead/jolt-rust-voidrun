@@ -1,7 +1,8 @@
 //! Collision shapes.
 
+use std::collections::BTreeMap;
 use std::fmt;
-use std::ptr::{null, null_mut, NonNull};
+use std::ptr::null;
 
 use oxijolt_sys::*;
 
@@ -10,6 +11,7 @@ use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
 use crate::world::ensure_initialized;
 
+mod compound;
 mod create;
 mod geometry;
 mod hull;
@@ -20,6 +22,8 @@ mod static_only;
 mod tapered;
 
 use crate::{Quat, ShapeError, Vec3};
+pub(crate) use compound::compound_sub_shape_of;
+use compound::{build_compound, check_child_pose, sub_shape_ids, RawCompoundChild};
 pub use mesh::{DroppedTriangles, MeshBuildQuality, MeshSettings};
 pub(crate) use static_only::static_only_leaves_are_meshes_of;
 
@@ -678,55 +682,36 @@ impl Shape {
     /// Every child position must be finite with each component at most
     /// [`limits::MAX_SHAPE_EXTENT`] in absolute value ([`ShapeError::InvalidSettings`]), and the
     /// compound's local bounds must lie within [`limits::MAX_SHAPE_EXTENT`] on every axis
-    /// ([`ShapeError::InvalidDimensions`]).
+    /// ([`ShapeError::InvalidDimensions`]). A hierarchy whose sub-shape ids Jolt cannot form
+    /// gives [`ShapeError::Rejected`] when it needs more than 32 bits and
+    /// [`ShapeError::InvalidSettings`] when a one-child compound would start at bit 32.
     pub fn new_compound(children: &[CompoundChild<'_>]) -> Result<Self, ShapeError> {
-        let invalid = |what| Err(ShapeError::InvalidSettings(what));
         if children.is_empty() {
-            return invalid("a compound needs at least one child");
+            return Err(ShapeError::InvalidSettings(compound::EMPTY_COMPOUND_RULE));
         }
         if u32::try_from(children.len()).is_err() {
-            return invalid("a compound has at most u32::MAX children");
+            return Err(ShapeError::InvalidSettings(
+                "a compound has at most u32::MAX children",
+            ));
         }
         for child in children {
-            if !limits::is_local_offset(child.position) {
-                return invalid(
-                    "compound child position must be finite and within limits::MAX_SHAPE_EXTENT",
-                );
-            }
-            if !child.rotation.is_valid_rotation() {
-                return invalid("compound child rotation must be a finite unit quaternion");
-            }
+            check_child_pose(child.position, child.rotation)?;
         }
-        initialize()?;
-        let single = children.len() == 1;
-        // SAFETY: Jolt is initialised. The returned settings hold one reference, which the
-        // guard takes over.
-        let settings = unsafe {
-            ShapeSettings::from_raw(if single {
-                JPH_MutableCompoundShapeSettings_Create().cast()
-            } else {
-                JPH_StaticCompoundShapeSettings_Create().cast()
+        let mut memo = BTreeMap::new();
+        let raw: Vec<_> = children
+            .iter()
+            .map(|child| RawCompoundChild {
+                shape: child.shape.as_ptr(),
+                position: child.position,
+                rotation: child.rotation,
+                user_data: child.user_data,
+                // SAFETY: `children` borrows every shape for the call.
+                ids: unsafe { sub_shape_ids(child.shape.as_ptr(), &mut memo) },
             })
-        }?;
-        for child in children {
-            let position = child.position.to_jph();
-            let rotation = child.rotation.to_jph();
-            // SAFETY: the settings are live and owned by the guard; both compound settings
-            // types derive from `CompoundShapeSettings` with single inheritance. The child shape
-            // is live, and the settings store their own `RefConst` to it. `position` and
-            // `rotation` are live locals.
-            unsafe {
-                JPH_CompoundShapeSettings_AddShape2(
-                    settings.as_ptr(),
-                    &position,
-                    &rotation,
-                    child.shape.as_ptr(),
-                    child.user_data,
-                );
-            }
-        }
-        // Jolt refuses, for example, a hierarchy that needs more than 32 sub-shape id bits.
-        settings.create()?.within_extent_bounds()
+            .collect();
+        // SAFETY: `children` borrows every shape for the call, the poses were checked above and
+        // the count fits in `u32`.
+        unsafe { build_compound(&raw) }
     }
 
     /// `shape` with its centre of mass moved by `offset` (shape space, metres, each component at
@@ -855,57 +840,6 @@ impl Shape {
             Ok(None)
         }
     }
-}
-
-/// The child of the compound `root` that `id` leads to; `None` unless `root` is a compound and
-/// `id` names one of its children.
-///
-/// # Safety
-/// `root` points to a live shape for the duration of the call.
-pub(crate) unsafe fn compound_sub_shape_of(
-    root: NonNull<JPH_Shape>,
-    id: SubShapeId,
-) -> Option<CompoundSubShape> {
-    let root = root.as_ptr();
-    // SAFETY: `root` is live (caller contract); the getter only reads it.
-    let sub_type = unsafe { JPH_Shape_GetSubType(root) };
-    if sub_type != JPH_ShapeSubType_StaticCompound && sub_type != JPH_ShapeSubType_MutableCompound {
-        return None;
-    }
-    let compound: *const JPH_CompoundShape = root.cast();
-    // SAFETY: `root` is live and a compound (checked above); the getter only reads it.
-    let count = unsafe { JPH_CompoundShape_GetNumSubShapes(compound) };
-    if count == 0 {
-        return None;
-    }
-    // Jolt `CompoundShape::GetSubShapeIDBits`: enough bits for the indices `0..count`.
-    let bits = 32 - (count - 1).leading_zeros();
-    let mask = ((1_u64 << bits) - 1) as u32;
-    // Rejecting out-of-range indices here keeps Jolt's index assertion unreachable.
-    if id.to_raw() & mask >= count {
-        return None;
-    }
-    let mut remainder: JPH_SubShapeID = 0;
-    // SAFETY: as above; `remainder` is a live local and the index is in range.
-    let index =
-        unsafe { JPH_CompoundShape_GetSubShapeIndexFromID(compound, id.to_raw(), &mut remainder) };
-    // Jolt indexes its child array without a check in `GetSubShape`.
-    if index >= count {
-        return None;
-    }
-    let mut user_data = 0;
-    // SAFETY: as above, `index < count`, and joltc writes only the outputs that are not null.
-    unsafe {
-        JPH_CompoundShape_GetSubShape(
-            compound,
-            index,
-            null_mut(),
-            null_mut(),
-            null_mut(),
-            &mut user_data,
-        );
-    }
-    Some(CompoundSubShape { index, user_data })
 }
 
 /// A shape, of which the owner holds one Jolt reference: joltc returns created shapes holding
