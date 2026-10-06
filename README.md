@@ -69,7 +69,7 @@ With Bevy, `use oxijolt::prelude::*` next to `bevy::prelude::*`; see `oxijolt::p
 
 ```toml
 [dependencies]
-oxijolt = "0.7"
+oxijolt = "1"
 ```
 
 ## Roadmap
@@ -114,7 +114,8 @@ The full list of what works today, with links to the guides, is in
 
 ## Status
 
-- Version 0.7.0 on [crates.io](https://crates.io/crates/oxijolt). The API changes between versions.
+- Version 1.0.0 on [crates.io](https://crates.io/crates/oxijolt). The API follows semantic
+  versioning from 1.0: a breaking change waits for the next major version.
 - CI builds and tests Windows (MSVC) and Linux (GCC) on x86_64, each in five configurations:
   default, `cross-platform-deterministic`, `double-precision`, `debug-renderer` and `asserts`.
   The bindings are committed for 64-bit Windows, Linux, macOS and Android targets; only the two

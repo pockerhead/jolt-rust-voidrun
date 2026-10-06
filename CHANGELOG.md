@@ -4,6 +4,8 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+## 1.0.0 — 2026-10-06
+
 - The public API follows one set of rules, written down in
   [docs/api-guidelines.md](docs/api-guidelines.md).
 - Both crates declare `rust-version = "1.88"`, the first Rust with `<[T]>::as_chunks`, and CI

@@ -19,7 +19,7 @@ From crates.io; the `oxijolt-sys` package carries the joltc and Jolt sources:
 
 ```toml
 [dependencies]
-oxijolt = "0.7"
+oxijolt = "1"
 ```
 
 Or from the repository, for changes not released yet; Cargo checks out the submodules with it:
