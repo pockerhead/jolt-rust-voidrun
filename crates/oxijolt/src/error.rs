@@ -58,6 +58,20 @@ pub enum ShapeError {
     Rejected(JoltMessage),
     /// joltc returned null.
     AllocationFailed,
+    /// A compound edit named a child index the compound does not have.
+    NoSubShape {
+        /// The index given.
+        index: u32,
+        /// The number of children the compound has.
+        count: u32,
+    },
+    /// A compound would hold more than
+    /// [`limits::MAX_EXPANDED_SUB_SHAPES`](crate::limits::MAX_EXPANDED_SUB_SHAPES) shapes,
+    /// counting a child shared by several parents at every use.
+    TooManySubShapes {
+        /// The shapes it would hold, at most `u32::MAX`.
+        expanded: u32,
+    },
 }
 
 impl fmt::Display for ShapeError {
@@ -71,6 +85,13 @@ impl fmt::Display for ShapeError {
             Self::ThinTriangles(error) => write!(f, "invalid scale: {error}"),
             Self::Rejected(message) => write!(f, "Jolt rejected the shape settings: {message}"),
             Self::AllocationFailed => f.write_str("could not create the shape"),
+            Self::NoSubShape { index, count } => {
+                write!(f, "compound has no sub-shape {index} (it has {count})")
+            }
+            Self::TooManySubShapes { expanded } => write!(
+                f,
+                "compound expands to {expanded} shapes, above limits::MAX_EXPANDED_SUB_SHAPES"
+            ),
         }
     }
 }

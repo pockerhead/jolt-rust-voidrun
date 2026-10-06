@@ -152,6 +152,8 @@ impl PhysicsWorld {
             if restored.is_err() {
                 return Err(StateError::RestoreFailed);
             }
+            // Restored contacts point to Jolt's default material.
+            self.retain_contact_materials(id);
         }
 
         let restored = self.restore_jolt(&state.jolt);

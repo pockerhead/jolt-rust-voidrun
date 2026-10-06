@@ -202,8 +202,13 @@ impl CharacterContact {
 /// contacts the character collided with) and the character's up, which Jolt does not save.
 /// It does not hold the settings, the shape or the contacts without collision, and Jolt does not
 /// restore a contact's character pointer, material or user data, nor the ground's material or
-/// user data. None of these feed the next update: before moving, Jolt reads only the normals and
-/// velocities of contacts with collision, and the move rebuilds the contacts.
+/// user data: restored contacts and ground carry Jolt's default material and user data 0. None
+/// of these feed an update that moves the character: before moving, Jolt reads only the normals
+/// and velocities of contacts with collision, and the move rebuilds the contacts. An update
+/// shorter than [`CharacterSettings::min_time_remaining`] moves nothing and takes its ground from
+/// the restored contacts, with the default material and user data 0.
+///
+/// [`CharacterSettings::min_time_remaining`]: crate::CharacterSettings::min_time_remaining
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CharacterState {
     jolt: Vec<u8>,
@@ -254,6 +259,14 @@ impl JoltObject for JPH_CharacterVsCharacterCollision {
 /// One character of a world.
 pub(crate) struct CharacterEntry {
     character: Owned<JPH_CharacterVirtual>,
+    /// One reference to each material the character's cached contacts point to. Jolt keeps a
+    /// raw pointer per contact (`CharacterVirtual.h`, `CharacterContact::mMaterial`), and an
+    /// update that moves nothing picks the ground from those contacts and takes a reference to
+    /// its material (`CharacterVirtual::UpdateSupportingContact`), also after the shape that
+    /// held the material is gone. Every native call that may replace the contacts is followed
+    /// by [`PhysicsWorld::retain_contact_materials`](crate::PhysicsWorld::retain_contact_materials).
+    /// Declared after `character`, so the references are released after the character.
+    contact_materials: Vec<Owned<JPH_PhysicsMaterial>>,
     inner_body: Option<BodyId>,
     collides_with_characters: bool,
     /// The mass with which the character presses on what it stands on.

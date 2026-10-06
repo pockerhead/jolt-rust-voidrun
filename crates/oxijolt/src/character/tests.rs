@@ -449,3 +449,314 @@ mod listener {
         assert_still_works(&mut setup, &quiet);
     }
 }
+
+mod materials {
+    use super::*;
+    use crate::{
+        Activation, BodySettings, ExtendedUpdateSettings, PhysicsMaterial, PhysicsWorld, Quat,
+        QueryFilter, Real, WorldSettings,
+    };
+
+    const RADIUS: f32 = 0.3;
+    const HALF_HEIGHT: f32 = 0.5;
+    /// How far the character sinks into the floor and the wall, so both contacts collide.
+    const OVERLAP: Real = 0.005;
+    const WALL_HALF_EXTENT: Vec3 = Vec3::new(0.5, 2.0, 5.0);
+
+    /// A floor of material `floor`, a wall of material `wall` and a character standing in the
+    /// corner, refreshed; the wall's shape is returned too.
+    struct Corner {
+        world: PhysicsWorld,
+        wall: BodyId,
+        wall_shape: Shape,
+        character: CharacterId,
+    }
+
+    fn corner(floor: &PhysicsMaterial, wall: &PhysicsMaterial) -> Corner {
+        let mut world = PhysicsWorld::new(WorldSettings::default()).unwrap();
+        let floor_shape =
+            Shape::new_box_with_material(Vec3::new(5.0, 0.5, 5.0), 0.05, floor).unwrap();
+        world
+            .create_body(
+                &floor_shape,
+                &BodySettings::new_static().position(RVec3::new(0.0, -0.5, 0.0)),
+            )
+            .unwrap();
+        let wall_shape = Shape::new_box_with_material(WALL_HALF_EXTENT, 0.05, wall).unwrap();
+        // The wall's face at x = RADIUS - OVERLAP.
+        let wall_center = RVec3::new(0.3 - OVERLAP + 0.5, 2.0, 0.0);
+        let wall = world
+            .create_body(
+                &wall_shape,
+                &BodySettings::new_static().position(wall_center),
+            )
+            .unwrap();
+        let capsule = Shape::new_capsule(HALF_HEIGHT, RADIUS).unwrap();
+        let settings = CharacterSettings::new(&capsule).shape_offset(Vec3::new(
+            0.0,
+            HALF_HEIGHT + RADIUS,
+            0.0,
+        ));
+        let character = world
+            .create_character(&settings, RVec3::new(0.0, -OVERLAP, 0.0), Quat::IDENTITY)
+            .unwrap();
+        world
+            .refresh_character_contacts(character, &QueryFilter::new())
+            .unwrap();
+        Corner {
+            world,
+            wall,
+            wall_shape,
+            character,
+        }
+    }
+
+    fn update(world: &mut PhysicsWorld, id: CharacterId, delta_time: f32) {
+        let settings = ExtendedUpdateSettings::default()
+            .stick_to_floor_step_down(Vec3::ZERO)
+            .walk_stairs_step_up(Vec3::ZERO);
+        world
+            .update_character(
+                id,
+                delta_time,
+                Vec3::new(0.0, -9.81, 0.0),
+                &settings,
+                &QueryFilter::new(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn cached_contact_materials_are_owned_until_the_contacts_change() {
+        let floor_material = PhysicsMaterial::new(1).unwrap();
+        let wall_material = PhysicsMaterial::new(2).unwrap();
+        let Corner {
+            mut world,
+            wall,
+            wall_shape,
+            character: id,
+        } = corner(&floor_material, &wall_material);
+        // The test's reference, the shape's and the character's list.
+        assert_eq!(wall_material.reference_count(), 3);
+        // The same, and the ground's.
+        assert_eq!(floor_material.reference_count(), 4);
+
+        let plain = Shape::new_box(WALL_HALF_EXTENT).unwrap();
+        world
+            .body_mut(wall)
+            .unwrap()
+            .set_shape(&plain, None, Activation::DontActivate)
+            .unwrap();
+        drop(wall_shape);
+        assert_eq!(
+            wall_material.reference_count(),
+            2,
+            "the test's and the list's"
+        );
+
+        // Up along the wall's normal makes the cached wall contact the best support, and an
+        // update shorter than `min_time_remaining` keeps the cached contacts.
+        world
+            .character_mut(id)
+            .unwrap()
+            .set_up(Vec3::new(-1.0, 0.0, 0.0))
+            .unwrap();
+        update(&mut world, id, 1e-6);
+        let character = world.character(id).unwrap();
+        assert_eq!(character.ground_body(), Some(wall));
+        assert!(character
+            .active_contacts()
+            .iter()
+            .any(|contact| contact.body == Some(wall)));
+        assert_eq!(
+            wall_material.reference_count(),
+            3,
+            "the test's, the list's and the ground's"
+        );
+
+        world
+            .character_mut(id)
+            .unwrap()
+            .set_up(Vec3::new(0.0, 1.0, 0.0))
+            .unwrap();
+        update(&mut world, id, 1.0 / 60.0);
+        assert_eq!(wall_material.reference_count(), 1, "only the test's");
+
+        world.remove_character(id).unwrap();
+        assert_eq!(
+            floor_material.reference_count(),
+            2,
+            "the test's and the shape's"
+        );
+    }
+
+    #[test]
+    fn a_world_restore_releases_the_contact_materials() {
+        let floor_material = PhysicsMaterial::new(1).unwrap();
+        let wall_material = PhysicsMaterial::new(2).unwrap();
+        let Corner {
+            mut world,
+            character: id,
+            ..
+        } = corner(&floor_material, &wall_material);
+        let state = world.save_state();
+        assert_eq!(wall_material.reference_count(), 3);
+        assert_eq!(floor_material.reference_count(), 4);
+
+        // Restored contacts and ground carry Jolt's default material.
+        world.restore_state(&state).unwrap();
+        assert_eq!(
+            wall_material.reference_count(),
+            2,
+            "the test's and the shape's"
+        );
+        assert_eq!(
+            floor_material.reference_count(),
+            2,
+            "the test's and the shape's"
+        );
+
+        update(&mut world, id, 1.0 / 60.0);
+        assert_eq!(wall_material.reference_count(), 3);
+        assert_eq!(floor_material.reference_count(), 4);
+    }
+
+    #[test]
+    fn a_character_restore_keeps_the_old_materials_until_the_next_update() {
+        let floor_material = PhysicsMaterial::new(1).unwrap();
+        let wall_material = PhysicsMaterial::new(2).unwrap();
+        let Corner {
+            mut world,
+            character: id,
+            ..
+        } = corner(&floor_material, &wall_material);
+        let state = world.character(id).unwrap().save_state();
+
+        // Restored contacts and ground carry Jolt's default material; the list keeps the
+        // materials of the contacts before.
+        world
+            .character_mut(id)
+            .unwrap()
+            .restore_state(&state)
+            .unwrap();
+        assert_eq!(
+            wall_material.reference_count(),
+            3,
+            "the test's, the shape's and the list's"
+        );
+        assert_eq!(floor_material.reference_count(), 3, "the same, no ground's");
+
+        // An update that moves nothing keeps the restored contacts, of the default material.
+        update(&mut world, id, 1e-6);
+        assert_eq!(wall_material.reference_count(), 2);
+        assert_eq!(floor_material.reference_count(), 2);
+
+        update(&mut world, id, 1.0 / 60.0);
+        assert_eq!(wall_material.reference_count(), 3);
+        assert_eq!(floor_material.reference_count(), 4);
+    }
+
+    #[test]
+    fn a_filter_panic_still_releases_the_materials_of_dropped_contacts() {
+        use crate::filter::tests::{inject_panic, Callback};
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let floor_material = PhysicsMaterial::new(1).unwrap();
+        let wall_material = PhysicsMaterial::new(2).unwrap();
+        let Corner {
+            mut world,
+            character: id,
+            ..
+        } = corner(&floor_material, &wall_material);
+        let far = world
+            .create_body(
+                &Shape::new_sphere(0.25).unwrap(),
+                &BodySettings::new_static().position(RVec3::new(50.0, 0.0, 0.0)),
+            )
+            .unwrap();
+        // Excluding a body makes the refresh run the body filter, which panics and rejects
+        // every body from then on.
+        let filter = QueryFilter::new().exclude_body(far);
+        inject_panic(Some(Callback::Body));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            world.refresh_character_contacts(id, &filter)
+        }));
+        inject_panic(None);
+        assert!(result.is_err(), "the refresh resumes the filter's panic");
+
+        assert!(world.character(id).unwrap().active_contacts().is_empty());
+        assert_eq!(
+            wall_material.reference_count(),
+            2,
+            "the test's and the shape's"
+        );
+        assert_eq!(floor_material.reference_count(), 2, "the same, no ground's");
+    }
+
+    #[test]
+    fn contacts_sharing_a_material_hold_one_reference() {
+        let material = PhysicsMaterial::new(1).unwrap();
+        let Corner {
+            mut world,
+            character: id,
+            ..
+        } = corner(&material, &material);
+        // The test's, the floor's and the wall's shapes', the list's and the ground's.
+        assert_eq!(material.reference_count(), 5);
+        update(&mut world, id, 1.0 / 60.0);
+        assert_eq!(material.reference_count(), 5);
+        world.remove_character(id).unwrap();
+        assert_eq!(material.reference_count(), 3);
+    }
+
+    #[test]
+    fn a_character_keeps_updating_after_a_character_it_touched_is_removed() {
+        let floor_material = PhysicsMaterial::new(1).unwrap();
+        let mut world = PhysicsWorld::new(WorldSettings::default()).unwrap();
+        let floor_shape =
+            Shape::new_box_with_material(Vec3::new(5.0, 0.5, 5.0), 0.05, &floor_material).unwrap();
+        world
+            .create_body(
+                &floor_shape,
+                &BodySettings::new_static().position(RVec3::new(0.0, -0.5, 0.0)),
+            )
+            .unwrap();
+        drop(floor_shape);
+        let capsule = Shape::new_capsule(HALF_HEIGHT, RADIUS).unwrap();
+        let settings = CharacterSettings::new(&capsule)
+            .shape_offset(Vec3::new(0.0, HALF_HEIGHT + RADIUS, 0.0))
+            .collide_with_characters(true);
+        let at = |x: Real| RVec3::new(x, -OVERLAP, 0.0);
+        let id = world
+            .create_character(&settings, at(0.0), Quat::IDENTITY)
+            .unwrap();
+        let neighbour = world
+            .create_character(&settings, at(2.0 * 0.3 - OVERLAP), Quat::IDENTITY)
+            .unwrap();
+        world
+            .refresh_character_contacts(id, &QueryFilter::new())
+            .unwrap();
+        let touches_neighbour = |world: &PhysicsWorld| {
+            world
+                .character(id)
+                .unwrap()
+                .active_contacts()
+                .iter()
+                .any(|contact| contact.character == Some(neighbour))
+        };
+        assert!(touches_neighbour(&world));
+        // The test's, the shape's, the list's and the ground's; the neighbour's contact
+        // carries Jolt's default material.
+        assert_eq!(floor_material.reference_count(), 4);
+
+        world.remove_character(neighbour).unwrap();
+        for _ in 0..3 {
+            update(&mut world, id, 1e-6);
+            assert!(touches_neighbour(&world), "the cached contact stays");
+            assert_eq!(floor_material.reference_count(), 4);
+        }
+        update(&mut world, id, 1.0 / 60.0);
+        assert!(!touches_neighbour(&world));
+        assert_eq!(floor_material.reference_count(), 4);
+    }
+}

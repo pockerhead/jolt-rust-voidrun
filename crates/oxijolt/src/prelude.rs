@@ -65,6 +65,7 @@
 //! (`oxijolt::error::Result`). The crate root, `use oxijolt::*`, brings in everything else, the
 //! math types included.
 
+pub use crate::MutableCompound;
 pub use crate::{
     Activation, AllowedDofs, BodyId, BodyMut, BodyPose, BodyRef, BodySettings, MotionQuality,
     MotionType,

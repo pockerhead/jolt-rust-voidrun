@@ -1,6 +1,7 @@
 //! Creating, removing and updating characters.
 
 use std::marker::PhantomData;
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::ptr::{null, NonNull};
 
 use oxijolt_sys::*;
@@ -113,6 +114,7 @@ impl PhysicsWorld {
             raw,
             CharacterEntry {
                 character,
+                contact_materials: Vec::new(),
                 inner_body,
                 collides_with_characters: settings.collide_with_characters,
                 mass: settings.mass,
@@ -179,12 +181,13 @@ impl PhysicsWorld {
             self.inner_bodies.remove(&body.to_raw());
             self.pending_cache_invalidations.remove(&body.to_raw());
         }
-        // Other characters may keep a pointer to this one in their cached contacts. That is
-        // sound: a contact listener is attached only during one update or refresh of a
-        // character, and every contact it receives was collected in that call from the live
-        // characters of the collision set; joltc's contact readout copies the pointer without
-        // dereferencing it, oxijolt never reads it, and the solve callbacks, which pass it on,
-        // are not installed.
+        // Other characters may keep a pointer to this one in their cached contacts. Jolt
+        // dereferences it only for contacts collected in the same call; an update that moves
+        // nothing reuses cached contacts and passes the pointer to the validate and added
+        // callbacks without dereferencing it (`CharacterVirtual::UpdateSupportingContact`).
+        // joltc's contact readout copies the pointer, oxijolt reads only the character id, and
+        // the solve callbacks are not installed. The entry releases its contact materials after
+        // the native character (field order).
         drop(entry);
         Ok(())
     }
@@ -295,7 +298,7 @@ impl PhysicsWorld {
         let gravity = gravity.to_jph();
         let settings = settings.to_jph();
         let allocator = self.temp_allocator.as_ptr();
-        self.with_character_filters(character, filter, |raw| {
+        self.with_character_filters(id, character, filter, |raw| {
             // SAFETY: `&mut self` gives this call exclusive use of the world, the character and
             // the temp allocator; `gravity` and `settings` are live locals and the filters are
             // live or null (accept everything). The filter callbacks get `&PhysicsWorld` while
@@ -339,7 +342,7 @@ impl PhysicsWorld {
         let character = self.character_entry(id)?.character.as_non_null();
         filter.validate(self).map_err(query_error)?;
         let allocator = self.temp_allocator.as_ptr();
-        self.with_character_filters(character, filter, |raw| {
+        self.with_character_filters(id, character, filter, |raw| {
             // SAFETY: as in `update_character`, without the move.
             unsafe {
                 JPH_CharacterVirtual_RefreshContacts2(
@@ -354,36 +357,90 @@ impl PhysicsWorld {
         })
     }
 
-    /// Runs `run`, a joltc update or refresh of `character`, with the joltc filters of `filter`
-    /// and the world's character contact listener attached, then delivers the removals the
-    /// listener collected.
+    /// Runs `run`, a joltc update or refresh of `character` (the native character of `id`),
+    /// with the joltc filters of `filter` and the world's character contact listener attached,
+    /// retains the materials of the contacts it left, then delivers the removals the listener
+    /// collected. The materials are retained also when a callback panic is resumed.
     fn with_character_filters(
         &mut self,
+        id: CharacterId,
         character: NonNull<JPH_CharacterVirtual>,
         filter: &QueryFilter<'_>,
         run: impl FnOnce(&RawFilters),
     ) -> Result<(), CharacterError> {
         let listener = self.character_listener.clone();
         let world = self.tag;
-        let removed = with_query_filters(self, filter, |raw, state: &FilterState<'_>| {
-            let Some(listener) = &listener else {
-                run(raw);
-                return Vec::<Removal>::new();
-            };
-            // SAFETY: `character` is a live character of this world, which the caller holds
-            // mutably for the whole call, and `run` updates or refreshes only that character.
-            let ((), removed) = unsafe {
-                with_character_listener(state, &**listener, world, character, || run(raw))
-            };
-            removed
-        })
-        .map_err(query_error)?;
+        // Only Rust frames unwind here: callbacks catch their panics, and `with_query_filters`
+        // resumes them after joltc returned. The world is consistent then.
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            with_query_filters(self, filter, |raw, state: &FilterState<'_>| {
+                let Some(listener) = &listener else {
+                    run(raw);
+                    return Vec::<Removal>::new();
+                };
+                // SAFETY: `character` is a live character of this world, which the caller
+                // holds mutably for the whole call, and `run` updates or refreshes only that
+                // character.
+                let ((), removed) = unsafe {
+                    with_character_listener(state, &**listener, world, character, || run(raw))
+                };
+                removed
+            })
+        }));
+        self.retain_contact_materials(id);
+        let removed = match outcome {
+            Ok(result) => result.map_err(query_error)?,
+            Err(payload) => resume_unwind(payload),
+        };
         if let Some(listener) = &listener {
             for (character, key) in removed {
                 listener.contact_removed(character, key);
             }
         }
         Ok(())
+    }
+
+    /// Makes the character `id` hold one reference to each material its cached contacts point
+    /// to now, and releases the references it held before. Call it after every native call that
+    /// may replace the contacts.
+    pub(crate) fn retain_contact_materials(&mut self, id: CharacterId) {
+        let Some(entry) = self.characters.get_mut(&id.to_raw()) else {
+            return;
+        };
+        let character = entry.character.as_ptr();
+        // SAFETY: the character is live and owned by this world, borrowed mutably; the getter
+        // reads the length of its contact list.
+        let count = unsafe { JPH_CharacterVirtual_GetNumActiveContacts(character) };
+        let mut materials: Vec<*const JPH_PhysicsMaterial> = (0..count)
+            .map(|index| {
+                // SAFETY: an all-zero `JPH_CharacterContact` is valid: integers, floats,
+                // `false`, null pointers and `JPH_MotionType_Static` (0).
+                let mut contact: JPH_CharacterContact = unsafe { std::mem::zeroed() };
+                // SAFETY: as above; `index < count`, so joltc's `at` stays in range, and
+                // `contact` is a live local that joltc overwrites. joltc copies the material
+                // pointer without dereferencing it.
+                unsafe { JPH_CharacterVirtual_GetActiveContact(character, index, &mut contact) };
+                contact.material
+            })
+            .filter(|material| !material.is_null())
+            .collect();
+        // Address order affects only which reference is taken first, never a result.
+        materials.sort_unstable();
+        materials.dedup();
+        let retained = materials
+            .into_iter()
+            .map(|material| {
+                // SAFETY: the material is alive: a contact collected by the call that just
+                // returned points to a material of a shape a live body holds (no body or shape
+                // changed during the call, the world was borrowed mutably), and a contact Jolt
+                // kept from before points to a material the old list still holds. The handle
+                // takes over the added reference.
+                unsafe { Owned::from_raw(JPH_PhysicsMaterial_AddRef(material)) }
+                    .unwrap_or_else(|| unreachable!("the material is not null"))
+            })
+            .collect();
+        // The old references go only after the new ones are taken.
+        entry.contact_materials = retained;
     }
 }
 

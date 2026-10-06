@@ -223,7 +223,7 @@ pub use ragdoll::{
 };
 pub use shape::{
     CompoundChild, CompoundSubShape, DroppedTriangles, HeightFieldSettings, MeshBuildQuality,
-    MeshSettings, Shape, SubShapeId,
+    MeshSettings, MutableCompound, Shape, SubShapeId,
 };
 pub use soft_body::{
     LongRangeAttachment, SoftBodyBendType, SoftBodyDihedralBend, SoftBodyEdge, SoftBodyMut,

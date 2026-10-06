@@ -402,6 +402,8 @@ impl ContactListener for Transplant {
 
 #[test]
 fn a_rejected_transplant_is_estimated_with_jolts_settings() {
+    // The donor lands first, so its settings are kept before the recipient's contact is added,
+    // whatever order a step's callbacks arrive in.
     let run = |transplant: bool| {
         let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
         world.set_event_settings(estimates());
@@ -415,9 +417,21 @@ fn a_rejected_transplant_is_estimated_with_jolts_settings() {
         let donor = world
             .create_body(
                 &small,
-                &BodySettings::new_dynamic().position(RVec3::new(0.0, 0.3, 0.0)),
+                &BodySettings::new_dynamic().position(RVec3::new(0.0, 0.26, 0.0)),
             )
             .unwrap();
+        let listener = Arc::new(Transplant {
+            donor,
+            kept: Mutex::default(),
+        });
+        if transplant {
+            world.set_contact_listener(Some(listener.clone()));
+        }
+        step(&mut world, 5);
+        world.take_events();
+        if transplant {
+            assert!(listener.kept.lock().unwrap().is_some(), "the donor landed");
+        }
         // 60 m from the floor's centre of mass: the kept spin does not fit its lever.
         let recipient = world
             .create_body(
@@ -425,12 +439,6 @@ fn a_rejected_transplant_is_estimated_with_jolts_settings() {
                 &BodySettings::new_dynamic().position(RVec3::new(60.0, 0.3, 0.0)),
             )
             .unwrap();
-        if transplant {
-            world.set_contact_listener(Some(Arc::new(Transplant {
-                donor,
-                kept: Mutex::default(),
-            })));
-        }
         let mut rejected = 0;
         let mut found = Vec::new();
         for _ in 0..10 {

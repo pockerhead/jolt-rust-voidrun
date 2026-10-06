@@ -76,6 +76,14 @@ impl PhysicsMaterial {
         self.user_data
     }
 
+    /// Jolt's reference count of the material: this value's reference plus every shape's and
+    /// character's.
+    #[cfg(test)]
+    pub(crate) fn reference_count(&self) -> u32 {
+        // SAFETY: `self` keeps the material alive; the getter reads its count.
+        unsafe { JPH_PhysicsMaterial_GetRefCount(self.as_ptr()) }
+    }
+
     pub(crate) fn as_ptr(&self) -> *const JPH_PhysicsMaterial {
         self.material.as_ptr()
     }

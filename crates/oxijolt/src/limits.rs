@@ -48,6 +48,18 @@ pub const MAX_POSITION: Real = (if core::mem::size_of::<Real>() == 8 {
 /// [docs/limits.md#frame-and-extent]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#frame-and-extent
 pub const MAX_SHAPE_EXTENT: f32 = 2000.0;
 
+/// Most shapes a compound may hold, counting itself, every child, decorator and leaf below it,
+/// and a child shared by several parents at every use: 2^20. Jolt walks every child without
+/// remembering the shapes it has seen when it builds a compound, computes its mass and steps
+/// its body, so a compound that holds the level below twice at each of 31 levels would take
+/// about 2^32 native calls per walk. At this bound a walk takes tens of milliseconds, as for a
+/// compound of 2^20 distinct children.
+///
+/// See [docs/limits.md#expanded-compounds].
+///
+/// [docs/limits.md#expanded-compounds]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#expanded-compounds
+pub const MAX_EXPANDED_SUB_SHAPES: u32 = 1 << 20;
+
 /// Largest linear velocity a caller may give a body or character, in m/s: Jolt's default
 /// `BodyCreationSettings::mMaxLinearVelocity`, to which Jolt also clamps a body's velocity every
 /// step.

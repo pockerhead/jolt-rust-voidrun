@@ -232,11 +232,11 @@ fn height_field_settings_reach_jolt() {
     assert_eq!(block_size, 4);
 }
 
-fn unit_box() -> Shape {
+pub(super) fn unit_box() -> Shape {
     Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap()
 }
 
-fn child(shape: &Shape, x: f32, user_data: u32) -> CompoundChild<'_> {
+pub(super) fn child(shape: &Shape, x: f32, user_data: u32) -> CompoundChild<'_> {
     CompoundChild {
         shape,
         position: Vec3::new(x, 0.0, 0.0),
@@ -278,4 +278,271 @@ fn out_of_range_sub_shape_ids_are_rejected() {
         assert_eq!(compound.compound_sub_shape(SubShapeId::new(raw)), None);
     }
     assert_eq!(unit_box.compound_sub_shape(SubShapeId::new(0)), None);
+}
+
+/// `levels` nested two-child compounds, each holding the previous level and a box, around
+/// `innermost`; `None` once a level is refused, with that level's error.
+pub(super) fn nested_pairs(innermost: Shape, levels: u32) -> Result<Shape, (u32, ShapeError)> {
+    let unit_box = unit_box();
+    let mut shape = innermost;
+    for level in 1..=levels {
+        shape = Shape::new_compound(&[child(&shape, 0.0, level), child(&unit_box, 2.0, 0)])
+            .map_err(|error| (level, error))?;
+    }
+    Ok(shape)
+}
+
+/// Jolt's rotated-translated shape of `shape`, which the safe API only makes inside compounds.
+pub(super) fn rotated_translated(shape: &Shape, position: Vec3, rotation: Quat) -> Shape {
+    let (position, rotation) = (position.to_jph(), rotation.to_jph());
+    // SAFETY: Jolt is initialised (`shape` exists); the arguments are live locals and a live
+    // shape, of which the decorator takes its own reference. The returned shape holds one
+    // reference, which `Shape` takes over.
+    unsafe {
+        Shape::from_raw(
+            JPH_RotatedTranslatedShape_Create(&position, &rotation, shape.as_ptr()).cast(),
+        )
+    }
+    .unwrap()
+}
+
+pub(super) fn id_bits(shape: &Shape) -> u32 {
+    // SAFETY: the shape is live; the getter only reads it.
+    unsafe { JPH_Shape_GetSubShapeIDBitsRecursive(shape.as_ptr()) }
+}
+
+#[test]
+fn a_one_child_compound_at_bit_32_is_refused() {
+    let cube = unit_box();
+    let single = || Shape::new_compound(&[child(&cube, 0.0, 7)]).unwrap();
+    let refused = Err((32, ShapeError::InvalidSettings(compound::SUB_SHAPE_ID_RULE)));
+
+    let at_31 = nested_pairs(single(), 31).unwrap();
+    assert_eq!(id_bits(&at_31), 31);
+    assert_eq!(nested_pairs(single(), 32).map(|_| ()), refused);
+
+    // Without the one-child compound the same depth is exactly Jolt's 32 bits.
+    let plain = nested_pairs(unit_box(), 32).unwrap();
+    assert_eq!(id_bits(&plain), 32);
+
+    // Decorators push no index: the one-child compound still starts at bit 32.
+    let scaled = Shape::scaled(&single(), Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    assert_eq!(nested_pairs(scaled, 32).map(|_| ()), refused);
+    let offset = Shape::new_offset_center_of_mass(&single(), Vec3::new(0.0, 0.1, 0.0)).unwrap();
+    assert_eq!(nested_pairs(offset, 32).map(|_| ()), refused);
+    let turned = || rotated_translated(&single(), Vec3::new(0.0, 0.5, 0.0), quarter_turn());
+    assert_eq!(id_bits(&nested_pairs(turned(), 31).unwrap()), 31);
+    assert_eq!(nested_pairs(turned(), 32).map(|_| ()), refused);
+}
+
+/// A quarter turn about +y.
+fn quarter_turn() -> Quat {
+    let half = std::f32::consts::FRAC_1_SQRT_2;
+    Quat::from_xyzw(0.0, half, 0.0, half)
+}
+
+/// `depth` levels of two-child compounds over `leaf`, each holding the level below twice: a
+/// graph of `depth + 1` distinct shapes with `2^depth` paths to the leaf.
+pub(super) fn shared_pairs(leaf: Shape, depth: u32) -> Shape {
+    let mut shape = leaf;
+    for level in 1..=depth {
+        shape =
+            Shape::new_compound(&[child(&shape, 0.0, level), child(&shape, 0.0, level)]).unwrap();
+    }
+    shape
+}
+
+/// The ids the builder computes for `shape`, with a fresh memo.
+fn walked_ids(shape: &Shape) -> compound::SubShapeIds {
+    // SAFETY: the shape is live for the call, and the memo starts empty.
+    unsafe { compound::sub_shape_ids(shape.as_ptr(), &mut std::collections::BTreeMap::new()) }
+}
+
+#[test]
+fn shared_shapes_are_walked_once() {
+    use compound::walk_count;
+    const DEPTH: u32 = 16;
+    let graph = shared_pairs(unit_box(), DEPTH);
+    let scaled = Shape::scaled(&graph, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let offset = Shape::new_offset_center_of_mass(&graph, Vec3::new(0.0, 0.1, 0.0)).unwrap();
+    let turned = rotated_translated(&graph, Vec3::new(0.0, 0.5, 0.0), quarter_turn());
+
+    walk_count::take();
+    let ids = walked_ids(&graph);
+    assert_eq!(ids.width, id_bits(&graph));
+    // Each distinct shape is visited once; only the box's width is asked of Jolt.
+    assert_eq!(walk_count::take(), (DEPTH + 1, 1));
+
+    // Repeated roots and three decorators of the graph add only the decorators.
+    let compound = Shape::new_compound(&[
+        child(&graph, 0.0, 0),
+        child(&graph, 0.0, 1),
+        child(&scaled, 0.0, 2),
+        child(&offset, 0.0, 3),
+        child(&turned, 0.0, 4),
+    ])
+    .unwrap();
+    assert_eq!(walk_count::take(), (DEPTH + 4, 1));
+    assert_eq!(walked_ids(&compound).width, id_bits(&compound));
+    assert_eq!(id_bits(&compound), DEPTH + 3);
+}
+
+#[test]
+fn walked_widths_follow_jolt() {
+    let cube = unit_box();
+    let single = Shape::new_compound(&[child(&cube, 0.0, 0)]).unwrap();
+    let (vertices, triangles) = (
+        [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ],
+        [[0, 2, 1]],
+    );
+    let (mesh, _) = Shape::new_mesh(&vertices, &triangles).unwrap();
+    let shapes = [
+        nested_pairs(single, 5).unwrap(),
+        height_field_at_32_bits(),
+        Shape::scaled(&mesh, Vec3::new(1.0, 2.0, 1.0)).unwrap(),
+        shared_pairs(height_field_13_bits(), 3),
+        rotated_translated(&widened(&mesh, 5, 0), Vec3::ZERO, quarter_turn()),
+    ];
+    for shape in &shapes {
+        assert_eq!(walked_ids(shape).width, id_bits(shape));
+    }
+}
+
+#[test]
+fn sub_shape_id_arithmetic_follows_jolt() {
+    use compound::{compound_ids, fits_jolt_ids, index_bits, SubShapeIds};
+
+    let expected = [(1, 0), (2, 1), (3, 2), (4, 2), (5, 3), (64, 6), (65, 7)];
+    for (count, bits) in expected {
+        assert_eq!(index_bits(count), bits, "{count} children");
+    }
+    assert_eq!(index_bits(u32::MAX), 32);
+
+    let leaf = SubShapeIds {
+        width: 0,
+        zero_width_at: None,
+        expanded: 1,
+    };
+    let single = compound_ids([leaf].into_iter(), 1);
+    assert_eq!(single.zero_width_at, Some(0));
+    // A pair of a one-child compound and a leaf puts the inner push one bit further.
+    let pair = compound_ids([single, leaf].into_iter(), 2);
+    assert_eq!(
+        pair,
+        SubShapeIds {
+            width: 1,
+            zero_width_at: Some(1),
+            expanded: 4,
+        }
+    );
+    let at = |bit| SubShapeIds {
+        width: bit,
+        zero_width_at: Some(bit),
+        expanded: 1,
+    };
+    assert!(fits_jolt_ids(at(31)));
+    assert!(!fits_jolt_ids(at(32)));
+    assert!(fits_jolt_ids(SubShapeIds {
+        width: 32,
+        zero_width_at: None,
+        expanded: 1,
+    }));
+    let saturated = SubShapeIds {
+        expanded: u32::MAX,
+        ..leaf
+    };
+    assert_eq!(
+        compound_ids([saturated, leaf].into_iter(), 2).expanded,
+        u32::MAX
+    );
+}
+
+#[test]
+fn compounds_above_the_expansion_bound_are_refused() {
+    use compound::walk_count;
+    use limits::MAX_EXPANDED_SUB_SHAPES as MAX;
+
+    // 19 shared levels over a box: 2^20 - 1 shapes once every use is counted.
+    let graph = shared_pairs(unit_box(), 19);
+    assert_eq!(walked_ids(&graph).expanded, MAX - 1);
+    let cube = unit_box();
+    let decorated = Shape::new_offset_center_of_mass(&graph, Vec3::ZERO).unwrap();
+    assert_eq!(walked_ids(&decorated).expanded, MAX);
+
+    // The bound itself: the compound and the graph.
+    let at_bound = Shape::new_compound(&[child(&graph, 0.0, 0)]).unwrap();
+    assert_eq!(walked_ids(&at_bound).expanded, MAX);
+    let refused = |expanded| Err(ShapeError::TooManySubShapes { expanded });
+    assert_eq!(
+        Shape::new_compound(&[child(&graph, 0.0, 0), child(&cube, 3.0, 1)]).map(|_| ()),
+        refused(MAX + 1)
+    );
+    assert_eq!(
+        Shape::new_compound(&[child(&decorated, 0.0, 0)]).map(|_| ()),
+        refused(MAX + 1)
+    );
+
+    // One more shared level is refused before Jolt walks it.
+    walk_count::take();
+    assert_eq!(
+        Shape::new_compound(&[child(&graph, 0.0, 20), child(&graph, 0.0, 20)]).map(|_| ()),
+        refused(2 * MAX - 1)
+    );
+    assert_eq!(walk_count::take(), (20, 1));
+}
+
+/// A compound of `deep` at the origin and `count - 1` boxes in a row beyond it.
+pub(super) fn widened(deep: &Shape, count: u32, user_data: u32) -> Shape {
+    let unit_box = unit_box();
+    let mut children = vec![child(deep, 0.0, user_data)];
+    children.extend((1..count).map(|i| child(&unit_box, 20.0 + 1.5 * i as f32, i)));
+    Shape::new_compound(&children).unwrap()
+}
+
+/// A flat 33 x 33 heightfield around the origin, whose ids use 13 bits.
+pub(super) fn height_field_13_bits() -> Shape {
+    let settings = HeightFieldSettings::default().offset(Vec3::new(-16.0, 0.0, -16.0));
+    let field = Shape::new_height_field(33, &[0.0; 33 * 33], &settings).unwrap();
+    // 33 samples are stored as 34: 2 * 6 bits for the cell and 1 for the triangle.
+    assert_eq!(id_bits(&field), 13);
+    field
+}
+
+/// A 33 x 33 heightfield (13 id bits) inside compounds of 64, 64 and 128 children (6, 6 and
+/// 7 bits): exactly 32 bits. The heightfield is child 0 at every level, around the origin.
+pub(super) fn height_field_at_32_bits() -> Shape {
+    let field = height_field_13_bits();
+    let inner = widened(&field, 64, 101);
+    let middle = widened(&inner, 64, 102);
+    widened(&middle, 128, 103)
+}
+
+#[test]
+fn height_field_ids_reach_exactly_32_bits() {
+    let outer = height_field_at_32_bits();
+    assert_eq!(id_bits(&outer), 32);
+
+    let mut world = crate::PhysicsWorld::new(crate::WorldSettings::default()).unwrap();
+    world
+        .create_body(&outer, &crate::BodySettings::new_static())
+        .unwrap();
+    let ray = crate::RayCast {
+        origin: crate::RVec3::new(1.3, 5.0, 2.7),
+        direction: Vec3::new(0.0, -10.0, 0.0),
+    };
+    let hit = world
+        .cast_ray(ray, &crate::QueryFilter::new())
+        .unwrap()
+        .expect("the ray hits the heightfield");
+    assert_eq!(
+        outer.compound_sub_shape(hit.sub_shape_id),
+        Some(CompoundSubShape {
+            index: 0,
+            user_data: 103
+        })
+    );
 }

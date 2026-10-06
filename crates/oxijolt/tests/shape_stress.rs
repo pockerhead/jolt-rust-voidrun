@@ -1,5 +1,6 @@
-//! Seeded stress of the shape constructors: random inputs per shape family, a named expectation
-//! where the outcome is defined, and collision use of a share of the accepted shapes.
+//! Seeded stress of the shape constructors and the compound editor: random inputs per shape
+//! family, a named expectation where the outcome is defined, and collision use of a share of the
+//! accepted shapes.
 //!
 //! The cases run in a child process (the ignored test `shape_stress_child`), so a Jolt assertion
 //! (asserts builds abort on it) or a crash fails the parent test, which names the last case the
@@ -13,6 +14,8 @@ use std::process::Command;
 use common::*;
 use oxijolt::*;
 
+#[path = "shape_stress/mutable.rs"]
+mod mutable;
 #[path = "shape_stress/scaled.rs"]
 mod scaled;
 #[path = "shape_stress/tapered.rs"]
@@ -61,6 +64,7 @@ fn shape_stress_child() {
     mesh_family(&mut arena);
     scaled::scaled_family(&mut arena);
     tapered::tapered_family(&mut arena);
+    mutable::mutable_family(&mut arena);
 }
 
 /// Announces a case on stderr before it runs, so a crash can be traced to it.
