@@ -1,7 +1,8 @@
 //! The compound editor family: seeded edit sequences over every shape kind at random poses,
 //! including the extent edge, invalid indices and poses and a child that uses all 32 sub-shape
 //! id bits. Each case checks every edit against a model, publishes the result and uses it on a
-//! static and a dynamic body.
+//! static and a dynamic body, which takes it or refuses it by the static-only or mass rules;
+//! three fixed publications pin a taken and two refused outcomes.
 
 use super::common::meshes::grid;
 use super::*;
@@ -233,8 +234,13 @@ fn edit(
 
 /// Uses `published` on a static body with a cube dropped onto it, as a query target, and on a
 /// dynamic body, which takes it unless a child is static-only or the mass rules refuse it.
-/// Returns whether the dynamic body took it.
-fn use_publication(arena: &mut Arena, published: &Shape, static_only: bool, what: &str) -> bool {
+/// Returns what the dynamic body's `set_shape` returned.
+fn use_publication(
+    arena: &mut Arena,
+    published: &Shape,
+    static_only: bool,
+    what: &str,
+) -> Result<(), BodyError> {
     let world = &mut arena.world;
     let ground = world
         .create_body(published, &BodySettings::new_static())
@@ -259,10 +265,12 @@ fn use_publication(arena: &mut Arena, published: &Shape, static_only: bool, what
     let taken = world
         .body_mut(mover)
         .unwrap()
-        .set_shape(published, None, Activation::Activate)
-        .is_ok();
+        .set_shape(published, None, Activation::Activate);
     if static_only {
-        assert!(!taken, "{what}: a dynamic body took a static-only child");
+        assert!(
+            taken.is_err(),
+            "{what}: a dynamic body took a static-only child"
+        );
     }
     for _ in 0..3 {
         assert!(world.step(DT).unwrap().is_complete());
@@ -280,7 +288,71 @@ fn use_publication(arena: &mut Arena, published: &Shape, static_only: bool, what
     taken
 }
 
+/// Whether `error` is the refusal of a dynamic body whose shape's mass or inertia breaks the
+/// body rules (`BodyMut::set_shape`).
+fn is_mass_refusal(error: &BodyError) -> bool {
+    matches!(error, BodyError::InvalidValue(rule) if rule.contains("inertia") || rule.starts_with("mass must"))
+}
+
+/// Publications whose outcome on a dynamic body is known: one that is taken and two that the
+/// mass rules refuse, so a refusal for another reason cannot pass in the random cases.
+fn known_publications(arena: &mut Arena) {
+    let at = |shape, position, rotation| CompoundChild {
+        shape,
+        position,
+        rotation,
+        user_data: 0,
+    };
+    let turn = quat_about(Vec3::new(0.6, 0.8, 0.0), 0.7);
+    let cube = Shape::new_box(Vec3::new(0.4, 0.3, 0.5)).unwrap();
+    let ball = Shape::new_sphere(0.35).unwrap();
+    let capsule = Shape::new_capsule(0.4, 0.2).unwrap();
+    let pair = Shape::new_compound(&[
+        at(&cube, Vec3::ZERO, Quat::IDENTITY),
+        at(&ball, Vec3::new(1.0, 0.0, 0.0), turn),
+    ])
+    .unwrap();
+    let mut convex = MutableCompound::from_children(&[
+        at(&cube, Vec3::ZERO, Quat::IDENTITY),
+        at(&ball, Vec3::new(1.0, 0.0, 0.0), Quat::IDENTITY),
+        at(&pair, Vec3::new(-1.5, 0.0, 0.0), turn),
+    ])
+    .unwrap();
+    convex
+        .modify_shape(1, Vec3::new(0.0, 1.0, 0.0), turn, Some(&capsule))
+        .unwrap();
+    convex.remove_shape(0).unwrap();
+    announce("mutable known", 0);
+    let taken = use_publication(arena, &convex.to_shape().unwrap(), false, "mutable known 0");
+    assert_eq!(taken, Ok(()), "convex children");
+
+    let needle = Shape::new_box(Vec3::new(1.0, 0.01, 0.01)).unwrap();
+    let speck = Shape::new_sphere(1.0e-20).unwrap();
+    for (case, refused) in [
+        // A turned needle: an inertia below the floor of the body rules.
+        at(&needle, Vec3::ZERO, turn),
+        // No finite inverse mass.
+        at(&speck, Vec3::ZERO, Quat::IDENTITY),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let what = format!("mutable known {}", case + 1);
+        announce("mutable known", case + 1);
+        let published = MutableCompound::from_children(&[refused])
+            .unwrap()
+            .to_shape()
+            .unwrap();
+        let taken = use_publication(arena, &published, false, &what);
+        assert!(
+            matches!(&taken, Err(error) if is_mass_refusal(error)),
+            "{what}: {taken:?}"
+        );
+    }
+}
+
 pub fn mutable_family(arena: &mut Arena) {
+    known_publications(arena);
     let palette = palette();
     let mut rng = Rng::new(0x5EED_0005);
     let (mut published_count, mut taken) = (0, 0);
@@ -301,8 +373,12 @@ pub fn mutable_family(arena: &mut Arena) {
         };
         published_count += 1;
         let static_only = model.iter().any(|&(shape, _)| palette.static_only[shape]);
-        if use_publication(arena, &published, static_only, &what) {
-            taken += 1;
+        match use_publication(arena, &published, static_only, &what) {
+            Ok(()) => taken += 1,
+            Err(error) => assert!(
+                static_only || is_mass_refusal(&error),
+                "{what}: a dynamic body refused convex children: {error}"
+            ),
         }
     }
     eprintln!("mutable: {published_count} of {CASES} published, {taken} taken by dynamic bodies");
