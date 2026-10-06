@@ -1,0 +1,1 @@
+os=windows arch=x86_64 cpu=Example CPU logical_threads=16 avx2=true fma=true

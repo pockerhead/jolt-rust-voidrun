@@ -20,6 +20,12 @@ commands:
   validate  one validation run with the same options; prints its quality.tsv row
   split     one Avian timed run that also records its physics schedule's time per tick
   size-jolt Jolt's buffer probe: --scene [--steps 600]; prints its jolt_sizes.tsv row
+  all       a matrix of child runs: --mode time|validate|split|sweep --scenes a,b (rapier,
+            fixtures or names) --variants --threads 1,4 --profiles --iterations 2,4,8
+            --steps --repeat --exe variant=path,... --require-identical variant --out DIR;
+            writes runs.tsv or quality.tsv, samples/, digests/, determinism.tsv,
+            failures.tsv, machine.txt and summary.md
+  summarize DIR  regenerates DIR/summary.md from the raw files
   machine   prints the machine line
   help      prints this text
 
@@ -47,6 +53,11 @@ fn run_command(args: &[String]) -> Result<String, String> {
     let Some((command, rest)) = args.split_first() else {
         return Ok(USAGE.trim_end().to_owned());
     };
+    if command == "summarize" {
+        let dir = rest.first().ok_or("summarize needs a directory")?;
+        crate::summary::write(std::path::Path::new(dir))?;
+        return Ok(String::new());
+    }
     let options = Options::parse(rest)?;
     match command.as_str() {
         "help" | "--help" | "-h" => Ok(USAGE.trim_end().to_owned()),
@@ -58,6 +69,7 @@ fn run_command(args: &[String]) -> Result<String, String> {
         "validate" => run::validate(&options.run_args()?),
         "split" => split(&options),
         "size-jolt" => size_jolt(&options),
+        "all" => crate::matrix::all(&options),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
 }

@@ -14,6 +14,22 @@ path = "src/lib.rs"
 name = "comparison"
 path = "src/main.rs"
 
+# The smallest program per engine, built alone for the build time and binary size comparison.
+[[bin]]
+name = "hello-jolt"
+path = "src/bin/hello_jolt.rs"
+required-features = ["jolt"]
+
+[[bin]]
+name = "hello-rapier"
+path = "src/bin/hello_rapier.rs"
+required-features = ["rapier"]
+
+[[bin]]
+name = "hello-avian"
+path = "src/bin/hello_avian.rs"
+required-features = ["avian"]
+
 [features]
 default = ["jolt"]
 # Each engine is its own feature, so a published run builds one engine per binary.
