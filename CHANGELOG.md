@@ -7,6 +7,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - joltc extension: `JPH_PhysicsMaterial_AddRef` and `JPH_PhysicsMaterial_GetRefCount`.
   `JOLTC_EXT_REVISION` is 18: a `JOLTC_LIB_DIR` prefix built before this change is refused until the
   next release's archives.
+- Fixed: a character could reference a freed physics material when an update shorter than its
+  `min_time_remaining` reused contacts with a body whose shape was replaced or removed. Characters
+  now keep the materials of their cached contacts alive.
 
 - Plane shapes ([guide](docs/guide.md#shapes)): `Shape::new_plane` and `new_plane_with_material`, a
   static ground plane cut to a square of a half extent; static bodies only, like meshes and

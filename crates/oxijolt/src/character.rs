@@ -254,6 +254,14 @@ impl JoltObject for JPH_CharacterVsCharacterCollision {
 /// One character of a world.
 pub(crate) struct CharacterEntry {
     character: Owned<JPH_CharacterVirtual>,
+    /// One reference to each material the character's cached contacts point to. Jolt keeps a
+    /// raw pointer per contact (`CharacterVirtual.h`, `CharacterContact::mMaterial`), and an
+    /// update that moves nothing picks the ground from those contacts and takes a reference to
+    /// its material (`CharacterVirtual::UpdateSupportingContact`), also after the shape that
+    /// held the material is gone. Every native call that may replace the contacts is followed
+    /// by [`PhysicsWorld::retain_contact_materials`](crate::PhysicsWorld::retain_contact_materials).
+    /// Declared after `character`, so the references are released after the character.
+    contact_materials: Vec<Owned<JPH_PhysicsMaterial>>,
     inner_body: Option<BodyId>,
     collides_with_characters: bool,
     /// The mass with which the character presses on what it stands on.

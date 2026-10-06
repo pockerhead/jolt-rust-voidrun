@@ -312,6 +312,11 @@ impl CharacterMut<'_> {
     /// in the state that do not resolve are harmless: Jolt checks every body id it looks up, and
     /// the readers here tolerate any sub-shape id. The inner body is moved to the restored pose,
     /// as [`set_position`](Self::set_position) moves it.
+    ///
+    /// Restored contacts carry Jolt's default material. The materials the contacts carried
+    /// before stay alive until the character's next update, refresh or removal
+    /// ([`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) releases them at
+    /// once).
     pub fn restore_state(&mut self, state: &CharacterState) -> Result<(), CharacterError> {
         // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
         let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
