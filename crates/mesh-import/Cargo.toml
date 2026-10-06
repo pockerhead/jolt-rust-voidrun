@@ -1,0 +1,11 @@
+[package]
+name = "mesh-import"
+description = "Triangle meshes from OBJ and glTF files, for oxijolt's tests and playground"
+version = "0.0.0"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# JSON and binary buffers only: no images, no embedded base64 buffers.
+gltf = { version = "1.4", default-features = false, features = ["utils"] }
