@@ -149,6 +149,11 @@ pub type Real = f32;
 /// Whether the native library was built with Jolt's assertions (the `asserts` feature).
 pub const ASSERTS_ENABLED: bool = cfg!(feature = "asserts");
 
+/// Whether the native library was built with Jolt's cross-platform determinism (the
+/// `cross-platform-deterministic` feature).
+pub const CROSS_PLATFORM_DETERMINISTIC_ENABLED: bool =
+    cfg!(feature = "cross-platform-deterministic");
+
 /// Jolt Physics commit the native library is built from (the `vendor/JoltPhysics` submodule).
 pub const JOLT_COMMIT: &str = env!("OXIJOLT_SYS_JOLT_COMMIT");
 

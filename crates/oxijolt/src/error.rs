@@ -72,6 +72,10 @@ pub enum ShapeError {
         /// The shapes it would hold, at most `u32::MAX`.
         expanded: u32,
     },
+    /// Shape binary state could not be saved or restored
+    /// ([`Shape::save_binary_state`](crate::Shape::save_binary_state),
+    /// [`Shape::restore_binary_state`](crate::Shape::restore_binary_state)).
+    BinaryState(BinaryStateError),
 }
 
 impl fmt::Display for ShapeError {
@@ -92,11 +96,19 @@ impl fmt::Display for ShapeError {
                 f,
                 "compound expands to {expanded} shapes, above limits::MAX_EXPANDED_SUB_SHAPES"
             ),
+            Self::BinaryState(error) => write!(f, "invalid shape binary state: {error}"),
         }
     }
 }
 
-impl std::error::Error for ShapeError {}
+impl std::error::Error for ShapeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::BinaryState(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 /// Why [`Shape::new_convex_hull`](crate::Shape::new_convex_hull) refused its points.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,6 +200,48 @@ impl fmt::Display for ThinTrianglesError {
 }
 
 impl std::error::Error for ThinTrianglesError {}
+
+/// Why [`Shape::save_binary_state`](crate::Shape::save_binary_state) or
+/// [`Shape::restore_binary_state`](crate::Shape::restore_binary_state) failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BinaryStateError {
+    /// The bytes do not start with the shape binary state header.
+    NotBinaryState,
+    /// The bytes were saved by another build: another format version, Jolt or joltc commit,
+    /// extension revision, precision, determinism mode or byte order. Save the shape again with
+    /// this build.
+    OtherBuild,
+    /// The bytes end before the header or before the payload the header announces.
+    Truncated,
+    /// The checksum does not match: the bytes changed after they were saved.
+    Corrupt,
+    /// The bytes break a structural rule the checksum cannot see; the payload names it.
+    Malformed(&'static str),
+    /// joltc refused to save the shape or to restore its records; the payload is its message.
+    Rejected(JoltMessage),
+}
+
+impl BinaryStateError {
+    /// The version of the byte layout this build writes and reads. Bytes of another version are
+    /// refused with [`OtherBuild`](Self::OtherBuild).
+    pub const FORMAT_VERSION: u32 = 1;
+}
+
+impl fmt::Display for BinaryStateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotBinaryState => f.write_str("the bytes are not shape binary state"),
+            Self::OtherBuild => f.write_str("the bytes were saved by another build"),
+            Self::Truncated => f.write_str("the bytes end early"),
+            Self::Corrupt => f.write_str("the checksum does not match"),
+            Self::Malformed(rule) => write!(f, "malformed bytes: {rule}"),
+            Self::Rejected(message) => write!(f, "joltc refused the bytes: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for BinaryStateError {}
 
 /// Jolt's diagnostic text for a refused shape, at most [`JoltMessage::CAPACITY`] bytes.
 ///
