@@ -5,7 +5,7 @@
 
 use oxijolt::{
     Activation, BodyId, BodySettings, CollideShape, EventSettings, MotionType, PhysicsWorld, Quat,
-    QueryFilter, RayCast, ShapeCast, StateError, WorldState,
+    QueryFilter, RayCast, ShapeCast, StateError, Vec3, WorldState,
 };
 
 use crate::camera::CameraHint;
@@ -48,7 +48,7 @@ struct Found {
     hit: Option<(BodyId, [f32; 3], [f32; 3])>,
     /// Where the sphere cast along the ray stopped.
     cast_stop: Option<[f32; 3]>,
-    /// The bodies the sphere at the hit overlaps, with the depth.
+    /// The bodies the sphere at the hit overlaps, each once with its deepest penetration.
     overlaps: Vec<(BodyId, f32)>,
     /// The bodies whose shape contains the hit point pushed 5 cm in.
     containing: Vec<BodyId>,
@@ -60,6 +60,7 @@ pub struct Queries {
     visuals: Visuals,
     tracked: Tracked,
     terrain: BodyId,
+    houses: Vec<BodyId>,
     probe: Shaped,
     probe_visual: VisualKey,
     /// A post drawn at the world's origin, which a rebase moves.
@@ -93,6 +94,7 @@ impl Queries {
         // Buildings: compounds of a block and a roof turned a quarter about its ridge.
         let roof = Shaped::cuboid([1.0, 0.45, 0.45])?;
         let turned = about_axis([1.0, 0.0, 0.0], std::f32::consts::FRAC_PI_4);
+        let mut houses = Vec::new();
         for (index, [x, z, height]) in [
             [-5.0, -3.0, 1.2],
             [-1.0, -4.0, 1.8],
@@ -111,7 +113,13 @@ impl Queries {
                 .clone()
                 .position(rvec([x, -0.2, z]))
                 .user_data(index as u64);
-            tracked.spawn(&mut world, &house, &at, &mut visuals, colours::STRUCTURE)?;
+            houses.push(tracked.spawn(
+                &mut world,
+                &house,
+                &at,
+                &mut visuals,
+                colours::STRUCTURE,
+            )?);
         }
 
         let crate_shape = Shaped::cuboid([0.3; 3])?;
@@ -144,6 +152,7 @@ impl Queries {
             visuals,
             tracked,
             terrain,
+            houses,
             probe,
             probe_visual,
             origin_post,
@@ -167,13 +176,15 @@ impl Queries {
             self.milestones.reach("ray hit");
 
             let sphere = CollideShape::new(&self.probe.shape, point, Quat::IDENTITY);
-            let mut overlaps: Vec<(BodyId, f32)> = self
-                .world
-                .collide_shape(&sphere, &filter)?
-                .into_iter()
-                .map(|overlap| (overlap.body, overlap.penetration_depth))
-                .collect();
-            // Jolt reports overlaps in no fixed order.
+            // Jolt reports one overlap per touched sub-shape (every terrain triangle), in no
+            // fixed order.
+            let mut overlaps: Vec<(BodyId, f32)> = Vec::new();
+            for overlap in self.world.collide_shape(&sphere, &filter)? {
+                match overlaps.iter_mut().find(|(body, _)| *body == overlap.body) {
+                    Some((_, depth)) => *depth = depth.max(overlap.penetration_depth),
+                    None => overlaps.push((overlap.body, overlap.penetration_depth)),
+                }
+            }
             overlaps.sort_by_key(|&(body, _)| body);
             if !overlaps.is_empty() {
                 self.milestones.reach("overlap found");
@@ -198,6 +209,24 @@ impl Queries {
         Ok(())
     }
 
+    /// The name the HUD shows for `body`.
+    fn body_name(&self, body: BodyId) -> String {
+        if body == self.terrain {
+            return "terrain".to_owned();
+        }
+        if let Some(index) = self.houses.iter().position(|&house| house == body) {
+            return format!("house {}", index + 1);
+        }
+        match self
+            .crates
+            .iter()
+            .position(|&crate_body| crate_body == body)
+        {
+            Some(index) => format!("crate {}", index + 1),
+            None => format!("body {}", body.to_raw()),
+        }
+    }
+
     /// Pushes the body under a click and remembers a crate as the one T toggles.
     fn push(&mut self, ray: RayCast) -> Result<()> {
         let Some(hit) = self.world.cast_ray(ray, &QueryFilter::new())? else {
@@ -215,7 +244,8 @@ impl Queries {
         Ok(())
     }
 
-    /// Toggles the last clicked crate between dynamic and kinematic.
+    /// Toggles the last clicked crate between dynamic and kinematic; a crate made kinematic
+    /// stops where it is, since a kinematic body keeps its velocity and nothing slows it down.
     fn toggle_picked(&mut self) -> Result<()> {
         let Some(crate_body) = self.picked else {
             return Ok(());
@@ -227,6 +257,10 @@ impl Queries {
             (MotionType::Dynamic, colours::BODY)
         };
         body.set_motion_type(motion, Activation::Activate)?;
+        if motion == MotionType::Kinematic {
+            body.set_linear_velocity(Vec3::ZERO)?;
+            body.set_angular_velocity(Vec3::ZERO)?;
+        }
         self.tracked.set_colour(crate_body, colour);
         Ok(())
     }
@@ -349,15 +383,16 @@ impl Scene for Queries {
             .found
             .overlaps
             .iter()
-            .map(|(body, depth)| format!("{} by {depth:.2} m", body.to_raw()))
+            .map(|&(body, depth)| format!("{} by {depth:.2} m", self.body_name(body)))
             .collect();
         out.hud
             .push(format!("sphere at the hit overlaps: {}", depths.join(", ")));
-        let containing: Vec<String> = self
-            .found
-            .containing
-            .iter()
-            .map(|body| body.to_raw().to_string())
+        let mut containing = self.found.containing.clone();
+        containing.sort();
+        containing.dedup();
+        let containing: Vec<String> = containing
+            .into_iter()
+            .map(|body| self.body_name(body))
             .collect();
         out.hud.push(format!(
             "bodies containing the hit point: {}",
@@ -499,6 +534,78 @@ mod tests {
                 ..Edges::default()
             },
         }
+    }
+
+    fn idle() -> Input {
+        Input::default()
+    }
+
+    #[test]
+    fn a_pushed_crate_made_kinematic_stays_where_it_is() {
+        let mut scene = scene();
+        for _ in 0..30 {
+            scene.update(&idle()).unwrap();
+        }
+        let crate_body = scene.crates[3];
+        let eye = scene.camera().eye();
+        let target = position(scene.world.body(crate_body).unwrap().position());
+        let click = Input {
+            edges: Edges {
+                pick: Some(RayCast::new(
+                    rvec(eye.to_array()),
+                    vec3((target - eye) * 1.5),
+                )),
+                ..Edges::default()
+            },
+            ..Input::default()
+        };
+        scene.update(&click).unwrap();
+        let speed = glam(scene.world.body(crate_body).unwrap().linear_velocity()).length();
+        assert!(speed > 1.0, "the click pushed the crate: {speed} m/s");
+
+        let toggle = Input {
+            edges: Edges {
+                toggle: true,
+                ..Edges::default()
+            },
+            ..Input::default()
+        };
+        scene.update(&toggle).unwrap();
+        let body = scene.world.body(crate_body).unwrap();
+        assert_eq!(body.motion_type(), MotionType::Kinematic);
+        let at = body.position();
+        for _ in 0..120 {
+            scene.update(&idle()).unwrap();
+        }
+        let body = scene.world.body(crate_body).unwrap();
+        assert_eq!(body.position(), at);
+        assert_eq!(body.linear_velocity(), Vec3::ZERO);
+        assert_eq!(body.angular_velocity(), Vec3::ZERO);
+    }
+
+    #[test]
+    fn the_sphere_on_the_terrain_lists_each_body_once_by_name() {
+        let mut scene = scene();
+        let ray = scene.camera().ray([0.0, -0.45], 16.0 / 9.0);
+        scene.update(&input(ray, false)).unwrap();
+        let bodies: Vec<BodyId> = scene.found.overlaps.iter().map(|&(body, _)| body).collect();
+        assert!(bodies.contains(&scene.terrain), "{bodies:?}");
+        let mut unique = bodies.clone();
+        unique.dedup();
+        assert_eq!(unique, bodies);
+
+        let mut out = DrawList::default();
+        scene.draw(&mut out).unwrap();
+        let line = out
+            .hud
+            .iter()
+            .find(|line| line.starts_with("sphere at the hit overlaps"))
+            .unwrap();
+        assert_eq!(line.matches("terrain").count(), 1, "{line}");
+        assert!(
+            !line.contains(&scene.terrain.to_raw().to_string()),
+            "{line}"
+        );
     }
 
     #[test]
