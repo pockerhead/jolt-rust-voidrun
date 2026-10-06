@@ -11,8 +11,8 @@ use comparison::run::{validate_with, RunArgs, Validation};
 use comparison::scene::{BodySpec, Motion, Scene, SceneSpec};
 
 /// Positions, rotations and velocities right after building are the scene's, in its order;
-/// fixed bodies have no mass and dynamic ones `density * volume`; principal inertia, where the
-/// engine exposes it, is the shape's for that mass.
+/// fixed bodies have no mass and dynamic ones `density * volume`; where the engine exposes them,
+/// the principal moments of inertia are the shape's for that mass.
 pub fn check_build<E: Engine>(scene: Scene) {
     let spec = scene.build();
     let mut engine = E::build(&spec, &Config::new(Profile::Matched, 1)).unwrap();
@@ -32,10 +32,15 @@ pub fn check_build<E: Engine>(scene: Scene) {
                 let mass = f64::from(mass.unwrap_or_else(|| panic!("{} has no mass", at())));
                 assert_close(mass, body.mass(), 1e-4, &format!("{} mass", at()));
                 if let Some(inertia) = engine.body_inertia(index) {
-                    let expected = body.shape.principal_inertia(body.mass());
-                    for axis in 0..3 {
-                        let what = format!("{} inertia about axis {axis}", at());
-                        assert_close(f64::from(inertia[axis]), expected[axis], 1e-3, &what);
+                    // Engines may order the principal axes differently, so the moments are
+                    // compared as sorted triples.
+                    let mut actual = inertia.map(f64::from);
+                    let mut expected = body.shape.principal_inertia(body.mass());
+                    actual.sort_by(f64::total_cmp);
+                    expected.sort_by(f64::total_cmp);
+                    for (moment, (a, e)) in actual.into_iter().zip(expected).enumerate() {
+                        let what = format!("{} principal moment {moment}", at());
+                        assert_close(a, e, 1e-3, &what);
                     }
                 }
             }
