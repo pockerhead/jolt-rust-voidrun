@@ -7,6 +7,7 @@ original authors.
 |---|---|---|---|---|
 | Physics engine | [Jolt Physics](https://github.com/jrouwe/JoltPhysics) 5.6 | Jorrit Rouwe and contributors | MIT | `crates/oxijolt-sys/vendor/JoltPhysics` (submodule, tag v5.6.0), built from source, unmodified |
 | C wrapper | [joltc](https://github.com/amerkoleci/joltc) | Amer Koleci and contributors (the C layer of JoltPhysicsSharp, also used by LÖVR) | MIT | `crates/oxijolt-sys/vendor/joltc` (submodule, pinned commit), unmodified; input of `crates/oxijolt-sys`. Functions this repository adds to joltc, in joltc's naming, live in `crates/oxijolt-sys/native/joltc_ext/` and are compiled into the same archive |
+| Benchmark scenes | [Rapier](https://github.com/dimforge/rapier) `examples3d/stress_tests` at v0.36.0 | Dimforge and contributors | Apache-2.0 | `benches/comparison/src/scenes/` and `benches/comparison/tests/`, ported to engine-neutral data; each file names its source and the change |
 
 The project began as a fork of
 [SecondHalfGames/jolt-rust](https://github.com/SecondHalfGames/jolt-rust). No code from it remains:
