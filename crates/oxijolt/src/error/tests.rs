@@ -80,6 +80,12 @@ fn source_is_the_wrapped_errors_source() {
         .source()
         .map(|s| s.to_string());
     assert_eq!(source, Some(body.to_string()));
+    // The chain skips the area error, which the umbrella's own `Display` already shows.
+    let wrapped = Error::from(StateError::Body(body));
+    let first = wrapped.source().expect("the body error");
+    assert_eq!(first.downcast_ref::<BodyError>(), Some(&body));
+    assert!(first.source().is_none());
+    assert_eq!(wrapped.to_string(), StateError::Body(body).to_string());
 }
 
 /// Every area error that wraps another one returns it from `source`.

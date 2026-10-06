@@ -243,8 +243,13 @@ fn ids_count_from_one_are_never_reused_and_belong_to_their_world() {
         [1, 2, 3]
     );
     assert_eq!(world.character_ids().collect::<Vec<_>>(), ids);
+    assert_eq!(world.character_count(), 3);
+    assert!(world.contains_character(ids[1]));
 
     world.remove_character(ids[1]).unwrap();
+    assert_eq!(world.character_count(), 2);
+    assert!(!world.contains_character(ids[1]));
+    assert!(!other.contains_character(ids[0]));
     assert!(matches!(
         world.character(ids[1]),
         Err(CharacterError::NotFound(_))

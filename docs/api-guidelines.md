@@ -27,6 +27,10 @@ breaks one needs a reason written next to it. The Rust API Guidelines
 
 - `<Thing>Settings` has private fields, a `Default` equal to Jolt's defaults, and consuming
   `#[must_use]` setters named after the field. A flag setter takes a `bool`.
+- Settings that need an input with no useful default (a character's shape, a wheel's position,
+  a vehicle's wheels and collision tester, a path, the centre of debug lines) take it in
+  `new(..)` and have no `Default`. The settings a listener receives (`ContactSettings`,
+  `CharacterContactSettings`, `SoftBodyContactSettings`) come from Jolt with the call.
 - Presets are named constructors (`humanoid`, `car`, `bike`).
 - Plain-Rust settings are checked by the call that consumes them and fail with that call's error.
   Jolt-backed immutable objects are checked when they are built.
@@ -40,8 +44,7 @@ breaks one needs a reason written next to it. The Rust API Guidelines
 - Setters on live objects are `set_<field>` and return `Result` when they check their input.
 - A world collection lists its ids with `<object>_ids()`, which returns an iterator
   (`impl Iterator<Item = <Object>Id>`), counts them with `<object>_count()` and tests one with
-  `contains_<object>(id)`. Calls of these shapes that do not exist yet are added under these
-  names.
+  `contains_<object>(id)`: bodies, characters, vehicles, ragdolls and constraints.
 
 ## R5. Conversions and buffers
 
@@ -60,6 +63,9 @@ breaks one needs a reason written next to it. The Rust API Guidelines
   `Rejected(JoltMessage)`.
 - A body problem found by another area is `<Area>Error::Body(BodyError)`. An error that wraps
   another returns it from `source()`.
+- The umbrella `error::Error` is transparent: its `Display` and `source()` are those of the area
+  error it holds, so an error report does not print that error twice. Get the area error with a
+  `match`, not from `source()`.
 - `Display` is lowercase, one clause, without a trailing period.
 - Fallible public calls return `Result` and do not panic on caller input; `expect` is for internal
   invariants only.
@@ -70,7 +76,12 @@ breaks one needs a reason written next to it. The Rust API Guidelines
   Handles show their id; wrappers of native objects use `finish_non_exhaustive`.
 - Ids are `Clone + Copy + PartialEq + Eq + PartialOrd + Ord + Hash`.
 - Readouts, events and settings are `Clone + PartialEq`, and `Copy` when they hold no heap data and
-  no Jolt reference. Settings are `Default`.
+  no Jolt reference. Settings are `Default` unless R3 says otherwise.
+- Settings that borrow a `Shape` or a `PhysicsMaterial` (`CharacterSettings`, `MeshSettings`) or
+  hold the caller's job system (`WorldSettings`) are not `PartialEq`: shapes, materials and job
+  systems have no equality. `RagdollSettings` and `SoftBodySharedSettings` are built Jolt objects,
+  not settings in this sense.
+- `tests/api_traits.rs` checks these traits at compile time.
 
 ## R8. `#[non_exhaustive]`
 

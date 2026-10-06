@@ -721,6 +721,8 @@ fn ragdoll_parts_and_ids_are_guarded() {
         .unwrap();
     let part = world.ragdoll(ragdoll).unwrap().body_ids()[CHEST];
     assert_eq!(world.ragdoll_of_body(part), Some(ragdoll));
+    assert_eq!(world.ragdoll_count(), 1);
+    assert!(world.contains_ragdoll(ragdoll));
     assert_eq!(
         world.remove_body(part),
         Err(BodyError::OwnedByRagdoll(part))
@@ -747,7 +749,10 @@ fn ragdoll_parts_and_ids_are_guarded() {
         world.remove_ragdoll(foreign),
         Err(RagdollError::WrongWorld(foreign))
     );
+    assert!(!world.contains_ragdoll(foreign));
     world.remove_ragdoll(ragdoll).unwrap();
+    assert_eq!(world.ragdoll_count(), 0);
+    assert!(!world.contains_ragdoll(ragdoll));
     assert_eq!(
         world.ragdoll(ragdoll).err(),
         Some(RagdollError::NotFound(ragdoll))

@@ -218,6 +218,17 @@ impl PhysicsWorld {
             .map(|&raw| CharacterId::new(raw, self.tag))
     }
 
+    /// Number of characters in the world.
+    pub fn character_count(&self) -> u32 {
+        // Every character has its own `u32` id, so the count fits.
+        self.characters.len() as u32
+    }
+
+    /// Whether `id` names a character that is in this world now.
+    pub fn contains_character(&self, id: CharacterId) -> bool {
+        self.character_entry(id).is_ok()
+    }
+
     /// Whether `id` is the inner body of a character of this world.
     pub fn is_inner_body(&self, id: BodyId) -> bool {
         id.world == self.tag && self.inner_bodies.contains(&id.to_raw())

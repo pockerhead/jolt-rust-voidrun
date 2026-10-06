@@ -740,6 +740,11 @@ impl PhysicsWorld {
         self.constraints.len() as u32
     }
 
+    /// Whether `id` names a constraint that is in this world now.
+    pub fn contains_constraint(&self, id: impl Into<AnyConstraintId>) -> bool {
+        self.constraint_entry(id).is_ok()
+    }
+
     /// Whether a constraint of this world uses `body`.
     pub(crate) fn is_constraint_body(&self, body: BodyId) -> bool {
         body.world == self.tag && self.constraint_bodies.contains_key(&body.to_raw())

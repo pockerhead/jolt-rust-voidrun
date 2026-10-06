@@ -791,6 +791,17 @@ impl PhysicsWorld {
             .map(|&raw| RagdollId::new(raw, self.tag))
     }
 
+    /// Number of ragdolls in the world.
+    pub fn ragdoll_count(&self) -> u32 {
+        // Every ragdoll has its own `u32` id, so the count fits.
+        self.ragdolls.len() as u32
+    }
+
+    /// Whether `id` names a ragdoll that is in this world now.
+    pub fn contains_ragdoll(&self, id: RagdollId) -> bool {
+        self.ragdoll_entry(id).is_ok()
+    }
+
     /// The ragdoll that `body` is a part of, if any.
     pub fn ragdoll_of_body(&self, body: BodyId) -> Option<RagdollId> {
         if body.world != self.tag {

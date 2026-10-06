@@ -602,11 +602,17 @@ fn vehicle_ids_are_sequential_and_never_reused() {
         ids.iter().map(|id| id.to_raw()).collect::<Vec<_>>(),
         [1, 2, 3]
     );
+    assert_eq!(world.vehicle_count(), 3);
+    assert!(world.contains_vehicle(ids[1]));
     world.remove_vehicle(ids[1]).unwrap();
     assert_eq!(
         world.vehicle_ids().collect::<Vec<_>>(),
         [ids[0].into(), ids[2].into()]
     );
+    assert_eq!(world.vehicle_count(), 2);
+    assert!(!world.contains_vehicle(ids[1]));
+    let (other, _) = car_world(Vec3::ZERO, 1);
+    assert!(!other.contains_vehicle(ids[0]));
     let (_, fourth) = add_car(
         &mut world,
         &layers,

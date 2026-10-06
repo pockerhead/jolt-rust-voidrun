@@ -24,7 +24,7 @@ use crate::{BodyId, ObjectLayer, PhysicsWorld, Quat, QueryError, QueryFilter, RV
 const BROAD_PHASE_MARGIN: Real = 0.01;
 
 /// Which colliders [`PhysicsWorld::debug_lines`] draws and how many lines it keeps.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DebugLineSettings {
     center: RVec3,
     radius: f32,

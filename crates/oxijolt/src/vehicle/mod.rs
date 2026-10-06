@@ -419,6 +419,17 @@ impl PhysicsWorld {
         })
     }
 
+    /// Number of vehicles of every kind in the world.
+    pub fn vehicle_count(&self) -> u32 {
+        // Every vehicle has its own `u32` id, so the count fits.
+        self.vehicles.len() as u32
+    }
+
+    /// Whether `id` names a vehicle that is in this world now.
+    pub fn contains_vehicle(&self, id: impl Into<AnyVehicleId>) -> bool {
+        self.vehicle_entry(id.into()).is_ok()
+    }
+
     /// The vehicle whose chassis is `body`, if any.
     pub fn vehicle_of_body(&self, body: BodyId) -> Option<AnyVehicleId> {
         if body.world != self.tag {

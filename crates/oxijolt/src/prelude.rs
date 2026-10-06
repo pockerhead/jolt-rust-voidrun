@@ -74,10 +74,11 @@ pub use crate::{ActivationEvent, ContactEvent, ContactListener, EventSettings, W
 pub use crate::{AnyConstraintId, ConstraintId};
 pub use crate::{AnyVehicleId, DriverInput, VehicleId, WheelSettings, WheeledVehicleSettings};
 pub use crate::{
-    BodyError, CharacterError, CollisionGroupError, ConstraintError, ContactSettingsError,
-    ConvexHullError, MeshError, QueryError, RagdollError, ShapeError, SoftBodyError, StateError,
-    StepError, ThinTrianglesError, VehicleError, WorldError,
+    BinaryStateError, BodyError, CharacterError, CollisionGroupError, ConstraintError,
+    ContactSettingsError, ConvexHullError, MeshError, QueryError, RagdollError, ShapeError,
+    SoftBodyError, StateError, StepError, ThinTrianglesError, VehicleError, WorldError,
 };
+pub use crate::{BodySelection, PhysicsWorld, StepReport, WorldSettings, WorldState};
 pub use crate::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use crate::{CharacterId, CharacterSettings, ExtendedUpdateSettings};
 pub use crate::{
@@ -85,7 +86,6 @@ pub use crate::{
 };
 pub use crate::{CompoundChild, HeightFieldSettings, PhysicsMaterial, Shape, SubShapeId};
 pub use crate::{DroppedTriangles, MeshBuildQuality, MeshSettings};
-pub use crate::{PhysicsWorld, StepReport, WorldSettings, WorldState};
 pub use crate::{RagdollId, RagdollSettings, Skeleton, SkeletonMapper};
 pub use crate::{ShapeCastHit, SoftBodySettings, SoftBodySharedSettings};
 

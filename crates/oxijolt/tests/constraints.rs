@@ -342,7 +342,10 @@ fn constraint_ids_are_typed_ordered_and_never_reused() {
     let third = point(&mut world, cubes[2]);
     assert_eq!([first.to_raw(), hinge.to_raw(), third.to_raw()], [1, 2, 3]);
     assert!(first < third);
+    assert!(world.contains_constraint(hinge));
+    assert!(world.contains_constraint(AnyConstraintId::from(first)));
     world.remove_constraint(hinge).unwrap();
+    assert!(!world.contains_constraint(hinge));
     let fourth = point(&mut world, cubes[1]);
     assert_eq!(fourth.to_raw(), 4);
 
@@ -373,6 +376,7 @@ fn wrong_world_and_removed_ids_are_rejected() {
     let theirs = make(&mut other);
     assert_eq!(ours.to_raw(), theirs.to_raw());
     assert_ne!(ours, theirs);
+    assert!(world.contains_constraint(ours) && !world.contains_constraint(theirs));
     assert_eq!(
         world.constraint(theirs).err(),
         Some(ConstraintError::WrongWorld(theirs.into()))
