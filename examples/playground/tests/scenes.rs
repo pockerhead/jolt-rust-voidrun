@@ -178,3 +178,31 @@ fn the_pose_cache_matches_the_bodies() {
     }
     assert!(saw_sleep, "the run includes sleep transitions");
 }
+
+#[cfg(feature = "debug-renderer")]
+#[test]
+fn the_wireframe_of_a_scene_is_capped() {
+    use oxijolt::{DebugLineSettings, DebugLines, QueryFilter};
+    let session = Session::new(SceneKind::from_name("queries").unwrap(), threads(1)).unwrap();
+    let world = session.scene().world();
+    let centre = rvec(session.scene().camera().target);
+    let mut lines = DebugLines::new();
+    world
+        .debug_lines(
+            &DebugLineSettings::new(centre, 12.0),
+            &QueryFilter::new(),
+            &mut lines,
+        )
+        .unwrap();
+    assert!(lines.lines().len() > 1000, "{}", lines.lines().len());
+    assert!(!lines.is_truncated());
+    world
+        .debug_lines(
+            &DebugLineSettings::new(centre, 12.0).max_lines(1000),
+            &QueryFilter::new(),
+            &mut lines,
+        )
+        .unwrap();
+    assert_eq!(lines.lines().len(), 1000);
+    assert!(lines.is_truncated());
+}

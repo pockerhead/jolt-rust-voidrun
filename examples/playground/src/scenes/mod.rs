@@ -5,6 +5,7 @@ pub mod constraints;
 pub mod contacts;
 pub mod destruction;
 pub mod pile;
+pub mod queries;
 pub mod ragdolls;
 pub mod soft_bodies;
 pub mod vehicles;
