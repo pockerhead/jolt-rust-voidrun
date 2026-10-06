@@ -179,13 +179,18 @@ and `Shape::new_plane`.
 
 ### 8 Breakable wall (`destruction`)
 
-![Cannonballs knock bricks out of a wall, and a click removes one more](media/destruction.gif)
+![Cannonballs and clicks knock bricks out of a wall, which breaks into pieces](media/destruction.gif)
 
-*Two cannonballs knock holes in the wall, and a click knocks out one more brick.*
+*Two cannonballs knock holes in the wall and a click knocks out one more brick; five more clicks
+cut it into three pieces: the top right corner drops onto the stub below it, and the arch that is
+left topples.*
 
-A wall of 48 bricks loses the bricks that cannonballs or clicks hit; each brick falls on as a body.
-It uses `MutableCompound`, `to_shape`, `BodyMut::set_shape`, `compound_sub_shape`,
-`CollisionEstimate` and `cast_ray` with `compound_child`.
+A wall of 48 bricks stands on the ground as one dynamic body. It loses the bricks that cannonballs
+or clicks hit, and each brick falls on as a body. What is left splits into pieces of bricks that
+touch face to face: the largest stays in the wall's body, every other piece becomes a body of its
+own, and a piece that lost its support topples or falls. It uses `MutableCompound`, `to_shape`,
+`BodyMut::set_shape` with a mass, `compound_sub_shape`, `CollisionEstimate` and `cast_ray` with
+`compound_child`.
 
 | Keys | Action |
 |---|---|

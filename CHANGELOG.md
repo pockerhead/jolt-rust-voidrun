@@ -39,6 +39,8 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   drops 0.48 % of its area) and as a 2.5 m statue.
 - Playground: the scenes `meshes` (the real models with bodies raining onto them) and `model`
   (any OBJ or glTF file given with `--model PATH`); `--models DIR` adds the downloaded models.
+  The wall of the `destruction` scene is a dynamic body that splits into pieces of touching
+  bricks, so a piece without support topples or falls.
 - Thin dynamic hulls on a floor ([limits](docs/limits.md#thin-dynamic-hulls-on-a-floor)): the
   sinking reported earlier is the impact of a wide thin hull that tips over and slaps down faster
   than Jolt's discrete step resolves, not its hull or convex radius. It sinks deep into box floors
