@@ -5,13 +5,9 @@ use crate::scene::{BodySpec, JointKind, JointSpec, SceneSpec, Shape};
 /// Bodies in each fixture chain, besides its fixed anchor.
 pub const CHAIN_LINKS: usize = 5;
 
-/// The slider axis of the prismatic fixture: diagonal, so gravity drives the sliders to their
-/// lower limit.
-pub const SLIDER_AXIS: [f32; 3] = [
-    std::f32::consts::FRAC_1_SQRT_2,
-    std::f32::consts::FRAC_1_SQRT_2,
-    0.0,
-];
+/// The slider axis of the prismatic fixture: straight down, so gravity holds every slider of the
+/// hanging chain against its upper limit (0) from the start.
+pub const SLIDER_AXIS: [f32; 3] = [0.0, -1.0, 0.0];
 
 fn cube(half_extent: f32) -> Shape {
     Shape::Cuboid {
@@ -20,13 +16,13 @@ fn cube(half_extent: f32) -> Shape {
 }
 
 /// Five 0.8 m cubes 1 m apart hanging from a fixed cube at 10 m, each joined to the one before by
-/// a `kind` joint anchored at the earlier body's centre. The chain starts horizontal along +x, so
-/// gravity swings it; a fixed chain hangs straight down instead, so its joints carry the weight
-/// without a lever.
+/// a `kind` joint anchored at the earlier body's centre. Ball joints and hinges start horizontal
+/// along +x, so gravity swings them about their free axes; fixed joints and sliders hang straight
+/// down, so their locked axes carry the weight without a lever.
 pub fn chain(name: &'static str, kind: JointKind) -> SceneSpec {
     let step: [f32; 3] = match kind {
-        JointKind::Fixed => [0.0, -1.0, 0.0],
-        _ => [1.0, 0.0, 0.0],
+        JointKind::Fixed | JointKind::Prismatic { .. } => [0.0, -1.0, 0.0],
+        JointKind::Spherical | JointKind::Revolute { .. } => [1.0, 0.0, 0.0],
     };
     let anchor = [0.0, 10.0, 0.0];
     let mut bodies = vec![BodySpec::fixed(cube(0.4), anchor)];

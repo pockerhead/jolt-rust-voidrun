@@ -1,15 +1,17 @@
 //! The Jolt adapter builds every scene as specified, its joints hold, and a full contact buffer
 //! fails the run.
 
+#![cfg(feature = "jolt")]
+
 mod common;
 
 use comparison::engine::{Config, Engine, Profile};
 use comparison::engines::jolt::{ids_follow_scene_order, temp_allocator_size, Buffers, Jolt};
 use comparison::scene::{BodySpec, Scene, SceneSpec, Shape};
 
-/// The scenes small enough for a debug test run; the others are checked with `--ignored` on a
-/// release build.
-const SMALL: [Scene; 2] = [Scene::Boxes, Scene::JointRevolute];
+/// The scenes small enough for a debug test run (balls for its density of 0.477); the others are
+/// checked with `--ignored` on a release build.
+const SMALL: [Scene; 3] = [Scene::Balls, Scene::Boxes, Scene::JointRevolute];
 
 #[test]
 fn small_scenes_are_built_as_specified() {

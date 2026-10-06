@@ -18,6 +18,13 @@ path = "src/main.rs"
 default = ["jolt"]
 # Each engine is its own feature, so a published run builds one engine per binary.
 jolt = ["dep:oxijolt"]
+rapier = ["dep:rapier3d"]
+# The engines' multithreaded builds; without it Rapier runs on the stepping thread alone.
+parallel = ["rapier3d?/parallel", "dep:rayon"]
+# Rapier's 8-lane solver, a tuned variant (`rapier-simd8`).
+simd8 = ["rapier3d?/simd8"]
 
 [dependencies]
 oxijolt = { path = "../../crates/oxijolt", optional = true }
+rapier3d = { version = "=0.36.0", optional = true }
+rayon = { version = "1", optional = true }

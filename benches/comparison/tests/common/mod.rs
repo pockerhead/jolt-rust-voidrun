@@ -30,11 +30,12 @@ pub fn check_build<E: Engine>(scene: Scene) {
             Motion::Fixed => assert_eq!(mass, None, "{} is fixed", at()),
             Motion::Dynamic => {
                 let mass = f64::from(mass.unwrap_or_else(|| panic!("{} has no mass", at())));
-                assert_close(mass, body.mass(), 1e-4, &at());
+                assert_close(mass, body.mass(), 1e-4, &format!("{} mass", at()));
                 if let Some(inertia) = engine.body_inertia(index) {
                     let expected = body.shape.principal_inertia(body.mass());
                     for axis in 0..3 {
-                        assert_close(f64::from(inertia[axis]), expected[axis], 1e-3, &at());
+                        let what = format!("{} inertia about axis {axis}", at());
+                        assert_close(f64::from(inertia[axis]), expected[axis], 1e-3, &what);
                     }
                 }
             }

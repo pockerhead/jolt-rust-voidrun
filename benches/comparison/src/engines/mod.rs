@@ -7,6 +7,8 @@ use crate::engine::Engine;
 
 #[cfg(feature = "jolt")]
 pub mod jolt;
+#[cfg(feature = "rapier")]
+pub mod rapier;
 
 /// The engines the comparison knows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -107,7 +109,7 @@ impl Variant {
 
 /// Whether this binary was built with the `parallel` and `simd8` features.
 pub fn build_features() -> (bool, bool) {
-    (false, false)
+    (cfg!(feature = "parallel"), cfg!(feature = "simd8"))
 }
 
 /// The engines compiled into this binary.
@@ -115,6 +117,9 @@ pub fn compiled_engines() -> Vec<EngineKind> {
     let mut engines = Vec::new();
     if cfg!(feature = "jolt") {
         engines.push(EngineKind::Jolt);
+    }
+    if cfg!(feature = "rapier") {
+        engines.push(EngineKind::Rapier);
     }
     engines
 }
@@ -130,6 +135,8 @@ pub fn dispatch<W: WithEngine>(engine: EngineKind, work: W) -> Result<W::Output,
     match engine {
         #[cfg(feature = "jolt")]
         EngineKind::Jolt => Ok(work.run::<jolt::Jolt>()),
+        #[cfg(feature = "rapier")]
+        EngineKind::Rapier => Ok(work.run::<rapier::Rapier>()),
         other => {
             drop(work);
             Err(format!("this binary was built without {other}"))
