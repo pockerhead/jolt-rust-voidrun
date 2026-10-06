@@ -66,7 +66,8 @@ character state, more pending contact-cache invalidations); a full save also siz
 later `Movable` and `Only` saves. The tests count no allocation over 1000 saves of a scene with
 stacks, a car and a character in every selection, after a buffer saw only full saves, and over
 worlds of two, one and two characters. Jolt's recorder still allocates its own stream on the C++
-heap for each save.
+heap for each save. Restores make no such promise: `restore_state` and `restore_state_of`
+allocate a few small buffers on each call.
 
 `WorldState::new()` (or `Default`) is an empty state of no world: restoring it fails with
 `StateError::WrongWorld`, so a ring can be allocated before the world exists. A buffer belongs to

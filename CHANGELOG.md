@@ -62,7 +62,7 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   ([limits](docs/limits.md#convex-shapes-against-meshes)).
 - Changed: mesh triangles are kept from twice the area of 1e-6 m², Jolt's own limit, plus the
   rounding margin (was 1e-5 m²), so a right triangle with legs of 1.2 mm is kept at the default
-  extent (was 3.3 mm) ([limits](docs/limits.md#triangle-meshes)).
+  extent (was 3.8 mm) ([limits](docs/limits.md#triangle-meshes)).
 - Changed (breaking), renames: `RayHit` to `RayCastHit`, `PointHit` to `CollidePointHit`,
   `HullError` to `ConvexHullError`, `BodyError::SoftBody` to `NotRigidBody`, `VehicleSettings`
   and `create_vehicle` to `WheeledVehicleSettings` and `create_wheeled_vehicle`,
