@@ -60,10 +60,13 @@ it.
 
 `save_state` returns a new `WorldState` each time. For rollback, where a game saves every tick,
 allocate the states once and save into them with `save_state_into`, which overwrites a state in
-place and reuses its memory. Once a buffer has held a save of the same size, a save into it
-allocates nothing on the Rust heap; the tests count allocations over 1000 saves of a scene with
-stacks, a car and a character. Jolt's recorder still allocates its own stream on the C++ heap for
-each save.
+place and keeps every buffer it grows. A save into it allocates on the Rust heap only for what
+no earlier save into that buffer needed (a longer Jolt stream, more bodies or characters, a larger
+character state, more pending contact-cache invalidations); a full save also sizes the buffer for
+later `Movable` and `Only` saves. The tests count no allocation over 1000 saves of a scene with
+stacks, a car and a character in every selection, after a buffer saw only full saves, and over
+worlds of two, one and two characters. Jolt's recorder still allocates its own stream on the C++
+heap for each save.
 
 `WorldState::new()` (or `Default`) is an empty state of no world: restoring it fails with
 `StateError::WrongWorld`, so a ring can be allocated before the world exists. A buffer belongs to
@@ -250,6 +253,8 @@ the restore, saved and unsaved configuration, structural changes, selected bodie
 (other inputs, a woken sleeper, a teleport, other gravity) and replays bit for bit with 1 and 4
 workers, checks movable states and every refusal, and restores selected bodies, comparing 120
 ticks after a filtered restore with 1 and 4 workers in two processes.
+`tests/state_filtered_parts.rs` restores a cloth and a ragdoll's parts while an unselected cloth,
+a body with pending forces and a body woken since the save step on as if nothing was restored.
 `tests/state_buffer_allocations.rs` counts Rust allocations of `save_state_into`,
 `tests/state_sizes.rs` the bytes of each object, and `tests/state_buffer_leaks.rs` (Windows)
 gates the process's private bytes over saves and filtered restores.

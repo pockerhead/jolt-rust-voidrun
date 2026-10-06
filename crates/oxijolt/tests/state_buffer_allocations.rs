@@ -1,8 +1,9 @@
-//! `save_state_into` makes no Rust heap allocation once its buffer has held a save of the same
-//! size: a counting global allocator sees none over 1000 saves of a scene with stacks, a car
-//! and a character. Jolt's own allocations (its recorder) go through the C++ heap, which this
-//! allocator does not see. The file holds exactly one test, so no other test allocates while the
-//! counter is armed.
+//! `save_state_into` makes no Rust heap allocation once its buffer has held a save that needed as
+//! much: a counting global allocator sees none over 1000 saves of a scene with stacks, a car
+//! and a character in every selection, in `Movable` and `Only` saves into a buffer that saw only
+//! full saves, and in saves of worlds of two, one and two characters into one buffer. Jolt's own
+//! allocations (its recorder) go through the C++ heap, which this allocator does not see. The
+//! file holds exactly one test, so no other test allocates while the counter is armed.
 
 mod common;
 
@@ -56,6 +57,37 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 const SAVES: usize = 1000;
 
+/// Runs `saves` with the counter armed and returns how many allocations it saw.
+fn allocations_of(saves: impl FnOnce() -> Result<(), StateError>) -> usize {
+    ALLOCATIONS.store(0, Ordering::SeqCst);
+    ARMED.store(true, Ordering::SeqCst);
+    let saved = saves();
+    ARMED.store(false, Ordering::SeqCst);
+    saved.unwrap();
+    ALLOCATIONS.load(Ordering::SeqCst)
+}
+
+/// A world with `count` characters standing on a floor.
+fn world_with_characters(count: usize) -> PhysicsWorld {
+    let mut world = common::world(Vec3::new(0.0, -9.81, 0.0), 1);
+    let floor = Shape::new_box(Vec3::new(10.0, 0.5, 10.0)).unwrap();
+    let at = RVec3::new(0.0, -0.5, 0.0);
+    world
+        .create_body(&floor, &BodySettings::new_static().position(at))
+        .unwrap();
+    let settings = CharacterSettings::humanoid(1.8, 0.3).unwrap();
+    for i in 0..count {
+        let feet = RVec3::new(2.0 * i as Real, 0.0, 0.0);
+        let character = world
+            .create_character(&settings, feet, Quat::IDENTITY)
+            .unwrap();
+        world
+            .refresh_character_contacts(character, &QueryFilter::new())
+            .unwrap();
+    }
+    world
+}
+
 #[test]
 fn saving_into_a_used_buffer_allocates_nothing() {
     let mut scene = RollbackScene::new(1);
@@ -73,20 +105,44 @@ fn saving_into_a_used_buffer_allocates_nothing() {
         scene.world.save_state_into(selection, &mut state).unwrap();
     }
 
-    ALLOCATIONS.store(0, Ordering::SeqCst);
-    ARMED.store(true, Ordering::SeqCst);
-    for save in 0..SAVES {
-        let selection = selections[save % selections.len()];
-        let saved = scene.world.save_state_into(selection, &mut state);
-        if saved.is_err() {
-            ARMED.store(false, Ordering::SeqCst);
-            panic!("save {save} failed: {saved:?}");
+    let allocations = allocations_of(|| {
+        for save in 0..SAVES {
+            let selection = selections[save % selections.len()];
+            scene.world.save_state_into(selection, &mut state)?;
         }
-    }
-    ARMED.store(false, Ordering::SeqCst);
-    let allocations = ALLOCATIONS.load(Ordering::SeqCst);
+        Ok(())
+    });
     assert_eq!(allocations, 0, "{SAVES} saves into a used buffer allocated");
-
     // The saves are real: the last one restores.
     scene.world.restore_state(&state).unwrap();
+
+    // A full save prepares a buffer for the selected saves too.
+    let mut state = WorldState::new();
+    scene
+        .world
+        .save_state_into(BodySelection::All, &mut state)
+        .unwrap();
+    let allocations = allocations_of(|| {
+        scene
+            .world
+            .save_state_into(BodySelection::Movable, &mut state)?;
+        scene
+            .world
+            .save_state_into(BodySelection::Only(&selected), &mut state)
+    });
+    assert_eq!(allocations, 0, "selected saves after a full save allocated");
+
+    // A world with fewer characters leaves the other character buffers for the next save.
+    let (mut two, one) = (world_with_characters(2), world_with_characters(1));
+    let mut state = WorldState::new();
+    two.save_state_into(BodySelection::All, &mut state).unwrap();
+    let allocations = allocations_of(|| {
+        one.save_state_into(BodySelection::All, &mut state)?;
+        two.save_state_into(BodySelection::All, &mut state)
+    });
+    assert_eq!(
+        allocations, 0,
+        "saves of two, one and two characters allocated"
+    );
+    two.restore_state(&state).unwrap();
 }

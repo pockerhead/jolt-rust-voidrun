@@ -58,6 +58,8 @@ pub struct WorldState {
     character_ids: Vec<u32>,
     /// Jolt's stream, which may hold bytes without a defined value (see above).
     jolt: Vec<MaybeUninit<u8>>,
+    /// The saved state of each character of `character_ids`, in that order; entries after them
+    /// are buffers of earlier saves, kept to reuse their memory.
     characters: Vec<CharacterState>,
     /// Raw ids of the bodies with a pending contact-cache invalidation, in ascending order.
     cache_invalidations: Vec<u32>,
@@ -163,9 +165,12 @@ impl PhysicsWorld {
     /// `state` holds.
     ///
     /// `state` may be new ([`WorldState::new`]), of another world or of this one; it is
-    /// overwritten and then belongs to this world. Once `state` has held a save of at least this
-    /// size, the call allocates nothing on the Rust heap; Jolt's recorder still allocates its own
-    /// stream for each save. On an error `state` is unchanged.
+    /// overwritten and then belongs to this world. `state` keeps every buffer it grows, so the
+    /// call allocates on the Rust heap only for what no earlier save into `state` needed: a
+    /// longer Jolt stream, more bodies, more characters or a larger character state, more
+    /// pending contact-cache invalidations, or a [`BodySelection::Only`] list longer than the
+    /// world's body count. Jolt's recorder still allocates its own stream for each save. On an
+    /// error `state` is unchanged.
     ///
     /// ```
     /// use oxijolt::*;
@@ -191,6 +196,11 @@ impl PhysicsWorld {
         bodies: BodySelection<'_>,
         state: &mut WorldState,
     ) -> Result<(), StateError> {
+        if let BodySelection::All = bodies {
+            // Sized here so that a later `Movable` or `Only` save needs no more memory.
+            state.selection.clear();
+            state.selection.reserve(self.body_count() as usize);
+        }
         let listed = self.select_bodies(bodies, &mut state.selection)?;
         self.record_into(listed, &mut state.jolt);
         self.save_world_parts_into(state);
@@ -339,7 +349,6 @@ impl PhysicsWorld {
         state.constraint_count = self.jolt_constraint_count();
         state.character_ids.clear();
         state.character_ids.extend(self.characters.keys());
-        state.characters.truncate(self.characters.len());
         for (index, id) in self.character_ids().enumerate() {
             let character = self
                 .character(id)
