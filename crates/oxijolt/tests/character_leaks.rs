@@ -1,5 +1,6 @@
 //! A leak gate for characters: creating, updating, saving, restoring and removing a character
-//! with an inner body that collides with other characters, 40 000 measured rounds against a
+//! with an inner body that collides with other characters, and creating and removing one from a
+//! clone of humanoid preset settings, which own their capsule, 40 000 measured rounds against a
 //! 4 MiB threshold, so a leak of more than about 100 bytes per round fails. A control run then
 //! creates characters through `oxijolt-sys` and never releases them, and must exceed the
 //! threshold, which shows the gate can see such a leak.
@@ -23,7 +24,7 @@ const MEASURED_ROUNDS: usize = 40_000;
 const MAX_GROWTH: usize = 4 * 1024 * 1024;
 
 /// One round: a character with an inner body that collides with characters, next to the
-/// neighbour character of the test.
+/// neighbour character of the test, then a character of a humanoid preset's clone.
 fn character_round(world: &mut PhysicsWorld, capsule: &Shape, round: usize) {
     let settings = CharacterSettings::new(capsule)
         .shape_offset(Vec3::new(0.0, 1.1, 0.0))
@@ -57,6 +58,15 @@ fn character_round(world: &mut PhysicsWorld, capsule: &Shape, round: usize) {
         .restore_state(&state)
         .unwrap();
     world.remove_character(id).unwrap();
+
+    let humanoid = CharacterSettings::humanoid(1.8, 0.3).unwrap();
+    let clone = humanoid.clone();
+    let id = world
+        .create_character(&clone, RVec3::new(-x, 0.0, 2.0), Quat::IDENTITY)
+        .unwrap();
+    world.remove_character(id).unwrap();
+    drop(humanoid);
+    drop(clone);
 }
 
 /// Creates `count` characters on `system` and never releases them.

@@ -4,6 +4,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- `CharacterSettings::humanoid(height, radius)`: settings that own a capsule `height` tall standing
+  on the character position, with Jolt's defaults for the rest; their clones share the capsule.
+
 ## 0.6.0 — 2026-10-06
 
 - Skeleton mapper ([guide](docs/guide.md#ragdolls)): `SkeletonMapper` (Jolt's `SkeletonMapper`)

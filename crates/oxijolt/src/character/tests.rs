@@ -74,6 +74,55 @@ fn ground_states_convert_and_report_support() {
     }
 }
 
+#[test]
+fn humanoid_puts_the_capsule_bottom_at_the_position() {
+    let settings = CharacterSettings::humanoid(1.8, 0.3).unwrap();
+    let jolt = settings.to_jph(1);
+    assert_eq!(Vec3::from_jph(jolt.shapeOffset), Vec3::new(0.0, 0.9, 0.0));
+    let capsule = jolt.base.shape.cast::<JPH_CapsuleShape>();
+    // SAFETY: the settings own the capsule, alive for these reads; the getters only read it.
+    let (radius, half_height) = unsafe {
+        (
+            JPH_CapsuleShape_GetRadius(capsule),
+            JPH_CapsuleShape_GetHalfHeightOfCylinder(capsule),
+        )
+    };
+    assert_eq!(radius, 0.3);
+    assert_eq!(half_height, 0.9 - 0.3);
+    // The capsule's lowest point, offset minus half height minus radius, is the position.
+    assert!((0.9 - half_height - radius).abs() <= 1.0e-6);
+}
+
+#[test]
+fn humanoid_refuses_bad_dimensions() {
+    use crate::ShapeError;
+    const RADIUS_RULE: &str = "humanoid radius must be finite and positive";
+    const HEIGHT_RULE: &str = "humanoid height must be finite and more than twice its radius";
+    let cases = [
+        (1.8, f32::NAN, RADIUS_RULE),
+        (1.8, 0.0, RADIUS_RULE),
+        (1.8, -0.3, RADIUS_RULE),
+        (1.8, f32::INFINITY, RADIUS_RULE),
+        (f32::NAN, 0.3, HEIGHT_RULE),
+        (f32::INFINITY, 0.3, HEIGHT_RULE),
+        (0.6, 0.3, HEIGHT_RULE),
+        (0.5, 0.3, HEIGHT_RULE),
+        (
+            2.0 * crate::limits::MAX_SHAPE_EXTENT + 1.0,
+            0.3,
+            "shape extends beyond limits::MAX_SHAPE_EXTENT",
+        ),
+    ];
+    for (height, radius, rule) in cases {
+        match CharacterSettings::humanoid(height, radius) {
+            Err(ShapeError::InvalidDimensions(what)) => {
+                assert_eq!(what, rule, "height {height}, radius {radius}");
+            }
+            other => panic!("height {height}, radius {radius}: {:?}", other.err()),
+        }
+    }
+}
+
 mod listener {
     use std::any::Any;
     use std::panic::{catch_unwind, AssertUnwindSafe};
