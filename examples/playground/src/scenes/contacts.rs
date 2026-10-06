@@ -421,6 +421,15 @@ impl Scene for Contacts {
         CameraHint::new([0.0, 1.0, 0.0], 0.0, 0.55, 15.0)
     }
 
+    /// The back row of stations, then the front row.
+    fn record_camera(&self, tick: u32) -> CameraHint {
+        if tick < 150 {
+            CameraHint::new([0.0, 1.2, -3.0], 0.0, 0.45, 11.0)
+        } else {
+            CameraHint::new([-1.0, 1.4, 3.0], 0.0, 0.4, 10.0)
+        }
+    }
+
     fn record_ticks(&self) -> u32 {
         300
     }

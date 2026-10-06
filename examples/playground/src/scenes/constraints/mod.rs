@@ -174,6 +174,19 @@ impl Scene for Constraints {
         CameraHint::new([0.5, 1.8, 0.0], 0.0, 0.3, 17.0)
     }
 
+    /// A fixed shot of each group in turn: the mechanisms, the hanging things, the joints.
+    fn record_camera(&self, tick: u32) -> CameraHint {
+        match tick {
+            0..120 => CameraHint::new([-7.5, 1.6, 1.0], 0.15, 0.3, 9.0),
+            120..240 => CameraHint::new([2.5, 2.2, 0.0], -0.1, 0.3, 8.5),
+            _ => CameraHint::new([10.5, 2.4, -1.0], 0.2, 0.3, 8.0),
+        }
+    }
+
+    fn record_ticks(&self) -> u32 {
+        360
+    }
+
     fn script(&self, tick: u32) -> Input {
         Input {
             edges: Edges {

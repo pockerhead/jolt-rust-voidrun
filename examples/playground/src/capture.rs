@@ -8,6 +8,11 @@ use std::io::Write;
 
 use gif::{DisposalMethod, Encoder, Frame, Repeat};
 
+/// The most bytes one scene's GIF may have.
+pub const MAX_GIF_BYTES: u64 = 1_500_000;
+/// The most bytes the GIFs of all scenes may have together.
+pub const MAX_TOTAL_BYTES: u64 = 12_000_000;
+
 /// The palette index that marks a pixel unchanged from the previous frame. Quantizing never
 /// produces it.
 pub const TRANSPARENT: u8 = 255;

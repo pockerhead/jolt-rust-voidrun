@@ -11,7 +11,9 @@ use macroquad::prelude::{
     Color, DrawTextureParams, Image, RenderTarget, RenderTargetParams, Vec2,
 };
 
-use playground::capture::{downsample_2x, flip_rows, thumbnail, GifWriter, Lut};
+use playground::capture::{
+    downsample_2x, flip_rows, thumbnail, GifWriter, Lut, MAX_GIF_BYTES, MAX_TOTAL_BYTES,
+};
 use playground::draw::DrawList;
 use playground::scene::{Result, SceneConfig, SceneKind};
 use playground::session::Session;
@@ -22,10 +24,6 @@ use super::render::{Renderer, View, BACKGROUND};
 const TARGET: [u32; 2] = [720, 406];
 /// Width of the PNG still.
 const STILL_WIDTH: usize = 240;
-/// The most bytes one GIF may have.
-pub const MAX_GIF_BYTES: u64 = 1_500_000;
-/// The most bytes the GIFs of all scenes may have together.
-pub const MAX_TOTAL_BYTES: u64 = 12_000_000;
 
 /// Records `scenes` into `out` and checks the media limits; returns the process exit code.
 pub async fn record_all(scenes: Vec<SceneKind>, out: PathBuf, frames: Option<u32>) -> i32 {
