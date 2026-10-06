@@ -200,3 +200,19 @@ fn jolt_message_keeps_whole_characters() {
     // An invalid byte inside the text keeps the valid part before it.
     assert_eq!(JoltMessage::from_c_buffer(b"ok\xffno\0").as_str(), "ok");
 }
+
+#[test]
+fn mapper_error_variants_display_their_joint() {
+    assert_eq!(
+        RagdollError::UnmappedJoint(3).to_string(),
+        "ragdoll joint 3 has no animation joint of its name"
+    );
+    assert_eq!(
+        RagdollError::HierarchyMismatch(4).to_string(),
+        "the animation joint of ragdoll joint 4 is not below its parent's"
+    );
+    assert_eq!(
+        RagdollError::DegenerateChain(5).to_string(),
+        "the mapped chain ending at ragdoll joint 5 is too short to turn"
+    );
+}

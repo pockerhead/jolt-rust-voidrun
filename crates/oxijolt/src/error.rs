@@ -561,6 +561,15 @@ pub enum RagdollError {
     TooManyBodies,
     /// The world has given out every ragdoll id.
     TooManyRagdolls,
+    /// A skeleton mapper's animation skeleton has no joint with the name of this ragdoll joint.
+    UnmappedJoint(u32),
+    /// The animation joint of this ragdoll joint does not sit below the animation joint of its
+    /// parent with only unmapped joints between them; for joint 0, it sits below a mapped joint.
+    HierarchyMismatch(u32),
+    /// The skeleton mapper cannot turn the animation chain that ends at this ragdoll joint: one
+    /// of its directions is shorter than
+    /// [`limits::MIN_MAPPED_CHAIN_LENGTH`](crate::limits::MIN_MAPPED_CHAIN_LENGTH).
+    DegenerateChain(u32),
 }
 
 impl fmt::Display for RagdollError {
@@ -578,6 +587,20 @@ impl fmt::Display for RagdollError {
             Self::Body(error) => write!(f, "unusable ragdoll part: {error}"),
             Self::TooManyBodies => f.write_str("the world has no room for every ragdoll part"),
             Self::TooManyRagdolls => f.write_str("the world has no ragdoll ids left"),
+            Self::UnmappedJoint(joint) => {
+                write!(
+                    f,
+                    "ragdoll joint {joint} has no animation joint of its name"
+                )
+            }
+            Self::HierarchyMismatch(joint) => write!(
+                f,
+                "the animation joint of ragdoll joint {joint} is not below its parent's"
+            ),
+            Self::DegenerateChain(joint) => write!(
+                f,
+                "the mapped chain ending at ragdoll joint {joint} is too short to turn"
+            ),
         }
     }
 }

@@ -218,8 +218,9 @@ pub use query::{
     CollideShape, CollideShapeHit, PointHit, RayCast, RayHit, ShapeCast, ShapeCastHit,
 };
 pub use ragdoll::{
-    JointReading, JointTransform, RagdollId, RagdollJoint, RagdollMut, RagdollPart, RagdollRef,
-    RagdollSettings, SettleDetector, Skeleton, SkeletonJoint, SkeletonPose,
+    JointReading, JointTransform, MappedSkeleton, RagdollId, RagdollJoint, RagdollMut, RagdollPart,
+    RagdollRef, RagdollSettings, SettleDetector, Skeleton, SkeletonJoint, SkeletonMapper,
+    SkeletonPose, TranslationLocks,
 };
 pub use shape::{
     CompoundChild, CompoundSubShape, DroppedTriangles, HeightFieldSettings, MeshBuildQuality,

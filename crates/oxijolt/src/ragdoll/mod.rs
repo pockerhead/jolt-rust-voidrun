@@ -14,6 +14,7 @@
 //!
 //! [`Shape`]: crate::Shape
 
+mod mapper;
 mod settings;
 mod settle;
 
@@ -29,6 +30,7 @@ use crate::owned::{JoltObject, Owned};
 use crate::world::{advance_structure_epoch, WorldTag, DELTA_TIME_RULE};
 use crate::{Activation, BodyId, MotionType, PhysicsWorld, Quat, RVec3, RagdollError, Vec3};
 
+pub use mapper::{MappedSkeleton, SkeletonMapper, TranslationLocks};
 use settings::JointKind;
 pub use settings::{
     JointTransform, RagdollJoint, RagdollPart, RagdollSettings, Skeleton, SkeletonJoint,
