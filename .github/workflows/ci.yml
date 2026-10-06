@@ -204,6 +204,84 @@ jobs:
         if: runner.os == 'Windows' && matrix.features == 'debug-renderer'
         run: cargo clippy --locked -p playground --all-targets -- -D warnings
 
+  # The engine comparison (benches/comparison): clippy and tests with every engine, a short
+  # validation matrix of moving scenes with 1 and 4 threads (Jolt's digests must be identical),
+  # and each engine's hello binary built and run alone. The full benchmark runs by hand
+  # (docs/comparison.md). Its native library is the test job's default one.
+  comparison:
+    name: comparison ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      NATIVE_MANIFEST: oxijolt-sys-manifest.txt
+      ENGINES: --features jolt,rapier,avian,parallel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: comparison-${{ matrix.os }}
+
+      - name: Check pinned commits
+        id: pins
+        run: |
+          joltc=$(git rev-parse HEAD:crates/oxijolt-sys/vendor/joltc)
+          jolt=$(git rev-parse HEAD:crates/oxijolt-sys/vendor/JoltPhysics)
+          grep -q "\"$joltc\"" crates/oxijolt-sys/build.rs || { echo "build.rs JOLTC_COMMIT differs from the gitlink $joltc"; exit 1; }
+          grep -q "\"$jolt\"" crates/oxijolt-sys/build.rs || { echo "build.rs JOLT_COMMIT differs from the gitlink $jolt"; exit 1; }
+          echo "joltc=$joltc" >> "$GITHUB_OUTPUT"
+          echo "jolt=$jolt" >> "$GITHUB_OUTPUT"
+
+      - name: Restore native library
+        id: native
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/joltc-prefix
+          key: joltc-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.joltc }}-${{ steps.pins.outputs.jolt }}-default-${{ hashFiles('crates/oxijolt-sys/native/**', 'crates/oxijolt-sys/build.rs', 'crates/oxijolt-sys/build/**') }}
+
+      # Built in a target directory of its own, so the cached one cannot add a second prefix.
+      - name: Build native library
+        if: steps.native.outputs.cache-hit != 'true'
+        run: |
+          CARGO_TARGET_DIR="$RUNNER_TEMP/native" cargo build -p oxijolt-sys
+          shopt -s nullglob
+          dirs=("$RUNNER_TEMP"/native/debug/build/oxijolt-sys-*/out/joltc)
+          [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/joltc-prefix"
+          cp -r "${dirs[0]}/lib" "${dirs[0]}/include" "${dirs[0]}/$NATIVE_MANIFEST" "$RUNNER_TEMP/joltc-prefix/"
+
+      - name: Use the native library
+        run: echo "JOLTC_LIB_DIR=$RUNNER_TEMP/joltc-prefix" >> "$GITHUB_ENV"
+
+      - run: cargo clippy --locked -p comparison --all-targets $ENGINES -- -D warnings
+      - run: cargo test --locked -p comparison $ENGINES
+      - name: Validation matrix, Jolt identical with 1 and 4 threads
+        run: |
+          cargo run --locked -p comparison $ENGINES -- all --mode validate \
+            --scenes fixture_spherical,fixture_revolute,capsules --variants jolt,rapier-par,avian-par \
+            --threads 1,4 --profiles matched --steps 60 --require-identical jolt \
+            --out "$RUNNER_TEMP/validate"
+          cat "$RUNNER_TEMP/validate/summary.md"
+      - name: Each engine's hello binary alone
+        run: |
+          for engine in jolt rapier avian; do
+            cargo run --locked -p comparison --no-default-features --features $engine --bin hello-$engine
+          done
+
   # The real-mesh checks on every model of assets/models/models.tsv, the large downloaded ones
   # included (scripts/fetch_models.py, cached by the table's hash), with and without Jolt's
   # assertions: a failed assertion aborts the test process and a dropped-area or other threshold
