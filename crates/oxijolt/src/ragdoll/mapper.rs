@@ -19,7 +19,8 @@ impl JoltObject for JPH_SkeletonMapper {
 
 const LOCK_RULE: &str =
     "locked joints exist and are neither the root nor the joint the ragdoll root maps to";
-const MAPPED_POSE_RULE: &str = "the mapped pose leaves limits::MAX_POSITION";
+const MAPPED_POSITION_RULE: &str = "the mapped pose leaves limits::MAX_POSITION";
+const MAPPED_ROTATION_RULE: &str = "the mapped pose has a rotation that is not a unit quaternion";
 
 /// One skeleton of a [`SkeletonMapper`] with its neutral pose.
 #[derive(Clone, Copy)]
@@ -425,7 +426,10 @@ fn mapped_pose(root_offset: RVec3, matrices: &[JPH_Mat4]) -> Result<SkeletonPose
     };
     match pose.validate(matrices.len()) {
         Ok(()) => Ok(pose),
-        Err(_) => Err(RagdollError::InvalidValue(MAPPED_POSE_RULE)),
+        Err(_) if pose.joints.iter().any(|j| !j.rotation.is_valid_rotation()) => {
+            Err(RagdollError::InvalidValue(MAPPED_ROTATION_RULE))
+        }
+        Err(_) => Err(RagdollError::InvalidValue(MAPPED_POSITION_RULE)),
     }
 }
 

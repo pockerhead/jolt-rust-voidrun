@@ -380,6 +380,74 @@ fn a_long_twisting_chain_maps() {
 }
 
 #[test]
+fn the_deepest_spiral_chains_map() {
+    // 1023 animation links between a ragdoll root and tip, the deepest chain a skeleton allows,
+    // each turned 45 degrees about one axis: a helix around that axis. Jolt multiplies the 1023 link matrices
+    // into model space in `f32`, and their rotations drift off unit length on the way.
+    const LINKS: usize = 1023;
+    const STEP: f32 = 0.001;
+    let ragdoll = Skeleton::new(&[joint("root", None), joint("tip", Some(0))]).unwrap();
+    let names: Vec<String> = (1..LINKS).map(|i| format!("link_{i}")).collect();
+    let mut joints = vec![joint("root", None)];
+    joints.extend(
+        names
+            .iter()
+            .zip(0..)
+            .map(|(name, parent)| joint(name, Some(parent))),
+    );
+    joints.push(joint("tip", Some(LINKS as u32 - 1)));
+    let animation = Skeleton::new(&joints).unwrap();
+    let up = |height: f32, rotation: Quat| JointTransform {
+        translation: Vec3::new(0.0, height, 0.0),
+        rotation,
+    };
+    let ragdoll_neutral = SkeletonPose {
+        root_offset: RVec3::ZERO,
+        joints: vec![
+            up(0.0, Quat::IDENTITY),
+            up(LINKS as f32 * STEP, Quat::IDENTITY),
+        ],
+    };
+    let animation_neutral = SkeletonPose {
+        root_offset: RVec3::ZERO,
+        joints: (0..=LINKS)
+            .map(|i| up(i as f32 * STEP, Quat::IDENTITY))
+            .collect(),
+    };
+    let mapper = mapper_with(
+        (&ragdoll, &ragdoll_neutral),
+        (&animation, &animation_neutral),
+        TranslationLocks::All,
+    )
+    .unwrap();
+
+    let tilt = Quat::from_xyzw(0.3, 0.1, -0.2, 0.927_36).normalized();
+    let ragdoll_pose = SkeletonPose {
+        root_offset: RVec3::ZERO,
+        joints: vec![
+            up(0.0, tilt),
+            JointTransform {
+                translation: Vec3::new(0.3, 0.7, 0.1),
+                rotation: tilt.product(tilt).normalized(),
+            },
+        ],
+    };
+    let half = std::f32::consts::FRAC_PI_8;
+    for (x, y, z) in [
+        (0.6, 0.8, 0.0),
+        (0.0, 0.8, 0.6),
+        (0.48, 0.6, 0.64),
+        (0.0, 1.0, 0.0),
+    ] {
+        let turn = Quat::from_xyzw(x * half.sin(), y * half.sin(), z * half.sin(), half.cos());
+        let mut local = vec![up(0.0, Quat::IDENTITY)];
+        local.extend((0..LINKS).map(|_| up(STEP, turn)));
+        let mapped = mapper.map(&ragdoll_pose, &local);
+        assert!(mapped.is_ok(), "axis ({x}, {y}, {z}): {mapped:?}");
+    }
+}
+
+#[test]
 fn a_mapper_is_send_and_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<SkeletonMapper>();
