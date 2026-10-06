@@ -155,7 +155,7 @@ impl<K: VehicleKind> VehicleMut<'_, K> {
     }
 
     /// Sets the largest pitch and roll angle, radians in `[0, π]`; π turns the limit off. See
-    /// [`VehicleSettings::max_pitch_roll_angle`](crate::VehicleSettings::max_pitch_roll_angle).
+    /// [`WheeledVehicleSettings::max_pitch_roll_angle`](crate::WheeledVehicleSettings::max_pitch_roll_angle).
     /// Not part of [`WorldState`](crate::WorldState):
     /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
     pub fn set_max_pitch_roll_angle(&mut self, radians: f32) -> Result<(), VehicleError> {

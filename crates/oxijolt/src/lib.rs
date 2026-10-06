@@ -43,8 +43,8 @@
 //! - Virtual characters: [`PhysicsWorld::create_character`], with a standing humanoid from
 //!   [`CharacterSettings::humanoid`].
 //! - Wheeled and tracked vehicles and motorcycles on a chassis body:
-//!   [`PhysicsWorld::create_vehicle`], [`PhysicsWorld::create_tracked_vehicle`] and
-//!   [`PhysicsWorld::create_motorcycle`], with ready settings from [`VehicleSettings::car`] and
+//!   [`PhysicsWorld::create_wheeled_vehicle`], [`PhysicsWorld::create_tracked_vehicle`] and
+//!   [`PhysicsWorld::create_motorcycle`], with ready settings from [`WheeledVehicleSettings::car`] and
 //!   [`MotorcycleSettings::bike`] and wheel poses for drawing from
 //!   [`VehicleRef::wheel_world_transform`].
 //! - Ragdolls: [`PhysicsWorld::create_ragdoll`].
@@ -236,13 +236,12 @@ pub use soft_body::{
 };
 pub use state::WorldState;
 pub use vehicle::{
-    AnyVehicleId, DriverInput, Motorcycle, MotorcycleLean, MotorcycleSettings, SuspensionSpring,
-    TrackSide, TrackState, TrackedDriverInput, TrackedVehicle, TrackedVehicleSettings,
-    TrackedWheelSettings, VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings,
-    VehicleEngineSettings, VehicleId, VehicleKind, VehicleMut, VehicleRef, VehicleSettings,
-    VehicleTrackSettings, VehicleTransmissionSettings, VehicleType, WheelContact, WheelSettings,
-    WheelState, WheeledVehicle, DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION,
-    DEFAULT_NORMALIZED_TORQUE,
+    AnyVehicleId, DriverInput, Motorcycle, MotorcycleLean, MotorcycleSettings, TrackSide,
+    TrackState, TrackedDriverInput, TrackedVehicle, TrackedVehicleSettings, TrackedWheelSettings,
+    VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings,
+    VehicleId, VehicleKind, VehicleMut, VehicleRef, VehicleTrackSettings,
+    VehicleTransmissionSettings, VehicleType, WheelContact, WheelSettings, WheelState,
+    WheeledVehicle, WheeledVehicleSettings,
 };
 pub use world::{PhysicsWorld, StepReport, WorldSettings};
 

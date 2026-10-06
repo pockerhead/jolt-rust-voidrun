@@ -426,7 +426,7 @@ fn constraints_and_vehicles_refuse_soft_bodies() {
     }
     let vehicle = common::vehicle::car_settings(VehicleCollisionTester::ray(ObjectLayer::MOVING));
     assert_eq!(
-        world.create_vehicle(id, &vehicle).err(),
+        world.create_wheeled_vehicle(id, &vehicle).err(),
         Some(VehicleError::Body(BodyError::NotRigidBody(id)))
     );
 }

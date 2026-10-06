@@ -170,7 +170,7 @@ impl VehicleMut<'_, TrackedVehicle> {
 impl PhysicsWorld {
     /// Attaches a tracked vehicle to the dynamic body `body`, its chassis, and returns its id.
     ///
-    /// The chassis works as for [`create_vehicle`](Self::create_vehicle): it stays an ordinary
+    /// The chassis works as for [`create_wheeled_vehicle`](Self::create_wheeled_vehicle): it stays an ordinary
     /// body the vehicle is a constraint and step listener on, and the same chassis rules and
     /// errors apply. The settings are checked as their setters state, plus the track drive
     /// envelope of [docs/limits.md#track-drive-envelope]; and at every wheel, the track's inertia

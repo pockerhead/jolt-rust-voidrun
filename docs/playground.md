@@ -79,8 +79,8 @@ the motorcycle from behind as it leans into a turn. The white spokes turn with t
 binding reports.*
 
 A car, a tank and a motorcycle on rolling terrain, and a walker; Tab switches which one the keys
-drive. It uses `VehicleSettings::car`, `TrackedVehicleSettings`, `MotorcycleSettings::bike`,
-`create_vehicle`, `create_tracked_vehicle`, `create_motorcycle`, `set_driver_input`,
+drive. It uses `WheeledVehicleSettings::car`, `TrackedVehicleSettings`, `MotorcycleSettings::bike`,
+`create_wheeled_vehicle`, `create_tracked_vehicle`, `create_motorcycle`, `set_driver_input`,
 `wheel_world_transform`, `current_gear`, `lean` and `Shape::new_offset_center_of_mass`.
 
 | Keys | Action |

@@ -6,14 +6,14 @@ use oxijolt_sys::*;
 
 use super::wheel::WheelBase;
 use super::{
-    validate_wheel_count, BuiltSettings, ControllerGuard, SuspensionSpring, VehicleCollisionTester,
+    validate_wheel_count, BuiltSettings, ControllerGuard, VehicleCollisionTester,
     VehicleEngineSettings, VehicleFrame, VehicleTransmissionSettings, WheelGeometry, WheelGuard,
     ANGULAR_VELOCITY_TO_RPM,
 };
 use crate::limits::{self, PrincipalMass};
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
-use crate::{PhysicsWorld, Quat, Vec3, VehicleError};
+use crate::{PhysicsWorld, Quat, SpringSettings, Vec3, VehicleError};
 
 /// One wheel of a tracked vehicle (Jolt `WheelSettings` and `WheelSettingsTV`). The wheel
 /// turns with its track; its suspension and size work as for [`WheelSettings`], whose methods
@@ -91,7 +91,7 @@ impl TrackedWheelSettings {
 
     /// See [`WheelSettings::suspension_spring`](crate::WheelSettings::suspension_spring).
     #[must_use]
-    pub fn suspension_spring(mut self, value: SuspensionSpring) -> Self {
+    pub fn suspension_spring(mut self, value: SpringSettings) -> Self {
         self.base.suspension_spring = value;
         self
     }
@@ -341,7 +341,7 @@ impl TrackedVehicleSettings {
         self
     }
 
-    /// See [`VehicleSettings::max_pitch_roll_angle`](crate::VehicleSettings::max_pitch_roll_angle).
+    /// See [`WheeledVehicleSettings::max_pitch_roll_angle`](crate::WheeledVehicleSettings::max_pitch_roll_angle).
     #[must_use]
     pub fn max_pitch_roll_angle(mut self, radians: f32) -> Self {
         self.frame.max_pitch_roll_angle = radians;

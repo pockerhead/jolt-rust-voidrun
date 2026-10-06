@@ -4,84 +4,34 @@ use std::f32::consts::PI;
 
 use oxijolt_sys::*;
 
-use super::{
-    create_curve, is_curve, DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION,
-    PERPENDICULAR_TOLERANCE,
-};
+use super::{create_curve, is_curve, PERPENDICULAR_TOLERANCE};
 use crate::limits::{self, is_local_distance, is_local_offset};
 use crate::math::{is_finite_non_negative, is_finite_positive, is_unit};
 use crate::owned::{JoltObject, Owned};
 use crate::{SpringSettings, Vec3, VehicleError};
 
-/// How a wheel's suspension spring is specified (Jolt `SpringSettings`).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum SuspensionSpring {
-    /// Oscillation frequency in Hz (finite, positive) and damping ratio (finite, not
-    /// negative; 1 is critical damping). Independent of the chassis mass.
-    FrequencyAndDamping {
-        /// Frequency in Hz.
-        frequency: f32,
-        /// Damping ratio.
-        damping: f32,
-    },
-    /// Spring stiffness in N/m (finite, positive) and damping in N·s/m (finite, not negative).
-    StiffnessAndDamping {
-        /// Stiffness in N/m.
-        stiffness: f32,
-        /// Damping in N·s/m.
-        damping: f32,
-    },
+/// Whether a suspension spring has a positive frequency or stiffness and a damping that is not
+/// negative, all finite.
+fn is_valid_suspension_spring(spring: SpringSettings) -> bool {
+    let (value, damping) = match spring {
+        SpringSettings::FrequencyAndDamping { frequency, damping } => (frequency, damping),
+        SpringSettings::StiffnessAndDamping { stiffness, damping } => (stiffness, damping),
+    };
+    is_finite_positive(value) && is_finite_non_negative(damping)
 }
 
-impl Default for SuspensionSpring {
-    /// Jolt's default: 1.5 Hz with damping ratio 0.5.
-    fn default() -> Self {
-        Self::FrequencyAndDamping {
-            frequency: 1.5,
-            damping: 0.5,
+/// Whether the stiffness and damping Jolt uses for a valid suspension spring stay at most
+/// [`limits::MAX_SPRING_COEFFICIENT`]. A stiffness-mode spring is used as given. In frequency
+/// mode Jolt multiplies by the suspension's effective mass
+/// (`VehicleConstraint::SetupVelocityConstraint`), which is at most the chassis mass and so at
+/// most [`limits::MAX_MASS`].
+fn suspension_spring_fits_the_coefficient_bound(spring: SpringSettings) -> bool {
+    match spring {
+        SpringSettings::FrequencyAndDamping { .. } => {
+            spring.fits_effective_mass(f64::from(limits::MAX_MASS))
         }
-    }
-}
-
-impl SuspensionSpring {
-    pub(super) fn to_jph(self) -> JPH_SpringSettings {
-        match self {
-            Self::FrequencyAndDamping { frequency, damping } => JPH_SpringSettings {
-                mode: JPH_SpringMode_FrequencyAndDamping,
-                frequencyOrStiffness: frequency,
-                damping,
-            },
-            Self::StiffnessAndDamping { stiffness, damping } => JPH_SpringSettings {
-                mode: JPH_SpringMode_StiffnessAndDamping,
-                frequencyOrStiffness: stiffness,
-                damping,
-            },
-        }
-    }
-
-    fn is_valid(self) -> bool {
-        let (value, damping) = match self {
-            Self::FrequencyAndDamping { frequency, damping } => (frequency, damping),
-            Self::StiffnessAndDamping { stiffness, damping } => (stiffness, damping),
-        };
-        is_finite_positive(value) && is_finite_non_negative(damping)
-    }
-
-    /// Whether the stiffness and damping Jolt uses for this valid spring stay at most
-    /// [`limits::MAX_SPRING_COEFFICIENT`]. A stiffness-mode spring is used as given. In
-    /// frequency mode Jolt multiplies by the suspension's effective mass
-    /// (`VehicleConstraint::SetupVelocityConstraint`), which is at most the chassis mass and so
-    /// at most [`limits::MAX_MASS`].
-    fn fits_the_coefficient_bound(self) -> bool {
-        match self {
-            Self::FrequencyAndDamping { frequency, damping } => {
-                SpringSettings::FrequencyAndDamping { frequency, damping }
-                    .fits_effective_mass(f64::from(limits::MAX_MASS))
-            }
-            Self::StiffnessAndDamping { stiffness, damping } => {
-                stiffness <= limits::MAX_SPRING_COEFFICIENT
-                    && damping <= limits::MAX_SPRING_COEFFICIENT
-            }
+        SpringSettings::StiffnessAndDamping { stiffness, damping } => {
+            stiffness <= limits::MAX_SPRING_COEFFICIENT && damping <= limits::MAX_SPRING_COEFFICIENT
         }
     }
 }
@@ -100,7 +50,7 @@ pub(super) struct WheelBase {
     pub(super) suspension_min_length: f32,
     pub(super) suspension_max_length: f32,
     pub(super) suspension_preload_length: f32,
-    pub(super) suspension_spring: SuspensionSpring,
+    pub(super) suspension_spring: SpringSettings,
     pub(super) radius: f32,
     pub(super) width: f32,
 }
@@ -118,7 +68,7 @@ impl WheelBase {
             suspension_min_length: 0.3,
             suspension_max_length: 0.5,
             suspension_preload_length: 0.0,
-            suspension_spring: SuspensionSpring::default(),
+            suspension_spring: WheelSettings::DEFAULT_SUSPENSION_SPRING,
             radius: 0.3,
             width: 0.1,
         }
@@ -163,12 +113,12 @@ impl WheelBase {
                 "suspension preload length must be finite and between 0 and limits::MAX_SHAPE_EXTENT",
             );
         }
-        if !self.suspension_spring.is_valid() {
+        if !is_valid_suspension_spring(self.suspension_spring) {
             return invalid(
                 "suspension spring frequency or stiffness must be positive, damping not negative",
             );
         }
-        if !self.suspension_spring.fits_the_coefficient_bound() {
+        if !suspension_spring_fits_the_coefficient_bound(self.suspension_spring) {
             return invalid(
                 "suspension spring stiffness or damping exceeds limits::MAX_SPRING_COEFFICIENT",
             );
@@ -244,6 +194,23 @@ pub struct WheelSettings {
 }
 
 impl WheelSettings {
+    /// Jolt's default longitudinal friction curve of a wheel (`WheelSettingsWV`): friction
+    /// coefficient over longitudinal slip ratio.
+    pub const DEFAULT_LONGITUDINAL_FRICTION: [(f32, f32); 3] =
+        [(0.0, 0.0), (0.06, 1.2), (0.2, 1.0)];
+
+    /// Jolt's default lateral friction curve of a wheel (`WheelSettingsWV`): friction
+    /// coefficient over slip angle in degrees.
+    pub const DEFAULT_LATERAL_FRICTION: [(f32, f32); 3] = [(0.0, 0.0), (3.0, 1.2), (20.0, 1.0)];
+
+    /// Jolt's default suspension spring (`WheelSettings::mSuspensionSpring`): 1.5 Hz with
+    /// damping ratio 0.5. [`SpringSettings::default`] is Jolt's spring default, 0 Hz, which a
+    /// suspension refuses.
+    pub const DEFAULT_SUSPENSION_SPRING: SpringSettings = SpringSettings::FrequencyAndDamping {
+        frequency: 1.5,
+        damping: 0.5,
+    };
+
     /// A wheel whose suspension is attached to the chassis at `position` (body space, each
     /// component within [`limits::MAX_SHAPE_EXTENT`]).
     pub fn new(position: Vec3) -> Self {
@@ -252,8 +219,8 @@ impl WheelSettings {
             inertia: 0.9,
             angular_damping: 0.2,
             max_steer_angle: 70.0_f32.to_radians(),
-            longitudinal_friction: DEFAULT_LONGITUDINAL_FRICTION.to_vec(),
-            lateral_friction: DEFAULT_LATERAL_FRICTION.to_vec(),
+            longitudinal_friction: Self::DEFAULT_LONGITUDINAL_FRICTION.to_vec(),
+            lateral_friction: Self::DEFAULT_LATERAL_FRICTION.to_vec(),
             max_brake_torque: 1500.0,
             max_hand_brake_torque: 4000.0,
         }
@@ -323,12 +290,15 @@ impl WheelSettings {
         self
     }
 
-    /// The suspension spring. Default [`SuspensionSpring::default`]. The stiffness and damping
-    /// Jolt derives from it must stay at most [`limits::MAX_SPRING_COEFFICIENT`] for a chassis of
-    /// [`limits::MAX_MASS`]: in frequency mode `MAX_MASS·ω²` and `2·MAX_MASS·ζ·ω` with
-    /// `ω = 2π·frequency`, in stiffness mode the values themselves.
+    /// The suspension spring. Default
+    /// [`DEFAULT_SUSPENSION_SPRING`](Self::DEFAULT_SUSPENSION_SPRING). The frequency
+    /// (Hz, independent of the chassis mass) or the stiffness (N/m) must be finite and
+    /// positive, the damping (ratio, or N·s/m) finite and not negative. The stiffness and
+    /// damping Jolt derives from it must stay at most [`limits::MAX_SPRING_COEFFICIENT`] for a
+    /// chassis of [`limits::MAX_MASS`]: in frequency mode `MAX_MASS·ω²` and `2·MAX_MASS·ζ·ω`
+    /// with `ω = 2π·frequency`, in stiffness mode the values themselves.
     #[must_use]
-    pub fn suspension_spring(mut self, value: SuspensionSpring) -> Self {
+    pub fn suspension_spring(mut self, value: SpringSettings) -> Self {
         self.base.suspension_spring = value;
         self
     }
@@ -372,7 +342,7 @@ impl WheelSettings {
     }
 
     /// Friction coefficient over longitudinal slip ratio, as `(slip, friction)` points with
-    /// strictly increasing slip. Default [`DEFAULT_LONGITUDINAL_FRICTION`].
+    /// strictly increasing slip. Default [`DEFAULT_LONGITUDINAL_FRICTION`](Self::DEFAULT_LONGITUDINAL_FRICTION).
     #[must_use]
     pub fn longitudinal_friction(mut self, points: Vec<(f32, f32)>) -> Self {
         self.longitudinal_friction = points;
@@ -380,7 +350,7 @@ impl WheelSettings {
     }
 
     /// Friction coefficient over slip angle in degrees, as `(angle, friction)` points with
-    /// strictly increasing angle. Default [`DEFAULT_LATERAL_FRICTION`].
+    /// strictly increasing angle. Default [`DEFAULT_LATERAL_FRICTION`](Self::DEFAULT_LATERAL_FRICTION).
     #[must_use]
     pub fn lateral_friction(mut self, points: Vec<(f32, f32)>) -> Self {
         self.lateral_friction = points;

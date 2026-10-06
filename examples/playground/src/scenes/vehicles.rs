@@ -3,9 +3,9 @@
 
 use oxijolt::{
     BodyId, BodySettings, DriverInput, EventSettings, Motorcycle, MotorcycleSettings, PhysicsWorld,
-    SuspensionSpring, TrackedDriverInput, TrackedVehicle, TrackedVehicleSettings,
-    TrackedWheelSettings, Vec3, VehicleCollisionTester, VehicleId, VehicleKind, VehicleSettings,
-    VehicleTrackSettings, VehicleTransmissionSettings,
+    SpringSettings, TrackedDriverInput, TrackedVehicle, TrackedVehicleSettings,
+    TrackedWheelSettings, Vec3, VehicleCollisionTester, VehicleId, VehicleKind,
+    VehicleTrackSettings, VehicleTransmissionSettings, WheeledVehicleSettings,
 };
 
 use crate::camera::CameraHint;
@@ -106,9 +106,9 @@ impl Vehicles {
         let gearbox = VehicleTransmissionSettings::default()
             .shift_up_rpm(2000.0)
             .shift_down_rpm(1100.0);
-        let car_settings =
-            VehicleSettings::car(Vec3::new(0.9, -0.1, 1.4), 0.35, tester).transmission(gearbox);
-        let car = world.create_vehicle(car_body, &car_settings)?;
+        let car_settings = WheeledVehicleSettings::car(Vec3::new(0.9, -0.1, 1.4), 0.35, tester)
+            .transmission(gearbox);
+        let car = world.create_wheeled_vehicle(car_body, &car_settings)?;
 
         let tank_hull = Shaped::cuboid([1.7, 0.5, 3.2])?;
         let tank_body = spawn_chassis(
@@ -560,7 +560,7 @@ fn tank_track(x: f32) -> VehicleTrackSettings {
                 .width(0.1)
                 .suspension_min_length(0.3)
                 .suspension_max_length(if end { 0.3 } else { 0.5 })
-                .suspension_spring(SuspensionSpring::FrequencyAndDamping {
+                .suspension_spring(SpringSettings::FrequencyAndDamping {
                     frequency: 1.0,
                     damping: 0.5,
                 })

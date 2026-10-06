@@ -2,10 +2,7 @@
 
 use oxijolt_sys::*;
 
-use super::{
-    create_curve, is_limited_slip_ratio, ANGULAR_VELOCITY_TO_RPM, DEFAULT_NORMALIZED_TORQUE,
-    LIMITED_SLIP_RULE,
-};
+use super::{create_curve, is_limited_slip_ratio, ANGULAR_VELOCITY_TO_RPM, LIMITED_SLIP_RULE};
 use crate::limits;
 use crate::math::{is_finite_non_negative, is_finite_positive};
 use crate::owned::{JoltObject, Owned};
@@ -34,7 +31,7 @@ impl Default for VehicleEngineSettings {
             max_torque: 500.0,
             min_rpm: 1000.0,
             max_rpm: 6000.0,
-            normalized_torque: DEFAULT_NORMALIZED_TORQUE.to_vec(),
+            normalized_torque: Self::DEFAULT_NORMALIZED_TORQUE.to_vec(),
             inertia: 0.5,
             angular_damping: 0.2,
         }
@@ -42,6 +39,10 @@ impl Default for VehicleEngineSettings {
 }
 
 impl VehicleEngineSettings {
+    /// Jolt's default normalized torque curve of an engine (`VehicleEngineSettings`): fraction
+    /// of the maximum torque over fraction of the maximum rpm.
+    pub const DEFAULT_NORMALIZED_TORQUE: [(f32, f32); 3] = [(0.0, 0.8), (0.66, 1.0), (1.0, 0.8)];
+
     /// Largest torque the engine delivers, N·m, not negative. Default 500.
     #[must_use]
     pub fn max_torque(mut self, value: f32) -> Self {
@@ -67,7 +68,7 @@ impl VehicleEngineSettings {
     /// torque fraction)` points: x within `0..=1`, increasing by at least
     /// [`limits::MIN_TORQUE_CURVE_SPACING`]; y within `0..=`[`limits::MAX_NORMALIZED_TORQUE`].
     /// Jolt reads the curve at the current rpm over the max rpm, between `min_rpm / max_rpm` and
-    /// 1. Default [`DEFAULT_NORMALIZED_TORQUE`].
+    /// 1. Default [`DEFAULT_NORMALIZED_TORQUE`](Self::DEFAULT_NORMALIZED_TORQUE).
     #[must_use]
     pub fn normalized_torque(mut self, points: Vec<(f32, f32)>) -> Self {
         self.normalized_torque = points;

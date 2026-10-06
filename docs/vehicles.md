@@ -5,7 +5,7 @@ chassis. oxijolt has three kinds, one per Jolt controller:
 
 | Kind | Creator | Settings | Driver input | Jolt controller |
 |---|---|---|---|---|
-| `WheeledVehicle` | `PhysicsWorld::create_vehicle` | `VehicleSettings` | `DriverInput` | `WheeledVehicleController` |
+| `WheeledVehicle` | `PhysicsWorld::create_wheeled_vehicle` | `WheeledVehicleSettings` | `DriverInput` | `WheeledVehicleController` |
 | `TrackedVehicle` | `PhysicsWorld::create_tracked_vehicle` | `TrackedVehicleSettings` | `TrackedDriverInput` | `TrackedVehicleController` |
 | `Motorcycle` | `PhysicsWorld::create_motorcycle` | `MotorcycleSettings` | `DriverInput` | `MotorcycleController` |
 
@@ -107,7 +107,7 @@ which differ from the wheeled ones.
 A motorcycle is a wheeled vehicle with exactly two wheels, apart along its forward, and a lean
 controller: a spring and damper about the chassis' forward axis that tilt it toward a target lean,
 the direction of the ground's push on both wheels. `MotorcycleSettings::new(vehicle)` wraps a
-`VehicleSettings`; the driver input is the wheeled `DriverInput`. `MotorcycleSettings::bike` builds
+`WheeledVehicleSettings`; the driver input is the wheeled `DriverInput`. `MotorcycleSettings::bike` builds
 the motorcycle of Jolt's `MotorcycleTest` sample, the one below, from its front wheel's position and
 radius.
 
@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wheel = |z: f32| WheelSettings::new(Vec3::new(0.0, -0.27, z)).radius(0.31).width(0.05);
     let front = wheel(0.75).max_steer_angle(30.0_f32.to_radians());
     let rear = wheel(-0.75).max_steer_angle(0.0);
-    let bike = VehicleSettings::new(
+    let bike = WheeledVehicleSettings::new(
         vec![front, rear],
         // The rear wheel alone is driven.
         vec![VehicleDifferentialSettings::new(None, Some(1)).differential_ratio(4.8)],

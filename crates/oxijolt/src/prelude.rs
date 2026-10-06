@@ -72,7 +72,7 @@ pub use crate::{
 };
 pub use crate::{ActivationEvent, ContactEvent, ContactListener, EventSettings, WorldEvents};
 pub use crate::{AnyConstraintId, ConstraintId};
-pub use crate::{AnyVehicleId, DriverInput, VehicleId, VehicleSettings, WheelSettings};
+pub use crate::{AnyVehicleId, DriverInput, VehicleId, WheelSettings, WheeledVehicleSettings};
 pub use crate::{
     BodyError, CharacterError, ConstraintError, ContactSettingsError, ConvexHullError, MeshError,
     QueryError, RagdollError, ShapeError, SoftBodyError, StateError, StepError, ThinTrianglesError,

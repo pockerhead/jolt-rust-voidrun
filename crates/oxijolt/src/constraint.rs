@@ -204,7 +204,7 @@ impl SpringSettings {
         }
     }
 
-    fn to_jph(self) -> JPH_SpringSettings {
+    pub(crate) fn to_jph(self) -> JPH_SpringSettings {
         let (strength, damping) = self.values();
         let mode = match self {
             Self::FrequencyAndDamping { .. } => JPH_SpringMode_FrequencyAndDamping,

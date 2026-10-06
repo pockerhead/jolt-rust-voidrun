@@ -622,7 +622,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Vehicles
 
 A vehicle is Jolt's `VehicleConstraint` with the wheeled controller, attached to a dynamic body the
-caller created, its chassis. `PhysicsWorld::create_vehicle(chassis, &settings)` adds it; from then
+caller created, its chassis. `PhysicsWorld::create_wheeled_vehicle(chassis, &settings)` adds it; from then
 on it runs inside every `step`: at the start of the step each wheel casts against the scene and
 gravity is applied, then engine, brakes and tire friction act through the constraint. Tracked
 vehicles and motorcycles work the same way and have [a guide of their own](vehicles.md); what
@@ -632,13 +632,13 @@ follows holds for every kind unless it names the wheeled settings.
   `Shape::new_offset_center_of_mass` moves only the centre of mass, not the collision surface, so a
   box hull can carry a low centre of mass that keeps the car from rolling over. `remove_body`
   refuses a chassis while its vehicle exists; call `remove_vehicle` first.
-- **Settings.** `VehicleSettings::new(wheels, differentials, collision_tester)`, with builders for
+- **Settings.** `WheeledVehicleSettings::new(wheels, differentials, collision_tester)`, with builders for
   the rest; the defaults are Jolt's. Positions and directions are in the chassis body's space,
   with up +Y and forward +Z by default. Wheels are numbered in the order given, and differentials
   and anti-roll bars name them by index; Jolt's samples put the left wheels at +X. A vehicle needs
   at least one differential, and the engine torque ratios of all differentials add up to 1.
-  Values Jolt asserts on or divides by are checked first: `create_vehicle` returns
-  `VehicleError::InvalidValue` for them and creates nothing. `VehicleSettings::car` is a ready
+  Values Jolt asserts on or divides by are checked first: `create_wheeled_vehicle` returns
+  `VehicleError::InvalidValue` for them and creates nothing. `WheeledVehicleSettings::car` is a ready
   front-wheel-drive car of four wheels mirrored from the front left one, with Jolt's default engine
   and transmission.
 - **Wheels and the ground.** `VehicleCollisionTester::ray`, `cast_sphere` or `cast_cylinder`.
@@ -649,7 +649,7 @@ follows holds for every kind unless it names the wheeled settings.
   `gravity_factor(0.0)` and `allow_sleeping(false)`, and call `VehicleMut::set_gravity` with the
   gravity at the car before every step. Jolt then adds that gravity times the chassis mass as a
   force on every step while the chassis is awake; a sleeping chassis gets nothing. The opposite of
-  that gravity is also the up of the pitch and roll limit (`VehicleSettings::max_pitch_roll_angle`).
+  that gravity is also the up of the pitch and roll limit (`WheeledVehicleSettings::max_pitch_roll_angle`).
 - **Driving.** `set_driver_input(DriverInput { forward, right, brake, hand_brake })`: forward and
   right in `[-1, 1]`, the brakes in `[0, 1]`. Right 1 steers fully right, which Jolt reports as a
   negative steer angle. The input stays until it is set again.
@@ -870,13 +870,13 @@ fn add_car(world: &mut PhysicsWorld, layers: &Layers) -> Result<(BodyId, Vehicle
     let wheel = |x: f32, z: f32| WheelSettings::new(Vec3::new(x, -0.1, z)).radius(0.35).width(0.2);
     let front = |x| wheel(x, 1.4).max_steer_angle(0.5).max_hand_brake_torque(0.0);
     let rear = |x| wheel(x, -1.4).max_steer_angle(0.0);
-    let settings = VehicleSettings::new(
+    let settings = WheeledVehicleSettings::new(
         vec![front(0.9), front(-0.9), rear(0.9), rear(-0.9)],
         vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
         VehicleCollisionTester::cast_sphere(layers.wheels, 0.2),
     )
     .anti_roll_bars(vec![VehicleAntiRollBar::new(0, 1), VehicleAntiRollBar::new(2, 3)]);
-    let car = world.create_vehicle(chassis, &settings)?;
+    let car = world.create_wheeled_vehicle(chassis, &settings)?;
     Ok((chassis, car))
 }
 

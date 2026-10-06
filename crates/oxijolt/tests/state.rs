@@ -506,7 +506,10 @@ fn restore_after_a_structural_change_is_refused_and_changes_nothing() {
         |scene, chassis| {
             let settings =
                 common::vehicle::car_settings(VehicleCollisionTester::ray(scene.layers.probe));
-            scene.world.create_vehicle(chassis, &settings).unwrap();
+            scene
+                .world
+                .create_wheeled_vehicle(chassis, &settings)
+                .unwrap();
         },
     );
     assert_refused_after(
@@ -677,7 +680,7 @@ fn a_vehicle_in_zero_gravity_keeps_its_world_up_across_a_restore() {
         )
         .unwrap();
     let car = world
-        .create_vehicle(
+        .create_wheeled_vehicle(
             chassis,
             &car_settings(VehicleCollisionTester::ray(layers.probe)).max_pitch_roll_angle(0.2),
         )

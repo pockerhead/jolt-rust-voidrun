@@ -250,7 +250,7 @@ impl<K: VehicleKind> VehicleRef<'_, K> {
     }
 
     /// The collision tester the wheels use.
-    pub fn collision_tester(&self) -> &VehicleCollisionTester {
-        &self.entry.collision_tester
+    pub fn collision_tester(&self) -> VehicleCollisionTester {
+        self.entry.collision_tester
     }
 }

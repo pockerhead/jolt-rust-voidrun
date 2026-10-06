@@ -5,7 +5,7 @@ use std::array::from_fn;
 use oxijolt_sys::*;
 
 use super::wheel::WheelBase;
-use super::{BuiltSettings, ControllerGuard, VehicleSettings};
+use super::{BuiltSettings, ControllerGuard, WheeledVehicleSettings};
 use crate::math::is_finite_non_negative;
 use crate::owned::{JoltObject, Owned};
 use crate::{Vec3, VehicleError};
@@ -21,7 +21,7 @@ use crate::{Vec3, VehicleError};
 /// no lean torque in the air, so a motorcycle does not right itself before landing.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MotorcycleSettings {
-    pub(super) vehicle: VehicleSettings,
+    pub(super) vehicle: WheeledVehicleSettings,
     pub(super) max_lean_angle: f32,
     pub(crate) lean_spring_constant: f32,
     pub(crate) lean_spring_damping: f32,
@@ -41,7 +41,7 @@ impl MotorcycleSettings {
 
     /// A motorcycle on the wheels, drivetrain and tester of `vehicle`, which must have exactly
     /// two wheels at different positions along its forward.
-    pub fn new(vehicle: VehicleSettings) -> Self {
+    pub fn new(vehicle: WheeledVehicleSettings) -> Self {
         Self {
             vehicle,
             max_lean_angle: 45.0_f32.to_radians(),

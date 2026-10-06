@@ -10,9 +10,9 @@ const LAYERS: u32 = 2;
 
 /// A valid motorcycle: front wheel at +Z, rear wheel at −Z, rear-wheel drive, a ray tester on
 /// layer 1.
-fn bike() -> VehicleSettings {
+fn bike() -> WheeledVehicleSettings {
     let wheel = |z: f32| WheelSettings::new(Vec3::new(0.0, -0.27, z)).radius(0.31);
-    VehicleSettings::new(
+    WheeledVehicleSettings::new(
         vec![wheel(0.75), wheel(-0.75).max_steer_angle(0.0)],
         vec![VehicleDifferentialSettings::new(None, Some(1))],
         VehicleCollisionTester::ray(ObjectLayer::new(1)),

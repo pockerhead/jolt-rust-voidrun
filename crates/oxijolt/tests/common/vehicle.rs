@@ -81,7 +81,7 @@ pub fn chassis_settings(layers: &CarLayers, position: RVec3, rotation: Quat) -> 
 }
 
 /// The vehicle settings of the test car with `tester`.
-pub fn car_settings(tester: VehicleCollisionTester) -> VehicleSettings {
+pub fn car_settings(tester: VehicleCollisionTester) -> WheeledVehicleSettings {
     let wheels = WHEEL_POSITIONS
         .iter()
         .enumerate()
@@ -96,7 +96,7 @@ pub fn car_settings(tester: VehicleCollisionTester) -> VehicleSettings {
                 .max_hand_brake_torque(if front { 0.0 } else { 4000.0 })
         })
         .collect();
-    VehicleSettings::new(
+    WheeledVehicleSettings::new(
         wheels,
         vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
         tester,
@@ -111,7 +111,7 @@ pub fn add_car_with(
 ) -> (BodyId, VehicleId) {
     let chassis = world.create_body(&chassis_shape(), body).unwrap();
     let vehicle = world
-        .create_vehicle(chassis, &car_settings(tester))
+        .create_wheeled_vehicle(chassis, &car_settings(tester))
         .unwrap();
     (chassis, vehicle)
 }

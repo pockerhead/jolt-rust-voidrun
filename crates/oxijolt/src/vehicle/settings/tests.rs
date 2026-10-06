@@ -1,6 +1,6 @@
 use super::*;
 use crate::world::ensure_initialized;
-use crate::{limits, ObjectLayer};
+use crate::{limits, ObjectLayer, SpringSettings};
 
 pub(super) fn bits3(v: Vec3) -> [u32; 3] {
     <[f32; 3]>::from(v).map(f32::to_bits)
@@ -227,7 +227,7 @@ fn built_settings_reach_jolt() {
         .inertia(1.5)
         .max_steer_angle(0.5)
         .longitudinal_friction(vec![(0.0, 0.0), (0.1, 1.5)])
-        .suspension_spring(SuspensionSpring::StiffnessAndDamping {
+        .suspension_spring(SpringSettings::StiffnessAndDamping {
             stiffness: 30000.0,
             damping: 2000.0,
         });
@@ -289,9 +289,9 @@ fn built_settings_reach_jolt() {
 }
 
 /// A valid car: four wheels, front-wheel drive, a ray tester on layer 1.
-fn car() -> VehicleSettings {
+fn car() -> WheeledVehicleSettings {
     let wheel = |x: f32, z: f32| WheelSettings::new(Vec3::new(x, -0.1, z)).radius(0.35);
-    VehicleSettings::new(
+    WheeledVehicleSettings::new(
         vec![
             wheel(0.9, 1.4),
             wheel(-0.9, 1.4),
@@ -306,7 +306,7 @@ fn car() -> VehicleSettings {
 const LAYERS: u32 = 2;
 
 #[track_caller]
-fn assert_rejected(settings: VehicleSettings) {
+fn assert_rejected(settings: WheeledVehicleSettings) {
     assert!(
         matches!(
             settings.validate(LAYERS),
@@ -316,7 +316,7 @@ fn assert_rejected(settings: VehicleSettings) {
     );
 }
 
-fn with_wheel(edit: impl Fn(WheelSettings) -> WheelSettings) -> VehicleSettings {
+fn with_wheel(edit: impl Fn(WheelSettings) -> WheelSettings) -> WheeledVehicleSettings {
     let mut settings = car();
     settings.wheels[2] = edit(settings.wheels[2].clone());
     settings
@@ -325,7 +325,7 @@ fn with_wheel(edit: impl Fn(WheelSettings) -> WheelSettings) -> VehicleSettings 
 #[test]
 fn valid_settings_pass() {
     assert_eq!(car().validate(LAYERS), Ok(()));
-    let two_differentials = VehicleSettings {
+    let two_differentials = WheeledVehicleSettings {
         differentials: vec![
             VehicleDifferentialSettings::new(Some(0), Some(1)).engine_torque_ratio(0.5),
             VehicleDifferentialSettings::new(Some(2), Some(3)).engine_torque_ratio(0.5),
@@ -335,7 +335,7 @@ fn valid_settings_pass() {
     .anti_roll_bars(vec![VehicleAntiRollBar::new(0, 1)])
     .differential_limited_slip_ratio(f32::MAX);
     assert_eq!(two_differentials.validate(LAYERS), Ok(()));
-    let cylinder = VehicleSettings {
+    let cylinder = WheeledVehicleSettings {
         collision_tester: VehicleCollisionTester::cast_cylinder(ObjectLayer::new(0)),
         ..car()
     };
@@ -344,7 +344,7 @@ fn valid_settings_pass() {
 
 #[test]
 fn vehicle_values_are_validated() {
-    assert_rejected(VehicleSettings {
+    assert_rejected(WheeledVehicleSettings {
         wheels: Vec::new(),
         differentials: Vec::new(),
         ..car()
@@ -384,13 +384,13 @@ fn wheel_values_are_validated() {
     assert_rejected(with_wheel(|w| w.suspension_max_length(0.2)));
     assert_rejected(with_wheel(|w| w.suspension_preload_length(-0.1)));
     assert_rejected(with_wheel(|w| {
-        w.suspension_spring(SuspensionSpring::FrequencyAndDamping {
+        w.suspension_spring(SpringSettings::FrequencyAndDamping {
             frequency: 0.0,
             damping: 0.5,
         })
     }));
     assert_rejected(with_wheel(|w| {
-        w.suspension_spring(SuspensionSpring::StiffnessAndDamping {
+        w.suspension_spring(SpringSettings::StiffnessAndDamping {
             stiffness: 1000.0,
             damping: -1.0,
         })
@@ -445,9 +445,8 @@ fn wheel_magnitudes_are_bounded_by_the_policy() {
 #[test]
 fn suspension_springs_are_bounded_by_the_coefficient() {
     let bound = limits::MAX_SPRING_COEFFICIENT;
-    let stiffness =
-        |stiffness, damping| SuspensionSpring::StiffnessAndDamping { stiffness, damping };
-    let spring = |spring: SuspensionSpring| with_wheel(move |w| w.suspension_spring(spring));
+    let stiffness = |stiffness, damping| SpringSettings::StiffnessAndDamping { stiffness, damping };
+    let spring = |spring: SpringSettings| with_wheel(move |w| w.suspension_spring(spring));
     assert_eq!(spring(stiffness(bound, bound)).validate(LAYERS), Ok(()));
     assert_rejected(spring(stiffness(bound.next_up(), 0.0)));
     assert_rejected(spring(stiffness(1.0, bound.next_up())));
@@ -458,7 +457,7 @@ fn suspension_springs_are_bounded_by_the_coefficient() {
     let two_pi = 2.0 * std::f64::consts::PI;
     let max_frequency = (f64::from(bound) / mass).sqrt() / two_pi;
     let max_damping = f64::from(bound) / (2.0 * mass * two_pi);
-    let frequency = |frequency: f64, damping: f64| SuspensionSpring::FrequencyAndDamping {
+    let frequency = |frequency: f64, damping: f64| SpringSettings::FrequencyAndDamping {
         frequency: frequency as f32,
         damping: damping as f32,
     };
@@ -518,7 +517,7 @@ fn step_coefficients_of_the_drivetrain_must_be_finite() {
     let transmission = VehicleTransmissionSettings::default();
     assert_rejected(car().transmission(transmission.clone().clutch_strength(f32::MAX)));
     assert_rejected(car().transmission(transmission.gear_ratios(vec![f32::MAX])));
-    assert_rejected(VehicleSettings {
+    assert_rejected(WheeledVehicleSettings {
         differentials: vec![
             VehicleDifferentialSettings::new(Some(0), Some(1)).differential_ratio(f32::MAX)
         ],
@@ -629,7 +628,7 @@ fn gear_lists_must_not_be_empty() {
 
 #[test]
 fn differentials_are_required() {
-    assert_rejected(VehicleSettings {
+    assert_rejected(WheeledVehicleSettings {
         differentials: Vec::new(),
         ..car()
     });
@@ -637,7 +636,7 @@ fn differentials_are_required() {
 
 #[test]
 fn differential_values_are_validated() {
-    let with = |differential: VehicleDifferentialSettings| VehicleSettings {
+    let with = |differential: VehicleDifferentialSettings| WheeledVehicleSettings {
         differentials: vec![differential],
         ..car()
     };
@@ -653,7 +652,7 @@ fn differential_values_are_validated() {
         with(VehicleDifferentialSettings::new(None, Some(3))).validate(LAYERS),
         Ok(())
     );
-    let uneven = VehicleSettings {
+    let uneven = WheeledVehicleSettings {
         differentials: vec![
             front.engine_torque_ratio(0.5),
             VehicleDifferentialSettings::new(Some(2), Some(3)).engine_torque_ratio(0.4999),
@@ -679,7 +678,7 @@ fn anti_roll_bars_are_validated() {
 
 #[test]
 fn collision_testers_are_validated() {
-    let with = |tester: VehicleCollisionTester| VehicleSettings {
+    let with = |tester: VehicleCollisionTester| WheeledVehicleSettings {
         collision_tester: tester,
         ..car()
     };

@@ -24,7 +24,7 @@ what is planned next.
   `CharacterSettings::humanoid(height, radius)`.
 - Wheeled vehicles with suspension, engine, automatic transmission, differentials and anti-roll
   bars; tracked vehicles (tanks) with two tracks; motorcycles with a lean controller
-  ([guide](vehicles.md)); presets for a car and a motorcycle (`VehicleSettings::car`,
+  ([guide](vehicles.md)); presets for a car and a motorcycle (`WheeledVehicleSettings::car`,
   `MotorcycleSettings::bike`), and each wheel's pose in world space for drawing
   (`VehicleRef::wheel_world_transform`).
 - Ragdolls from a skeleton, posed, motor-driven or kinematic, with settle detection, and a skeleton

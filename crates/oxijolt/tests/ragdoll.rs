@@ -725,13 +725,13 @@ fn ragdoll_parts_and_ids_are_guarded() {
         world.remove_body(part),
         Err(BodyError::OwnedByRagdoll(part))
     );
-    let vehicle = VehicleSettings::new(
+    let vehicle = WheeledVehicleSettings::new(
         vec![WheelSettings::new(Vec3::new(0.0, -0.2, 0.0))],
         vec![VehicleDifferentialSettings::new(Some(0), None)],
         VehicleCollisionTester::ray(layers.fixed),
     );
     assert!(matches!(
-        world.create_vehicle(part, &vehicle),
+        world.create_wheeled_vehicle(part, &vehicle),
         Err(VehicleError::Body(BodyError::OwnedByRagdoll(id))) if id == part
     ));
 

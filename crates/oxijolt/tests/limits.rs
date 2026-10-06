@@ -1137,16 +1137,16 @@ fn vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely() {
     let max_frequency = (f64::from(coefficient) / f64::from(limits::MAX_MASS)).sqrt()
         / (2.0 * std::f64::consts::PI);
     let springs = [
-        SuspensionSpring::StiffnessAndDamping {
+        SpringSettings::StiffnessAndDamping {
             stiffness: coefficient,
             damping: coefficient,
         },
-        SuspensionSpring::FrequencyAndDamping {
+        SpringSettings::FrequencyAndDamping {
             frequency: (0.999 * max_frequency) as f32,
             damping: 1.0,
         },
-        SuspensionSpring::default(),
-        SuspensionSpring::default(),
+        WheelSettings::DEFAULT_SUSPENSION_SPRING,
+        WheelSettings::DEFAULT_SUSPENSION_SPRING,
     ];
     let wheels = WHEEL_POSITIONS
         .iter()
@@ -1160,7 +1160,7 @@ fn vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely() {
                 .suspension_spring(spring)
         })
         .collect();
-    let settings = VehicleSettings::new(
+    let settings = WheeledVehicleSettings::new(
         wheels,
         vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
         VehicleCollisionTester::ray(layers.probe),
@@ -1173,7 +1173,7 @@ fn vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely() {
     let tilt = Quat::from_xyzw(0.0, 0.0, 0.05, (1.0_f32 - 0.0025).sqrt());
     let body = chassis_settings(&layers, RVec3::new(0.0, 0.9, 0.0), tilt);
     let chassis = world.create_body(&chassis_shape(), &body).unwrap();
-    let car = world.create_vehicle(chassis, &settings).unwrap();
+    let car = world.create_wheeled_vehicle(chassis, &settings).unwrap();
     world
         .vehicle_mut(car)
         .unwrap()

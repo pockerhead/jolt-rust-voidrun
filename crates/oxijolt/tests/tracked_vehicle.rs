@@ -527,7 +527,7 @@ fn tank_testers() {
         .unwrap()
         .set_collision_tester(blind)
         .unwrap();
-    assert_eq!(*world.vehicle(tank).unwrap().collision_tester(), blind);
+    assert_eq!(world.vehicle(tank).unwrap().collision_tester(), blind);
     step(&mut world, 1);
     assert!(world
         .vehicle(tank)

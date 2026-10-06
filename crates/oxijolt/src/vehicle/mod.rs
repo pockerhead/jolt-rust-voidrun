@@ -42,10 +42,9 @@ pub use motorcycle::MotorcycleLean;
 pub use readout::{VehicleRef, WheelContact, WheelState};
 use settings::{BuiltSettings, WheelGeometry};
 pub use settings::{
-    MotorcycleSettings, SuspensionSpring, TrackedVehicleSettings, TrackedWheelSettings,
-    VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings,
-    VehicleSettings, VehicleTrackSettings, VehicleTransmissionSettings, WheelSettings,
-    DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
+    MotorcycleSettings, TrackedVehicleSettings, TrackedWheelSettings, VehicleAntiRollBar,
+    VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings,
+    VehicleTrackSettings, VehicleTransmissionSettings, WheelSettings, WheeledVehicleSettings,
 };
 pub use tracked::{TrackSide, TrackState, TrackedDriverInput};
 
@@ -156,7 +155,7 @@ impl PhysicsWorld {
     /// vehicle every tick.
     ///
     /// Fails with [`VehicleError::InvalidValue`] when a setting is out of range (see the setters
-    /// of [`VehicleSettings`] and the types it holds), with [`VehicleError::Body`] when `body`
+    /// of [`WheeledVehicleSettings`] and the types it holds), with [`VehicleError::Body`] when `body`
     /// is not in this world, is the inner body of a character, a ragdoll part or a soft body, or
     /// has fewer than six degrees of freedom, with
     /// [`VehicleError::NotDynamic`], with [`VehicleError::AlreadyHasVehicle`] when the body
@@ -184,12 +183,12 @@ impl PhysicsWorld {
     /// let wheel = |x: f32, z: f32| {
     ///     WheelSettings::new(Vec3::new(x, -0.1, z)).radius(0.35).width(0.2)
     /// };
-    /// let settings = VehicleSettings::new(
+    /// let settings = WheeledVehicleSettings::new(
     ///     vec![wheel(0.9, 1.4), wheel(-0.9, 1.4), wheel(0.9, -1.4), wheel(-0.9, -1.4)],
     ///     vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
     ///     VehicleCollisionTester::ray(ObjectLayer::MOVING),
     /// );
-    /// let car = world.create_vehicle(chassis, &settings)?;
+    /// let car = world.create_wheeled_vehicle(chassis, &settings)?;
     ///
     /// world.vehicle_mut(car)?.set_driver_input(DriverInput { forward: 1.0, ..DriverInput::default() })?;
     /// for _ in 0..60 {
@@ -201,10 +200,10 @@ impl PhysicsWorld {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn create_vehicle(
+    pub fn create_wheeled_vehicle(
         &mut self,
         body: BodyId,
-        settings: &VehicleSettings,
+        settings: &WheeledVehicleSettings,
     ) -> Result<VehicleId, VehicleError> {
         settings.validate(self.object_layer_count)?;
         self.check_chassis(body)?;
@@ -356,7 +355,7 @@ impl PhysicsWorld {
     /// world's reference.
     fn unregister_vehicle(&mut self, entry: VehicleEntry) {
         // SAFETY: the system and the constraint are live, the system is borrowed mutably and no
-        // step runs; the vehicle was registered in both lists by `create_vehicle`.
+        // step runs; the vehicle was registered in both lists by `create_wheeled_vehicle`.
         unsafe {
             let constraint = entry.constraint.as_ptr();
             JPH_PhysicsSystem_RemoveStepListener(
