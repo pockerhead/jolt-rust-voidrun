@@ -19,7 +19,7 @@
 //! ```
 //!
 //! The prelude names no math type and no `Result`, so it can be glob-imported next to
-//! `bevy::prelude::*`: `Vec3`, `Quat` and `Result` stay Bevy's. With the `glam` feature,
+//! `bevy::prelude::*`: `Vec3`, `Quat` and `Result` stay Bevy's. With the `glam032` feature,
 //! `.into()` converts poses to Bevy's types; `?` in a system that returns Bevy's `Result`
 //! converts any oxijolt error.
 //!
@@ -74,9 +74,9 @@ pub use crate::{ActivationEvent, ContactEvent, ContactListener, EventSettings, W
 pub use crate::{AnyConstraintId, ConstraintId};
 pub use crate::{AnyVehicleId, DriverInput, VehicleId, WheelSettings, WheeledVehicleSettings};
 pub use crate::{
-    BodyError, CharacterError, ConstraintError, ContactSettingsError, ConvexHullError, MeshError,
-    QueryError, RagdollError, ShapeError, SoftBodyError, StateError, StepError, ThinTrianglesError,
-    VehicleError, WorldError,
+    BodyError, CharacterError, CollisionGroupError, ConstraintError, ContactSettingsError,
+    ConvexHullError, MeshError, QueryError, RagdollError, ShapeError, SoftBodyError, StateError,
+    StepError, ThinTrianglesError, VehicleError, WorldError,
 };
 pub use crate::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use crate::{CharacterId, CharacterSettings, ExtendedUpdateSettings};

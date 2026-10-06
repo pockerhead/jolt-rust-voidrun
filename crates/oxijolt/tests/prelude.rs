@@ -46,6 +46,8 @@ fn the_prelude_leaves_math_and_result_to_the_engine_prelude() -> Result {
     assert!(world.step(1.0 / 60.0)?.is_complete());
     let poses: Vec<BodyPose> = world.active_body_poses();
     assert_eq!(poses.len(), 1);
+    // Every area error is in the prelude.
+    let _: Option<CollisionGroupError> = None;
     Ok(())
 }
 

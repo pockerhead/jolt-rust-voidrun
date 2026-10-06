@@ -1,4 +1,4 @@
-//! `From` conversions between the math types and [glam](https://docs.rs/glam)'s (feature `glam`).
+//! `From` conversions between the math types and [glam](https://docs.rs/glam)'s (feature `glam032`).
 //!
 //! Each conversion copies the fields, so a value converted there and back has the same bits. It
 //! neither normalizes nor checks: the calls that take a value check it as usual.

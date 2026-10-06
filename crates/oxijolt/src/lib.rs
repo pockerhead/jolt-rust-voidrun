@@ -96,13 +96,17 @@
 //! returns in its [`StepReport`].
 //!
 //! # Features
+//! Every feature adds to the API except `double-precision`, which changes [`Real`] in every
+//! signature: only the final application enables it, and libraries built on oxijolt forward it.
+//! `bindgen` is a build switch outside the semver promise.
+//!
 //! - `double-precision`: world positions ([`Real`], [`RVec3`]) use `f64`.
 //! - `cross-platform-deterministic`: Jolt's cross-platform deterministic floating point settings.
 //! - `debug-renderer`: collider wireframes as line data, see above.
 //! - `asserts`: Jolt's debug assertions, reported as above.
 //! - `bindgen`: generates the raw bindings with libclang at build time.
-//! - `glam`: `From` conversions both ways between [`Vec3`], [`Quat`], [`RVec3`] and glam's
-//!   `Vec3`, `Quat` and vector of [`Real`] (`DVec3` in double precision), for glam 0.32.
+//! - `glam032`: `From` conversions both ways between [`Vec3`], [`Quat`], [`RVec3`] and glam
+//!   0.32's `Vec3`, `Quat` and vector of [`Real`] (`DVec3` in double precision).
 //! - `mint`: `From` conversions both ways between [`Vec3`], [`Quat`], [`RVec3`] and mint's
 //!   `Vector3<f32>`, `Quaternion<f32>` and `Vector3<Real>`.
 //!
@@ -110,7 +114,7 @@
 //! nothing is normalized or checked until a call takes the value.
 //!
 //! ```
-//! # #[cfg(feature = "glam")]
+//! # #[cfg(feature = "glam032")]
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use oxijolt::{BodySettings, PhysicsWorld, Shape, WorldSettings};
 //!
@@ -125,7 +129,7 @@
 //! assert_eq!(velocity, glam::Vec3::X);
 //! # Ok(())
 //! # }
-//! # #[cfg(not(feature = "glam"))]
+//! # #[cfg(not(feature = "glam032"))]
 //! # fn main() {}
 //! ```
 //!
@@ -157,7 +161,7 @@ mod constraint;
 mod debug;
 pub mod error;
 mod filter;
-#[cfg(feature = "glam")]
+#[cfg(feature = "glam032")]
 mod glam_interop;
 mod job_system;
 mod jolt_assert;

@@ -42,7 +42,7 @@ what is planned next.
 - A floating origin (`PhysicsWorld::rebase`) and optional `f64` world positions.
 - Jolt's jobs on Jolt's thread pool or on your own, such as Rayon ([guide](job-system.md)).
 - Debug wireframes as line data (feature `debug-renderer`); nothing is drawn.
-- Optional `glam` and `mint` features with exact conversions for `Vec3`, `RVec3` and `Quat`.
+- Optional `glam032` and `mint` features with exact conversions for `Vec3`, `RVec3` and `Quat`.
 - The poses of every awake body in one call, in a deterministic order
   (`PhysicsWorld::active_body_poses`).
 - `oxijolt::prelude` for the common types, and `oxijolt::error::{Error, Result}` that wraps the

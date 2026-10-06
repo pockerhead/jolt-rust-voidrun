@@ -16,7 +16,7 @@ debug-renderer = ["oxijolt/debug-renderer"]
 asserts = ["oxijolt/asserts"]
 
 [dependencies]
-oxijolt = { path = "../../crates/oxijolt", features = ["glam"] }
+oxijolt = { path = "../../crates/oxijolt", features = ["glam032"] }
 glam = "0.32"
 gif = "0.14"
 macroquad = { version = "0.4.16", default-features = false, optional = true }

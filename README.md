@@ -91,7 +91,7 @@ The full list of what works today, with links to the guides, is in
 - [x] Debug wireframes as line data
 - [x] Same results for any worker thread count
 - [x] Builds without LLVM; Windows and Linux in CI; prebuilt libraries in releases
-- [x] `glam` and `mint` conversions
+- [x] `glam` (feature `glam032`) and `mint` conversions
 - [x] One-call pose readout, a crate-wide error type, a prelude
 - [x] Convex hull, triangle mesh, scaled and tapered shapes
 - [x] Body controls: impulses, kinematic moves, activation, sensors, user data, changing shape

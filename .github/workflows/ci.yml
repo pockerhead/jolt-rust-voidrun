@@ -117,9 +117,9 @@ jobs:
           if cargo tree -p oxijolt -e normal --prefix none $FEATURE_ARGS | grep -E '^(glam|mint) '; then
             echo "glam or mint is in the dependency graph without its feature"; exit 1
           fi
-          cargo clippy -p oxijolt --lib $FEATURE_ARGS --features oxijolt/glam -- -D warnings
+          cargo clippy -p oxijolt --lib $FEATURE_ARGS --features oxijolt/glam032 -- -D warnings
           cargo clippy -p oxijolt --lib $FEATURE_ARGS --features oxijolt/mint -- -D warnings
-          interop="--features oxijolt/glam,oxijolt/mint"
+          interop="--features oxijolt/glam032,oxijolt/mint"
           cargo clippy --workspace --exclude playground --all-targets $FEATURE_ARGS $interop -- -D warnings
           cargo test -p oxijolt --lib $FEATURE_ARGS $interop interop
           cargo test -p oxijolt --doc $FEATURE_ARGS $interop
