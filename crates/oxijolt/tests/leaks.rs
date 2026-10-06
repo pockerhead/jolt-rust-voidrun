@@ -63,7 +63,7 @@ fn per_call_joltc_objects_do_not_leak() {
         for i in 0..rounds {
             let x = (i % 7) as Real * 0.1;
             let ray = RayCast::new(RVec3::new(x, 5.0, 0.0), down);
-            hits += usize::from(world.cast_ray(ray, &filter).unwrap().is_some());
+            hits += usize::from(world.cast_ray(&ray, &filter).unwrap().is_some());
             let cast = ShapeCast::new(&capsule, RVec3::new(x, 6.0, 0.0), Quat::IDENTITY, down)
                 .target_distance(0.02);
             hits += usize::from(world.cast_shape(&cast, &filter).unwrap().is_some());

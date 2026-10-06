@@ -24,7 +24,7 @@ what is planned next.
   `CharacterSettings::humanoid(height, radius)`.
 - Wheeled vehicles with suspension, engine, automatic transmission, differentials and anti-roll
   bars; tracked vehicles (tanks) with two tracks; motorcycles with a lean controller
-  ([guide](vehicles.md)); presets for a car and a motorcycle (`VehicleSettings::car`,
+  ([guide](vehicles.md)); presets for a car and a motorcycle (`WheeledVehicleSettings::car`,
   `MotorcycleSettings::bike`), and each wheel's pose in world space for drawing
   (`VehicleRef::wheel_world_transform`).
 - Ragdolls from a skeleton, posed, motor-driven or kinematic, with settle detection, and a skeleton
@@ -38,17 +38,24 @@ what is planned next.
   thread count, and a contact listener that changes friction, restitution, mass scales or surface
   velocity per contact, or rejects contacts before they form (one-way platforms), and Jolt's
   estimate of each new contact's impulses for impact sounds and damage ([guide](events.md)).
-- Saving and restoring a world's state for rollback and replays ([guide](state.md)).
+- Saving and restoring a world's state for rollback and replays, into reused buffers without
+  allocating, of every body, the bodies that can move or chosen ones, and restoring chosen
+  bodies only ([guide](state.md)).
+- Shape cooking: built shapes with their children and materials saved to bytes and restored,
+  checked against the build that wrote them ([guide](shape-cooking.md)); meshes and hulls tested
+  on real models from open sources ([report](real-meshes.md)).
 - A floating origin (`PhysicsWorld::rebase`) and optional `f64` world positions.
 - Jolt's jobs on Jolt's thread pool or on your own, such as Rayon ([guide](job-system.md)).
 - Debug wireframes as line data (feature `debug-renderer`); nothing is drawn.
-- Optional `glam` and `mint` features with exact conversions for `Vec3`, `RVec3` and `Quat`.
+- Optional `glam032` and `mint` features with exact conversions for `Vec3`, `RVec3` and `Quat`.
 - The poses of every awake body in one call, in a deterministic order
   (`PhysicsWorld::active_body_poses`).
 - `oxijolt::prelude` for the common types, and `oxijolt::error::{Error, Result}` that wraps the
   error of every area.
+- One set of API rules for names, constructors, settings, errors and derives
+  ([api-guidelines.md](api-guidelines.md)), and Rust 1.88 as the minimum version, checked in CI.
 
-The [playground](playground.md) shows them in ten small scenes with a window, and runs the same
+The [playground](playground.md) shows them in twelve small scenes with a window, and runs the same
 scenes headless.
 
 The raw layer, `oxijolt-sys`, has the joltc functions for all of them.

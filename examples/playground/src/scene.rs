@@ -1,6 +1,7 @@
 //! The interface every scene implements, the list of scenes, and the world setup they share.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use oxijolt::{
     BroadPhaseLayer, CollisionLayers, EventSettings, ObjectLayer, PhysicsWorld, Vec3, WorldSettings,
@@ -20,10 +21,14 @@ pub const DT: f32 = 1.0 / 60.0;
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// How a scene's world is built.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SceneConfig {
     /// Jolt worker threads; `None` takes the scene's own default.
     pub worker_threads: Option<u32>,
+    /// The OBJ or glTF file the `model` scene loads; `None` takes the committed track tile.
+    pub model: Option<PathBuf>,
+    /// The directory `scripts/fetch_models.py` filled, whose models the `meshes` scene adds.
+    pub models: Option<PathBuf>,
 }
 
 /// What a scene's recorded clip must show, and what the scene showed so far.
@@ -132,11 +137,15 @@ pub enum SceneKind {
     Contacts,
     /// Scene queries, body controls, save and restore, and a floating origin.
     Queries,
+    /// Real models from open sources as static meshes, with bodies raining onto them.
+    Meshes,
+    /// Any OBJ or glTF model given on the command line, with bodies raining onto it.
+    Model,
 }
 
 impl SceneKind {
     /// Every scene in menu order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Character,
         Self::Vehicles,
         Self::Pile,
@@ -147,6 +156,8 @@ impl SceneKind {
         Self::Destruction,
         Self::Contacts,
         Self::Queries,
+        Self::Meshes,
+        Self::Model,
     ];
 
     /// The command-line name, the number key and the menu title.
@@ -162,6 +173,8 @@ impl SceneKind {
             Self::Destruction => ("destruction", '8', "Breakable wall"),
             Self::Contacts => ("contacts", '9', "Contact control and sensors"),
             Self::Queries => ("queries", '0', "Queries, state and origin"),
+            Self::Meshes => ("meshes", '-', "Real models as meshes"),
+            Self::Model => ("model", '=', "A model from the command line"),
         }
     }
 
@@ -202,6 +215,8 @@ impl SceneKind {
             }
             Self::Contacts => Box::new(scenes::contacts::Contacts::new(config, generation)?),
             Self::Queries => Box::new(scenes::queries::Queries::new(config, generation)?),
+            Self::Meshes => Box::new(scenes::meshes::Meshes::new(config, generation)?),
+            Self::Model => Box::new(scenes::model::Model::new(config, generation)?),
         })
     }
 }

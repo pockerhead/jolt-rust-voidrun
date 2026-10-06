@@ -80,9 +80,9 @@ pub fn run_shape_creation() -> Result<Vec<Row>, Box<dyn Error>> {
             ));
         }
         let (mesh, _) = Shape::new_mesh(&vertices, &triangles)?;
-        let us = time(|| Shape::scaled(&mesh, Vec3::new(2.0, 2.0, 2.0)))?;
+        let us = time(|| Shape::new_scaled(&mesh, Vec3::new(2.0, 2.0, 2.0)))?;
         rows.push(Row::new(
-            &format!("shape creation: Shape::scaled by 2, mesh of {count} triangles"),
+            &format!("shape creation: Shape::new_scaled by 2, mesh of {count} triangles"),
             "one creation",
             us,
             Limit::None,
@@ -95,7 +95,7 @@ pub fn run_shape_creation() -> Result<Vec<Row>, Box<dyn Error>> {
         let cloud: Vec<Vec3> = (0..points)
             .map(|_| Vec3::new(coordinate(), coordinate(), coordinate()))
             .collect();
-        let us = time(|| Shape::new_convex_hull(&cloud, 0.05))?;
+        let us = time(|| Shape::new_convex_hull_with_convex_radius(&cloud, 0.05))?;
         rows.push(Row::new(
             &format!("shape creation: convex hull of {points} random points"),
             "one creation",

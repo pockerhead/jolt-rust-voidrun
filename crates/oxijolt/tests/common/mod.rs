@@ -14,6 +14,7 @@ pub mod math;
 pub mod memory;
 pub mod meshes;
 pub mod ragdoll;
+pub mod rollback;
 pub mod soft_body;
 pub mod vehicle;
 pub mod vehicle_kinds;

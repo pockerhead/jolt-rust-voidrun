@@ -1,18 +1,21 @@
 [package]
 name = "oxijolt"
 description = "Safe Rust API for Jolt Physics"
-version = "0.7.0+jolt-5.6.0"
+version = "1.0.0+jolt-5.6.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/pockerhead/oxijolt"
 edition = "2021"
+rust-version = "1.88"
 keywords = ["physics", "jolt", "gamedev", "simulation", "deterministic"]
 categories = ["game-development", "simulation"]
 
 [package.metadata.docs.rs]
-features = ["glam", "mint", "debug-renderer"]
+features = ["glam032", "mint", "debug-renderer"]
 targets = ["x86_64-unknown-linux-gnu"]
 
 [features]
+# Every feature adds to the API except `double-precision`, which turns `Real` into `f64` in every
+# signature: only the final application enables it, and libraries built on oxijolt forward it.
 double-precision = ["oxijolt-sys/double-precision"]
 cross-platform-deterministic = ["oxijolt-sys/cross-platform-deterministic"]
 # Debug wireframe of colliders as line data (`PhysicsWorld::debug_lines`); also compiles Jolt's
@@ -21,22 +24,26 @@ debug-renderer = ["oxijolt-sys/debug-renderer"]
 # Compiles Jolt with its debug assertions (`oxijolt-sys/asserts`); a failed assertion prints its
 # message and aborts the process.
 asserts = ["oxijolt-sys/asserts"]
-# Generates the raw bindings with libclang at build time (`oxijolt-sys/bindgen`).
+# Generates the raw bindings with libclang at build time (`oxijolt-sys/bindgen`). A build switch
+# outside the semver promise.
 bindgen = ["oxijolt-sys/bindgen"]
-# `From` conversions between the math types and glam's `Vec3`, `Quat` and the vector of `Real`
-# (`DVec3` in double precision).
-glam = ["dep:glam"]
+# `From` conversions between the math types and glam 0.32's `Vec3`, `Quat` and the vector of
+# `Real` (`DVec3` in double precision). The name carries glam's version, so a later glam can get
+# a feature of its own next to it.
+glam032 = ["dep:glam"]
 # `From` conversions between the math types and mint's `Vector3` and `Quaternion`.
 mint = ["dep:mint"]
 
 [dependencies]
-oxijolt-sys = { version = "0.7.0", path = "../oxijolt-sys" }
+oxijolt-sys = { version = "1.0.0", path = "../oxijolt-sys" }
 # The glam version Bevy uses; `std` is glam's math backend and adds nothing to the conversions.
 glam = { version = "0.32", optional = true, default-features = false, features = ["std"] }
 mint = { version = "0.5", optional = true, default-features = false }
 
 [dev-dependencies]
 rayon = "1.11"
+# The real-mesh tests' OBJ and glTF reader; not published, so cargo drops it on publish.
+mesh-import = { path = "../mesh-import" }
 
 [[bench]]
 name = "budgets"

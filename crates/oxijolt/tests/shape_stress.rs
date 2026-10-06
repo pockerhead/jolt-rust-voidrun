@@ -206,7 +206,7 @@ impl Arena {
             Shape::new_sphere(0.3).unwrap(),
             Shape::new_box(Vec3::new(0.3, 0.3, 0.3)).unwrap(),
             Shape::new_capsule(0.3, 0.2).unwrap(),
-            Shape::new_convex_hull(
+            Shape::new_convex_hull_with_convex_radius(
                 &[
                     Vec3::new(-0.3, -0.2, -0.3),
                     Vec3::new(0.3, -0.25, -0.2),
@@ -261,7 +261,7 @@ impl Arena {
             RVec3::new(real(c.x), top, real(c.z)),
             Vec3::new(0.0, -(extent.height() + 2.0), 0.0),
         );
-        if let Some(hit) = self.world.cast_ray(ray, &QueryFilter::new()).unwrap() {
+        if let Some(hit) = self.world.cast_ray(&ray, &QueryFilter::new()).unwrap() {
             let y = ray.point_at(hit.fraction).y;
             assert!(
                 y.is_finite() && hit.normal.y.is_finite(),
@@ -313,7 +313,7 @@ impl Arena {
             RVec3::new(real(c.x), top, real(c.z)),
             Vec3::new(0.0, -(extent.height() + 2.0), 0.0),
         );
-        if let Some(hit) = self.world.cast_ray(ray, &QueryFilter::new()).unwrap() {
+        if let Some(hit) = self.world.cast_ray(&ray, &QueryFilter::new()).unwrap() {
             assert!(ray.point_at(hit.fraction).y.is_finite(), "{what}: {hit:?}");
         }
         let sphere = Shape::new_sphere(0.3).unwrap();
@@ -548,17 +548,19 @@ fn cloud(rng: &mut Rng, kind: Cloud) -> Vec<Vec3> {
 }
 
 /// The outcome the hull rules define for `kind`, when they define one.
-fn expected_hull_error(kind: Cloud, points: &[Vec3]) -> Option<&'static [HullError]> {
+fn expected_hull_error(kind: Cloud, points: &[Vec3]) -> Option<&'static [ConvexHullError]> {
     let within = points.iter().all(|p| {
         [p.x, p.y, p.z]
             .iter()
             .all(|c| c.abs() <= limits::MAX_SHAPE_EXTENT)
     });
     match kind {
-        Cloud::TooFew => Some(&[HullError::TooFewPoints]),
-        Cloud::ExactLine if within => Some(&[HullError::Degenerate]),
+        Cloud::TooFew => Some(&[ConvexHullError::TooFewPoints]),
+        Cloud::ExactLine if within => Some(&[ConvexHullError::Degenerate]),
         // A tiny plane is also smaller than Jolt's minimum initial triangle.
-        Cloud::ExactPlane if within => Some(&[HullError::Coplanar, HullError::Degenerate]),
+        Cloud::ExactPlane if within => {
+            Some(&[ConvexHullError::Coplanar, ConvexHullError::Degenerate])
+        }
         _ => None,
     }
 }
@@ -578,7 +580,7 @@ fn hull_family(arena: &mut Arena) {
         let points = cloud(&mut rng, kind);
         let radius = if index % 3 == 0 { 0.0 } else { 0.05 };
         let what = format!("hull {index} ({kind:?}, {} points)", points.len());
-        let result = Shape::new_convex_hull(&points, radius);
+        let result = Shape::new_convex_hull_with_convex_radius(&points, radius);
         if let Some(allowed) = expected_hull_error(kind, &points) {
             assert!(
                 matches!(result, Err(ShapeError::ConvexHull(error)) if allowed.contains(&error)),

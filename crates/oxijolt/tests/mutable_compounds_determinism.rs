@@ -198,11 +198,11 @@ impl Scene {
         let count = self.ledge_editor.sub_shape_count();
         tick.shape.extend_from_slice(&count.to_le_bytes());
         // A probe through tile 9, whose index shifts with the removals.
-        let ray = RayCast {
-            origin: RVec3::new(tile_x(9), LEDGE_Y + 0.1, 0.0),
-            direction: Vec3::new(0.0, -0.2, 0.0),
-        };
-        let hit = self.world.cast_ray(ray, &QueryFilter::new()).unwrap();
+        let ray = RayCast::new(
+            RVec3::new(tile_x(9), LEDGE_Y + 0.1, 0.0),
+            Vec3::new(0.0, -0.2, 0.0),
+        );
+        let hit = self.world.cast_ray(&ray, &QueryFilter::new()).unwrap();
         let probe = hit.and_then(|hit| hit.compound_child);
         tick.shape.extend(format!("{probe:?}").bytes());
     }

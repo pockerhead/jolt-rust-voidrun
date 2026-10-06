@@ -43,9 +43,9 @@
 //! - Virtual characters: [`PhysicsWorld::create_character`], with a standing humanoid from
 //!   [`CharacterSettings::humanoid`].
 //! - Wheeled and tracked vehicles and motorcycles on a chassis body:
-//!   [`PhysicsWorld::create_vehicle`], [`PhysicsWorld::create_tracked_vehicle`] and
-//!   [`PhysicsWorld::create_motorcycle`], with ready settings from [`VehicleSettings::car`] and
-//!   [`MotorcycleSettings::bike`] and wheel poses for drawing from
+//!   [`PhysicsWorld::create_wheeled_vehicle`], [`PhysicsWorld::create_tracked_vehicle`] and
+//!   [`PhysicsWorld::create_motorcycle`], with ready settings from [`WheeledVehicleSettings::car`]
+//!   and [`MotorcycleSettings::bike`] and wheel poses for drawing from
 //!   [`VehicleRef::wheel_world_transform`].
 //! - Ragdolls: [`PhysicsWorld::create_ragdoll`].
 //! - Constraints of twelve kinds between two bodies: [`PhysicsWorld::create_constraint`]
@@ -96,13 +96,17 @@
 //! returns in its [`StepReport`].
 //!
 //! # Features
+//! Every feature adds to the API except `double-precision`, which changes [`Real`] in every
+//! signature: only the final application enables it, and libraries built on oxijolt forward it.
+//! `bindgen` is a build switch outside the semver promise.
+//!
 //! - `double-precision`: world positions ([`Real`], [`RVec3`]) use `f64`.
 //! - `cross-platform-deterministic`: Jolt's cross-platform deterministic floating point settings.
 //! - `debug-renderer`: collider wireframes as line data, see above.
 //! - `asserts`: Jolt's debug assertions, reported as above.
 //! - `bindgen`: generates the raw bindings with libclang at build time.
-//! - `glam`: `From` conversions both ways between [`Vec3`], [`Quat`], [`RVec3`] and glam's
-//!   `Vec3`, `Quat` and vector of [`Real`] (`DVec3` in double precision), for glam 0.32.
+//! - `glam032`: `From` conversions both ways between [`Vec3`], [`Quat`], [`RVec3`] and glam
+//!   0.32's `Vec3`, `Quat` and vector of [`Real`] (`DVec3` in double precision).
 //! - `mint`: `From` conversions both ways between [`Vec3`], [`Quat`], [`RVec3`] and mint's
 //!   `Vector3<f32>`, `Quaternion<f32>` and `Vector3<Real>`.
 //!
@@ -110,7 +114,7 @@
 //! nothing is normalized or checked until a call takes the value.
 //!
 //! ```
-//! # #[cfg(feature = "glam")]
+//! # #[cfg(feature = "glam032")]
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use oxijolt::{BodySettings, PhysicsWorld, Shape, WorldSettings};
 //!
@@ -125,7 +129,7 @@
 //! assert_eq!(velocity, glam::Vec3::X);
 //! # Ok(())
 //! # }
-//! # #[cfg(not(feature = "glam"))]
+//! # #[cfg(not(feature = "glam032"))]
 //! # fn main() {}
 //! ```
 //!
@@ -141,6 +145,7 @@
 //! [coverage]: https://github.com/pockerhead/oxijolt/blob/main/docs/coverage.md#not-covered
 #![warn(
     missing_docs,
+    missing_debug_implementations,
     unsafe_op_in_unsafe_fn,
     clippy::undocumented_unsafe_blocks,
     clippy::missing_safety_doc
@@ -156,7 +161,7 @@ mod constraint;
 mod debug;
 pub mod error;
 mod filter;
-#[cfg(feature = "glam")]
+#[cfg(feature = "glam032")]
 mod glam_interop;
 mod job_system;
 mod jolt_assert;
@@ -202,9 +207,9 @@ pub use constraint::{
 #[cfg(feature = "debug-renderer")]
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
-    BodyError, CharacterError, CollisionGroupError, ConstraintError, ContactSettingsError,
-    HullError, MeshError, QueryError, RagdollError, ShapeError, SoftBodyError, StateError,
-    StepError, ThinTrianglesError, VehicleError, WorldError,
+    BinaryStateError, BodyError, CharacterError, CollisionGroupError, ConstraintError,
+    ContactSettingsError, ConvexHullError, MeshError, QueryError, RagdollError, ShapeError,
+    SoftBodyError, StateError, StepError, ThinTrianglesError, VehicleError, WorldError,
 };
 pub use filter::QueryFilter;
 pub use job_system::{Job, JobSystem};
@@ -218,7 +223,7 @@ pub use listener::{
 pub use material::PhysicsMaterial;
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{
-    CollideShape, CollideShapeHit, PointHit, RayCast, RayHit, ShapeCast, ShapeCastHit,
+    CollidePointHit, CollideShape, CollideShapeHit, RayCast, RayCastHit, ShapeCast, ShapeCastHit,
 };
 pub use ragdoll::{
     JointReading, JointTransform, MappedSkeleton, RagdollId, RagdollJoint, RagdollMut, RagdollPart,
@@ -234,15 +239,14 @@ pub use soft_body::{
     SoftBodyRef, SoftBodySettings, SoftBodySharedSettings, SoftBodySharedSettingsBuilder,
     SoftBodyVertex, SoftBodyVertexAttributes, SoftBodyVertexState, SoftBodyVolume,
 };
-pub use state::WorldState;
+pub use state::{BodySelection, WorldState};
 pub use vehicle::{
-    AnyVehicleId, DriverInput, Motorcycle, MotorcycleLean, MotorcycleSettings, SuspensionSpring,
-    TrackSide, TrackState, TrackedDriverInput, TrackedVehicle, TrackedVehicleSettings,
-    TrackedWheelSettings, VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings,
-    VehicleEngineSettings, VehicleId, VehicleKind, VehicleMut, VehicleRef, VehicleSettings,
-    VehicleTrackSettings, VehicleTransmissionSettings, VehicleType, WheelContact, WheelSettings,
-    WheelState, WheeledVehicle, DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION,
-    DEFAULT_NORMALIZED_TORQUE,
+    AnyVehicleId, DriverInput, Motorcycle, MotorcycleLean, MotorcycleSettings, TrackSide,
+    TrackState, TrackedDriverInput, TrackedVehicle, TrackedVehicleSettings, TrackedWheelSettings,
+    VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings,
+    VehicleId, VehicleKind, VehicleMut, VehicleRef, VehicleTrackSettings,
+    VehicleTransmissionSettings, VehicleType, WheelContact, WheelSettings, WheelState,
+    WheeledVehicle, WheeledVehicleSettings,
 };
 pub use world::{PhysicsWorld, StepReport, WorldSettings};
 
@@ -285,6 +289,11 @@ pub struct StateGuide;
 #[cfg(doctest)]
 #[doc = include_str!("../../../docs/job-system.md")]
 pub struct JobSystemGuide;
+
+/// The shape cooking guide, `docs/shape-cooking.md`.
+#[cfg(doctest)]
+#[doc = include_str!("../../../docs/shape-cooking.md")]
+pub struct ShapeCookingGuide;
 
 /// The vehicles guide, `docs/vehicles.md`.
 #[cfg(doctest)]

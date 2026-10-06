@@ -555,7 +555,7 @@ fn motorcycle_testers() {
         .unwrap()
         .set_collision_tester(blind)
         .unwrap();
-    assert_eq!(*world.vehicle(bike).unwrap().collision_tester(), blind);
+    assert_eq!(world.vehicle(bike).unwrap().collision_tester(), blind);
     step(&mut world, 1);
     assert!(!both_wheels_down(&world, bike));
     world.remove_body(ground).unwrap();

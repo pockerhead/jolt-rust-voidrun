@@ -84,11 +84,12 @@ impl FixedConstraintSettings {
         self
     }
 
-    /// Lets Jolt place the weld point between the bodies as they are when the constraint is
-    /// created, instead of the given points. Only in [`ConstraintSpace::WorldSpace`].
+    /// Whether Jolt places the weld point between the bodies as they are when the constraint is
+    /// created, instead of the given points. Only in [`ConstraintSpace::WorldSpace`]. Default
+    /// false.
     #[must_use]
-    pub fn auto_detect_point(mut self) -> Self {
-        self.auto_detect_point = true;
+    pub fn auto_detect_point(mut self, value: bool) -> Self {
+        self.auto_detect_point = value;
         self
     }
 

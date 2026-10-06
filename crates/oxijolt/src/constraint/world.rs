@@ -138,6 +138,14 @@ pub(crate) mod sealed {
         pub(crate) constraint: NonNull<JPH_Constraint>,
         pub(crate) bodies: [BodyId; 2],
     }
+
+    impl std::fmt::Debug for ReferencedConstraint {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("ReferencedConstraint")
+                .field("bodies", &self.bodies)
+                .finish_non_exhaustive()
+        }
+    }
 }
 
 /// A kind of world constraint, named by the zero-sized markers such as [`HingeConstraint`]. It
@@ -258,6 +266,14 @@ pub struct ConstraintRef<'w, K> {
     entry: &'w ConstraintEntry,
 }
 
+impl<K: ConstraintKind> std::fmt::Debug for ConstraintRef<'_, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConstraintRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<K: ConstraintKind> ConstraintRef<'_, K> {
     /// The constraint as the joltc handle `T` of its kind, which is the same object
     /// (joltc casts the most derived object).
@@ -298,6 +314,14 @@ impl<K: ConstraintKind> ConstraintRef<'_, K> {
 pub struct ConstraintMut<'w, K> {
     world: &'w mut PhysicsWorld,
     id: ConstraintId<K>,
+}
+
+impl<K: ConstraintKind> std::fmt::Debug for ConstraintMut<'_, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConstraintMut")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<K: ConstraintKind> ConstraintMut<'_, K> {
@@ -395,11 +419,11 @@ impl PhysicsWorld {
     ///
     /// Fails with [`ConstraintError::InvalidValue`] when a setting or a lever-arm ratio is out of
     /// range, with [`ConstraintError::NotDynamic`] as above, with
-    /// [`ConstraintError::Body`]`(`[`BodyError::SoftBody`]`)` for a soft body (Jolt's constraints
-    /// cannot operate on soft bodies; pin a vertex and move it instead), with
-    /// [`ConstraintError::NotFound`] or [`ConstraintError::WrongWorld`] for a referenced
-    /// constraint that is not in this world, and with [`ConstraintError::TooManyConstraints`]
-    /// when the world has run out of ids. Nothing changes on failure.
+    /// [`ConstraintError::Body`]`(`[`BodyError::NotRigidBody`]`)` for a soft body (Jolt's
+    /// constraints cannot operate on soft bodies; pin a vertex and move it instead), with
+    /// [`ConstraintError::NotFound`] or [`ConstraintError::WrongWorld`] for a referenced constraint
+    /// that is not in this world, and with [`ConstraintError::TooManyConstraints`] when the world
+    /// has run out of ids. Nothing changes on failure.
     ///
     /// # Example
     /// ```
@@ -468,7 +492,7 @@ impl PhysicsWorld {
                 .map_err(ConstraintError::Body)?
                 .is_soft_body()
             {
-                return Err(ConstraintError::Body(BodyError::SoftBody(body)));
+                return Err(ConstraintError::Body(BodyError::NotRigidBody(body)));
             }
             // The lever-arm and spring checks below assume unmasked inverse mass and inertia.
             let allowed_dofs = self
@@ -697,25 +721,28 @@ impl PhysicsWorld {
     }
 
     /// The ids of the constraints that use `body`, in id order.
-    pub fn constraints_of_body(&self, body: BodyId) -> Vec<AnyConstraintId> {
-        if body.world != self.tag {
-            return Vec::new();
-        }
-        self.constraint_bodies
-            .get(&body.to_raw())
-            .into_iter()
-            .flatten()
-            .map(|&raw| AnyConstraintId {
-                raw,
-                world: self.tag,
-                kind: self.constraints[&raw].kind,
-            })
-            .collect()
+    pub fn constraints_of_body(&self, body: BodyId) -> impl Iterator<Item = AnyConstraintId> + '_ {
+        let raws = if body.world == self.tag {
+            self.constraint_bodies.get(&body.to_raw())
+        } else {
+            None
+        };
+        raws.into_iter().flatten().map(|&raw| AnyConstraintId {
+            raw,
+            world: self.tag,
+            kind: self.constraints[&raw].kind,
+        })
     }
 
     /// Number of constraints in the world.
-    pub fn constraint_count(&self) -> usize {
-        self.constraints.len()
+    pub fn constraint_count(&self) -> u32 {
+        // Every constraint has its own `u32` id, so the count fits.
+        self.constraints.len() as u32
+    }
+
+    /// Whether `id` names a constraint that is in this world now.
+    pub fn contains_constraint(&self, id: impl Into<AnyConstraintId>) -> bool {
+        self.constraint_entry(id).is_ok()
     }
 
     /// Whether a constraint of this world uses `body`.

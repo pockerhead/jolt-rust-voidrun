@@ -12,10 +12,11 @@ use crate::{limits, MeshError, PhysicsMaterial, ShapeError, Vec3};
 const MAX_MESH_MATERIALS: usize = 32;
 /// Most triangles Jolt stores per leaf of a mesh's tree (`MeshShape::MaxTrianglesPerLeaf`).
 const MAX_TRIANGLES_PER_LEAF: u32 = 8;
-/// Smallest `|(v1 - v0) x (v2 - v0)|` (twice the area, m²) of a triangle given to Jolt: ten
-/// times the cross product below which Jolt's collision detection asserts on a triangle
-/// (`EPAPenetrationDepth::GetPenetrationDepthStepGJK`, `IsNearZero` at 1e-12 squared).
-const MIN_TRIANGLE_CROSS: f64 = 1.0e-5;
+/// Smallest `|(v1 - v0) x (v2 - v0)|` (twice the area, m²) of a triangle given to Jolt. Jolt's
+/// collision detection asserts on a triangle whose `f32` cross product has a squared length of
+/// at most 1e-12 (`EPAPenetrationDepth::GetPenetrationDepthStepGJK`, `IsNearZero`); the floor
+/// is 1e-6 raised by a relative 1e-6, about eight times the rounding of that squared length.
+const MIN_TRIANGLE_CROSS: f64 = 1.000_001e-6;
 /// How many times the largest change Jolt's rounding can make to a triangle's cross product the
 /// cross product must keep above [`MIN_TRIANGLE_CROSS`]; see [`is_collidable`].
 const CROSS_ERROR_MARGIN: f64 = 2.0;
@@ -68,13 +69,17 @@ impl Default for MeshSettings<'_> {
 }
 
 impl<'a> MeshSettings<'a> {
-    /// The default of [`max_convex_extent`](Self::max_convex_extent), metres: the largest
-    /// extent at which the triangle rule still keeps a strip 1 m long and 1 mm wide, made of two
-    /// triangles, near the mesh origin in any orientation, rounded down. It is below
-    /// [`limits::MAX_SHAPE_EXTENT`]; see [docs/limits.md#convex-shapes-against-meshes].
+    /// The default of [`max_convex_extent`](Self::max_convex_extent), metres: the largest round
+    /// extent at which every prop of the real models tested in CI loses under 0.1 % of its area
+    /// to the triangle rule ([docs/real-meshes.md]). A mesh of small detailed objects that only
+    /// meets small bodies keeps more of its triangles with a smaller extent. Convex shapes larger than the extent a mesh
+    /// was built for can trip Jolt's assertions on its thinnest triangles in an asserts build;
+    /// a mesh that must meet them is built with a larger extent. See
+    /// [docs/limits.md#convex-shapes-against-meshes].
     ///
+    /// [docs/real-meshes.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/real-meshes.md
     /// [docs/limits.md#convex-shapes-against-meshes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-shapes-against-meshes
-    pub const DEFAULT_MAX_CONVEX_EXTENT: f32 = 1100.0;
+    pub const DEFAULT_MAX_CONVEX_EXTENT: f32 = 300.0;
 
     /// Gives triangle `i` the material `list[indices[i]]`. `list` holds 1 to 32 materials,
     /// `indices` one entry per triangle, each naming a material of the list. Without materials
@@ -129,7 +134,7 @@ impl<'a> MeshSettings<'a> {
 
     /// Checks everything but the geometry against `triangle_count`.
     fn validate(&self, triangle_count: usize) -> Result<(), ShapeError> {
-        let invalid = |what| Err(ShapeError::InvalidSettings(what));
+        let invalid = |what| Err(ShapeError::InvalidValue(what));
         let threshold = self.active_edge_cos_threshold_angle;
         if !(threshold.is_finite() && (-1.0..=1.0).contains(&threshold)) {
             return invalid("active_edge_cos_threshold_angle must be between -1 and 1");
@@ -168,12 +173,12 @@ fn mesh_counts_fit(vertices: usize, triangles: usize) -> bool {
 /// The geometry checks of [`Shape::new_mesh_with_settings`].
 fn validate_geometry(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Result<(), ShapeError> {
     if vertices.is_empty() || triangles.is_empty() {
-        return Err(ShapeError::InvalidSettings(
+        return Err(ShapeError::InvalidValue(
             "a mesh needs vertices and triangles",
         ));
     }
     if !mesh_counts_fit(vertices.len(), triangles.len()) {
-        return Err(ShapeError::InvalidSettings(
+        return Err(ShapeError::InvalidValue(
             "a mesh has at most i32::MAX vertices and triangles",
         ));
     }
@@ -181,7 +186,7 @@ fn validate_geometry(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Result<(), Sh
         .iter()
         .all(|&vertex| limits::is_local_offset(vertex))
     {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "mesh vertices must be finite and within limits::MAX_SHAPE_EXTENT",
         ));
     }
@@ -191,7 +196,7 @@ fn validate_geometry(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Result<(), Sh
         .flatten()
         .any(|&index| index as usize >= vertices.len())
     {
-        return Err(ShapeError::InvalidSettings(
+        return Err(ShapeError::InvalidValue(
             "triangle index beyond the vertex list",
         ));
     }
@@ -250,12 +255,12 @@ impl Shape {
     ///
     /// A triangle's front face is the side from which its vertices run counter-clockwise.
     /// Triangles too small or too thin for Jolt to collide with reliably are dropped and
-    /// reported in [`DroppedTriangles`]: twice a triangle's area must be at least 1e-5 m² plus
+    /// reported in [`DroppedTriangles`]: twice a triangle's area must be above 1e-6 m² plus
     /// twice the largest change Jolt's 21-bit vertex quantization and `f32` rounding can make
     /// to it. That margin follows the triangle's own shape and distance from the shape origin,
     /// the quantization step of the mesh's bounds on each axis and the size of the convex shapes
-    /// it collides with ([`MeshSettings::max_convex_extent`]); with the defaults a strip near
-    /// the origin is kept from about 0.54 mm wide along the axes and from 0.93 mm in any
+    /// it collides with ([`MeshSettings::max_convex_extent`]); with the defaults a strip 1 m long
+    /// near the origin is kept from about 0.15 mm wide along the axes and from 0.26 mm in any
     /// orientation ([docs/limits.md#triangle-meshes]). Jolt itself
     /// keeps one copy of duplicate triangles and reorders the rest, so sub-shape ids do not
     /// follow the input order. Closest-hit rays hit back faces too.
@@ -276,9 +281,9 @@ impl Shape {
     /// dynamic bodies.
     ///
     /// # Errors
-    /// - [`ShapeError::InvalidSettings`]: no vertices or no triangles, more than `i32::MAX` of
+    /// - [`ShapeError::InvalidValue`]: no vertices or no triangles, more than `i32::MAX` of
     ///   either, an index beyond `vertices`, or a setting out of range (see [`MeshSettings`]);
-    /// - [`ShapeError::InvalidDimensions`]: a vertex (referenced or not) that is not finite or
+    /// - [`ShapeError::InvalidValue`]: a vertex (referenced or not) that is not finite or
     ///   has a component beyond [`limits::MAX_SHAPE_EXTENT`] in absolute value;
     /// - [`ShapeError::Mesh`]: no triangle is left after dropping small, thin and degenerate
     ///   ones;
@@ -316,8 +321,8 @@ impl Shape {
 
     /// Keeps `extent` in the new mesh's Jolt user data (`Shape::mUserData`), with
     /// [`CONVEX_EXTENT_TAG`] in the high half and the bits of `extent` in the low half, so that
-    /// [`Shape::scaled`] checks the mesh against the extent it was built for. The safe API does not
-    /// expose a shape's user data otherwise.
+    /// [`Shape::new_scaled`] checks the mesh against the extent it was built for. The safe API does
+    /// not expose a shape's user data otherwise.
     fn record_convex_extent(&self, extent: f32) {
         let data = CONVEX_EXTENT_TAG | u64::from(extent.to_bits());
         // SAFETY: the mesh is live and was just created by the caller, which has not handed it

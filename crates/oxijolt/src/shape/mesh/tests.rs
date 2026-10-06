@@ -17,11 +17,11 @@ fn quad() -> (Vec<Vec3>, Vec<[u32; 3]>) {
 }
 
 fn invalid_settings<T>(result: Result<T, ShapeError>) -> bool {
-    matches!(result, Err(ShapeError::InvalidSettings(_)))
+    matches!(result, Err(ShapeError::InvalidValue(_)))
 }
 
 fn invalid_dimensions<T>(result: Result<T, ShapeError>) -> bool {
-    matches!(result, Err(ShapeError::InvalidDimensions(_)))
+    matches!(result, Err(ShapeError::InvalidValue(_)))
 }
 
 fn no_triangles<T>(result: Result<T, ShapeError>) -> bool {
@@ -333,8 +333,8 @@ fn slivers_that_collapse_under_quantization_are_dropped() {
 
 #[test]
 fn small_and_thin_triangles_are_dropped() {
-    // Twice the area of a right triangle with legs `leg` is `leg^2`; the threshold is 1e-5 m²
-    // plus the rounding margin, here mostly the rounding of coordinates 1100 m out in the space
+    // Twice the area of a right triangle with legs `leg` is `leg^2`; the threshold is 1e-6 m²
+    // plus the rounding margin, here mostly the rounding of coordinates 300 m out in the space
     // of the largest convex shape of the default settings.
     let triangle = |leg: f32| {
         [
@@ -343,12 +343,18 @@ fn small_and_thin_triangles_are_dropped() {
             Vec3::new(leg, 0.0, 0.0),
         ]
     };
-    assert_eq!(kept(&triangle(0.0038), &[[0, 1, 2]]), [0]);
-    assert!(kept(&triangle(0.0037), &[[0, 1, 2]]).is_empty());
+    assert_eq!(kept(&triangle(0.002), &[[0, 1, 2]]), [0]);
+    assert_eq!(kept(&triangle(0.00117), &[[0, 1, 2]]), [0]);
+    assert!(kept(&triangle(0.00116), &[[0, 1, 2]]).is_empty());
     assert!(no_triangles(Shape::new_mesh(
-        &triangle(0.0037),
+        &triangle(0.00116),
         &[[0, 1, 2]]
     )));
+    // Without convex shapes to round in, the floor itself decides: legs of 1 mm give Jolt's
+    // limit of 1e-6 m², which is dropped, and 1.001 mm is kept.
+    let none = |corners: &[Vec3]| collidable_triangles(corners, &[[0, 1, 2]], 0.0).0;
+    assert!(none(&triangle(0.001)).is_empty());
+    assert_eq!(none(&triangle(0.001001)), [0]);
     // A 10 m sliver 1e-5 m wide has a cross product of 1e-4, above the floor, but each corner
     // can move by about 1e-4 m across it, which changes the cross product by up to 10 m times
     // the width change.
@@ -403,18 +409,18 @@ fn thin_patches_survive_far_geometry() {
 #[test]
 fn dropped_triangles_are_reported_with_their_area() {
     let (mut vertices, _) = quad();
-    // A right triangle with 3 mm legs: twice its area, 9e-6 m², is below the 1e-5 floor.
+    // A right triangle with 1 mm legs: twice its area, 1e-6 m², is at Jolt's limit.
     vertices.extend([
         Vec3::new(2.0, 0.0, 0.0),
-        Vec3::new(2.0, 0.0, 0.003),
-        Vec3::new(2.003, 0.0, 0.0),
+        Vec3::new(2.0, 0.0, 0.001),
+        Vec3::new(2.001, 0.0, 0.0),
     ]);
     let triangles = [[0, 1, 2], [0, 0, 3], [4, 5, 6], [0, 2, 3]];
     let (_, dropped) = Shape::new_mesh(&vertices, &triangles).unwrap();
     assert_eq!(dropped.count(), 2);
     assert_eq!(dropped.indices(), [1, 2]);
     assert!(
-        (dropped.area() - 4.5e-6).abs() < 1.0e-9,
+        (dropped.area() - 5.0e-7).abs() < 1.0e-10,
         "{}",
         dropped.area()
     );
@@ -497,22 +503,22 @@ fn the_default_convex_extent_keeps_millimetre_bevels() {
             .is_empty()
     };
     let turns = turns(2000);
-    // Every orientation keeps the strip at the default; in the worst ones it goes at 1200 m.
+    // Every orientation keeps the strip at the default; in the worst ones it goes above 1200 m.
     assert!(turns
         .iter()
         .all(|&turn| keeps(MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, turn)));
-    assert!(turns.iter().any(|&turn| !keeps(1200.0, turn)));
-    // Along the axes it survives up to about 2050 m.
+    assert!(turns.iter().any(|&turn| !keeps(1250.0, turn)));
+    // Along the axes it survives up to about 2080 m.
     assert!(keeps(2000.0, turns[0]) && !keeps(2100.0, turns[0]));
 }
 
 #[test]
 fn the_rule_does_not_depend_on_the_corner_order() {
-    // Strips 1 m long and 0.5 to 1 mm wide, split along either diagonal, at the default
+    // Strips 1 m long and 0.15 to 0.26 mm wide, split along either diagonal, at the default
     // extent near the thinnest they keep: each triangle gets the same verdict from each corner.
     let mut verdicts = 0;
     for turn in turns(200) {
-        for width in [5.0e-4, 5.4e-4, 6.0e-4, 9.3e-4, 1.0e-3] {
+        for width in [1.5e-4, 1.6e-4, 2.0e-4, 2.5e-4, 2.6e-4] {
             let strip = turned_strip(width, turn);
             for [i, j, k] in [[0, 1, 2], [0, 2, 3], [0, 1, 3], [1, 2, 3]] {
                 let corners = [i, j, k].map(|index| v3(strip[index]));
@@ -571,6 +577,6 @@ fn slivers_too_thin_for_large_convex_shapes_are_dropped() {
         thinnest(MeshSettings::DEFAULT_MAX_CONVEX_EXTENT),
         thinnest(2.0 * limits::MAX_SHAPE_EXTENT),
     );
-    assert!((5.3e-4..5.5e-4).contains(&default), "{default}");
+    assert!((1.45e-4..1.48e-4).contains(&default), "{default}");
     assert!((1.9e-3..2.0e-3).contains(&largest), "{largest}");
 }

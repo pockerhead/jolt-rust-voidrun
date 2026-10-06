@@ -1,7 +1,7 @@
 use super::super::tests::{bits3, curve_points, jolt_vec};
 use super::*;
 use crate::world::ensure_initialized;
-use crate::ObjectLayer;
+use crate::{ObjectLayer, SpringSettings};
 
 const LAYERS: u32 = 2;
 
@@ -309,7 +309,7 @@ fn tracked_wheels_share_the_wheel_rules() {
     );
     assert_refused(
         with_wheel(|w| {
-            w.suspension_spring(SuspensionSpring::FrequencyAndDamping {
+            w.suspension_spring(SpringSettings::FrequencyAndDamping {
                 frequency: 0.0,
                 damping: 0.5,
             })

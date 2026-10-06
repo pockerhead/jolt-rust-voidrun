@@ -1,0 +1,10 @@
+Licence of oloid256_tri.obj
+
+From Keenan Crane's 3D Model Repository
+(https://www.cs.cmu.edu/~kmcrane/Projects/ModelRepository/), entry "Oloid":
+
+    Model and associated data is dedicated under CC0 1.0 Universal.
+
+CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+Author: Keenan Crane. The file is a member of
+https://www.cs.cmu.edu/~kmcrane/Projects/ModelRepository/oloid.zip.

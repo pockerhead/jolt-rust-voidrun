@@ -43,7 +43,7 @@ fn palette() -> Palette {
         Shape::new_sphere(0.35).unwrap(),
         Shape::new_capsule(0.4, 0.2).unwrap(),
         Shape::new_cylinder(0.3, 0.4).unwrap(),
-        Shape::new_convex_hull(
+        Shape::new_convex_hull_with_convex_radius(
             &[
                 Vec3::new(-0.3, -0.2, -0.3),
                 Vec3::new(0.3, -0.25, -0.2),
@@ -185,7 +185,7 @@ fn edit(
             let ids_fit = !(holds(model, deep) || (shape == deep && len >= 1));
             if !valid_pose || !ids_fit {
                 assert!(
-                    matches!(result, Err(ShapeError::InvalidSettings(_))),
+                    matches!(result, Err(ShapeError::InvalidValue(_))),
                     "{what}: add {result:?}"
                 );
             } else {
@@ -218,7 +218,7 @@ fn edit(
                 );
             } else if !valid_pose || (replace && shape == deep && len >= 2) {
                 assert!(
-                    matches!(result, Err(ShapeError::InvalidSettings(_))),
+                    matches!(result, Err(ShapeError::InvalidValue(_))),
                     "{what}: modify {result:?}"
                 );
             } else {
@@ -247,7 +247,7 @@ fn use_publication(
         .unwrap();
     let ray = RayCast::new(RVec3::new(0.0, 2100.0, 0.0), Vec3::new(0.0, -2200.0, 0.0));
     let top = world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .map_or(0.0, |hit| ray.point_at(hit.fraction).y);
     let cube = world
@@ -366,9 +366,9 @@ pub fn mutable_family(arena: &mut Arena) {
         }
         let published = match editor.to_shape() {
             Ok(shape) => shape,
-            Err(ShapeError::InvalidSettings(_)) if model.is_empty() => continue,
+            Err(ShapeError::InvalidValue(_)) if model.is_empty() => continue,
             // A child at the extent edge can end up beyond it once the centre of mass moves.
-            Err(ShapeError::InvalidDimensions(_)) => continue,
+            Err(ShapeError::InvalidValue(_)) => continue,
             Err(error) => panic!("{what}: to_shape {error}"),
         };
         published_count += 1;

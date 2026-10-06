@@ -2,13 +2,12 @@
 //! creators validate them like any other settings.
 
 use super::{
-    MotorcycleSettings, SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester,
-    VehicleDifferentialSettings, VehicleEngineSettings, VehicleSettings,
-    VehicleTransmissionSettings, WheelSettings,
+    MotorcycleSettings, VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings,
+    VehicleEngineSettings, VehicleTransmissionSettings, WheelSettings, WheeledVehicleSettings,
 };
-use crate::Vec3;
+use crate::{SpringSettings, Vec3};
 
-impl VehicleSettings {
+impl WheeledVehicleSettings {
     /// A four-wheeled, front-wheel-drive car with Jolt's default engine and automatic
     /// transmission.
     ///
@@ -20,11 +19,11 @@ impl VehicleSettings {
     /// one differential; the hand brake holds the rear wheels. Anti-roll bars join the front pair
     /// and the rear pair. The wheels find the ground with `collision_tester`.
     ///
-    /// The values suit a chassis like the one the tests drive: a 1500 kg box of half extents
-    /// (0.9, 0.3, 2.0) with its centre of mass moved 0.3 m down, and wheels at
-    /// `(0.9, -0.1, 1.4)` of radius 0.35. Nothing is checked here:
-    /// [`PhysicsWorld::create_vehicle`](crate::PhysicsWorld::create_vehicle) validates the
-    /// settings and refuses, for example, a radius that is not positive.
+    /// The values suit a chassis like the one the tests drive: a 1500 kg box of half extents (0.9,
+    /// 0.3, 2.0) with its centre of mass moved 0.3 m down, and wheels at `(0.9, -0.1, 1.4)` of
+    /// radius 0.35. Nothing is checked here:
+    /// [`PhysicsWorld::create_wheeled_vehicle`](crate::PhysicsWorld::create_wheeled_vehicle)
+    /// validates the settings and refuses, for example, a radius that is not positive.
     ///
     /// # Example
     /// ```
@@ -39,8 +38,8 @@ impl VehicleSettings {
     ///     &BodySettings::new_dynamic().position(RVec3::new(0.0, 1.0, 0.0)).mass(1500.0),
     /// )?;
     /// let tester = VehicleCollisionTester::cast_sphere(ObjectLayer::MOVING, 0.2);
-    /// let settings = VehicleSettings::car(Vec3::new(0.9, -0.1, 1.4), 0.35, tester);
-    /// let car = world.create_vehicle(chassis, &settings)?;
+    /// let settings = WheeledVehicleSettings::car(Vec3::new(0.9, -0.1, 1.4), 0.35, tester);
+    /// let car = world.create_wheeled_vehicle(chassis, &settings)?;
     /// assert_eq!(world.vehicle(car)?.wheel_count(), 4);
     /// # Ok(())
     /// # }
@@ -64,7 +63,7 @@ impl VehicleSettings {
                 .max_hand_brake_torque(0.0)
         };
         let rear = |x| wheel(x, -z).max_steer_angle(0.0);
-        VehicleSettings::new(
+        WheeledVehicleSettings::new(
             vec![front(x), front(-x), rear(x), rear(-x)],
             vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
             collision_tester,
@@ -106,7 +105,7 @@ impl MotorcycleSettings {
                 .width(0.05)
                 .suspension_min_length(0.3)
                 .suspension_max_length(0.5)
-                .suspension_spring(SuspensionSpring::FrequencyAndDamping {
+                .suspension_spring(SpringSettings::FrequencyAndDamping {
                     frequency,
                     damping: 0.5,
                 })
@@ -119,22 +118,23 @@ impl MotorcycleSettings {
         let rear = wheel(-z, 2.0, 250.0).max_steer_angle(0.0);
         let rear_drive =
             VehicleDifferentialSettings::new(None, Some(1)).differential_ratio(1.93 * 40.0 / 16.0);
-        let vehicle = VehicleSettings::new(vec![front, rear], vec![rear_drive], collision_tester)
-            .max_pitch_roll_angle(60.0_f32.to_radians())
-            .engine(
-                VehicleEngineSettings::default()
-                    .max_torque(150.0)
-                    .min_rpm(1000.0)
-                    .max_rpm(10000.0),
-            )
-            .transmission(
-                VehicleTransmissionSettings::default()
-                    .gear_ratios(vec![2.27, 1.63, 1.3, 1.09, 0.96, 0.88])
-                    .reverse_gear_ratios(vec![-4.0])
-                    .shift_down_rpm(2000.0)
-                    .shift_up_rpm(8000.0)
-                    .clutch_strength(2.0),
-            );
+        let vehicle =
+            WheeledVehicleSettings::new(vec![front, rear], vec![rear_drive], collision_tester)
+                .max_pitch_roll_angle(60.0_f32.to_radians())
+                .engine(
+                    VehicleEngineSettings::default()
+                        .max_torque(150.0)
+                        .min_rpm(1000.0)
+                        .max_rpm(10000.0),
+                )
+                .transmission(
+                    VehicleTransmissionSettings::default()
+                        .gear_ratios(vec![2.27, 1.63, 1.3, 1.09, 0.96, 0.88])
+                        .reverse_gear_ratios(vec![-4.0])
+                        .shift_down_rpm(2000.0)
+                        .shift_up_rpm(8000.0)
+                        .clutch_strength(2.0),
+                );
         MotorcycleSettings::new(vehicle)
     }
 }
@@ -160,7 +160,7 @@ mod tests {
                 .max_hand_brake_torque(0.0)
         };
         let rear = |x| wheel(x, -1.4).max_steer_angle(0.0);
-        let explicit = VehicleSettings::new(
+        let explicit = WheeledVehicleSettings::new(
             vec![front(0.9), front(-0.9), rear(0.9), rear(-0.9)],
             vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
             tester,
@@ -172,7 +172,7 @@ mod tests {
         .engine(VehicleEngineSettings::default())
         .transmission(VehicleTransmissionSettings::default());
         assert_eq!(
-            VehicleSettings::car(Vec3::new(0.9, -0.1, 1.4), 0.35, tester),
+            WheeledVehicleSettings::car(Vec3::new(0.9, -0.1, 1.4), 0.35, tester),
             explicit
         );
     }

@@ -164,7 +164,7 @@ fn bodies_with_restricted_dofs_are_refused_by_every_constraint_kind_vehicles_and
         .unwrap();
     let settings = car_settings(VehicleCollisionTester::ray(layers.probe));
     assert_eq!(
-        world.create_vehicle(chassis, &settings),
+        world.create_wheeled_vehicle(chassis, &settings),
         Err(VehicleError::Body(BodyError::RestrictedDofs(chassis)))
     );
     assert_eq!(world.vehicle_ids().count(), 0);

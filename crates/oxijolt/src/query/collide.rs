@@ -161,8 +161,10 @@ impl PhysicsWorld {
     ///
     /// The position must be finite and within [`limits::MAX_POSITION`], the rotation a finite unit
     /// quaternion, the maximum separation distance between 0 and [`limits::MAX_SHAPE_EXTENT`], the
-    /// shape not static-only (a mesh, heightfield or plane), and the filter valid for this world;
-    /// otherwise [`QueryError::InvalidValue`] is returned.
+    /// shape not static-only (a mesh, heightfield or plane); otherwise
+    /// [`QueryError::InvalidValue`] is returned.
+    /// A filter that names an object layer this world does not have, or a body of another
+    /// world, gives [`QueryError::UnknownObjectLayer`] or [`QueryError::WrongWorld`].
     pub fn collide_shape(
         &self,
         query: &CollideShape<'_>,

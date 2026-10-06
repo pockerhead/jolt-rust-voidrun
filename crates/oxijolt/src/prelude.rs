@@ -19,7 +19,7 @@
 //! ```
 //!
 //! The prelude names no math type and no `Result`, so it can be glob-imported next to
-//! `bevy::prelude::*`: `Vec3`, `Quat` and `Result` stay Bevy's. With the `glam` feature,
+//! `bevy::prelude::*`: `Vec3`, `Quat` and `Result` stay Bevy's. With the `glam032` feature,
 //! `.into()` converts poses to Bevy's types; `?` in a system that returns Bevy's `Result`
 //! converts any oxijolt error.
 //!
@@ -72,18 +72,20 @@ pub use crate::{
 };
 pub use crate::{ActivationEvent, ContactEvent, ContactListener, EventSettings, WorldEvents};
 pub use crate::{AnyConstraintId, ConstraintId};
-pub use crate::{AnyVehicleId, DriverInput, VehicleId, VehicleSettings, WheelSettings};
+pub use crate::{AnyVehicleId, DriverInput, VehicleId, WheelSettings, WheeledVehicleSettings};
 pub use crate::{
-    BodyError, CharacterError, ConstraintError, ContactSettingsError, HullError, MeshError,
-    QueryError, RagdollError, ShapeError, SoftBodyError, StateError, StepError, ThinTrianglesError,
-    VehicleError, WorldError,
+    BinaryStateError, BodyError, CharacterError, CollisionGroupError, ConstraintError,
+    ContactSettingsError, ConvexHullError, MeshError, QueryError, RagdollError, ShapeError,
+    SoftBodyError, StateError, StepError, ThinTrianglesError, VehicleError, WorldError,
 };
+pub use crate::{BodySelection, PhysicsWorld, StepReport, WorldSettings, WorldState};
 pub use crate::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use crate::{CharacterId, CharacterSettings, ExtendedUpdateSettings};
-pub use crate::{CollideShape, CollideShapeHit, PointHit, QueryFilter, RayCast, RayHit, ShapeCast};
+pub use crate::{
+    CollidePointHit, CollideShape, CollideShapeHit, QueryFilter, RayCast, RayCastHit, ShapeCast,
+};
 pub use crate::{CompoundChild, HeightFieldSettings, PhysicsMaterial, Shape, SubShapeId};
 pub use crate::{DroppedTriangles, MeshBuildQuality, MeshSettings};
-pub use crate::{PhysicsWorld, StepReport, WorldSettings, WorldState};
 pub use crate::{RagdollId, RagdollSettings, Skeleton, SkeletonMapper};
 pub use crate::{ShapeCastHit, SoftBodySettings, SoftBodySharedSettings};
 

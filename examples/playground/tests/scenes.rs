@@ -16,6 +16,7 @@ use playground::visual::{Shaped, Visuals};
 fn threads(n: u32) -> SceneConfig {
     SceneConfig {
         worker_threads: Some(n),
+        ..SceneConfig::default()
     }
 }
 
@@ -197,7 +198,7 @@ fn the_wireframe_of_a_scene_is_capped() {
     let centre = rvec(session.scene().camera().target);
     let mut lines = DebugLines::new();
     world
-        .debug_lines(
+        .debug_lines_into(
             &DebugLineSettings::new(centre, 12.0),
             &QueryFilter::new(),
             &mut lines,
@@ -206,7 +207,7 @@ fn the_wireframe_of_a_scene_is_capped() {
     assert!(lines.lines().len() > 1000, "{}", lines.lines().len());
     assert!(!lines.is_truncated());
     world
-        .debug_lines(
+        .debug_lines_into(
             &DebugLineSettings::new(centre, 12.0).max_lines(1000),
             &QueryFilter::new(),
             &mut lines,

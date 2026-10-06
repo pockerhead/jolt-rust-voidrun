@@ -281,15 +281,15 @@ fn impulses_ignore_static_and_kinematic_bodies_and_refuse_soft_bodies() {
     let mut body = world.body_mut(cloth).unwrap();
     assert_eq!(
         body.add_impulse(Vec3::ZERO),
-        Err(BodyError::SoftBody(cloth))
+        Err(BodyError::NotRigidBody(cloth))
     );
     assert_eq!(
         body.add_angular_impulse(Vec3::ZERO),
-        Err(BodyError::SoftBody(cloth))
+        Err(BodyError::NotRigidBody(cloth))
     );
     assert_eq!(
         body.add_impulse_at_point(Vec3::ZERO, RVec3::ZERO),
-        Err(BodyError::SoftBody(cloth))
+        Err(BodyError::NotRigidBody(cloth))
     );
     step(&mut world, 5);
 }
@@ -494,7 +494,7 @@ fn kinematic_moves_are_bounded_by_the_velocities_they_imply() {
             .body_mut(cloth)
             .unwrap()
             .move_kinematic(RVec3::ZERO, Quat::IDENTITY, dt),
-        Err(BodyError::SoftBody(cloth))
+        Err(BodyError::NotRigidBody(cloth))
     );
     step(&mut world, 1);
 }
@@ -614,7 +614,7 @@ fn deactivate_refuses_soft_bodies() {
     activations(&mut world);
     assert_eq!(
         world.body_mut(cloth).unwrap().deactivate(),
-        Err(BodyError::SoftBody(cloth))
+        Err(BodyError::NotRigidBody(cloth))
     );
     assert!(world.body(cloth).unwrap().is_active());
     assert!(activations(&mut world).is_empty());

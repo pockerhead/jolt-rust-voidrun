@@ -24,8 +24,10 @@
 //! a contact listener whose validate callback gets the collide result without faces
 //! (`JPH_ContactListener2_*`, `JPH_PhysicsSystem_SetContactListener2`) and a soft body contact
 //! listener (`JPH_SoftBodyContactListener_*`,
-//! `JPH_PhysicsSystem_SetSoftBodyContactListener`, `JPH_SoftBodyManifold_*`). The safe API lives
-//! in the `oxijolt` crate.
+//! `JPH_PhysicsSystem_SetSoftBodyContactListener`, `JPH_SoftBodyManifold_*`), and shapes saved
+//! to bytes with their children and materials and restored (`JPH_Shape_SaveBinaryState`,
+//! `JPH_Shape_RestoreBinaryState`, `JPH_ShapeBinaryState_*`). The safe API lives in the
+//! `oxijolt` crate.
 //!
 //! # Features
 //! - `asserts`: compile Jolt with its debug assertions. joltc's default handler prints a failed
@@ -146,6 +148,21 @@ pub type Real = f32;
 
 /// Whether the native library was built with Jolt's assertions (the `asserts` feature).
 pub const ASSERTS_ENABLED: bool = cfg!(feature = "asserts");
+
+/// Whether the native library was built with Jolt's cross-platform determinism (the
+/// `cross-platform-deterministic` feature).
+pub const CROSS_PLATFORM_DETERMINISTIC_ENABLED: bool =
+    cfg!(feature = "cross-platform-deterministic");
+
+/// Jolt Physics commit the native library is built from (the `vendor/JoltPhysics` submodule).
+pub const JOLT_COMMIT: &str = env!("OXIJOLT_SYS_JOLT_COMMIT");
+
+/// joltc commit the native library is built from (the `vendor/joltc` submodule).
+pub const JOLTC_COMMIT: &str = env!("OXIJOLT_SYS_JOLTC_COMMIT");
+
+/// Revision of this fork's joltc additions (`native/joltc_ext/`) in the native library. A
+/// prebuilt prefix of another revision is refused by the build script.
+pub const JOLTC_EXT_REVISION: &str = env!("OXIJOLT_SYS_JOLTC_EXT_REVISION");
 
 /// `JPH_Mat4_RotationTranslation` under the name double precision uses.
 ///

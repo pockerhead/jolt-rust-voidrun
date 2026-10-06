@@ -733,9 +733,14 @@ fn wheeled_engines_take_only_curves_in_the_domain() {
             )
         };
         for curve in overflowing_curves() {
-            assert_refused(world.create_vehicle(chassis, &car(curve)), "torque curve");
+            assert_refused(
+                world.create_wheeled_vehicle(chassis, &car(curve)),
+                "torque curve",
+            );
         }
-        let id = world.create_vehicle(chassis, &car(widest_curve())).unwrap();
+        let id = world
+            .create_wheeled_vehicle(chassis, &car(widest_curve()))
+            .unwrap();
         drive_wheeled(&mut world, id, chassis, |world| {
             world
                 .vehicle_mut(id)

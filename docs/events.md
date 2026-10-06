@@ -58,8 +58,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Materials
 
 A `PhysicsMaterial` carries a `u64` of the caller's, for example a surface id for footstep sounds.
-Shapes made with `Shape::new_box_with_material` and its siblings, or a heightfield with
-`new_height_field_with_materials` (one material per cell), carry it, and contacts report it for each
+Shapes made with `Shape::new_box_with_material` and its siblings, a mesh with
+`MeshSettings::materials` (one material per triangle) or a heightfield with
+`HeightFieldSettings::materials` (one material per cell) carry it, and contacts report it for each
 side (`ContactManifold::materials`). Friction and restitution stay on the bodies. There is no call
 that looks up the material of an arbitrary sub-shape id: Jolt decodes such ids without range checks,
 so materials are read only for the ids a contact reports.

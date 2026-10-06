@@ -91,23 +91,16 @@ impl<'a> QueryFilter<'a> {
     /// Checks the parts that refer to `world`.
     pub(crate) fn validate(&self, world: &PhysicsWorld) -> Result<(), QueryError> {
         let layers = self.object_layers.unwrap_or_default();
-        if layers
+        if let Some(&layer) = layers
             .iter()
-            .any(|layer| layer.get() >= world.object_layer_count)
+            .find(|layer| layer.get() >= world.object_layer_count)
         {
-            return Err(QueryError::InvalidValue(
-                "object layer does not exist in this world",
-            ));
+            return Err(QueryError::UnknownObjectLayer(layer));
         }
-        if self
-            .excluded_body
-            .is_some_and(|body| body.world != world.tag)
-        {
-            return Err(QueryError::InvalidValue(
-                "excluded body belongs to another world",
-            ));
+        match self.excluded_body {
+            Some(body) if body.world != world.tag => Err(QueryError::WrongWorld(body)),
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     /// Whether a compound child with `user_data` is in the group mask, if one is set.
@@ -316,7 +309,7 @@ unsafe fn create_filter<T: JoltObject>(
     // returned object is a `T` owned entirely by the handle.
     unsafe { Owned::from_raw(create(user_data)) }
         .map(Some)
-        .ok_or(QueryError::InvalidValue("could not create a query filter"))
+        .ok_or(QueryError::AllocationFailed)
 }
 
 /// Runs `run` with the joltc filters that implement `filter` for one query on `world`.
@@ -564,7 +557,7 @@ pub(crate) mod tests {
         let down = Vec3::new(0.0, -10.0, 0.0);
         match query {
             Query::Ray => world
-                .cast_ray(RayCast::new(above, down), filter)
+                .cast_ray(&RayCast::new(above, down), filter)
                 .unwrap()
                 .map(|hit| hit.body),
             Query::ShapeCast => world
@@ -781,18 +774,18 @@ pub(crate) mod tests {
             Ok(())
         );
         let unknown = [ObjectLayer::new(1)];
-        assert!(matches!(
+        assert_eq!(
             QueryFilter::new().object_layers(&unknown).validate(&world),
-            Err(QueryError::InvalidValue(_))
-        ));
+            Err(QueryError::UnknownObjectLayer(unknown[0]))
+        );
         let foreign = BodyId::new(0, other.tag);
-        assert!(matches!(
+        assert_eq!(
             QueryFilter::new().exclude_body(foreign).validate(&world),
-            Err(QueryError::InvalidValue(_))
-        ));
+            Err(QueryError::WrongWorld(foreign))
+        );
         // An id of this world that names no body (removed, or never created) is allowed.
         let removed = BodyId::new(0, world.tag);
-        assert!(!world.contains(removed));
+        assert!(!world.contains_body(removed));
         assert_eq!(
             QueryFilter::new().exclude_body(removed).validate(&world),
             Ok(())

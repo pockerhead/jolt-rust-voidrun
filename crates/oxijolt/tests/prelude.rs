@@ -46,6 +46,13 @@ fn the_prelude_leaves_math_and_result_to_the_engine_prelude() -> Result {
     assert!(world.step(1.0 / 60.0)?.is_complete());
     let poses: Vec<BodyPose> = world.active_body_poses();
     assert_eq!(poses.len(), 1);
+    // Rollback names its selection and buffer from the prelude.
+    let mut state = WorldState::new();
+    world.save_state_into(BodySelection::Movable, &mut state)?;
+    world.restore_state(&state)?;
+    // Every area error is in the prelude.
+    let _: Option<CollisionGroupError> = None;
+    let _: Option<BinaryStateError> = None;
     Ok(())
 }
 

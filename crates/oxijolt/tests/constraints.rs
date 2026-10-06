@@ -73,7 +73,7 @@ fn fixed_constraint_holds_a_box_under_a_static_bar() {
         .create_constraint(
             bar,
             cube,
-            &FixedConstraintSettings::default().auto_detect_point(),
+            &FixedConstraintSettings::default().auto_detect_point(true),
         )
         .unwrap();
     let mut worst: f64 = 0.0;
@@ -256,11 +256,11 @@ fn bodies_of_constraints_cannot_be_removed() {
             world.remove_body(body),
             Err(BodyError::UsedByConstraint(body))
         );
-        assert_eq!(world.constraints_of_body(body), vec![rope.into()]);
+        assert!(world.constraints_of_body(body).eq([rope.into()]));
     }
     step(&mut world, 10);
     world.remove_constraint(rope).unwrap();
-    assert!(world.constraints_of_body(cube).is_empty());
+    assert_eq!(world.constraints_of_body(cube).next(), None);
     world.remove_body(cube).unwrap();
     world.remove_body(anchor).unwrap();
     step(&mut world, 10);
@@ -342,7 +342,10 @@ fn constraint_ids_are_typed_ordered_and_never_reused() {
     let third = point(&mut world, cubes[2]);
     assert_eq!([first.to_raw(), hinge.to_raw(), third.to_raw()], [1, 2, 3]);
     assert!(first < third);
+    assert!(world.contains_constraint(hinge));
+    assert!(world.contains_constraint(AnyConstraintId::from(first)));
     world.remove_constraint(hinge).unwrap();
+    assert!(!world.contains_constraint(hinge));
     let fourth = point(&mut world, cubes[1]);
     assert_eq!(fourth.to_raw(), 4);
 
@@ -373,6 +376,7 @@ fn wrong_world_and_removed_ids_are_rejected() {
     let theirs = make(&mut other);
     assert_eq!(ours.to_raw(), theirs.to_raw());
     assert_ne!(ours, theirs);
+    assert!(world.contains_constraint(ours) && !world.contains_constraint(theirs));
     assert_eq!(
         world.constraint(theirs).err(),
         Some(ConstraintError::WrongWorld(theirs.into()))
@@ -410,7 +414,7 @@ fn dropping_a_world_with_constraints_is_clean() {
             .create_constraint(
                 a,
                 b,
-                &FixedConstraintSettings::default().auto_detect_point(),
+                &FixedConstraintSettings::default().auto_detect_point(true),
             )
             .unwrap();
         world
@@ -468,7 +472,7 @@ fn invalid_constraint_creates_nothing() {
         bodies,
         &FixedConstraintSettings::default()
             .space(ConstraintSpace::LocalToBodyCom)
-            .auto_detect_point(),
+            .auto_detect_point(true),
     );
     let valid = world
         .create_constraint(
@@ -489,7 +493,7 @@ fn removing_a_constraint_wakes_its_bodies() {
         .create_constraint(
             anchor,
             cube,
-            &FixedConstraintSettings::default().auto_detect_point(),
+            &FixedConstraintSettings::default().auto_detect_point(true),
         )
         .unwrap();
     let asleep = (0..600).any(|_| {
@@ -643,7 +647,12 @@ fn every_setter_wakes_the_constraint_bodies() {
     assert_wakes!(sleeping_pair(&distance), |c| c.set_limits_spring(soft));
     let slider = SliderConstraintSettings::new(RVec3::ZERO, Y, X);
     assert_wakes!(sleeping_pair(&slider), |c| c.set_motor_settings(motor));
-    assert_wakes!(sleeping_pair(&slider), |c| c.set_limits(Some((-1.0, 0.0))));
+    assert_wakes!(sleeping_pair(&slider), |c| c.set_limits(-1.0, 0.0));
+    let limited = SliderConstraintSettings::new(RVec3::ZERO, Y, X).limits(-1.0, 0.0);
+    assert_wakes!(sleeping_pair(&limited), |c| {
+        c.remove_limits();
+        Ok::<(), ConstraintError>(())
+    });
     assert_wakes!(sleeping_pair(&slider), |c| c.set_limits_spring(soft));
     assert_wakes!(sleeping_pair(&slider), |c| c.set_max_friction_force(1.0));
     let hinge = HingeConstraintSettings::new(RVec3::ZERO, Z, X);
@@ -687,7 +696,7 @@ fn changed_limits_motors_and_friction_act_on_sleeping_bodies() {
     world
         .constraint_mut(slider)
         .unwrap()
-        .set_limits(Some((-1.0, 0.0)))
+        .set_limits(-1.0, 0.0)
         .unwrap();
     step(&mut world, 60);
     let after = world.constraint(slider).unwrap().current_position();
@@ -1401,7 +1410,7 @@ fn gear_references_correct_drift() {
         .create_constraint(
             discs[0],
             discs[1],
-            &GearConstraintSettings::new(Z, Z, 2.0).hinges(hinges[0], hinges[1]),
+            &GearConstraintSettings::new(Z, Z, 2.0).constraints(hinges[0], hinges[1]),
         )
         .unwrap();
     drive(&mut world, hinges[0], 3.0);
@@ -1547,7 +1556,7 @@ fn a_referenced_hinge_cannot_be_removed() {
         .create_constraint(
             discs[0],
             discs[1],
-            &GearConstraintSettings::new(Z, Z, 2.0).hinges(hinges[0], hinges[1]),
+            &GearConstraintSettings::new(Z, Z, 2.0).constraints(hinges[0], hinges[1]),
         )
         .unwrap();
     for hinge in hinges {
@@ -1595,7 +1604,7 @@ fn unrelated_or_reversed_references_are_rejected() {
         let result = world.create_constraint(
             discs[0],
             discs[1],
-            &GearConstraintSettings::new(Z, Z, 2.0).hinges(first, hinges[1]),
+            &GearConstraintSettings::new(Z, Z, 2.0).constraints(first, hinges[1]),
         );
         assert!(
             matches!(result, Err(ConstraintError::InvalidValue(_))),
@@ -1607,14 +1616,14 @@ fn unrelated_or_reversed_references_are_rejected() {
     let result = world.create_constraint(
         discs[0],
         discs[1],
-        &GearConstraintSettings::new(Z, Z, 2.0).hinges(hinges[0], hinges[0]),
+        &GearConstraintSettings::new(Z, Z, 2.0).constraints(hinges[0], hinges[0]),
     );
     assert!(matches!(result, Err(ConstraintError::InvalidValue(_))));
     world
         .create_constraint(
             discs[0],
             discs[1],
-            &GearConstraintSettings::new(Z, Z, 2.0).hinges(hinges[0], hinges[1]),
+            &GearConstraintSettings::new(Z, Z, 2.0).constraints(hinges[0], hinges[1]),
         )
         .unwrap();
     // A removed reference is not found.
@@ -1624,7 +1633,7 @@ fn unrelated_or_reversed_references_are_rejected() {
             .create_constraint(
                 discs[0],
                 discs[1],
-                &GearConstraintSettings::new(Z, Z, 2.0).hinges(unrelated, hinges[1]),
+                &GearConstraintSettings::new(Z, Z, 2.0).constraints(unrelated, hinges[1]),
             )
             .err(),
         Some(ConstraintError::NotFound(unrelated.into()))

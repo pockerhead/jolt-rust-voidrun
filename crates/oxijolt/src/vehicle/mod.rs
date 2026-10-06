@@ -42,10 +42,9 @@ pub use motorcycle::MotorcycleLean;
 pub use readout::{VehicleRef, WheelContact, WheelState};
 use settings::{BuiltSettings, WheelGeometry};
 pub use settings::{
-    MotorcycleSettings, SuspensionSpring, TrackedVehicleSettings, TrackedWheelSettings,
-    VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings,
-    VehicleSettings, VehicleTrackSettings, VehicleTransmissionSettings, WheelSettings,
-    DEFAULT_LATERAL_FRICTION, DEFAULT_LONGITUDINAL_FRICTION, DEFAULT_NORMALIZED_TORQUE,
+    MotorcycleSettings, TrackedVehicleSettings, TrackedWheelSettings, VehicleAntiRollBar,
+    VehicleCollisionTester, VehicleDifferentialSettings, VehicleEngineSettings,
+    VehicleTrackSettings, VehicleTransmissionSettings, WheelSettings, WheeledVehicleSettings,
 };
 pub use tracked::{TrackSide, TrackState, TrackedDriverInput};
 
@@ -155,13 +154,13 @@ impl PhysicsWorld {
     /// [`gravity_factor(0.0)`](crate::BodySettings::gravity_factor), and set the gravity at the
     /// vehicle every tick.
     ///
-    /// Fails with [`VehicleError::InvalidValue`] when a setting is out of range (see the setters
-    /// of [`VehicleSettings`] and the types it holds), with [`VehicleError::Body`] when `body`
+    /// Fails with [`VehicleError::InvalidValue`] when a setting is out of range (see the setters of
+    /// [`WheeledVehicleSettings`] and the types it holds), with [`VehicleError::Body`] when `body`
     /// is not in this world, is the inner body of a character, a ragdoll part or a soft body, or
-    /// has fewer than six degrees of freedom, with
-    /// [`VehicleError::NotDynamic`], with [`VehicleError::AlreadyHasVehicle`] when the body
-    /// carries a vehicle already, and with [`VehicleError::TooManyVehicles`] when the world has
-    /// run out of ids. Nothing is created on failure.
+    /// has fewer than six degrees of freedom, with [`VehicleError::NotDynamic`], with
+    /// [`VehicleError::AlreadyHasVehicle`] when the body carries a vehicle already, and with
+    /// [`VehicleError::TooManyVehicles`] when the world has run out of ids. Nothing is created on
+    /// failure.
     ///
     /// # Example
     /// ```
@@ -184,12 +183,12 @@ impl PhysicsWorld {
     /// let wheel = |x: f32, z: f32| {
     ///     WheelSettings::new(Vec3::new(x, -0.1, z)).radius(0.35).width(0.2)
     /// };
-    /// let settings = VehicleSettings::new(
+    /// let settings = WheeledVehicleSettings::new(
     ///     vec![wheel(0.9, 1.4), wheel(-0.9, 1.4), wheel(0.9, -1.4), wheel(-0.9, -1.4)],
     ///     vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
     ///     VehicleCollisionTester::ray(ObjectLayer::MOVING),
     /// );
-    /// let car = world.create_vehicle(chassis, &settings)?;
+    /// let car = world.create_wheeled_vehicle(chassis, &settings)?;
     ///
     /// world.vehicle_mut(car)?.set_driver_input(DriverInput { forward: 1.0, ..DriverInput::default() })?;
     /// for _ in 0..60 {
@@ -201,10 +200,10 @@ impl PhysicsWorld {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn create_vehicle(
+    pub fn create_wheeled_vehicle(
         &mut self,
         body: BodyId,
-        settings: &VehicleSettings,
+        settings: &WheeledVehicleSettings,
     ) -> Result<VehicleId, VehicleError> {
         settings.validate(self.object_layer_count)?;
         self.check_chassis(body)?;
@@ -226,7 +225,7 @@ impl PhysicsWorld {
         // A vehicle is a constraint, and Jolt's constraints cannot operate on soft bodies
         // (`Docs/Architecture.md:462`).
         if self.body(body).map_err(VehicleError::Body)?.is_soft_body() {
-            return Err(VehicleError::Body(BodyError::SoftBody(body)));
+            return Err(VehicleError::Body(BodyError::NotRigidBody(body)));
         }
         if self.body(body).map_err(VehicleError::Body)?.motion_type() != MotionType::Dynamic {
             return Err(VehicleError::NotDynamic(body));
@@ -356,7 +355,7 @@ impl PhysicsWorld {
     /// world's reference.
     fn unregister_vehicle(&mut self, entry: VehicleEntry) {
         // SAFETY: the system and the constraint are live, the system is borrowed mutably and no
-        // step runs; the vehicle was registered in both lists by `create_vehicle`.
+        // step runs; the vehicle was registered in both lists by `create_wheeled_vehicle`.
         unsafe {
             let constraint = entry.constraint.as_ptr();
             JPH_PhysicsSystem_RemoveStepListener(
@@ -418,6 +417,17 @@ impl PhysicsWorld {
             world: self.tag,
             kind: entry.kind,
         })
+    }
+
+    /// Number of vehicles of every kind in the world.
+    pub fn vehicle_count(&self) -> u32 {
+        // Every vehicle has its own `u32` id, so the count fits.
+        self.vehicles.len() as u32
+    }
+
+    /// Whether `id` names a vehicle that is in this world now.
+    pub fn contains_vehicle(&self, id: impl Into<AnyVehicleId>) -> bool {
+        self.vehicle_entry(id.into()).is_ok()
     }
 
     /// The vehicle whose chassis is `body`, if any.

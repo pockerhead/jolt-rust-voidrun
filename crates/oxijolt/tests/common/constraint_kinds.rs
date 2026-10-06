@@ -35,7 +35,7 @@ pub fn create_every_kind(
             .create_constraint(
                 body1,
                 body2,
-                &FixedConstraintSettings::default().auto_detect_point(),
+                &FixedConstraintSettings::default().auto_detect_point(true),
             )
             .map(Into::into),
     );

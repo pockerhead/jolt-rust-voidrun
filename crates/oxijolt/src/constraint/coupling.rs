@@ -99,11 +99,11 @@ unsafe fn check_reference(
 /// the gear passes to body 2 is not `ratio` times the torque on body 1; the rotation rates
 /// follow the ratio.
 ///
-/// Without [`hinges`](Self::hinges) Jolt couples the velocities only, and the gears slowly drift
-/// apart. With them it also corrects `angle1 + ratio · angle2` (modulo 2π) from the hinges'
-/// angles in `[-π, π]`. That correction is consistent across a hinge angle's wrap at ±π only
-/// for an integer ratio; with another ratio it corrects towards a wrong angle once gear 2 has
-/// wrapped (a limitation of Jolt's `GearConstraint`).
+/// Without the hinges ([`constraints`](Self::constraints)) Jolt couples the velocities only, and
+/// the gears slowly drift apart. With them it also corrects `angle1 + ratio · angle2` (modulo 2π)
+/// from the hinges' angles in `[-π, π]`. That correction is consistent across a hinge angle's wrap
+/// at ±π only for an integer ratio; with another ratio it corrects towards a wrong angle once gear
+/// 2 has wrapped (a limitation of Jolt's `GearConstraint`).
 ///
 /// The default is Jolt's: both axes +X, world space, ratio 1.
 ///
@@ -158,7 +158,7 @@ impl GearConstraintSettings {
     /// axis has the gear's axis direction in that body. They cannot be removed while the gear
     /// exists.
     #[must_use]
-    pub fn hinges(
+    pub fn constraints(
         mut self,
         hinge1: ConstraintId<HingeConstraint>,
         hinge2: ConstraintId<HingeConstraint>,

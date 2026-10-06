@@ -19,9 +19,9 @@ bindings to the [joltc] C wrapper. Everything runs headless and is tested withou
 
 ## Playground
 
-Ten small scenes in a window show what the binding does: a character, vehicles, a pile of bodies,
-ragdolls, constraints, soft bodies, buoyancy, destruction, contact control and queries. In a clone
-of the repository with Rust, CMake and a C++ toolchain:
+Twelve small scenes in a window show what the binding does: a character, vehicles, a pile of
+bodies, ragdolls, constraints, soft bodies, buoyancy, destruction, contact control, queries, real
+meshes and any model file. In a clone of the repository with Rust, CMake and a C++ toolchain:
 
 ```sh
 git clone --recursive https://github.com/pockerhead/oxijolt
@@ -59,7 +59,7 @@ fn main() -> oxijolt::error::Result<()> {
 
     // A ray cast down from above hits the ball first.
     let ray = RayCast::new(RVec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -20.0, 0.0));
-    let hit = world.cast_ray(ray, &QueryFilter::new())?.expect("the ray hits");
+    let hit = world.cast_ray(&ray, &QueryFilter::new())?.expect("the ray hits");
     assert_eq!(hit.body, ball);
     Ok(())
 }
@@ -69,56 +69,32 @@ With Bevy, `use oxijolt::prelude::*` next to `bevy::prelude::*`; see `oxijolt::p
 
 ```toml
 [dependencies]
-oxijolt = "0.7"
+oxijolt = "1"
 ```
 
 ## Roadmap
 
-The full list of what works today, with links to the guides, is in
-[docs/features.md](docs/features.md).
+Everything planned for 1.0 is done; what works today, with links to the guides, is in
+[docs/features.md](docs/features.md). Next:
 
-- [x] Rigid bodies: box, sphere, cylinder, capsule, heightfield and compound shapes, materials
-- [x] Scene queries: ray casts, shape casts, collide-shape, with filters
-- [x] Character controller (`CharacterVirtual`)
-- [x] Wheeled vehicles
-- [x] Ragdolls
-- [x] Twelve kinds of constraints with motors, springs and limits
-- [x] Soft bodies
-- [x] Contact, activation and soft body contact events; contact listener
-- [x] Saving and restoring world state
-- [x] Floating origin and optional `f64` positions
-- [x] Jolt's jobs on your own thread pool
-- [x] Debug wireframes as line data
-- [x] Same results for any worker thread count
-- [x] Builds without LLVM; Windows and Linux in CI; prebuilt libraries in releases
-- [x] `glam` and `mint` conversions
-- [x] One-call pose readout, a crate-wide error type, a prelude
-- [x] Convex hull, triangle mesh, scaled and tapered shapes
-- [x] Body controls: impulses, kinematic moves, activation, sensors, user data, changing shape
-      and motion type
-- [x] Locked axes (allowed degrees of freedom) at body creation
-- [x] First release on crates.io and docs.rs
-- [x] Tracked vehicles and motorcycles
-- [x] Character contact callbacks, contact validation and collision groups
-- [x] Mutable compounds, buoyancy, point queries, plane shape, collision response estimate, skeleton mapper
-- [x] Playground: an example with a window that shows every feature, with a GIF of every scene
-- [x] Presets for a humanoid character, a car and a motorcycle, wheel poses for drawing, and the
-      list of every body of a world
 - [ ] Comparison with Rapier and Avian
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
-- [ ] Rollback helpers: reusable state buffer, filtered restore
-- [ ] Real meshes from open sources tested in CI, and shape cooking (save and load built shapes)
-- [ ] API review and freeze for 1.0
 - [ ] Same results across operating systems, checked in CI
+- [ ] Prebuilt native libraries downloaded by the build script
+- [ ] Constraint force readout and breakable constraints
+- [ ] Playground: debris that breaks again when it hits the ground
 
 ## Status
 
-- Version 0.7.0 on [crates.io](https://crates.io/crates/oxijolt). The API changes between versions.
+- Version 1.0.0 on [crates.io](https://crates.io/crates/oxijolt). The API follows semantic
+  versioning from 1.0: a breaking change waits for the next major version.
 - CI builds and tests Windows (MSVC) and Linux (GCC) on x86_64, each in five configurations:
   default, `cross-platform-deterministic`, `double-precision`, `debug-renderer` and `asserts`.
   The bindings are committed for 64-bit Windows, Linux, macOS and Android targets; only the two
   CI targets are tested.
+- Rust 1.88 or newer (checked in CI). The public API follows the rules in
+  [docs/api-guidelines.md](docs/api-guidelines.md).
 - Building needs a C++ toolchain and CMake, not LLVM. Jolt and joltc are compiled from pinned
   submodules; `JOLTC_LIB_DIR` links a prebuilt native library instead
   ([building](docs/building.md)).
@@ -160,12 +136,13 @@ API is not complete yet; the [roadmap](#roadmap) says what is missing.
   car and a ragdoll, run as doctests.
 - Topic guides: [constraints](docs/constraints.md), [soft bodies](docs/soft-bodies.md),
   [events](docs/events.md), [save and restore](docs/state.md), [job systems](docs/job-system.md),
-  [determinism](docs/determinism.md), [building](docs/building.md).
+  [determinism](docs/determinism.md), [shape cooking](docs/shape-cooking.md),
+  [building](docs/building.md).
 - [Limits](docs/limits.md) and [coverage](docs/coverage.md); [benchmarks](docs/benchmarks.md)
-  against a game's budgets.
+  against a game's budgets; [real meshes](docs/real-meshes.md) from open sources.
 - [Character study](docs/character-study.md): which character laws CharacterVirtual's settings
   carry, and at what cost.
-- [Playground](docs/playground.md): ten scenes with a window, headless runs and recorded clips.
+- [Playground](docs/playground.md): twelve scenes with a window, headless runs and recorded clips.
 - API docs: `cargo doc -p oxijolt --open`. Example: `cargo run -p oxijolt --example hello_world`.
 - [CHANGELOG](CHANGELOG.md).
 

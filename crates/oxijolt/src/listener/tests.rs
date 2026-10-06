@@ -419,19 +419,19 @@ fn contact_settings_setters_accept_their_range_and_refuse_beyond() {
     let floor = crate::limits::MIN_CONTACT_SCALE;
     let scale_setters: [(Setter, ContactSettingsError); 4] = [
         (
-            ContactSettings::set_inv_mass_scale1,
+            ContactSettings::set_inverse_mass_scale1,
             ContactSettingsError::InverseMassScale,
         ),
         (
-            ContactSettings::set_inv_mass_scale2,
+            ContactSettings::set_inverse_mass_scale2,
             ContactSettingsError::InverseMassScale,
         ),
         (
-            ContactSettings::set_inv_inertia_scale1,
+            ContactSettings::set_inverse_inertia_scale1,
             ContactSettingsError::InverseInertiaScale,
         ),
         (
-            ContactSettings::set_inv_inertia_scale2,
+            ContactSettings::set_inverse_inertia_scale2,
             ContactSettingsError::InverseInertiaScale,
         ),
     ];
@@ -558,9 +558,9 @@ fn soft_body_contact_settings_setters_keep_scales_in_range() {
     });
     type SoftSetter = fn(&mut SoftBodyContactSettings, f32) -> Result<(), ContactSettingsError>;
     let setters: [SoftSetter; 3] = [
-        SoftBodyContactSettings::set_inv_mass_scale1,
-        SoftBodyContactSettings::set_inv_mass_scale2,
-        SoftBodyContactSettings::set_inv_inertia_scale2,
+        SoftBodyContactSettings::set_inverse_mass_scale1,
+        SoftBodyContactSettings::set_inverse_mass_scale2,
+        SoftBodyContactSettings::set_inverse_inertia_scale2,
     ];
     for setter in setters {
         for valid in [0.0, crate::limits::MIN_CONTACT_SCALE, 1.0] {

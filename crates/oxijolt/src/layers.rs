@@ -66,8 +66,8 @@ pub struct CollisionLayers {
 }
 
 impl CollisionLayers {
-    /// Largest number of object layers a world accepts.
-    const MAX_OBJECT_LAYERS: usize = u16::MAX as usize;
+    /// Largest number of object layers a world accepts: 65535.
+    pub const MAX_OBJECT_LAYERS: u32 = u16::MAX as u32;
 
     /// Creates a setup with `broad_phase_layer_count` broad-phase layers and no object layers.
     pub fn new(broad_phase_layer_count: u8) -> Self {
@@ -107,7 +107,7 @@ impl CollisionLayers {
         if self.broad_phase_of.is_empty() {
             return Err(WorldError::InvalidLayers("there are no object layers"));
         }
-        if self.broad_phase_of.len() > Self::MAX_OBJECT_LAYERS {
+        if self.broad_phase_of.len() > Self::MAX_OBJECT_LAYERS as usize {
             return Err(WorldError::InvalidLayers("more than 65535 object layers"));
         }
         // 0xff is Jolt's invalid broad-phase layer, which a u8 count of at most 255 excludes.

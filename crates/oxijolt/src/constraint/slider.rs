@@ -116,11 +116,12 @@ impl SliderConstraintSettings {
         self
     }
 
-    /// Lets Jolt place the frame points between the bodies as they are when the constraint is
-    /// created. Only in [`ConstraintSpace::WorldSpace`].
+    /// Whether Jolt places the frame points between the bodies as they are when the constraint
+    /// is created, instead of the given points. Only in [`ConstraintSpace::WorldSpace`]. Default
+    /// false.
     #[must_use]
-    pub fn auto_detect_point(mut self) -> Self {
-        self.auto_detect_point = true;
+    pub fn auto_detect_point(mut self, value: bool) -> Self {
+        self.auto_detect_point = value;
         self
     }
 
@@ -335,20 +336,31 @@ impl ConstraintMut<'_, SliderConstraint> {
         Ok(())
     }
 
-    /// Sets the position limits, with the rules of [`SliderConstraintSettings::limits`]; `None`
-    /// removes them. Wakes the constraint's bodies.
+    /// Sets the position limits, with the rules of [`SliderConstraintSettings::limits`]. Wakes
+    /// the constraint's bodies.
     /// Not part of [`WorldState`](crate::WorldState):
     /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
-    pub fn set_limits(&mut self, limits: Option<(f32, f32)>) -> Result<(), ConstraintError> {
-        if let Some((min, max)) = limits {
-            validate_slider_limits(min, max, self.limits_spring())
-                .map_err(ConstraintError::InvalidValue)?;
-        }
-        let (min, max) = limits.unwrap_or(NO_SLIDER_LIMITS);
-        // SAFETY: as in `set_motor_state`; Jolt asserts `min <= 0 <= max`, which holds.
+    pub fn set_limits(&mut self, min: f32, max: f32) -> Result<(), ConstraintError> {
+        validate_slider_limits(min, max, self.limits_spring())
+            .map_err(ConstraintError::InvalidValue)?;
+        self.write_limits(min, max);
+        Ok(())
+    }
+
+    /// Removes the position limits (Jolt's `-FLT_MAX..FLT_MAX`). Wakes the constraint's bodies.
+    /// Not part of [`WorldState`](crate::WorldState):
+    /// [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) does not undo it.
+    pub fn remove_limits(&mut self) {
+        let (min, max) = NO_SLIDER_LIMITS;
+        self.write_limits(min, max);
+    }
+
+    /// Hands checked limits to Jolt and wakes the bodies.
+    fn write_limits(&mut self, min: f32, max: f32) {
+        // SAFETY: as in `set_motor_state`; Jolt asserts `min <= 0 <= max`, which the callers'
+        // limits satisfy.
         unsafe { JPH_SliderConstraint_SetLimits(self.ptr(), min, max) };
         self.wake_bodies();
-        Ok(())
     }
 
     /// Replaces the spring that makes the limits soft, bounded through the bodies' effective

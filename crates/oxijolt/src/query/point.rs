@@ -18,7 +18,7 @@ use crate::{
 /// One body whose shape contains the point of a [`PhysicsWorld::collide_point`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct PointHit {
+pub struct CollidePointHit {
     /// The body whose shape contains the point.
     pub body: BodyId,
     /// Path from the body's shape to the leaf shape that contains the point.
@@ -97,13 +97,15 @@ impl PhysicsWorld {
     /// the parity of its faces above the point. Child groups of the filter apply when
     /// the body's shape is a compound; a compound inside a decorator is not filtered by child.
     ///
-    /// The point must be finite and within [`limits::MAX_POSITION`], and the filter valid for
-    /// this world; otherwise [`QueryError::InvalidValue`] is returned.
+    /// The point must be finite and within [`limits::MAX_POSITION`]; otherwise
+    /// [`QueryError::InvalidValue`] is returned.
+    /// A filter that names an object layer this world does not have, or a body of another
+    /// world, gives [`QueryError::UnknownObjectLayer`] or [`QueryError::WrongWorld`].
     pub fn collide_point(
         &self,
         point: RVec3,
         filter: &QueryFilter<'_>,
-    ) -> Result<Vec<PointHit>, QueryError> {
+    ) -> Result<Vec<CollidePointHit>, QueryError> {
         if !limits::is_in_frame(point) {
             return Err(QueryError::InvalidValue(
                 "point must be finite and within limits::MAX_POSITION",
@@ -142,7 +144,7 @@ impl PhysicsWorld {
             .map(|(body, id)| {
                 let body = BodyId::new(body, self.tag);
                 let sub_shape_id = SubShapeId::new(id);
-                PointHit {
+                CollidePointHit {
                     body,
                     sub_shape_id,
                     object_layer: self.object_layer_of(body),

@@ -90,7 +90,7 @@ impl JobSystemChoice {
                 if (1..=WorldSettings::MAX_CONCURRENCY).contains(&value) {
                     Ok(value)
                 } else {
-                    Err(WorldError::InvalidSettings(
+                    Err(WorldError::InvalidValue(
                         "job system max_concurrency must be between 1 and 65",
                     ))
                 }
@@ -126,8 +126,9 @@ impl Default for WorldSettings {
 }
 
 impl WorldSettings {
-    /// Largest body count Jolt supports (`PhysicsSystem::cMaxBodiesLimit`).
-    const MAX_BODIES_LIMIT: u32 = 1 << 23;
+    /// Largest accepted [`max_bodies`](Self::max_bodies) value, 2²³: Jolt's own limit
+    /// (`PhysicsSystem::cMaxBodiesLimit`).
+    pub const MAX_BODIES: u32 = 1 << 23;
 
     /// Largest accepted [`worker_threads`](Self::worker_threads) value. Jolt starts one OS
     /// thread per worker; this bound is chosen by oxijolt to keep thread creation sane and
@@ -148,7 +149,8 @@ impl WorldSettings {
     /// pins.
     pub const MAX_CONTACT_CONSTRAINTS: u32 = 1 << 20;
 
-    /// Maximum number of bodies in the world, at most 2²³. Default 10240.
+    /// Maximum number of bodies in the world, between 1 and [`MAX_BODIES`](Self::MAX_BODIES).
+    /// Default 10240.
     #[must_use]
     pub fn max_bodies(mut self, value: u32) -> Self {
         self.max_bodies = value;
@@ -219,8 +221,8 @@ impl WorldSettings {
     }
 
     pub(crate) fn validate(&self) -> Result<(), WorldError> {
-        let invalid = |what| Err(WorldError::InvalidSettings(what));
-        if !(1..=Self::MAX_BODIES_LIMIT).contains(&self.max_bodies) {
+        let invalid = |what| Err(WorldError::InvalidValue(what));
+        if !(1..=Self::MAX_BODIES).contains(&self.max_bodies) {
             return invalid("max_bodies must be between 1 and 2^23");
         }
         if self.max_body_pairs == 0 {
@@ -419,6 +421,15 @@ pub struct PhysicsWorld {
     pub(crate) pending_cache_invalidations: BTreeSet<u32>,
     /// The listener the character updates and refreshes attach for their duration.
     pub(crate) character_listener: Option<Arc<dyn CharacterContactListener>>,
+}
+
+impl fmt::Debug for PhysicsWorld {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PhysicsWorld")
+            .field("body_count", &self.body_count())
+            .field("constraint_count", &self.constraint_count())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Drop for PhysicsWorld {
@@ -626,7 +637,7 @@ impl PhysicsWorld {
     /// zero is allowed. Sleeping bodies stay asleep.
     pub fn set_gravity(&mut self, gravity: Vec3) -> Result<(), WorldError> {
         if !limits::is_acceleration(gravity) {
-            return Err(WorldError::InvalidSettings(limits::GRAVITY_RULE));
+            return Err(WorldError::InvalidValue(limits::GRAVITY_RULE));
         }
         let gravity = gravity.to_jph();
         // SAFETY: the system is live and borrowed mutably; `gravity` is a live local.

@@ -56,7 +56,7 @@ fn contacts_are_added_persisted_and_removed_with_their_sub_shapes() {
     assert!(!manifold.points.is_empty());
     for point in &manifold.points {
         assert!(
-            point.on1.y.abs() < 0.1 && point.on2.y.abs() < 0.1,
+            point.point_on1.y.abs() < 0.1 && point.point_on2.y.abs() < 0.1,
             "{point:?}"
         );
     }

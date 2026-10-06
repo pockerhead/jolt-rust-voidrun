@@ -4,7 +4,7 @@ use oxijolt_sys::*;
 
 use super::geometry::{cross, dot, length_sq, sub, v3};
 use super::{initialize, validate_convex_radius, Shape, ShapeSettings};
-use crate::{limits, HullError, PhysicsMaterial, ShapeError, Vec3};
+use crate::{limits, ConvexHullError, PhysicsMaterial, ShapeError, Vec3};
 
 /// Jolt's `ConvexHullBuilder::cMinTriangleAreaSq`: the squared length of the cross product of two
 /// triangle edges below which Jolt finds no initial triangle for a hull.
@@ -28,18 +28,25 @@ const MIN_NEEDLE_LEVER: f64 = 0.25;
 const MIN_SLAB_THICKNESS: f64 = 200.0;
 
 impl Shape {
+    /// The convex hull of `points` (shape space, metres) with Jolt's default convex radius,
+    /// 0.05 m; otherwise as
+    /// [`new_convex_hull_with_convex_radius`](Self::new_convex_hull_with_convex_radius).
+    pub fn new_convex_hull(points: &[Vec3]) -> Result<Self, ShapeError> {
+        Self::new_convex_hull_with_convex_radius(points, JPH_DEFAULT_CONVEX_RADIUS as f32)
+    }
+
     /// The convex hull of `points` (shape space, metres) with a convex radius in metres.
     ///
-    /// Needs at least 4 points ([`HullError::TooFewPoints`]), each finite with every component
-    /// at most [`limits::MAX_SHAPE_EXTENT`] in absolute value, and a convex radius that is
-    /// finite and not negative ([`ShapeError::InvalidDimensions`]). Points on or close to a line
-    /// or in one spot are refused as [`HullError::Degenerate`], points on or close to a plane as
-    /// [`HullError::Coplanar`]: a flat hull has no volume, so Jolt would give a dynamic body made
-    /// of it zero mass and a meaningless inertia, and Jolt's single-precision hull builder cannot
-    /// build very thin needles and slabs reliably. "Close" grows with the cloud's length and its
-    /// distance from the shape origin; [docs/limits.md#convex-hulls] gives the rules. Use a
-    /// mesh, a capsule or a thin box instead. Whatever else Jolt's hull builder refuses comes
-    /// back as [`ShapeError::Rejected`].
+    /// Needs at least 4 points ([`ConvexHullError::TooFewPoints`]), each finite with every
+    /// component at most [`limits::MAX_SHAPE_EXTENT`] in absolute value, and a convex radius that
+    /// is finite and not negative ([`ShapeError::InvalidValue`]). Points on or close to a line or
+    /// in one spot are refused as [`ConvexHullError::Degenerate`], points on or close to a plane as
+    /// [`ConvexHullError::Coplanar`]: a flat hull has no volume, so Jolt would give a dynamic body
+    /// made of it zero mass and a meaningless inertia, and Jolt's single-precision hull builder
+    /// cannot build very thin needles and slabs reliably. "Close" grows with the cloud's length and
+    /// its distance from the shape origin; [docs/limits.md#convex-hulls] gives the rules. Use a
+    /// mesh, a capsule or a thin box instead. Whatever else Jolt's hull builder refuses comes back
+    /// as [`ShapeError::Rejected`].
     ///
     /// With the `asserts` feature Jolt's hull builder can abort the process on some clouds with
     /// many nearly coplanar faces: densely sampled faces a few coplanar distances off their
@@ -56,11 +63,15 @@ impl Shape {
     ///
     /// [docs/limits.md#convex-hulls]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-hulls
     /// [docs/limits.md#clouds-the-hull-builder-asserts-on]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#clouds-the-hull-builder-asserts-on
-    pub fn new_convex_hull(points: &[Vec3], convex_radius: f32) -> Result<Self, ShapeError> {
+    pub fn new_convex_hull_with_convex_radius(
+        points: &[Vec3],
+        convex_radius: f32,
+    ) -> Result<Self, ShapeError> {
         Self::convex_hull(points, convex_radius, None)
     }
 
-    /// [`new_convex_hull`](Self::new_convex_hull) made of `material`; the same rules apply.
+    /// [`new_convex_hull_with_convex_radius`](Self::new_convex_hull_with_convex_radius) made of
+    /// `material`; the same rules apply.
     pub fn new_convex_hull_with_material(
         points: &[Vec3],
         convex_radius: f32,
@@ -99,7 +110,7 @@ impl Shape {
         }
         let shape = settings.create()?;
         if shape.is_flat_hull() {
-            return Err(ShapeError::ConvexHull(HullError::Coplanar));
+            return Err(ShapeError::ConvexHull(ConvexHullError::Coplanar));
         }
         shape.within_extent_bounds()
     }
@@ -117,19 +128,19 @@ impl Shape {
     }
 }
 
-/// The count and magnitude checks of [`Shape::new_convex_hull`].
+/// The count and magnitude checks of [`Shape::new_convex_hull_with_convex_radius`].
 fn validate_hull_points(points: &[Vec3]) -> Result<(), ShapeError> {
     if points.len() < 4 {
-        return Err(ShapeError::ConvexHull(HullError::TooFewPoints));
+        return Err(ShapeError::ConvexHull(ConvexHullError::TooFewPoints));
     }
     // Jolt's hull builder indexes points with `int`.
     if points.len() > i32::MAX as usize {
-        return Err(ShapeError::InvalidSettings(
+        return Err(ShapeError::InvalidValue(
             "a convex hull has at most i32::MAX points",
         ));
     }
     if !points.iter().all(|&point| limits::is_local_offset(point)) {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "convex hull points must be finite and within limits::MAX_SHAPE_EXTENT",
         ));
     }
@@ -194,17 +205,17 @@ impl InitialSimplex {
     /// Jolt's `f32` result can differ from this `f64` replay.
     fn classify(&self) -> Result<(), ShapeError> {
         if self.area_sq < MIN_TRIANGLE_AREA_SQ {
-            return Err(ShapeError::ConvexHull(HullError::Degenerate));
+            return Err(ShapeError::ConvexHull(ConvexHullError::Degenerate));
         }
         // The rounding of a position, about the coplanar distance, tilts a face built over the
         // width by `coplanar / width`, which moves it by `length * coplanar / width` at the far
         // end; the builder needs that well inside its tolerance.
         let tolerance = HULL_TOLERANCE.max(self.coplanar_distance);
         if self.width * tolerance < MIN_NEEDLE_LEVER * self.length * self.coplanar_distance {
-            return Err(ShapeError::ConvexHull(HullError::Degenerate));
+            return Err(ShapeError::ConvexHull(ConvexHullError::Degenerate));
         }
         if self.thickness < MIN_SLAB_THICKNESS * self.coplanar_distance {
-            return Err(ShapeError::ConvexHull(HullError::Coplanar));
+            return Err(ShapeError::ConvexHull(ConvexHullError::Coplanar));
         }
         Ok(())
     }

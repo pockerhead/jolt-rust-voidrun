@@ -53,7 +53,7 @@ macro_rules! vehicle_kinds {
 
 vehicle_kinds! {
     /// A wheeled vehicle, created with
-    /// [`PhysicsWorld::create_vehicle`](crate::PhysicsWorld::create_vehicle).
+    /// [`PhysicsWorld::create_wheeled_vehicle`](crate::PhysicsWorld::create_wheeled_vehicle).
     WheeledVehicle => Wheeled;
     /// A tracked vehicle such as a tank.
     TrackedVehicle => Tracked;

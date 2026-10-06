@@ -39,8 +39,8 @@ impl Shape {
     /// at most [`limits::MAX_SHAPE_EXTENT`], and the radii may differ by at most
     /// `2 * half_height * (1 - 2^-21)`; otherwise one sphere contains the other and the shape
     /// is a sphere, which [`new_sphere`](Self::new_sphere) builds
-    /// ([`ShapeError::InvalidDimensions`]; [docs/limits.md#tapered-shapes]). Only a uniform
-    /// [`scaled`](Self::scaled) applies.
+    /// ([`ShapeError::InvalidValue`]; [docs/limits.md#tapered-shapes]). Only a uniform
+    /// [`new_scaled`](Self::new_scaled) applies.
     ///
     /// [docs/limits.md#tapered-shapes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#tapered-shapes
     pub fn new_tapered_capsule(
@@ -61,6 +61,21 @@ impl Shape {
         settings.create()?.within_extent_bounds()
     }
 
+    /// A tapered cylinder with Jolt's default convex radius, 0.05 m; otherwise as
+    /// [`new_tapered_cylinder_with_convex_radius`](Self::new_tapered_cylinder_with_convex_radius).
+    pub fn new_tapered_cylinder(
+        half_height: f32,
+        top_radius: f32,
+        bottom_radius: f32,
+    ) -> Result<Self, ShapeError> {
+        Self::new_tapered_cylinder_with_convex_radius(
+            half_height,
+            top_radius,
+            bottom_radius,
+            JPH_DEFAULT_CONVEX_RADIUS as f32,
+        )
+    }
+
     /// A cylinder along the local Y axis whose ends differ: `2 * half_height` metres high with
     /// a disc of `top_radius` at the top and one of `bottom_radius` at the bottom, a Jolt
     /// `TaperedCylinderShape`. A radius of 0 makes a cone. The centre of mass lies on the axis
@@ -70,13 +85,13 @@ impl Shape {
     /// different (equal radii make a cylinder: use
     /// [`new_cylinder_with_convex_radius`](Self::new_cylinder_with_convex_radius)), the larger
     /// radius at least `2^-63` m, and all of them at most [`limits::MAX_SHAPE_EXTENT`]
-    /// ([`ShapeError::InvalidDimensions`]; [docs/limits.md#tapered-shapes]). The convex radius
+    /// ([`ShapeError::InvalidValue`]; [docs/limits.md#tapered-shapes]). The convex radius
     /// must be finite and not negative; Jolt clamps it to the smaller radius, and contacts use
-    /// at most 0.05 m of it. Only a [`scaled`](Self::scaled) that is uniform in X and Z
+    /// at most 0.05 m of it. Only a [`new_scaled`](Self::new_scaled) that is uniform in X and Z
     /// applies.
     ///
     /// [docs/limits.md#tapered-shapes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#tapered-shapes
-    pub fn new_tapered_cylinder(
+    pub fn new_tapered_cylinder_with_convex_radius(
         half_height: f32,
         top_radius: f32,
         bottom_radius: f32,
@@ -113,21 +128,21 @@ fn validate_tapered_capsule(
         .into_iter()
         .all(is_finite_positive)
     {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "tapered capsule half height and radii must be finite and positive",
         ));
     }
     let (larger, smaller) = (top_radius.max(bottom_radius), top_radius.min(bottom_radius));
     if half_height + larger > limits::MAX_SHAPE_EXTENT {
-        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+        return Err(ShapeError::InvalidValue(BEYOND_EXTENT));
     }
     // Jolt's `TaperedCapsuleShapeSettings::IsSphere`, evaluated in `f32` as Jolt does.
     if larger >= 2.0 * half_height + smaller {
-        return Err(ShapeError::InvalidDimensions(SPHERE_LIKE));
+        return Err(ShapeError::InvalidValue(SPHERE_LIKE));
     }
     let taper = f64::from(bottom_radius - top_radius).abs();
     if taper > f64::from(2.0 * half_height) * MAX_TAPER {
-        return Err(ShapeError::InvalidDimensions(SPHERE_LIKE));
+        return Err(ShapeError::InvalidValue(SPHERE_LIKE));
     }
     Ok(())
 }
@@ -142,7 +157,7 @@ fn validate_tapered_cylinder(
         && is_finite_non_negative(top_radius)
         && is_finite_non_negative(bottom_radius))
     {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "tapered cylinder half height must be finite and positive, its radii finite and not negative",
         ));
     }
@@ -150,15 +165,15 @@ fn validate_tapered_cylinder(
         .into_iter()
         .all(within_extent)
     {
-        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+        return Err(ShapeError::InvalidValue(BEYOND_EXTENT));
     }
     if top_radius == bottom_radius {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "tapered cylinder radii must differ; use a cylinder",
         ));
     }
     if top_radius.max(bottom_radius) < MIN_TAPERED_CYLINDER_RADIUS {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "tapered cylinder larger radius must be at least 2^-63 m",
         ));
     }

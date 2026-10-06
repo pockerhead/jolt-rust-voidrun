@@ -53,7 +53,7 @@ fn radial_gravity(position: RVec3) -> Vec3 {
 fn mixed_shapes() -> Vec<Shape> {
     let block = Shape::new_box(Vec3::new(0.3, 0.2, 0.25)).unwrap();
     let ball = Shape::new_sphere(0.25).unwrap();
-    let hull = Shape::new_convex_hull(
+    let hull = Shape::new_convex_hull_with_convex_radius(
         &[
             Vec3::new(-0.3, 0.0, -0.3),
             Vec3::new(0.3, 0.0, -0.3),

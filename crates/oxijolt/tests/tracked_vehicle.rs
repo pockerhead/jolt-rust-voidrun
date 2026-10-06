@@ -377,7 +377,7 @@ fn invalid_tracked_vehicles_create_nothing() {
         (restricted, BodyError::RestrictedDofs(restricted)),
         (inner, BodyError::OwnedByCharacter(inner)),
         (part, BodyError::OwnedByRagdoll(part)),
-        (cloth, BodyError::SoftBody(cloth)),
+        (cloth, BodyError::NotRigidBody(cloth)),
     ];
     for (body, error) in body_refusals {
         assert_eq!(
@@ -527,7 +527,7 @@ fn tank_testers() {
         .unwrap()
         .set_collision_tester(blind)
         .unwrap();
-    assert_eq!(*world.vehicle(tank).unwrap().collision_tester(), blind);
+    assert_eq!(world.vehicle(tank).unwrap().collision_tester(), blind);
     step(&mut world, 1);
     assert!(world
         .vehicle(tank)

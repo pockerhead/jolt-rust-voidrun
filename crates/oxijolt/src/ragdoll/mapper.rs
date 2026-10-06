@@ -23,7 +23,7 @@ const MAPPED_POSITION_RULE: &str = "the mapped pose leaves limits::MAX_POSITION"
 const MAPPED_ROTATION_RULE: &str = "the mapped pose has a rotation that is not a unit quaternion";
 
 /// One skeleton of a [`SkeletonMapper`] with its neutral pose.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MappedSkeleton<'a> {
     /// The skeleton.
     pub skeleton: &'a Skeleton,
@@ -82,6 +82,15 @@ pub struct SkeletonMapper {
     mapper: Owned<JPH_SkeletonMapper>,
     ragdoll_joint_count: u32,
     animation_joint_count: u32,
+}
+
+impl std::fmt::Debug for SkeletonMapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SkeletonMapper")
+            .field("ragdoll_joint_count", &self.ragdoll_joint_count)
+            .field("animation_joint_count", &self.animation_joint_count)
+            .finish_non_exhaustive()
+    }
 }
 
 // SAFETY: the Jolt mapper is never changed after `new`; `Map`, `MapReverse`, `GetMappedJointIdx`

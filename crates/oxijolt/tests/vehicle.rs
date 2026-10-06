@@ -496,7 +496,7 @@ fn invalid_vehicles_create_nothing() {
 
     let bad_layer = car_settings(VehicleCollisionTester::ray(ObjectLayer::new(3)));
     assert!(matches!(
-        world.create_vehicle(chassis, &bad_layer),
+        world.create_wheeled_vehicle(chassis, &bad_layer),
         Err(VehicleError::InvalidValue(_))
     ));
     unchanged(&world);
@@ -510,7 +510,7 @@ fn invalid_vehicles_create_nothing() {
     let settings = car_settings(VehicleCollisionTester::ray(layers.probe));
     for body in [fixed, kinematic] {
         assert_eq!(
-            world.create_vehicle(body, &settings),
+            world.create_wheeled_vehicle(body, &settings),
             Err(VehicleError::NotDynamic(body))
         );
     }
@@ -528,7 +528,7 @@ fn invalid_vehicles_create_nothing() {
         .unwrap();
     let inner = world.character(character).unwrap().inner_body().unwrap();
     assert_eq!(
-        world.create_vehicle(inner, &settings),
+        world.create_wheeled_vehicle(inner, &settings),
         Err(VehicleError::Body(BodyError::OwnedByCharacter(inner)))
     );
 
@@ -537,7 +537,7 @@ fn invalid_vehicles_create_nothing() {
         .create_body(&chassis_shape(), &BodySettings::new_dynamic())
         .unwrap();
     assert_eq!(
-        world.create_vehicle(foreign, &settings),
+        world.create_wheeled_vehicle(foreign, &settings),
         Err(VehicleError::Body(BodyError::WrongWorld(foreign)))
     );
     let removed = world
@@ -545,14 +545,14 @@ fn invalid_vehicles_create_nothing() {
         .unwrap();
     world.remove_body(removed).unwrap();
     assert_eq!(
-        world.create_vehicle(removed, &settings),
+        world.create_wheeled_vehicle(removed, &settings),
         Err(VehicleError::Body(BodyError::NotFound(removed)))
     );
     assert_eq!(world.vehicle_ids().count(), 0);
 
-    let car = world.create_vehicle(chassis, &settings).unwrap();
+    let car = world.create_wheeled_vehicle(chassis, &settings).unwrap();
     assert_eq!(
-        world.create_vehicle(chassis, &settings),
+        world.create_wheeled_vehicle(chassis, &settings),
         Err(VehicleError::AlreadyHasVehicle(chassis))
     );
     assert_eq!(world.vehicle_ids().collect::<Vec<_>>(), vec![car.into()]);
@@ -580,7 +580,7 @@ fn invalid_vehicles_create_nothing() {
         Err(VehicleError::InvalidValue(_))
     ));
     assert_eq!(
-        *world.vehicle(car).unwrap().collision_tester(),
+        world.vehicle(car).unwrap().collision_tester(),
         VehicleCollisionTester::ray(layers.probe)
     );
 }
@@ -602,11 +602,17 @@ fn vehicle_ids_are_sequential_and_never_reused() {
         ids.iter().map(|id| id.to_raw()).collect::<Vec<_>>(),
         [1, 2, 3]
     );
+    assert_eq!(world.vehicle_count(), 3);
+    assert!(world.contains_vehicle(ids[1]));
     world.remove_vehicle(ids[1]).unwrap();
     assert_eq!(
         world.vehicle_ids().collect::<Vec<_>>(),
         [ids[0].into(), ids[2].into()]
     );
+    assert_eq!(world.vehicle_count(), 2);
+    assert!(!world.contains_vehicle(ids[1]));
+    let (other, _) = car_world(Vec3::ZERO, 1);
+    assert!(!other.contains_vehicle(ids[0]));
     let (_, fourth) = add_car(
         &mut world,
         &layers,
@@ -657,7 +663,7 @@ fn collision_tester_can_be_replaced() {
         .unwrap()
         .set_collision_tester(sphere)
         .unwrap();
-    assert_eq!(*world.vehicle(car).unwrap().collision_tester(), sphere);
+    assert_eq!(world.vehicle(car).unwrap().collision_tester(), sphere);
     step(&mut world, 5);
     assert!(world
         .vehicle(car)

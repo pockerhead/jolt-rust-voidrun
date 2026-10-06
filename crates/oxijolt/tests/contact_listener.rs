@@ -276,10 +276,10 @@ impl ContactListener for Scales {
     }
 
     fn contact_persisted(&self, _: &ContactManifold, settings: &mut ContactSettings) {
-        settings.set_inv_mass_scale1(self.mass).unwrap();
-        settings.set_inv_mass_scale2(self.mass).unwrap();
-        settings.set_inv_inertia_scale1(self.inertia).unwrap();
-        settings.set_inv_inertia_scale2(self.inertia).unwrap();
+        settings.set_inverse_mass_scale1(self.mass).unwrap();
+        settings.set_inverse_mass_scale2(self.mass).unwrap();
+        settings.set_inverse_inertia_scale1(self.inertia).unwrap();
+        settings.set_inverse_inertia_scale2(self.inertia).unwrap();
         self.calls.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -289,9 +289,9 @@ impl ContactListener for Scales {
         _: BodyId,
         settings: &mut SoftBodyContactSettings,
     ) -> SoftBodyValidateResult {
-        settings.set_inv_mass_scale1(self.vertex).unwrap();
-        settings.set_inv_mass_scale2(self.mass).unwrap();
-        settings.set_inv_inertia_scale2(self.inertia).unwrap();
+        settings.set_inverse_mass_scale1(self.vertex).unwrap();
+        settings.set_inverse_mass_scale2(self.mass).unwrap();
+        settings.set_inverse_inertia_scale2(self.inertia).unwrap();
         self.calls.fetch_add(1, Ordering::Relaxed);
         SoftBodyValidateResult::AcceptContact
     }

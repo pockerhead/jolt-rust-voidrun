@@ -46,6 +46,7 @@ Layers, bottom to top:
 - **Idiomatic Rust in the safe layer.** Builders and settings structs with `Default`, newtypes for ids,
   `Result` for fallible calls, iterators instead of out-buffers, RAII instead of manual destroy, no raw
   pointers in public signatures. Keep Jolt's vocabulary in names so Jolt's docs still map onto the API.
+  API rules: [docs/api-guidelines.md](docs/api-guidelines.md).
 - **One feature per commit.** Small reviewable steps; C-wrapper additions kept separable so they can be
   offered to the wrapper's upstream.
 - **Data over constants for tuning**, laws as constants: physical tuning numbers belong to the caller,
@@ -71,7 +72,7 @@ and skips CMake; the build script validates it against the target, CRT, features
 cargo build                         # builds the C wrapper + Jolt through CMake (always Release), uses the committed bindings
 cargo test -p oxijolt-sys       # raw binding smoke tests
 cargo test -p oxijolt           # safe API tests
-cargo test --workspace              # everything
+cargo test --workspace              # everything, also the playground window and a second native build with the debug renderer
 cargo test -p oxijolt-sys --features cross-platform-deterministic   # when touching determinism (forward it from oxijolt when oxijolt needs it)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check

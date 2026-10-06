@@ -110,7 +110,7 @@ impl BodyMut<'_> {
     ///   [`BodyError::OwnedByRagdoll`] or [`BodyError::UsedByConstraint`] for a body that a
     ///   character, vehicle, ragdoll or constraint holds, whose checks assume the motion type it
     ///   had, also when the motion type would not change;
-    /// - [`BodyError::SoftBody`] for a soft body, which Jolt keeps dynamic;
+    /// - [`BodyError::NotRigidBody`] for a soft body, which Jolt keeps dynamic;
     /// - [`BodyError::CannotMove`] for kinematic or dynamic on a body created static without
     ///   [`BodySettings::allow_dynamic_or_kinematic`];
     /// - [`BodyError::InvalidValue`] for dynamic when the shape contains a mesh, heightfield or plane,
@@ -194,7 +194,7 @@ impl BodyMut<'_> {
     /// - [`BodyError::OwnedByCharacter`], [`BodyError::UsedByVehicle`],
     ///   [`BodyError::OwnedByRagdoll`] or [`BodyError::UsedByConstraint`] for a body that a
     ///   character, vehicle, ragdoll or constraint holds;
-    /// - [`BodyError::SoftBody`] for a soft body;
+    /// - [`BodyError::NotRigidBody`] for a soft body;
     /// - [`BodyError::InvalidValue`] when the body's motion type, movement capability or sensor
     ///   flag refuses the shape or mass, as [`PhysicsWorld::create_body`] would refuse them, or
     ///   when a dynamic body holds forces or torques added since the last step (call

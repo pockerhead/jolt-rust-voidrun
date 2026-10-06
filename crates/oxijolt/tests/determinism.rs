@@ -804,7 +804,7 @@ fn run_constraints(worker_threads: u32) -> Digest {
         .create_constraint(
             discs[0],
             discs[1],
-            &GearConstraintSettings::new(z, z, 2.0).hinges(hinges[0], hinges[1]),
+            &GearConstraintSettings::new(z, z, 2.0).constraints(hinges[0], hinges[1]),
         )
         .unwrap();
     let mut motor = world.constraint_mut(hinges[0]).unwrap();
@@ -1253,7 +1253,7 @@ struct Fleet {
 }
 
 /// The carrier: a 10 m flatbed vehicle with a low centre of mass.
-fn carrier_settings(layers: &vehicle::CarLayers) -> (Shape, VehicleSettings) {
+fn carrier_settings(layers: &vehicle::CarLayers) -> (Shape, WheeledVehicleSettings) {
     let hull = Shape::new_box(Vec3::new(2.5, 0.3, 5.0)).unwrap();
     let shape = Shape::new_offset_center_of_mass(&hull, Vec3::new(0.0, -0.3, 0.0)).unwrap();
     let wheels = [(2.3, 4.0), (-2.3, 4.0), (2.3, -4.0), (-2.3, -4.0)]
@@ -1267,7 +1267,7 @@ fn carrier_settings(layers: &vehicle::CarLayers) -> (Shape, VehicleSettings) {
                 .max_steer_angle(0.0)
         })
         .collect();
-    let settings = VehicleSettings::new(
+    let settings = WheeledVehicleSettings::new(
         wheels,
         vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
         VehicleCollisionTester::ray(layers.probe),
@@ -1339,7 +1339,9 @@ fn build_fleet(worker_threads: u32) -> Fleet {
         .unwrap();
     placed.push((
         carrier_body,
-        world.create_vehicle(carrier_body, &carrier).unwrap(),
+        world
+            .create_wheeled_vehicle(carrier_body, &carrier)
+            .unwrap(),
     ));
     placed.push(place(&mut world, 60.0, 0.85 + 0.3 + 0.85, 20.0, ray));
     let cylinder = VehicleCollisionTester::cast_cylinder(layers.probe);

@@ -348,7 +348,7 @@ fn only_submerged_dynamic_bodies_are_pushed() {
     }
     assert_eq!(
         buoy(&mut world, cloth, &surface, GRAVITY),
-        Err(BodyError::SoftBody(cloth))
+        Err(BodyError::NotRigidBody(cloth))
     );
     world.take_events();
 
@@ -607,7 +607,7 @@ fn small_light_and_far_buoyancy_centres_stay_finite() {
         child(&cube, Vec3::new(0.0, 8.0, 0.0), 2),
     ])
     .unwrap();
-    let scaled = Shape::scaled(&nested, Vec3::new(1.5, -1.0, 1.0)).unwrap();
+    let scaled = Shape::new_scaled(&nested, Vec3::new(1.5, -1.0, 1.0)).unwrap();
     let long = world
         .create_body(
             &scaled,
@@ -689,7 +689,8 @@ fn stress_shapes() -> Vec<Shape> {
         Shape::new_sphere(0.3).unwrap(),
         Shape::new_capsule(0.4, 0.2).unwrap(),
         Shape::new_cylinder(0.3, 0.25).unwrap(),
-        Shape::new_convex_hull(&common::meshes::irregular_points(), 0.02).unwrap(),
+        Shape::new_convex_hull_with_convex_radius(&common::meshes::irregular_points(), 0.02)
+            .unwrap(),
         Shape::new_offset_center_of_mass(&compound, Vec3::new(0.2, -0.1, 0.0)).unwrap(),
         compound,
     ]

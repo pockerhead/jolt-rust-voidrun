@@ -109,11 +109,11 @@ fn world_gravity_is_bounded_by_max_acceleration() {
     for gravity in beyond {
         assert!(matches!(
             PhysicsWorld::new(WorldSettings::default().gravity(gravity)),
-            Err(WorldError::InvalidSettings(_))
+            Err(WorldError::InvalidValue(_))
         ));
         assert!(matches!(
             world.set_gravity(gravity),
-            Err(WorldError::InvalidSettings(_))
+            Err(WorldError::InvalidValue(_))
         ));
         assert_eq!(bits(world.gravity()), before);
     }
@@ -706,11 +706,11 @@ fn height_field_extent_is_bounded() {
     assert!(field(-1999.0, 1333.0).is_ok());
     assert!(matches!(
         field(-1999.0, 1333.0f32.next_up()),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
     assert!(matches!(
         field(-extent.next_up(), 1.0),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
 }
 
@@ -728,9 +728,9 @@ fn query_inputs_are_bounded_by_the_frame() {
     let beyond = RVec3::new(bound.next_up(), 0.0, 0.0);
     let across = Vec3::new(-span, -span, -span);
 
-    world.cast_ray(RayCast::new(corner, across), &all).unwrap();
+    world.cast_ray(&RayCast::new(corner, across), &all).unwrap();
     assert!(query_invalid(world.cast_ray(
-        RayCast::new(beyond, Vec3::new(0.0, -1.0, 0.0)),
+        &RayCast::new(beyond, Vec3::new(0.0, -1.0, 0.0)),
         &all
     )));
 
@@ -826,7 +826,7 @@ fn a_ray_with_a_huge_finite_direction_is_cast() {
     let floor = add_floor(&mut world);
     let hit = world
         .cast_ray(
-            RayCast::new(RVec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -1.0e30, 0.0)),
+            &RayCast::new(RVec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -1.0e30, 0.0)),
             &QueryFilter::new(),
         )
         .unwrap()
@@ -1137,16 +1137,16 @@ fn vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely() {
     let max_frequency = (f64::from(coefficient) / f64::from(limits::MAX_MASS)).sqrt()
         / (2.0 * std::f64::consts::PI);
     let springs = [
-        SuspensionSpring::StiffnessAndDamping {
+        SpringSettings::StiffnessAndDamping {
             stiffness: coefficient,
             damping: coefficient,
         },
-        SuspensionSpring::FrequencyAndDamping {
+        SpringSettings::FrequencyAndDamping {
             frequency: (0.999 * max_frequency) as f32,
             damping: 1.0,
         },
-        SuspensionSpring::default(),
-        SuspensionSpring::default(),
+        WheelSettings::DEFAULT_SUSPENSION_SPRING,
+        WheelSettings::DEFAULT_SUSPENSION_SPRING,
     ];
     let wheels = WHEEL_POSITIONS
         .iter()
@@ -1160,7 +1160,7 @@ fn vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely() {
                 .suspension_spring(spring)
         })
         .collect();
-    let settings = VehicleSettings::new(
+    let settings = WheeledVehicleSettings::new(
         wheels,
         vec![VehicleDifferentialSettings::new(Some(0), Some(1))],
         VehicleCollisionTester::ray(layers.probe),
@@ -1173,7 +1173,7 @@ fn vehicle_springs_and_anti_roll_bar_at_their_bounds_step_finitely() {
     let tilt = Quat::from_xyzw(0.0, 0.0, 0.05, (1.0_f32 - 0.0025).sqrt());
     let body = chassis_settings(&layers, RVec3::new(0.0, 0.9, 0.0), tilt);
     let chassis = world.create_body(&chassis_shape(), &body).unwrap();
-    let car = world.create_vehicle(chassis, &settings).unwrap();
+    let car = world.create_wheeled_vehicle(chassis, &settings).unwrap();
     world
         .vehicle_mut(car)
         .unwrap()
@@ -1566,11 +1566,12 @@ fn slider_cone_swing_twist_and_six_dof_targets_are_bounded() {
     for velocity in [speed.next_up(), (-speed).next_down()] {
         assert!(constraint_invalid(slider.set_target_velocity(velocity)));
     }
-    assert!(slider.set_limits(Some((-extent, extent))).is_ok());
+    assert!(slider.set_limits(-extent, extent).is_ok());
     assert!(constraint_invalid(
-        slider.set_limits(Some((-extent, extent.next_up())))
+        slider.set_limits(-extent, extent.next_up())
     ));
-    assert!(slider.set_limits(None).is_ok());
+    slider.remove_limits();
+    assert_eq!(world.constraint(id.unwrap()).unwrap().limits(), None);
 
     let cone = |angle| ConeConstraintSettings::new(RVec3::ZERO, AXIS_X, angle);
     for angle in [0.0, PI] {
@@ -1870,7 +1871,8 @@ fn ratios_at_the_bound_step_finitely() {
                         .create_constraint(
                             bodies[0],
                             bodies[1],
-                            &GearConstraintSettings::new(z, z, ratio).hinges(hinges[0], hinges[1]),
+                            &GearConstraintSettings::new(z, z, ratio)
+                                .constraints(hinges[0], hinges[1]),
                         )
                         .unwrap();
                     world
@@ -2104,7 +2106,7 @@ fn lever_arms_are_bounded_by_the_bodies_size() {
     // mass towards the lighter body, kinematic bodies included. A 1 kg, 1 m cube, dynamic or
     // kinematic, welded to a dynamic 1000 kg, 4 m cube holds the large cube at 1000/1001 of the
     // distance between them, which its ratio bounds.
-    let weld = FixedConstraintSettings::default().auto_detect_point();
+    let weld = FixedConstraintSettings::default().auto_detect_point(true);
     let reach = cube_lever(2.0, bound) * 1.001;
     for light_settings in [BodySettings::new_dynamic(), BodySettings::new_kinematic()] {
         for (distance, accepted) in [(reach * 0.999, true), (reach * 1.001, false)] {

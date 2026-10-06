@@ -1,6 +1,6 @@
 # Playground
 
-`examples/playground` is a program with a window that shows what `oxijolt` does, in ten small
+`examples/playground` is a program with a window that shows what `oxijolt` does, in twelve small
 scenes. Each scene owns its own `PhysicsWorld`, built fresh when the scene is chosen or reset. The
 same scenes run without a window, for tests and CI, and record the clips on this page.
 
@@ -36,7 +36,7 @@ These keys work in every scene:
 
 | Keys | Action |
 |---|---|
-| 1 to 9, 0 | choose a scene |
+| 1 to 9, 0, -, = | choose a scene |
 | R | reset the scene |
 | P | pause |
 | N | one tick while paused |
@@ -79,8 +79,8 @@ the motorcycle from behind as it leans into a turn. The white spokes turn with t
 binding reports.*
 
 A car, a tank and a motorcycle on rolling terrain, and a walker; Tab switches which one the keys
-drive. It uses `VehicleSettings::car`, `TrackedVehicleSettings`, `MotorcycleSettings::bike`,
-`create_vehicle`, `create_tracked_vehicle`, `create_motorcycle`, `set_driver_input`,
+drive. It uses `WheeledVehicleSettings::car`, `TrackedVehicleSettings`, `MotorcycleSettings::bike`,
+`create_wheeled_vehicle`, `create_tracked_vehicle`, `create_motorcycle`, `set_driver_input`,
 `wheel_world_transform`, `current_gear`, `lean` and `Shape::new_offset_center_of_mass`.
 
 | Keys | Action |
@@ -98,7 +98,7 @@ drive. It uses `VehicleSettings::car`, `TrackedVehicleSettings`, `MotorcycleSett
 the bin asleep in grey, and one more layer.*
 
 400 bodies of nine shape kinds fall into a bin; estimated impacts flash, sleeping bodies turn grey.
-It uses boxes, spheres, capsules, cylinders, tapered shapes, convex hulls, `Shape::scaled`,
+It uses boxes, spheres, capsules, cylinders, tapered shapes, convex hulls, `Shape::new_scaled`,
 `MotionQuality::LinearCast`, `EventSettings::collision_estimates`, `ActivationEvent` and
 `active_body_poses_into`.
 
@@ -179,13 +179,18 @@ and `Shape::new_plane`.
 
 ### 8 Breakable wall (`destruction`)
 
-![Cannonballs knock bricks out of a wall, and a click removes one more](media/destruction.gif)
+![Cannonballs and clicks knock bricks out of a wall, which breaks into pieces](media/destruction.gif)
 
-*Two cannonballs knock holes in the wall, and a click knocks out one more brick.*
+*Two cannonballs knock holes in the wall and a click knocks out one more brick; five more clicks
+cut it into three pieces: the top right corner drops onto the stub below it, and the arch that is
+left topples.*
 
-A wall of 48 bricks loses the bricks that cannonballs or clicks hit; each brick falls on as a body.
-It uses `MutableCompound`, `to_shape`, `BodyMut::set_shape`, `compound_sub_shape`,
-`CollisionEstimate` and `cast_ray` with `compound_child`.
+A wall of 48 bricks stands on the ground as one dynamic body. It loses the bricks that cannonballs
+or clicks hit, and each brick falls on as a body. What is left splits into pieces of bricks that
+touch face to face: the largest stays in the wall's body, every other piece becomes a body of its
+own, and a piece that lost its support topples or falls. It uses `MutableCompound`, `to_shape`,
+`BodyMut::set_shape` with a mass, `compound_sub_shape`, `CollisionEstimate` and `cast_ray` with
+`compound_child`.
 
 | Keys | Action |
 |---|---|
@@ -232,6 +237,42 @@ pushing and toggling crates, saving and restoring, moving the origin, the collid
 | T | the last clicked crate: kinematic or dynamic |
 | K, L | save the world, restore it |
 | B | move the origin to the point under the cursor |
+
+### - Real models as meshes (`meshes`)
+
+![Spheres and boxes rain onto a racing track tile, a dungeon corridor, furniture and an oloid](media/meshes.gif)
+
+*Bodies rain onto the real models of `assets/models`: a racing track tile, a dungeon corridor whose
+floor has both faces, a radio, a fridge, a bathtub, a bookcase and Crane's oloid. Sleeping bodies
+turn grey; at the cut, a burst drops two bodies over every model.*
+
+The committed models of the [real-mesh tests](real-meshes.md), read with `crates/mesh-import`,
+built with `Shape::new_mesh` and placed on a ground plane. With `--models DIR`, the directory
+`scripts/fetch_models.py` filled, the scene adds Crane's spot and the ScatteringSkull as a 2.5 m
+statue. The HUD counts the triangles Jolt was handed and those dropped as too thin.
+
+| Keys | Action |
+|---|---|
+| Space | drop a burst of bodies |
+
+### = A model from the command line (`model`)
+
+![Spheres and boxes rain onto the racing track tile and come to rest](media/model.gif)
+
+*The default model, the track tile, with spheres and boxes raining onto it and falling asleep.*
+
+Any OBJ, glTF or GLB file given with `--model PATH` (by default the committed track tile) as a
+static mesh, standing on the ground plane, with bodies raining onto it:
+
+```sh
+cargo run -p playground --release -- --scene model --model path/to/level.glb
+```
+
+The HUD shows the file's triangle count and how many the mesh constructor dropped.
+
+| Keys | Action |
+|---|---|
+| Space | drop a burst of bodies |
 
 What is not shown, because it has nothing to draw: Jolt's jobs on a caller's thread pool, `f64`
 positions, the `glam` and `mint` conversions, the prelude and the error type.

@@ -142,7 +142,7 @@ impl MutableCompound {
 
     /// An editor holding `children`, in order.
     ///
-    /// Fails with [`ShapeError::InvalidSettings`] when a position or rotation breaks the rules
+    /// Fails with [`ShapeError::InvalidValue`] when a position or rotation breaks the rules
     /// of [`Shape::new_compound`], when there are more than `u32::MAX - 3` children or when the
     /// children's sub-shape ids would not fit Jolt's 32 bits, and with
     /// [`ShapeError::TooManySubShapes`] above [`limits::MAX_EXPANDED_SUB_SHAPES`]. Nothing is
@@ -151,7 +151,7 @@ impl MutableCompound {
     /// [`limits::MAX_EXPANDED_SUB_SHAPES`]: crate::limits::MAX_EXPANDED_SUB_SHAPES
     pub fn from_children(children: &[CompoundChild<'_>]) -> Result<Self, ShapeError> {
         if !fits_child_count(children.len()) {
-            return Err(ShapeError::InvalidSettings(CHILD_COUNT_RULE));
+            return Err(ShapeError::InvalidValue(CHILD_COUNT_RULE));
         }
         for child in children {
             check_child_pose(child.position, child.rotation)?;
@@ -175,7 +175,7 @@ impl MutableCompound {
             })
             .collect();
         if !ids.fits(entries.len() as u32, None) {
-            return Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
+            return Err(ShapeError::InvalidValue(SUB_SHAPE_ID_RULE));
         }
         // Building the holder walks the expanded tree.
         check_children_expanded(expanded)?;
@@ -201,7 +201,7 @@ impl MutableCompound {
 
     /// Adds `child` after the last child and returns its index.
     ///
-    /// Fails with [`ShapeError::InvalidSettings`] when the pose breaks the rules of
+    /// Fails with [`ShapeError::InvalidValue`] when the pose breaks the rules of
     /// [`Shape::new_compound`], when the compound already holds `u32::MAX - 3` children or when
     /// the ids of the compound with the new child would not fit Jolt's 32 bits, and with
     /// [`ShapeError::TooManySubShapes`] when the compound would hold more than
@@ -211,12 +211,12 @@ impl MutableCompound {
     pub fn add_shape(&mut self, child: &CompoundChild<'_>) -> Result<u32, ShapeError> {
         let index = self.sub_shape_count();
         if !fits_child_count(self.children.len() + 1) {
-            return Err(ShapeError::InvalidSettings(CHILD_COUNT_RULE));
+            return Err(ShapeError::InvalidValue(CHILD_COUNT_RULE));
         }
         check_child_pose(child.position, child.rotation)?;
         let ids = child_ids(child.shape);
         if !self.ids.fits(index + 1, Some(ids)) {
-            return Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
+            return Err(ShapeError::InvalidValue(SUB_SHAPE_ID_RULE));
         }
         let expanded = self.expanded.saturating_add(ids.expanded);
         check_children_expanded(expanded)?;
@@ -264,7 +264,7 @@ impl MutableCompound {
     /// The child keeps its user data.
     ///
     /// Fails with [`ShapeError::NoSubShape`] when there is no such child, with
-    /// [`ShapeError::InvalidSettings`] when the pose breaks the rules of
+    /// [`ShapeError::InvalidValue`] when the pose breaks the rules of
     /// [`Shape::new_compound`] or when the new shape's ids would not fit Jolt's 32 bits, and with
     /// [`ShapeError::TooManySubShapes`] when the compound would hold more than
     /// [`limits::MAX_EXPANDED_SUB_SHAPES`] shapes; the compound is unchanged then.
@@ -284,7 +284,7 @@ impl MutableCompound {
             // The current children fit, and replacing one can only lower their maxima: the
             // compound fits with the new child exactly when it fits next to all current ones.
             if !self.ids.fits(self.sub_shape_count(), Some(ids)) {
-                return Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
+                return Err(ShapeError::InvalidValue(SUB_SHAPE_ID_RULE));
             }
             let old = self.children[index as usize].ids;
             let expanded = (self.expanded - old.expanded).saturating_add(ids.expanded);
@@ -317,14 +317,14 @@ impl MutableCompound {
     /// The current children as a new shape, equal to [`Shape::new_compound`] of them; see the
     /// type's documentation. The editor and every body stay as they are.
     ///
-    /// Fails with [`ShapeError::InvalidSettings`] when there is no child, and with the errors
-    /// of [`Shape::new_compound`] otherwise, such as [`ShapeError::InvalidDimensions`] when the
+    /// Fails with [`ShapeError::InvalidValue`] when there is no child, and with the errors
+    /// of [`Shape::new_compound`] otherwise, such as [`ShapeError::InvalidValue`] when the
     /// recentred compound leaves [`limits::MAX_SHAPE_EXTENT`].
     ///
     /// [`limits::MAX_SHAPE_EXTENT`]: crate::limits::MAX_SHAPE_EXTENT
     pub fn to_shape(&self) -> Result<Shape, ShapeError> {
         if self.children.is_empty() {
-            return Err(ShapeError::InvalidSettings(EMPTY_COMPOUND_RULE));
+            return Err(ShapeError::InvalidValue(EMPTY_COMPOUND_RULE));
         }
         let raw: Vec<_> = (0..self.sub_shape_count())
             .zip(&self.children)

@@ -226,7 +226,7 @@ fn child_count_is_bounded_by_jolts_block_arithmetic() {
 
 #[test]
 fn sub_shape_ids_are_checked_before_every_edit() {
-    let refused = Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
+    let refused = Err(ShapeError::InvalidValue(SUB_SHAPE_ID_RULE));
     let cube = unit_box();
     let at = |shape, x| CompoundChild {
         shape,
@@ -276,7 +276,7 @@ fn sub_shape_ids_are_checked_before_every_edit() {
 
 #[test]
 fn refused_edits_walk_a_shared_child_once() {
-    let refused = Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
+    let refused = Err(ShapeError::InvalidValue(SUB_SHAPE_ID_RULE));
     let cube = unit_box();
     let at = |shape| CompoundChild {
         shape,
@@ -421,7 +421,7 @@ fn refused_edits_change_nothing() {
             position,
             ..children[0]
         };
-        let refused = Err(ShapeError::InvalidSettings(CHILD_POSITION_RULE));
+        let refused = Err(ShapeError::InvalidValue(CHILD_POSITION_RULE));
         assert_eq!(editor.add_shape(&child).map(|_| ()), refused);
         assert_eq!(
             editor.modify_shape(1, position, Quat::IDENTITY, Some(&parts.ball)),
@@ -442,7 +442,7 @@ fn refused_edits_change_nothing() {
             rotation,
             ..children[0]
         };
-        let refused = Err(ShapeError::InvalidSettings(CHILD_ROTATION_RULE));
+        let refused = Err(ShapeError::InvalidValue(CHILD_ROTATION_RULE));
         assert_eq!(editor.add_shape(&child).map(|_| ()), refused);
         assert_eq!(editor.modify_shape(1, Vec3::ZERO, rotation, None), refused);
     }
@@ -464,7 +464,7 @@ fn removing_to_zero_and_adding_again_works() {
     editor.remove_shape(0).unwrap();
     assert_eq!(
         editor.to_shape().map(|_| ()),
-        Err(ShapeError::InvalidSettings(EMPTY_COMPOUND_RULE))
+        Err(ShapeError::InvalidValue(EMPTY_COMPOUND_RULE))
     );
     assert_eq!(
         MutableCompound::new().unwrap().to_shape().map(|_| ()),
@@ -499,7 +499,7 @@ fn extent_is_checked_after_the_centre_of_mass_moves() {
         MutableCompound::from_children(&[child(&heavy, -1900.0), child(&light, 1990.0)]).unwrap();
     assert!(matches!(
         editor.to_shape(),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
     editor.remove_shape(1).unwrap();
     editor.add_shape(&child(&light, -1700.0)).unwrap();

@@ -109,7 +109,7 @@ pub fn chunk_pose(angle: f64) -> (RVec3, Quat) {
 
 /// Heightfield settings of spec B: a 33 x 33 field centred on its body origin, `side` metres
 /// wide, with 16 bits per sample so slopes keep their shape.
-fn field_settings(side: f32) -> HeightFieldSettings {
+fn field_settings(side: f32) -> HeightFieldSettings<'static> {
     let spacing = side / 32.0;
     HeightFieldSettings::default()
         .offset(Vec3::new(-side / 2.0, 0.0, -side / 2.0))
@@ -835,7 +835,7 @@ pub fn record_walker(
 ) {
     let character = world.character(walker.id).unwrap();
     assert!(!character.max_hits_exceeded());
-    digest.extend_from_slice(&character.save_state().as_bytes());
+    digest.extend_from_slice(&character.save_state().to_bytes());
     for value in out.pos.iter().chain(&out.velocity) {
         digest.extend_from_slice(&value.to_bits().to_le_bytes());
     }
