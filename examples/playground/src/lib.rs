@@ -20,3 +20,4 @@ pub mod session;
 pub mod terrain;
 pub mod tracked;
 pub mod visual;
+pub mod walker;

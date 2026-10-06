@@ -109,17 +109,20 @@ pub trait Scene {
 /// The scenes, in menu order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SceneKind {
+    /// A character controller on terrain with stairs, slopes, a conveyor and a ferry.
+    Character,
     /// A dynamic body pile with impact estimates and sleeping.
     Pile,
 }
 
 impl SceneKind {
     /// Every scene in menu order.
-    pub const ALL: [Self; 1] = [Self::Pile];
+    pub const ALL: [Self; 2] = [Self::Character, Self::Pile];
 
     /// The name used on the command line and for media files.
     pub fn name(self) -> &'static str {
         match self {
+            Self::Character => "character",
             Self::Pile => "pile",
         }
     }
@@ -132,6 +135,7 @@ impl SceneKind {
     /// The number key that switches to the scene.
     pub fn key(self) -> char {
         match self {
+            Self::Character => '1',
             Self::Pile => '3',
         }
     }
@@ -139,6 +143,7 @@ impl SceneKind {
     /// The title shown in the menu.
     pub fn title(self) -> &'static str {
         match self {
+            Self::Character => "Character on terrain",
             Self::Pile => "Body pile and impacts",
         }
     }
@@ -146,6 +151,7 @@ impl SceneKind {
     /// Builds the scene fresh, with visual keys of `generation`.
     pub fn build(self, config: &SceneConfig, generation: u64) -> Result<Box<dyn Scene>> {
         Ok(match self {
+            Self::Character => Box::new(scenes::character::Character::new(config, generation)?),
             Self::Pile => Box::new(scenes::pile::Pile::new(config, generation)?),
         })
     }

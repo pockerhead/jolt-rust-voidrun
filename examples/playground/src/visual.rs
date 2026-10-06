@@ -178,29 +178,11 @@ impl Shaped {
     /// knows for its few fixed hulls; each face is turned to face outward.
     pub fn hull(points: &[[f32; 3]], faces: &[[u32; 3]]) -> Result<Self> {
         let jolt_points: Vec<Vec3> = points.iter().map(|&p| p.into()).collect();
-        let point = |index: u32| glam::Vec3::from(points[index as usize]);
-        let centre = points
-            .iter()
-            .map(|&p| glam::Vec3::from(p))
-            .sum::<glam::Vec3>()
-            / points.len() as f32;
-        let outward = faces
-            .iter()
-            .map(|&[a, b, c]| {
-                let normal = (point(b) - point(a)).cross(point(c) - point(a));
-                let face_centre = (point(a) + point(b) + point(c)) / 3.0;
-                if normal.dot(face_centre - centre) < 0.0 {
-                    [a, c, b]
-                } else {
-                    [a, b, c]
-                }
-            })
-            .collect();
         Ok(Self {
             shape: Shape::new_convex_hull(&jolt_points, 0.05)?,
             visual: Visual::Triangles {
                 vertices: points.to_vec(),
-                triangles: outward,
+                triangles: face_outward(points, faces),
             },
         })
     }
@@ -295,6 +277,29 @@ impl Shaped {
             ),
         })
     }
+}
+
+/// The triangles of a convex solid of `points`, each turned to face away from the points'
+/// centre.
+pub fn face_outward(points: &[[f32; 3]], faces: &[[u32; 3]]) -> Vec<[u32; 3]> {
+    let point = |index: u32| glam::Vec3::from(points[index as usize]);
+    let centre = points
+        .iter()
+        .map(|&p| glam::Vec3::from(p))
+        .sum::<glam::Vec3>()
+        / points.len() as f32;
+    faces
+        .iter()
+        .map(|&[a, b, c]| {
+            let normal = (point(b) - point(a)).cross(point(c) - point(a));
+            let face_centre = (point(a) + point(b) + point(c)) / 3.0;
+            if normal.dot(face_centre - centre) < 0.0 {
+                [a, c, b]
+            } else {
+                [a, b, c]
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
