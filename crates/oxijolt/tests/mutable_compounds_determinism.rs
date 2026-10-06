@@ -281,8 +281,8 @@ fn replayed(threads: u32) -> Digest {
     }
     assert!(!scene.world.body(scene.sleeper).unwrap().is_sleeping());
     scene.world.restore_state(&saved).unwrap();
-    // Gravity is world configuration, not state.
-    scene.world.set_gravity(GRAVITY).unwrap();
+    // Jolt's saved state holds the world's gravity, which the detour changed.
+    assert_eq!(scene.world.gravity(), GRAVITY);
     step(&mut scene.world, 1);
     scene.record(&mut digest);
     for tick in LAST_EDIT + 1..TICKS {
