@@ -189,6 +189,16 @@ impl CharacterRef<'_> {
     /// The character's persistent state, to restore later with
     /// [`CharacterMut::restore_state`].
     pub fn save_state(&self) -> CharacterState {
+        let mut state = CharacterState {
+            jolt: Vec::new(),
+            up: [0; 3],
+        };
+        self.save_state_into(&mut state);
+        state
+    }
+
+    /// Writes the character's persistent state into `state`, reusing its memory.
+    pub(crate) fn save_state_into(&self, state: &mut CharacterState) {
         // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
         let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
             .unwrap_or_else(|| unreachable!("`new` does not return null"));
@@ -198,14 +208,14 @@ impl CharacterRef<'_> {
             JPH_CharacterVirtual_SaveState(self.ptr(), recorder.as_ptr());
             JPH_StateRecorder_GetDataSize(recorder.as_ptr())
         };
-        let mut jolt = vec![0_u8; size];
-        // SAFETY: `jolt` holds exactly `size` writable bytes, which joltc copies at most.
-        unsafe { JPH_StateRecorder_CopyData(recorder.as_ptr(), jolt.as_mut_ptr().cast(), size) };
+        state.jolt.clear();
+        state.jolt.resize(size, 0);
+        // SAFETY: `state.jolt` holds exactly `size` writable bytes, which joltc copies at most.
+        unsafe {
+            JPH_StateRecorder_CopyData(recorder.as_ptr(), state.jolt.as_mut_ptr().cast(), size)
+        };
         let up: [f32; 3] = self.up().into();
-        CharacterState {
-            jolt,
-            up: up.map(f32::to_bits),
-        }
+        state.up = up.map(f32::to_bits);
     }
 }
 

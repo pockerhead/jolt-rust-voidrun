@@ -14,8 +14,9 @@ pub use selection::BodySelection;
 use crate::world::WorldTag;
 use crate::{CharacterState, PhysicsWorld, StateError};
 
-/// A world's simulation state at one moment, from [`PhysicsWorld::save_state`] or
-/// [`PhysicsWorld::save_state_of`], to go back to with [`PhysicsWorld::restore_state`].
+/// A world's simulation state at one moment, from [`PhysicsWorld::save_state`],
+/// [`PhysicsWorld::save_state_of`] or [`PhysicsWorld::save_state_into`], to go back to with
+/// [`PhysicsWorld::restore_state`].
 ///
 /// It holds Jolt's saved state of the physics system (bodies with their poses, velocities,
 /// forces and sleep data, soft body vertices, the contact cache, each constraint's own state,
@@ -43,10 +44,14 @@ use crate::{CharacterState, PhysicsWorld, StateError};
 /// without a defined value (a wheel's contact data before its first contact). Compare what a
 /// world reports instead.
 ///
+/// For rollback, allocate the states once ([`WorldState::new`]) and save into them with
+/// [`PhysicsWorld::save_state_into`], which reuses their memory.
+///
 /// [docs/state.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/state.md
 #[derive(Clone)]
 pub struct WorldState {
-    world: WorldTag,
+    /// The world that saved it; `None` for a state no world saved ([`WorldState::new`]).
+    world: Option<WorldTag>,
     epoch: u64,
     body_count: u32,
     constraint_count: u32,
@@ -56,6 +61,41 @@ pub struct WorldState {
     characters: Vec<CharacterState>,
     /// Raw ids of the bodies with a pending contact-cache invalidation, in ascending order.
     cache_invalidations: Vec<u32>,
+    /// The raw ids of the last save's selected bodies, kept to reuse its memory.
+    selection: Vec<u32>,
+}
+
+impl WorldState {
+    /// A state that no world saved, holding no memory yet: a buffer for
+    /// [`PhysicsWorld::save_state_into`]. Restoring it fails with [`StateError::WrongWorld`].
+    pub fn new() -> Self {
+        Self {
+            world: None,
+            epoch: 0,
+            body_count: 0,
+            constraint_count: 0,
+            character_ids: Vec::new(),
+            jolt: Vec::new(),
+            characters: Vec::new(),
+            cache_invalidations: Vec::new(),
+            selection: Vec::new(),
+        }
+    }
+
+    /// The size in bytes of Jolt's saved stream, which makes up most of a state; 0 for
+    /// [`WorldState::new`]. [docs/state.md] lists what each body, contact and constraint adds.
+    ///
+    /// [docs/state.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/state.md#size
+    pub fn data_size(&self) -> usize {
+        self.jolt.len()
+    }
+}
+
+impl Default for WorldState {
+    /// The same as [`WorldState::new`].
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl fmt::Debug for WorldState {
@@ -67,6 +107,7 @@ impl fmt::Debug for WorldState {
             .field("characters", &self.character_ids.len())
             .field("jolt_bytes", &self.jolt.len())
             .field("cache_invalidations", &self.cache_invalidations.len())
+            .field("saved", &self.world.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -98,7 +139,10 @@ impl PhysicsWorld {
     /// # }
     /// ```
     pub fn save_state(&self) -> WorldState {
-        self.state_with(self.record(None))
+        let mut state = WorldState::new();
+        self.record_into(None, &mut state.jolt);
+        self.save_world_parts_into(&mut state);
+        state
     }
 
     /// Saves the simulation state with only the bodies `bodies` selects; global state, contacts,
@@ -110,9 +154,47 @@ impl PhysicsWorld {
     /// never moved. Fails with [`StateError::Body`] for an id of another world or a removed body,
     /// before anything is saved.
     pub fn save_state_of(&self, bodies: BodySelection<'_>) -> Result<WorldState, StateError> {
-        let mut ids = Vec::new();
-        let listed = self.select_bodies(bodies, &mut ids)?;
-        Ok(self.state_with(self.record(listed)))
+        let mut state = WorldState::new();
+        self.save_state_into(bodies, &mut state)?;
+        Ok(state)
+    }
+
+    /// Saves what [`save_state_of`](Self::save_state_of) saves into `state`, reusing the memory
+    /// `state` holds.
+    ///
+    /// `state` may be new ([`WorldState::new`]), of another world or of this one; it is
+    /// overwritten and then belongs to this world. Once `state` has held a save of at least this
+    /// size, the call allocates nothing on the Rust heap; Jolt's recorder still allocates its own
+    /// stream for each save. On an error `state` is unchanged.
+    ///
+    /// ```
+    /// use oxijolt::*;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    /// let ball_shape = Shape::new_sphere(0.5)?;
+    /// world.create_body(&ball_shape, &BodySettings::new_dynamic())?;
+    ///
+    /// // One buffer per tick of the rollback window, allocated before the game runs.
+    /// let mut ring = vec![WorldState::new(); 8];
+    /// for tick in 0..60 {
+    ///     world.save_state_into(BodySelection::All, &mut ring[tick % 8])?;
+    ///     assert!(world.step(1.0 / 60.0)?.is_complete());
+    /// }
+    /// // Back to the start of tick 55.
+    /// world.restore_state(&ring[55 % 8])?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn save_state_into(
+        &self,
+        bodies: BodySelection<'_>,
+        state: &mut WorldState,
+    ) -> Result<(), StateError> {
+        let listed = self.select_bodies(bodies, &mut state.selection)?;
+        self.record_into(listed, &mut state.jolt);
+        self.save_world_parts_into(state);
+        Ok(())
     }
 
     /// Returns the world to `state`. See [`WorldState`] for what this restores and what it
@@ -128,7 +210,7 @@ impl PhysicsWorld {
     /// not saved left aside; the tests check this with 1 and 4 worker threads, in one process
     /// and across two.
     pub fn restore_state(&mut self, state: &WorldState) -> Result<(), StateError> {
-        if state.world != self.tag {
+        if state.world != Some(self.tag) {
             return Err(StateError::WrongWorld);
         }
         let same_characters = self.characters.keys().eq(state.character_ids.iter());
@@ -173,25 +255,28 @@ impl PhysicsWorld {
         unsafe { JPH_PhysicsSystem_GetNumConstraints(self.system.as_ptr()) }
     }
 
-    /// A state of this world now, around Jolt's saved stream `jolt`.
-    fn state_with(&self, jolt: Vec<MaybeUninit<u8>>) -> WorldState {
-        let characters = self
-            .character_ids()
-            .map(|id| {
-                self.character(id)
-                    .unwrap_or_else(|_| unreachable!("listed by the world"))
-                    .save_state()
-            })
-            .collect();
-        WorldState {
-            world: self.tag,
-            epoch: self.structure_epoch,
-            body_count: self.body_count(),
-            constraint_count: self.jolt_constraint_count(),
-            character_ids: self.characters.keys().copied().collect(),
-            jolt,
-            characters,
-            cache_invalidations: self.pending_cache_invalidations.iter().copied().collect(),
+    /// Writes everything of a state of this world now but Jolt's stream into `state`, reusing
+    /// its memory.
+    fn save_world_parts_into(&self, state: &mut WorldState) {
+        state.world = Some(self.tag);
+        state.epoch = self.structure_epoch;
+        state.body_count = self.body_count();
+        state.constraint_count = self.jolt_constraint_count();
+        state.character_ids.clear();
+        state.character_ids.extend(self.characters.keys());
+        state.characters.truncate(self.characters.len());
+        for (index, id) in self.character_ids().enumerate() {
+            let character = self
+                .character(id)
+                .unwrap_or_else(|_| unreachable!("listed by the world"));
+            match state.characters.get_mut(index) {
+                Some(saved) => character.save_state_into(saved),
+                None => state.characters.push(character.save_state()),
+            }
         }
+        state.cache_invalidations.clear();
+        state
+            .cache_invalidations
+            .extend(&self.pending_cache_invalidations);
     }
 }

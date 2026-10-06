@@ -9,10 +9,10 @@ use crate::owned::Owned;
 use crate::PhysicsWorld;
 
 impl PhysicsWorld {
-    /// Jolt's saved stream of every part of the system's state, with only the bodies whose raw
-    /// ids are in `bodies` (distinct bodies of this world, from `select_bodies`), or with every
-    /// body for `None`.
-    pub(super) fn record(&self, bodies: Option<&[u32]>) -> Vec<MaybeUninit<u8>> {
+    /// Writes Jolt's saved stream of every part of the system's state into `jolt`, reusing its
+    /// memory, with only the bodies whose raw ids are in `bodies` (distinct bodies of this world,
+    /// from `select_bodies`), or with every body for `None`.
+    pub(super) fn record_into(&self, bodies: Option<&[u32]>, jolt: &mut Vec<MaybeUninit<u8>>) {
         // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
         let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
             .unwrap_or_else(|| unreachable!("`new` does not return null"));
@@ -36,12 +36,12 @@ impl PhysicsWorld {
             );
             JPH_StateRecorder_GetDataSize(recorder.as_ptr())
         };
-        let mut jolt = vec![MaybeUninit::uninit(); size];
+        jolt.clear();
+        jolt.resize(size, MaybeUninit::uninit());
         // SAFETY: `jolt` holds exactly `size` writable bytes, which joltc copies at most with
         // `memcpy`. The copied bytes may lack a defined value, which `MaybeUninit` allows; Rust
         // never reads them.
         unsafe { JPH_StateRecorder_CopyData(recorder.as_ptr(), jolt.as_mut_ptr().cast(), size) };
-        jolt
     }
 
     /// Restores Jolt's saved stream `jolt`; whether Jolt read it without failing.
