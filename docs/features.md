@@ -46,6 +46,8 @@ what is planned next.
   on real models from open sources ([report](real-meshes.md)).
 - A floating origin (`PhysicsWorld::rebase`) and optional `f64` world positions.
 - Jolt's jobs on Jolt's thread pool or on your own, such as Rayon ([guide](job-system.md)).
+- Solver velocity and position steps chosen per world (`WorldSettings::velocity_steps`,
+  `position_steps`), within Jolt's limits ([limits](limits.md#solver-step-counts)).
 - Debug wireframes as line data (feature `debug-renderer`); nothing is drawn.
 - Optional `glam032` and `mint` features with exact conversions for `Vec3`, `RVec3` and `Quat`.
 - The poses of every awake body in one call, in a deterministic order

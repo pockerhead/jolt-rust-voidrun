@@ -78,6 +78,7 @@ Everything planned for 1.0 is done; what works today, with links to the guides, 
 [docs/features.md](docs/features.md). Next:
 
 - [ ] Comparison with Rapier and Avian
+- [x] Solver step counts per world
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
 - [ ] Same results across operating systems, checked in CI

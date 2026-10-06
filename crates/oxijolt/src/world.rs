@@ -109,6 +109,8 @@ pub struct WorldSettings {
     temp_allocator_size: u32,
     gravity: Vec3,
     layers: CollisionLayers,
+    velocity_steps: u32,
+    position_steps: u32,
 }
 
 impl Default for WorldSettings {
@@ -121,6 +123,8 @@ impl Default for WorldSettings {
             temp_allocator_size: 10 * 1024 * 1024,
             gravity: Vec3::new(0.0, -9.81, 0.0),
             layers: CollisionLayers::default(),
+            velocity_steps: 10,
+            position_steps: 2,
         }
     }
 }
@@ -148,6 +152,21 @@ impl WorldSettings {
     /// cMaxContactConstraintsLimit`, above which Jolt asserts), which a native compile-time check
     /// pins.
     pub const MAX_CONTACT_CONSTRAINTS: u32 = 1 << 20;
+
+    /// Smallest accepted [`velocity_steps`](Self::velocity_steps) value, 2: Jolt applies friction
+    /// with the contact impulse of the previous velocity iteration, so friction needs two
+    /// (`PhysicsSettings.h:83`). See [docs/limits.md].
+    ///
+    /// [docs/limits.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#solver-step-counts
+    pub const MIN_VELOCITY_STEPS: u32 = 2;
+
+    /// Largest accepted [`velocity_steps`](Self::velocity_steps) and
+    /// [`position_steps`](Self::position_steps) value, 255: Jolt keeps step counts in 8 bits
+    /// (`IslandBuilder.cpp:385`, `PhysicsSystem.cpp:1545-1546`, `MotionProperties.h:192,196`).
+    /// See [docs/limits.md].
+    ///
+    /// [docs/limits.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#solver-step-counts
+    pub const MAX_SOLVER_STEPS: u32 = 255;
 
     /// Maximum number of bodies in the world, between 1 and [`MAX_BODIES`](Self::MAX_BODIES).
     /// Default 10240.
@@ -220,6 +239,28 @@ impl WorldSettings {
         self
     }
 
+    /// Velocity iterations of the contact and constraint solver per step (Jolt
+    /// `PhysicsSettings::mNumVelocitySteps`), between
+    /// [`MIN_VELOCITY_STEPS`](Self::MIN_VELOCITY_STEPS) and
+    /// [`MAX_SOLVER_STEPS`](Self::MAX_SOLVER_STEPS). Default 10, Jolt's. Fewer steps make a step
+    /// cheaper and joints and stacks softer. Set once, when the world is created; a test checks
+    /// that a chain at 4 steps gives the same results with 1 and 4 worker threads.
+    #[must_use]
+    pub fn velocity_steps(mut self, value: u32) -> Self {
+        self.velocity_steps = value;
+        self
+    }
+
+    /// Position iterations of the solver per step, which push apart what still penetrates or
+    /// drifted after the velocity iterations (Jolt `PhysicsSettings::mNumPositionSteps`), at most
+    /// [`MAX_SOLVER_STEPS`](Self::MAX_SOLVER_STEPS); 0 turns the position pass off. Default 2,
+    /// Jolt's. Set once, when the world is created.
+    #[must_use]
+    pub fn position_steps(mut self, value: u32) -> Self {
+        self.position_steps = value;
+        self
+    }
+
     pub(crate) fn validate(&self) -> Result<(), WorldError> {
         let invalid = |what| Err(WorldError::InvalidValue(what));
         if !(1..=Self::MAX_BODIES).contains(&self.max_bodies) {
@@ -241,6 +282,12 @@ impl WorldSettings {
         }
         if !limits::is_acceleration(self.gravity) {
             return invalid(limits::GRAVITY_RULE);
+        }
+        if !(Self::MIN_VELOCITY_STEPS..=Self::MAX_SOLVER_STEPS).contains(&self.velocity_steps) {
+            return invalid("velocity_steps must be between 2 and 255");
+        }
+        if self.position_steps > Self::MAX_SOLVER_STEPS {
+            return invalid("position_steps must be at most 255");
         }
         self.layers.validate()
     }
@@ -485,6 +532,19 @@ unsafe impl Send for PhysicsWorld {}
 // the `&mut self` character updates and refreshes.
 unsafe impl Sync for PhysicsWorld {}
 
+/// Jolt's `PhysicsSettings` of `system`, copied out by joltc.
+///
+/// # Safety
+/// `system` is a live physics system that no step is updating.
+unsafe fn physics_settings(system: *mut JPH_PhysicsSystem) -> JPH_PhysicsSettings {
+    // SAFETY: an all-zero `JPH_PhysicsSettings` is valid: integers, floats and `false`.
+    let mut settings: JPH_PhysicsSettings = unsafe { std::mem::zeroed() };
+    // SAFETY: the system is live and not stepping (contract); joltc writes every field of the
+    // live local.
+    unsafe { JPH_PhysicsSystem_GetPhysicsSettings(system, &mut settings) };
+    settings
+}
+
 /// What a step length must satisfy ([`PhysicsWorld::is_valid_delta_time`]).
 pub(crate) const DELTA_TIME_RULE: &str =
     "delta time must be finite and between MIN_DELTA_TIME and MAX_DELTA_TIME";
@@ -565,6 +625,12 @@ impl PhysicsWorld {
         let gravity = settings.gravity.to_jph();
         // SAFETY: `system` is live and `gravity` is a live local.
         unsafe { JPH_PhysicsSystem_SetGravity(system.as_ptr(), &gravity) };
+        // SAFETY: `system` is live, owned here, and nothing steps or reads it yet.
+        let mut physics = unsafe { physics_settings(system.as_ptr()) };
+        physics.numVelocitySteps = settings.velocity_steps;
+        physics.numPositionSteps = settings.position_steps;
+        // SAFETY: as above; `physics` is a live local that joltc copies field by field.
+        unsafe { JPH_PhysicsSystem_SetPhysicsSettings(system.as_ptr(), &mut physics) };
 
         // SAFETY: `system` is live. The interfaces and the narrow-phase and broad-phase queries
         // live inside the Jolt system and stay valid as long as it does; the world stores them
@@ -643,6 +709,18 @@ impl PhysicsWorld {
         // SAFETY: the system is live and borrowed mutably; `gravity` is a live local.
         unsafe { JPH_PhysicsSystem_SetGravity(self.system.as_ptr(), &gravity) };
         Ok(())
+    }
+
+    /// Velocity iterations per step, as Jolt holds them ([`WorldSettings::velocity_steps`]).
+    pub fn velocity_steps(&self) -> u32 {
+        // SAFETY: the system is live; settings change only in `new`, before `self` exists.
+        unsafe { physics_settings(self.system.as_ptr()) }.numVelocitySteps
+    }
+
+    /// Position iterations per step, as Jolt holds them ([`WorldSettings::position_steps`]).
+    pub fn position_steps(&self) -> u32 {
+        // SAFETY: as in `velocity_steps`.
+        unsafe { physics_settings(self.system.as_ptr()) }.numPositionSteps
     }
 
     /// Number of bodies in the world.

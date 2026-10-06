@@ -119,3 +119,51 @@ fn worker_thread_bounds_are_validated() {
         ));
     }
 }
+
+/// Jolt's `PhysicsSettings` defaults (`PhysicsSettings.h:36-126`) with the given step counts.
+fn jolt_default_physics_settings(velocity_steps: u32, position_steps: u32) -> JPH_PhysicsSettings {
+    JPH_PhysicsSettings {
+        maxInFlightBodyPairs: 16384,
+        stepListenersBatchSize: 8,
+        stepListenerBatchesPerJob: 1,
+        baumgarte: 0.2,
+        speculativeContactDistance: 0.02,
+        penetrationSlop: 0.02,
+        linearCastThreshold: 0.75,
+        linearCastMaxPenetration: 0.25,
+        manifoldTolerance: 1.0e-3,
+        maxPenetrationDistance: 0.2,
+        bodyPairCacheMaxDeltaPositionSq: 0.001 * 0.001,
+        bodyPairCacheCosMaxDeltaRotationDiv2: 1.0f64.to_radians().cos() as f32,
+        contactNormalCosMaxDeltaRotation: 5.0f64.to_radians().cos() as f32,
+        contactPointPreserveLambdaMaxDistSq: 0.01 * 0.01,
+        numVelocitySteps: velocity_steps,
+        numPositionSteps: position_steps,
+        minVelocityForRestitution: 1.0,
+        timeBeforeSleep: 0.5,
+        pointVelocitySleepThreshold: 0.03,
+        deterministicSimulation: true,
+        constraintWarmStart: true,
+        useBodyPairContactCache: true,
+        useManifoldReduction: true,
+        useLargeIslandSplitter: true,
+        allowSleeping: true,
+        checkActiveEdges: true,
+    }
+}
+
+#[test]
+fn solver_steps_leave_every_other_physics_setting_at_jolts_default() {
+    for (velocity, position) in [(10, 2), (4, 0), (255, 255)] {
+        let settings = WorldSettings::default()
+            .velocity_steps(velocity)
+            .position_steps(position);
+        let world = PhysicsWorld::new(settings).unwrap();
+        // SAFETY: the world's system is live and nothing steps it.
+        let read = unsafe { physics_settings(world.system.as_ptr()) };
+        assert_eq!(
+            format!("{read:?}"),
+            format!("{:?}", jolt_default_physics_settings(velocity, position))
+        );
+    }
+}

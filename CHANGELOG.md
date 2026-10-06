@@ -4,6 +4,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- `WorldSettings::velocity_steps` and `position_steps`: the solver's velocity and position
+  iterations per step, set when the world is created (Jolt's defaults 10 and 2; velocity
+  `2..=255`, position `0..=255`, [limits](docs/limits.md#solver-step-counts)), read back with
+  `PhysicsWorld::velocity_steps` and `position_steps`.
 - Playground: in `destruction`, a wall piece that lands hard on the ground or on another piece
   breaks at the contact point that hit hardest, also when it tips over an edge it stands on.
 
