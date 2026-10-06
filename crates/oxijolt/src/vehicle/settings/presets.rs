@@ -2,8 +2,9 @@
 //! creators validate them like any other settings.
 
 use super::{
-    VehicleAntiRollBar, VehicleCollisionTester, VehicleDifferentialSettings, VehicleSettings,
-    WheelSettings,
+    MotorcycleSettings, SuspensionSpring, VehicleAntiRollBar, VehicleCollisionTester,
+    VehicleDifferentialSettings, VehicleEngineSettings, VehicleSettings,
+    VehicleTransmissionSettings, WheelSettings,
 };
 use crate::Vec3;
 
@@ -75,9 +76,71 @@ impl VehicleSettings {
     }
 }
 
+impl MotorcycleSettings {
+    /// The motorcycle of Jolt's `MotorcycleTest` sample, with a six-gear 150 N·m engine up to
+    /// 10000 rpm driving the rear wheel and a pitch and roll limit of 60°.
+    ///
+    /// `front_wheel` is the front wheel's attachment point in the chassis' local space, with up
+    /// +Y and forward +Z; the rear wheel is attached at `(x, y, -z)`. Both wheels have radius
+    /// `wheel_radius`, width 0.05 and suspension travel 0.3 to 0.5 m. The
+    /// front suspension and steering axis are raked back 30° (caster) and the front wheel steers
+    /// up to 30°; the front brake gives 500 N·m, the rear 250 N·m. The lean controller keeps
+    /// Jolt's defaults. The wheels find the ground with `collision_tester`.
+    ///
+    /// The sample's chassis is a 240 kg box of half extents (0.2, 0.3, 0.4) with its centre of
+    /// mass moved 0.3 m down, and wheels at `(0, -0.27, 0.75)` of radius 0.31.
+    /// [`PhysicsWorld::create_motorcycle`](crate::PhysicsWorld::create_motorcycle) validates the
+    /// settings; it refuses wheels at one point along forward, which here is `z = -0.125`, where
+    /// the end of the front's raked suspension is level with the rear's.
+    pub fn bike(
+        front_wheel: Vec3,
+        wheel_radius: f32,
+        collision_tester: VehicleCollisionTester,
+    ) -> Self {
+        let rake = 30.0_f32.to_radians().tan();
+        let length = (1.0 + rake * rake).sqrt();
+        let Vec3 { x, y, z } = front_wheel;
+        let wheel = |z: f32, frequency: f32, brake: f32| {
+            WheelSettings::new(Vec3::new(x, y, z))
+                .radius(wheel_radius)
+                .width(0.05)
+                .suspension_min_length(0.3)
+                .suspension_max_length(0.5)
+                .suspension_spring(SuspensionSpring::FrequencyAndDamping {
+                    frequency,
+                    damping: 0.5,
+                })
+                .max_brake_torque(brake)
+        };
+        let front = wheel(z, 1.5, 500.0)
+            .max_steer_angle(30.0_f32.to_radians())
+            .suspension_direction(Vec3::new(0.0, -1.0 / length, rake / length))
+            .steering_axis(Vec3::new(0.0, 1.0 / length, -rake / length));
+        let rear = wheel(-z, 2.0, 250.0).max_steer_angle(0.0);
+        let rear_drive =
+            VehicleDifferentialSettings::new(None, Some(1)).differential_ratio(1.93 * 40.0 / 16.0);
+        let vehicle = VehicleSettings::new(vec![front, rear], vec![rear_drive], collision_tester)
+            .max_pitch_roll_angle(60.0_f32.to_radians())
+            .engine(
+                VehicleEngineSettings::default()
+                    .max_torque(150.0)
+                    .min_rpm(1000.0)
+                    .max_rpm(10000.0),
+            )
+            .transmission(
+                VehicleTransmissionSettings::default()
+                    .gear_ratios(vec![2.27, 1.63, 1.3, 1.09, 0.96, 0.88])
+                    .reverse_gear_ratios(vec![-4.0])
+                    .shift_down_rpm(2000.0)
+                    .shift_up_rpm(8000.0)
+                    .clutch_strength(2.0),
+            );
+        MotorcycleSettings::new(vehicle)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::{VehicleEngineSettings, VehicleTransmissionSettings};
     use super::*;
     use crate::ObjectLayer;
 

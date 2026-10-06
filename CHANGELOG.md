@@ -9,6 +9,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - `VehicleSettings::car(front_left_wheel, wheel_radius, tester)`: a front-wheel-drive car of four
   mirrored wheels with steering, hand brake, anti-roll bars and Jolt's default engine and
   transmission, validated by `create_vehicle` like any settings.
+- `MotorcycleSettings::bike(front_wheel, wheel_radius, tester)`: the motorcycle of Jolt's
+  `MotorcycleTest` sample (raked front suspension, rear drive, six gears), validated by
+  `create_motorcycle`.
 
 ## 0.6.0 — 2026-10-06
 

@@ -1,10 +1,13 @@
-//! Settings presets: a humanoid character standing and walking on a floor, and a car that
-//! drives, brakes, steers and shifts.
+//! Settings presets: a humanoid character standing and walking on a floor, a car that drives,
+//! brakes, steers and shifts, and a motorcycle that rides upright.
 
 mod common;
 
 use common::math::{f3, norm, rotate, v3};
 use common::vehicle::{car_world, chassis_settings, CarLayers, GRAVITY as CAR_GRAVITY};
+use common::vehicle_kinds::{
+    behaviour_chassis, bike_chassis_shape, bike_tester, bike_vehicle_settings, BIKE_MASS,
+};
 use common::*;
 use oxijolt::*;
 
@@ -248,6 +251,85 @@ fn car_preset_values_are_validated() {
             "{front_left:?}, radius {radius}"
         );
         assert_eq!(world.body_count(), bodies);
+        assert_eq!(world.vehicle_ids().count(), 0);
+    }
+}
+
+#[test]
+fn bike_preset_equals_the_motorcycle_sample() {
+    let (_, layers) = car_world(Vec3::ZERO, 1);
+    let tester = bike_tester(&layers);
+    assert_eq!(
+        MotorcycleSettings::bike(Vec3::new(0.0, -0.27, 0.75), 0.31, tester),
+        MotorcycleSettings::new(bike_vehicle_settings(tester))
+    );
+}
+
+/// A chassis of the sample bike at y = 2 over a box floor, under gravity.
+fn bike_world() -> (PhysicsWorld, CarLayers, BodyId) {
+    let (mut world, layers) = car_world(CAR_GRAVITY, 1);
+    world
+        .create_body(
+            &Shape::new_box(Vec3::new(100.0, 1.0, 100.0)).unwrap(),
+            &BodySettings::new_static()
+                .position(RVec3::new(0.0, -1.0, 0.0))
+                .object_layer(layers.ground),
+        )
+        .unwrap();
+    let body = behaviour_chassis(
+        &layers,
+        BIKE_MASS,
+        RVec3::new(0.0, 2.0, 0.0),
+        Quat::IDENTITY,
+    );
+    let chassis = world.create_body(&bike_chassis_shape(), &body).unwrap();
+    (world, layers, chassis)
+}
+
+#[test]
+fn a_bike_preset_rides_upright() {
+    let (mut world, layers, chassis) = bike_world();
+    let settings =
+        MotorcycleSettings::bike(Vec3::new(0.0, -0.27, 0.75), 0.31, bike_tester(&layers));
+    let bike = world.create_motorcycle(chassis, &settings).unwrap();
+    let input = DriverInput {
+        forward: 0.4,
+        ..DriverInput::default()
+    };
+    for _ in 0..180 {
+        let mut vehicle = world.vehicle_mut(bike).unwrap();
+        vehicle.set_driver_input(input).unwrap();
+        assert!(world.step(DT).unwrap().is_complete());
+    }
+    let body = world.body(chassis).unwrap();
+    let speed = norm(f3(body.linear_velocity()));
+    let up = rotate(body.rotation(), [0.0, 1.0, 0.0])[1];
+    // Measured: 5.39 m/s with up.y 0.9986 after 3 s at 0.4 throttle.
+    assert!(speed > 4.0, "speed {speed}");
+    assert!(up > 0.99, "up.y {up}");
+    let wheels = world.vehicle(bike).unwrap().wheels();
+    assert!(wheels.iter().all(|wheel| wheel.contact.is_some()));
+}
+
+#[test]
+fn bike_preset_values_are_validated() {
+    const APART_RULE: &str = "a motorcycle's wheels must be apart along its forward";
+    const RADIUS_RULE: &str = "wheel radius must be positive and at most limits::MAX_SHAPE_EXTENT";
+    let (mut world, layers, chassis) = bike_world();
+    let tester = bike_tester(&layers);
+    // At z = -0.125 the front's suspension, raked 30° and 0.5 long, ends at z = 0.125, level
+    // with the rear's: no wheel base.
+    let cases = [
+        (Vec3::new(0.0, -0.27, -0.125), 0.31, APART_RULE),
+        (Vec3::new(0.0, -0.27, 0.75), 0.0, RADIUS_RULE),
+    ];
+    for (front, radius, rule) in cases {
+        let settings = MotorcycleSettings::bike(front, radius, tester);
+        assert_eq!(
+            world.create_motorcycle(chassis, &settings),
+            Err(VehicleError::InvalidValue(rule)),
+            "{front:?}, radius {radius}"
+        );
         assert_eq!(world.vehicle_ids().count(), 0);
     }
 }
