@@ -157,7 +157,7 @@ impl CharacterRef<'_> {
     pub fn contact_object_layer(&self, contact: &CharacterContact) -> Option<ObjectLayer> {
         let body = contact.body?;
         self.world
-            .contains(body)
+            .contains_body(body)
             .then(|| self.world.object_layer_of(body))
     }
 

@@ -134,9 +134,11 @@ impl Session {
         let centre = crate::math::rvec(self.scene.camera().target);
         let settings =
             oxijolt::DebugLineSettings::new(centre, WIREFRAME_RADIUS).max_lines(WIREFRAME_LINES);
-        self.scene
-            .world()
-            .debug_lines(&settings, &oxijolt::QueryFilter::new(), &mut self.lines)?;
+        self.scene.world().debug_lines_into(
+            &settings,
+            &oxijolt::QueryFilter::new(),
+            &mut self.lines,
+        )?;
         for line in self.lines.lines() {
             out.line(
                 crate::math::position_f32(line.from),

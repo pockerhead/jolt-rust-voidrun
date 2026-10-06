@@ -280,8 +280,8 @@ fn humanoid_settles_on_a_heightfield_in_a_second_world() {
 
     assert_eq!(scene.main.body_count(), main_bodies);
     assert_eq!(ray_bits(&scene.main, 1.0, 2.0), main_ray);
-    assert!(scene.main.contains(scene.main_statics.terrain));
-    assert!(scene.main.contains(scene.main_statics.compound));
+    assert!(scene.main.contains_body(scene.main_statics.terrain));
+    assert!(scene.main.contains_body(scene.main_statics.compound));
 }
 
 // Jolt solves contacts after constraints, so when the humanoid hits the ground the contacts win

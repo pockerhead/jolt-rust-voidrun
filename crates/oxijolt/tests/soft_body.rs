@@ -516,7 +516,7 @@ fn soft_bodies_are_removed_and_a_full_world_refuses_one_cleanly() {
     let second = world
         .create_soft_body(&shared, &SoftBodySettings::default())
         .unwrap();
-    assert!(world.contains(second) && !world.contains(first));
+    assert!(world.contains_body(second) && !world.contains_body(first));
 }
 
 #[test]

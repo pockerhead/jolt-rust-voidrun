@@ -126,8 +126,9 @@ impl Default for WorldSettings {
 }
 
 impl WorldSettings {
-    /// Largest body count Jolt supports (`PhysicsSystem::cMaxBodiesLimit`).
-    const MAX_BODIES_LIMIT: u32 = 1 << 23;
+    /// Largest accepted [`max_bodies`](Self::max_bodies) value, 2²³: Jolt's own limit
+    /// (`PhysicsSystem::cMaxBodiesLimit`).
+    pub const MAX_BODIES: u32 = 1 << 23;
 
     /// Largest accepted [`worker_threads`](Self::worker_threads) value. Jolt starts one OS
     /// thread per worker; this bound is chosen by oxijolt to keep thread creation sane and
@@ -148,7 +149,8 @@ impl WorldSettings {
     /// pins.
     pub const MAX_CONTACT_CONSTRAINTS: u32 = 1 << 20;
 
-    /// Maximum number of bodies in the world, at most 2²³. Default 10240.
+    /// Maximum number of bodies in the world, between 1 and [`MAX_BODIES`](Self::MAX_BODIES).
+    /// Default 10240.
     #[must_use]
     pub fn max_bodies(mut self, value: u32) -> Self {
         self.max_bodies = value;
@@ -220,7 +222,7 @@ impl WorldSettings {
 
     pub(crate) fn validate(&self) -> Result<(), WorldError> {
         let invalid = |what| Err(WorldError::InvalidValue(what));
-        if !(1..=Self::MAX_BODIES_LIMIT).contains(&self.max_bodies) {
+        if !(1..=Self::MAX_BODIES).contains(&self.max_bodies) {
             return invalid("max_bodies must be between 1 and 2^23");
         }
         if self.max_body_pairs == 0 {

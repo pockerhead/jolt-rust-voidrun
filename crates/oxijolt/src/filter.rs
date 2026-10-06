@@ -785,7 +785,7 @@ pub(crate) mod tests {
         );
         // An id of this world that names no body (removed, or never created) is allowed.
         let removed = BodyId::new(0, world.tag);
-        assert!(!world.contains(removed));
+        assert!(!world.contains_body(removed));
         assert_eq!(
             QueryFilter::new().exclude_body(removed).validate(&world),
             Ok(())

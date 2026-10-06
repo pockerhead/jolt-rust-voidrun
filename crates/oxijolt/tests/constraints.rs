@@ -256,11 +256,11 @@ fn bodies_of_constraints_cannot_be_removed() {
             world.remove_body(body),
             Err(BodyError::UsedByConstraint(body))
         );
-        assert_eq!(world.constraints_of_body(body), vec![rope.into()]);
+        assert!(world.constraints_of_body(body).eq([rope.into()]));
     }
     step(&mut world, 10);
     world.remove_constraint(rope).unwrap();
-    assert!(world.constraints_of_body(cube).is_empty());
+    assert_eq!(world.constraints_of_body(cube).next(), None);
     world.remove_body(cube).unwrap();
     world.remove_body(anchor).unwrap();
     step(&mut world, 10);

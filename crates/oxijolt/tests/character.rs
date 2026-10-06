@@ -153,7 +153,7 @@ fn invalid_settings_and_poses_are_rejected_without_side_effects() {
         ));
     }
     assert_eq!(world.body_count(), 1);
-    assert!(world.contains(floor));
+    assert!(world.contains_body(floor));
     assert_eq!(world.character_ids().count(), 0);
 
     let id = world
@@ -666,7 +666,7 @@ fn an_inner_body_is_a_body_of_the_world_owned_by_its_character() {
         .unwrap();
     assert_eq!(world.body_count(), 2);
     let inner = world.character(id).unwrap().inner_body().unwrap();
-    assert!(world.contains(inner));
+    assert!(world.contains_body(inner));
     assert!(world.is_inner_body(inner));
     assert!(!world.is_inner_body(floor));
     assert_eq!(
@@ -715,11 +715,11 @@ fn an_inner_body_is_a_body_of_the_world_owned_by_its_character() {
         world.remove_body(inner),
         Err(BodyError::OwnedByCharacter(inner))
     );
-    assert!(world.contains(inner));
+    assert!(world.contains_body(inner));
     let count = world.body_count();
     world.remove_character(id).unwrap();
     assert_eq!(world.body_count(), count - 1);
-    assert!(!world.contains(inner));
+    assert!(!world.contains_body(inner));
     assert!(!world.is_inner_body(inner));
 
     let without = world

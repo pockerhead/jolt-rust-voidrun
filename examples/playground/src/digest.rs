@@ -84,7 +84,7 @@ impl Digest {
     /// inverse mass.
     pub fn world(&mut self, world: &mut PhysicsWorld) -> Result<()> {
         let ids = world.body_ids();
-        self.u64(ids.len() as u64);
+        self.u64(u64::from(world.body_count()));
         let mut vertices = Vec::new();
         for id in ids {
             let body = world.body(id)?;

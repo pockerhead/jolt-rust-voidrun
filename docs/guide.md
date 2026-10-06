@@ -189,8 +189,9 @@ before acting on them. Equal results across platforms and compilers need the
 
 ## Debug lines
 
-With the `debug-renderer` feature, `PhysicsWorld::debug_lines` fills a `DebugLines` buffer with the
-wireframe of the colliders around a point, filtered like a query. It produces line data only and
+With the `debug-renderer` feature, `PhysicsWorld::debug_lines` returns a `DebugLines` buffer with the
+wireframe of the colliders around a point, filtered like a query; `debug_lines_into` refills one
+buffer every frame. It produces line data only and
 draws nothing. It has no level of detail, so cap the output with `DebugLineSettings::max_lines`.
 
 ## Characters

@@ -697,25 +697,23 @@ impl PhysicsWorld {
     }
 
     /// The ids of the constraints that use `body`, in id order.
-    pub fn constraints_of_body(&self, body: BodyId) -> Vec<AnyConstraintId> {
-        if body.world != self.tag {
-            return Vec::new();
-        }
-        self.constraint_bodies
-            .get(&body.to_raw())
-            .into_iter()
-            .flatten()
-            .map(|&raw| AnyConstraintId {
-                raw,
-                world: self.tag,
-                kind: self.constraints[&raw].kind,
-            })
-            .collect()
+    pub fn constraints_of_body(&self, body: BodyId) -> impl Iterator<Item = AnyConstraintId> + '_ {
+        let raws = if body.world == self.tag {
+            self.constraint_bodies.get(&body.to_raw())
+        } else {
+            None
+        };
+        raws.into_iter().flatten().map(|&raw| AnyConstraintId {
+            raw,
+            world: self.tag,
+            kind: self.constraints[&raw].kind,
+        })
     }
 
     /// Number of constraints in the world.
-    pub fn constraint_count(&self) -> usize {
-        self.constraints.len()
+    pub fn constraint_count(&self) -> u32 {
+        // Every constraint has its own `u32` id, so the count fits.
+        self.constraints.len() as u32
     }
 
     /// Whether a constraint of this world uses `body`.

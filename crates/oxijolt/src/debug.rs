@@ -80,9 +80,10 @@ pub struct DebugLine {
     pub child_user_data: Option<u32>,
 }
 
-/// A reusable buffer of debug lines, filled by [`PhysicsWorld::debug_lines`].
+/// A buffer of debug lines, returned by [`PhysicsWorld::debug_lines`] or refilled by
+/// [`PhysicsWorld::debug_lines_into`].
 ///
-/// Each call clears the buffer and refills it, keeping its capacity, so drawing every frame
+/// Each `debug_lines_into` call clears the buffer and refills it, keeping its capacity, so drawing every frame
 /// allocates only when the line count grows. [`release`](Self::release) or dropping the buffer
 /// frees the line storage. Jolt's own per-shape debug geometry (built for heightfields and meshes
 /// on their first draw) stays with the shape and is not affected.
@@ -116,6 +117,21 @@ impl DebugLines {
 }
 
 impl PhysicsWorld {
+    /// The wireframe lines of the colliders near `settings`' center, in a new buffer; see
+    /// [`debug_lines_into`](Self::debug_lines_into), which reuses one.
+    ///
+    /// # Errors
+    /// As [`debug_lines_into`](Self::debug_lines_into).
+    pub fn debug_lines(
+        &self,
+        settings: &DebugLineSettings,
+        filter: &QueryFilter<'_>,
+    ) -> Result<DebugLines, QueryError> {
+        let mut lines = DebugLines::new();
+        self.debug_lines_into(settings, filter, &mut lines)?;
+        Ok(lines)
+    }
+
     /// Collects the wireframe lines of the colliders near `settings`' center into `out`,
     /// replacing what it held.
     ///
@@ -149,7 +165,7 @@ impl PhysicsWorld {
     /// [`limits::MAX_POSITION`](crate::limits::MAX_POSITION), the radius is negative, not finite
     /// or above twice that bound. [`QueryError::UnknownObjectLayer`] or [`QueryError::WrongWorld`]
     /// when `filter` names an object layer this world does not have or a body of another world.
-    pub fn debug_lines(
+    pub fn debug_lines_into(
         &self,
         settings: &DebugLineSettings,
         filter: &QueryFilter<'_>,
@@ -646,13 +662,15 @@ mod tests {
         let filter = QueryFilter::new();
 
         let mut clean = DebugLines::new();
-        world.debug_lines(&settings, &filter, &mut clean).unwrap();
+        world
+            .debug_lines_into(&settings, &filter, &mut clean)
+            .unwrap();
         assert_eq!(clean.lines().len(), 3 * 36);
 
         let mut lines = DebugLines::new();
         INJECTED_PANIC.set(true);
         let result = catch_unwind(AssertUnwindSafe(|| {
-            world.debug_lines(&settings, &filter, &mut lines)
+            world.debug_lines_into(&settings, &filter, &mut lines)
         }));
         INJECTED_PANIC.set(false);
         let payload = result.expect_err("joltc returned and the panic resumed");
@@ -662,7 +680,9 @@ mod tests {
         );
 
         // A second live renderer would trip Jolt's singleton, and a held lock would deadlock.
-        world.debug_lines(&settings, &filter, &mut lines).unwrap();
+        world
+            .debug_lines_into(&settings, &filter, &mut lines)
+            .unwrap();
         assert_eq!(lines.lines(), clean.lines());
         assert!(!lines.is_truncated());
     }
