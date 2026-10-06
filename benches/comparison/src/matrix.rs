@@ -134,8 +134,10 @@ impl Matrix {
             None => vec![None],
         };
         let repeats = options.number("repeat", 1u32)?;
+        // A later call can add repeats to an output directory without reusing run ids.
+        let first = options.number("first-repeat", 1u32)?.max(1);
         let mut cases = Vec::new();
-        for repeat in 1..=repeats {
+        for repeat in first..first + repeats {
             // Rotate the variant order per repeat so no variant always runs first.
             let mut order = variants.clone();
             let shift = (repeat as usize - 1) % order.len().max(1);
@@ -258,6 +260,9 @@ fn append(path: &Path, header: &str, line: &str) -> Result<(), String> {
     writeln!(file, "{line}").map_err(|e| e.to_string())
 }
 
+/// Column names of `cases.tsv`, every case a matrix was asked to run, written before it runs.
+pub const CASES_HEADER: &str = "mode\trun_id";
+
 /// Column names of `failures.tsv`.
 pub const FAILURES_HEADER: &str = "mode\trun_id\tvariant\tscene\tprofile\tthreads\treason";
 
@@ -335,6 +340,8 @@ pub fn all(options: &Options) -> Result<String, String> {
     let mut rows: Vec<(&Case, String)> = Vec::new();
     for case in &matrix.cases {
         eprintln!("{}", case.run_id);
+        let requested = format!("{}\t{}", matrix.mode.name(), case.run_id);
+        append(&matrix.out.join("cases.tsv"), CASES_HEADER, &requested)?;
         match run_case(&matrix, case)? {
             Outcome::Row(row) => {
                 let (path, header) = match matrix.mode {
@@ -435,16 +442,13 @@ mod tests {
         let mut columns = vec!["x"; 7 + 18];
         columns[7 + 13] = "1.0";
         columns[7 + 15] = "true";
-        columns.join("	")
+        columns.join("\t")
     }
 
     fn write_digests(out: &Path, case: &Case, digests: &[u64]) {
-        let mut text = String::from(
-            "tick	digest
-",
-        );
+        let mut text = String::from("tick\tdigest\n");
         for (i, d) in digests.iter().enumerate() {
-            writeln!(text, "{}	{d:016x}", i + 1).unwrap();
+            writeln!(text, "{}\t{d:016x}", i + 1).unwrap();
         }
         let path = digests_path(out, &case.run_id);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -465,7 +469,7 @@ mod tests {
         write_digests(&out, &four, &[1, 2, 9, 4]);
         let (line, pass) = determinism_row(&out, &group);
         assert!(!pass);
-        assert!(line.contains("	3	"), "{line}");
+        assert!(line.contains("\t3\t"), "{line}");
 
         let still = row.replace("1.0", "0.0");
         write_digests(&out, &four, &[1, 2, 3, 4]);

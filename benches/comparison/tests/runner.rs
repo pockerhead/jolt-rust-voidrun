@@ -115,5 +115,6 @@ fn a_failing_case_fails_the_matrix_and_keeps_the_other_rows() {
     let failures = read_tsv(&out.join("failures.tsv"));
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0]["variant"], failing.name);
+    assert_eq!(read_tsv(&out.join("cases.tsv")).len(), 2);
     assert!(out.join("summary.md").exists());
 }

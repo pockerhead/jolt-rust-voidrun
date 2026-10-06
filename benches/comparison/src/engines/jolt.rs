@@ -12,38 +12,48 @@ use oxijolt::{
 use crate::engine::{BodyState, Config, Engine, Profile, DT, GRAVITY, MATCHED_FRICTION};
 use crate::scene::{BodySpec, JointKind, JointSpec, Motion, Scene, SceneSpec, Shape, V3};
 
-/// Jolt's contact buffers per scene: `max_body_pairs` and `max_contact_constraints` both get
-/// this value. Each is the smallest power of two from 2^14 at which 600 matched ticks at one
-/// thread dropped no contact, doubled once, at most 2^20 (`comparison size-jolt`).
-pub const CONTACT_BUFFERS: [(Scene, u32); 10] = [
-    (Scene::Balls, 1 << 16),
-    (Scene::Boxes, 1 << 15),
-    (Scene::Capsules, 1 << 15),
-    (Scene::Pyramid, 1 << 19),
-    (Scene::ManyPyramids, 1 << 16),
-    (Scene::Keva, 1 << 18),
-    (Scene::JointBall, 1 << 15),
-    (Scene::JointFixed, 1 << 15),
-    (Scene::JointPrismatic, 1 << 15),
-    (Scene::JointRevolute, 1 << 15),
+/// Jolt's buffers per scene, from `comparison size-jolt` (results in `jolt_sizes.tsv`):
+/// `max_body_pairs` and `max_contact_constraints` both get `contacts`, the smallest power of two
+/// from 2^14 at which 600 matched ticks at one thread dropped no contact, doubled once, at most
+/// 2^20. The temp allocator gets [`temp_allocator_size`] of that, doubled while 120 ticks ran
+/// more than 3 % slower than with twice the size.
+pub const SIZES: [(Scene, Buffers); 10] = [
+    (Scene::Balls, Buffers::sized(1 << 15)),
+    (Scene::Boxes, Buffers::sized(1 << 15)),
+    (Scene::Capsules, Buffers::sized(1 << 15)),
+    (Scene::Pyramid, Buffers::sized(1 << 19)),
+    (
+        Scene::ManyPyramids,
+        Buffers {
+            contacts: 1 << 16,
+            temp_allocator: 512 << 20,
+        },
+    ),
+    (
+        Scene::Keva,
+        Buffers {
+            contacts: 1 << 19,
+            temp_allocator: 1152 << 20,
+        },
+    ),
+    (Scene::JointBall, Buffers::sized(1 << 15)),
+    (Scene::JointFixed, Buffers::sized(1 << 15)),
+    (Scene::JointPrismatic, Buffers::sized(1 << 15)),
+    (Scene::JointRevolute, Buffers::sized(1 << 15)),
 ];
 
-/// Buffers of the fixtures and of scenes not in [`CONTACT_BUFFERS`].
-const SMALL_BUFFERS: u32 = 1 << 14;
-
-/// The contact buffer size for the scene called `name`.
-pub fn contact_buffers(name: &str) -> u32 {
-    CONTACT_BUFFERS
-        .iter()
-        .find(|(scene, _)| scene.name() == name)
-        .map_or(SMALL_BUFFERS, |&(_, size)| size)
-}
+/// Buffers of the fixtures and of scenes not in [`SIZES`].
+const SMALL_BUFFERS: Buffers = Buffers::sized(1 << 14);
 
 /// Temp allocator bytes for `contact_buffers`: Jolt takes about 1 KiB per contact constraint
 /// from it each step (`ContactConstraintManager.cpp:762`), plus 64 MiB for everything else.
-pub fn temp_allocator_size(contact_buffers: u32) -> u32 {
-    let bytes = u64::from(contact_buffers) * 1024 + (64 << 20);
-    u32::try_from(bytes).unwrap_or(u32::MAX)
+pub const fn temp_allocator_size(contact_buffers: u32) -> u32 {
+    let bytes = contact_buffers as u64 * 1024 + (64 << 20);
+    if bytes > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        bytes as u32
+    }
 }
 
 /// A caller job system of concurrency 1: every job is left to the stepping thread, so a step
@@ -61,20 +71,28 @@ impl JobSystem for SteppingThreadOnly {
     }
 }
 
-/// Sizes of a world, overridable by the buffer probe.
-#[derive(Clone, Copy, Debug)]
+/// Buffer sizes of a world.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Buffers {
     pub contacts: u32,
     pub temp_allocator: u32,
 }
 
 impl Buffers {
-    pub fn for_scene(name: &str) -> Self {
-        let contacts = contact_buffers(name);
+    /// `contacts` with the temp allocator [`temp_allocator_size`] gives it.
+    pub const fn sized(contacts: u32) -> Self {
         Self {
             contacts,
             temp_allocator: temp_allocator_size(contacts),
         }
+    }
+
+    /// The sizes of the scene called `name`.
+    pub fn for_scene(name: &str) -> Self {
+        SIZES
+            .iter()
+            .find(|(scene, _)| scene.name() == name)
+            .map_or(SMALL_BUFFERS, |&(_, buffers)| buffers)
     }
 }
 

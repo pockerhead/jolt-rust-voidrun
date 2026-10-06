@@ -22,7 +22,8 @@ commands:
   size-jolt Jolt's buffer probe: --scene [--steps 600]; prints its jolt_sizes.tsv row
   all       a matrix of child runs: --mode time|validate|split|sweep --scenes a,b (rapier,
             fixtures or names) --variants --threads 1,4 --profiles --iterations 2,4,8
-            --steps --repeat --exe variant=path,... --require-identical variant --out DIR;
+            --steps --repeat --first-repeat --exe variant=path,... --require-identical variant
+            --out DIR;
             writes runs.tsv or quality.tsv, samples/, digests/, determinism.tsv,
             failures.tsv, machine.txt and summary.md
   summarize DIR  regenerates DIR/summary.md from the raw files

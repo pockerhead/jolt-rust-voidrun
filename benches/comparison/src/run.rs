@@ -149,16 +149,13 @@ fn finish_timing(
     header: &str,
     (result, samples): (TimeResult, Vec<Vec<u64>>),
 ) -> Result<String, String> {
-    let mut text = format!(
-        "tick	{header}
-"
-    );
+    let mut text = format!("tick\t{header}\n");
     for (i, tick) in samples.iter().enumerate() {
         let columns: Vec<String> = tick.iter().map(u64::to_string).collect();
-        writeln!(text, "{}	{}", i + 1, columns.join("	")).unwrap();
+        writeln!(text, "{}\t{}", i + 1, columns.join("\t")).unwrap();
     }
     write_file(&samples_path(&args.out, &args.run_id), &text)?;
-    Ok(format!("{}	{}", args.key_columns(), result.columns()))
+    Ok(format!("{}\t{}", args.key_columns(), result.columns()))
 }
 
 struct Timed<'a> {
@@ -215,7 +212,7 @@ pub fn split(args: &RunArgs) -> Result<String, String> {
             Ok(vec![update, physics.as_nanos() as u64])
         },
     )?;
-    finish_timing(args, "ns	physics_ns", timing)
+    finish_timing(args, "ns\tphysics_ns", timing)
 }
 
 /// What a validation run recorded.
@@ -327,7 +324,7 @@ pub fn validate(args: &RunArgs) -> Result<String, String> {
 /// tick times within 3 %, else it is doubled. Returns the `jolt_sizes.tsv` row.
 #[cfg(feature = "jolt")]
 pub fn size_jolt(scene: Scene, steps: usize) -> Result<String, String> {
-    use crate::engines::jolt::{contact_buffers, temp_allocator_size, Buffers, Jolt};
+    use crate::engines::jolt::{Buffers, Jolt};
 
     let spec = scene.build();
     let config = Config::new(Profile::Matched, 1);
@@ -344,47 +341,36 @@ pub fn size_jolt(scene: Scene, steps: usize) -> Result<String, String> {
     let mut found = None;
     for exponent in 14..=20 {
         let size = 1u32 << exponent;
-        let buffers = Buffers {
-            contacts: size,
-            temp_allocator: temp_allocator_size(size),
-        };
-        if run(buffers, steps)?.is_some() {
+        if run(Buffers::sized(size), steps)?.is_some() {
             found = Some(size);
             break;
         }
     }
     let found = found.ok_or("no buffer size up to 2^20 completes the run")?;
     let chosen = (found * 2).min(1 << 20);
-    let mut temp = temp_allocator_size(chosen);
+    let mut measured = Buffers::sized(chosen);
     let (mut mean, mut mean_doubled);
     loop {
-        let doubled = temp.saturating_mul(2);
-        mean = run(
-            Buffers {
-                contacts: chosen,
-                temp_allocator: temp,
-            },
-            120,
-        )?
-        .ok_or("the chosen size dropped contacts")?;
-        mean_doubled = run(
-            Buffers {
-                contacts: chosen,
-                temp_allocator: doubled,
-            },
-            120,
-        )?
-        .ok_or("the chosen size dropped contacts")?;
-        if mean <= mean_doubled * 1.03 || temp == u32::MAX {
+        let doubled = Buffers {
+            temp_allocator: measured.temp_allocator.saturating_mul(2),
+            ..measured
+        };
+        let dropped = "the chosen size dropped contacts";
+        mean = run(measured, 120)?.ok_or(dropped)?;
+        mean_doubled = run(doubled, 120)?.ok_or(dropped)?;
+        if mean <= mean_doubled * 1.03 || measured.temp_allocator == u32::MAX {
             break;
         }
-        temp = doubled;
+        measured = doubled;
     }
+    let table = Buffers::for_scene(scene.name());
     Ok(format!(
-        "{}\t{found}\t{chosen}\t{}\t{temp}\t{mean:.3}\t{mean_doubled:.3}\t{}",
+        "{}\t{found}\t{chosen}\t{}\t{}\t{}\t{mean:.3}\t{mean_doubled:.3}\t{}",
         scene.name(),
-        contact_buffers(scene.name()),
-        if chosen == contact_buffers(scene.name()) && temp == temp_allocator_size(chosen) {
+        table.contacts,
+        measured.temp_allocator,
+        table.temp_allocator,
+        if measured == table {
             "table matches"
         } else {
             "table differs"
@@ -393,5 +379,4 @@ pub fn size_jolt(scene: Scene, steps: usize) -> Result<String, String> {
 }
 
 /// Column names of `jolt_sizes.tsv`.
-pub const SIZES_HEADER: &str =
-    "scene\tsmallest_complete\tchosen\ttable\ttemp_allocator\tmean_ms\tmean_ms_doubled_temp\tcheck";
+pub const SIZES_HEADER: &str = "scene\tsmallest_complete\tchosen\ttable\ttemp_allocator\ttable_temp_allocator\tmean_ms\tmean_ms_doubled_temp\tcheck";
