@@ -85,8 +85,9 @@ fn add_primitive(
     let base = u32::try_from(mesh.vertices.len())
         .map_err(|_| Error::Unsupported("more than u32::MAX vertices".into()))?;
     mesh.vertices.extend(positions);
-    mesh.triangles.extend(indices.chunks_exact(3).map(|t| {
-        let [a, b, c] = [t[0] + base, t[1] + base, t[2] + base];
+    let (triangles, _) = indices.as_chunks::<3>();
+    mesh.triangles.extend(triangles.iter().map(|t| {
+        let [a, b, c] = t.map(|i| i + base);
         if mirrored {
             [a, c, b]
         } else {

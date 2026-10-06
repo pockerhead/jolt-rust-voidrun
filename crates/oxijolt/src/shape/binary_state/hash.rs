@@ -50,11 +50,10 @@ impl Xxh64 {
             self.consume(&stripe);
             self.buffered = 0;
         }
-        let mut stripes = data.chunks_exact(STRIPE);
-        for stripe in &mut stripes {
+        let (stripes, rest) = data.as_chunks::<STRIPE>();
+        for stripe in stripes {
             self.consume(stripe);
         }
-        let rest = stripes.remainder();
         self.buffer[..rest.len()].copy_from_slice(rest);
         self.buffered = rest.len();
     }
@@ -102,9 +101,10 @@ impl Xxh64 {
         avalanche(hash)
     }
 
-    fn consume(&mut self, stripe: &[u8]) {
-        for (accumulator, lane) in self.accumulators.iter_mut().zip(stripe.chunks_exact(8)) {
-            *accumulator = round(*accumulator, read_u64(lane));
+    fn consume(&mut self, stripe: &[u8; STRIPE]) {
+        let (lanes, _) = stripe.as_chunks::<8>();
+        for (accumulator, lane) in self.accumulators.iter_mut().zip(lanes) {
+            *accumulator = round(*accumulator, u64::from_le_bytes(*lane));
         }
     }
 }
