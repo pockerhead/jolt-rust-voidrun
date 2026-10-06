@@ -131,6 +131,29 @@ Events are not part of the state: `restore_state` neither clears nor rewinds the
 `take_events` drains, and a restore reports no activation changes. Take the events before a rollback
 and drop those of the abandoned steps.
 
+## Size
+
+`WorldState::data_size` is the length of Jolt's stream, which makes up most of a state. Jolt
+writes only what changes at run time, at the size each value has in memory, except that a
+`Vec3` takes three floats and a position three `Real`s. The table gives what each object adds,
+from Jolt's `SaveState` functions; `tests/state_sizes.rs` checks every row in both precisions.
+
+| Object | Bytes, single precision | Bytes, double precision |
+|---|---|---|
+| Every state: the saved parts, delta time, gravity and the body, contact and constraint counts | 33 | 33 |
+| Static body: id, awake flag, position, rotation | 33 | 45 |
+| Dynamic or kinematic body, asleep or awake: also velocities, force, torque and sleep test data | 134 | 170 |
+| Contact pair with one manifold, plus per contact point | 78 + 28 | 78 + 28 |
+| Hinge | 45 | 45 |
+
+A cube resting on a floor after one step, for example, is 33 + 33 + 134 + 78 + 4 x 28 = 390 bytes
+in single precision. A soft body also saves its vertices, which the table does not cover, and
+the other constraint kinds and vehicles save their own solver state.
+
+Characters are outside `data_size`: each keeps a `CharacterState` of 97 bytes plus 73 per contact
+with collision (121 and 85 in double precision), plus 12 bytes for its up. A character's inner
+body is a kinematic body in the stream.
+
 ## The bytes
 
 A `WorldState` gives neither its bytes nor `==`. Jolt writes fields it has never initialised into
