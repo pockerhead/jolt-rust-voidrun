@@ -140,8 +140,15 @@ namespace
 	public:
 		SpanStreamIn(const uint8_t* data, size_t size) : mData(data), mSize(size) {}
 
+		// Jolt reads an empty array into its null data pointer with a size of 0 (a heightfield
+		// without materials), and memcpy and memset need valid pointers even for no bytes.
 		void ReadBytes(void* out, size_t size) override
 		{
+			if (size == 0)
+			{
+				return;
+			}
+			JPH_ASSERT(out != nullptr);
 			if (mEOF || size > mSize - mPosition)
 			{
 				mEOF = true;

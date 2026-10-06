@@ -303,6 +303,36 @@ fn materials_round_trip_with_their_user_data() {
     }
 }
 
+/// A heightfield with no or one material stores no material indices, and Jolt reads that empty
+/// array with a null destination and a length of 0. The joltc extension's input stream returns
+/// before `memcpy` then, and under `asserts` it asserts that every other read has a destination,
+/// so this test aborts in the asserts build if the early return goes.
+#[test]
+fn heightfields_without_material_indices_round_trip() {
+    let only = PhysicsMaterial::new(73).unwrap();
+    let list = [&only];
+    let n = 9;
+    let indices = vec![0; ((n - 1) * (n - 1)) as usize];
+    let samples = vec![0.0; (n * n) as usize];
+    let plain = HeightFieldSettings::default().offset(Vec3::new(-4.0, 0.0, -4.0));
+    let one_material = plain.clone().materials(&list, &indices);
+    let drops = [(-2.3, 0.4), (2.3, -0.4)];
+    for (name, settings, single) in [
+        ("no material", plain, false),
+        ("one material", one_material, true),
+    ] {
+        let field = Shape::new_height_field(n, &samples, &settings).unwrap();
+        let restored = round_trip(&field);
+        assert_eq!(ray_grid(&restored, 3.5), ray_grid(&field, 3.5), "{name}");
+        let seen = contact_materials(&restored, &drops);
+        assert_eq!(seen, contact_materials(&field, &drops), "{name}");
+        assert!(seen.iter().all(|cube| !cube.is_empty()), "{name}: {seen:?}");
+        if single {
+            assert!(seen.iter().flatten().all(|&m| m == Some(73)), "{seen:?}");
+        }
+    }
+}
+
 #[test]
 fn a_restored_mesh_keeps_its_convex_extent() {
     let sliver = [
