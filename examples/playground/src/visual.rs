@@ -174,6 +174,14 @@ impl Shaped {
         })
     }
 
+    /// `of` with its centre of mass moved by `offset`; the surface and the description stay.
+    pub fn offset_center_of_mass(of: &Shaped, offset: [f32; 3]) -> Result<Self> {
+        Ok(Self {
+            shape: Shape::new_offset_center_of_mass(&of.shape, offset.into())?,
+            visual: of.visual.clone(),
+        })
+    }
+
     /// The convex hull of `points`, drawn with `faces`, the hull's triangles, which the caller
     /// knows for its few fixed hulls; each face is turned to face outward.
     pub fn hull(points: &[[f32; 3]], faces: &[[u32; 3]]) -> Result<Self> {

@@ -111,20 +111,28 @@ pub trait Scene {
 pub enum SceneKind {
     /// A character controller on terrain with stairs, slopes, a conveyor and a ferry.
     Character,
+    /// A car, a tank and a motorcycle, and a walker to switch between them.
+    Vehicles,
     /// A dynamic body pile with impact estimates and sleeping.
     Pile,
 }
 
 impl SceneKind {
     /// Every scene in menu order.
-    pub const ALL: [Self; 2] = [Self::Character, Self::Pile];
+    pub const ALL: [Self; 3] = [Self::Character, Self::Vehicles, Self::Pile];
+
+    /// The command-line name, the number key and the menu title.
+    fn about(self) -> (&'static str, char, &'static str) {
+        match self {
+            Self::Character => ("character", '1', "Character on terrain"),
+            Self::Vehicles => ("vehicles", '2', "Car, tank and motorcycle"),
+            Self::Pile => ("pile", '3', "Body pile and impacts"),
+        }
+    }
 
     /// The name used on the command line and for media files.
     pub fn name(self) -> &'static str {
-        match self {
-            Self::Character => "character",
-            Self::Pile => "pile",
-        }
+        self.about().0
     }
 
     /// The scene of a command-line name.
@@ -134,24 +142,19 @@ impl SceneKind {
 
     /// The number key that switches to the scene.
     pub fn key(self) -> char {
-        match self {
-            Self::Character => '1',
-            Self::Pile => '3',
-        }
+        self.about().1
     }
 
     /// The title shown in the menu.
     pub fn title(self) -> &'static str {
-        match self {
-            Self::Character => "Character on terrain",
-            Self::Pile => "Body pile and impacts",
-        }
+        self.about().2
     }
 
     /// Builds the scene fresh, with visual keys of `generation`.
     pub fn build(self, config: &SceneConfig, generation: u64) -> Result<Box<dyn Scene>> {
         Ok(match self {
             Self::Character => Box::new(scenes::character::Character::new(config, generation)?),
+            Self::Vehicles => Box::new(scenes::vehicles::Vehicles::new(config, generation)?),
             Self::Pile => Box::new(scenes::pile::Pile::new(config, generation)?),
         })
     }

@@ -2,3 +2,4 @@
 
 pub mod character;
 pub mod pile;
+pub mod vehicles;
