@@ -341,7 +341,7 @@ impl Scene for Queries {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.tracked.write_state(digest);
         digest.f32s(&self.origin);
         if let Some((body, point, normal)) = self.found.hit {
@@ -360,6 +360,7 @@ impl Scene for Queries {
             digest.u32(body.to_raw());
         }
         digest.bool(self.saved.is_some());
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

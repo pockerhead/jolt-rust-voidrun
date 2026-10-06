@@ -3,6 +3,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::digest::Digest;
 use crate::draw::DrawList;
 use crate::input::{Held, Input, InputQueue};
 use crate::scene::{Result, Scene, SceneConfig, SceneKind};
@@ -98,6 +99,13 @@ impl Session {
     pub fn tick_scripted(&mut self) -> Result<()> {
         let input = self.scene.script(self.tick);
         self.tick(input)
+    }
+
+    /// Folds the run's state into `digest`: every body of the world as the binding reports it,
+    /// then the scene's own state.
+    pub fn write_state(&self, digest: &mut Digest) -> Result<()> {
+        digest.world(self.scene.world())?;
+        self.scene.write_state(digest)
     }
 
     /// The milestones of the scene's clip not reached yet, including the wireframe for a scene

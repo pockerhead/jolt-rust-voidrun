@@ -123,10 +123,8 @@ impl Walker {
     }
 
     /// Folds the character's state and the caller's vertical speed into `digest`.
-    pub fn write_state(&self, world: &PhysicsWorld, digest: &mut Digest) {
-        let Ok(character) = world.character(self.id) else {
-            return;
-        };
+    pub fn write_state(&self, world: &PhysicsWorld, digest: &mut Digest) -> Result<()> {
+        let character = world.character(self.id)?;
         digest.rvec3(character.position());
         digest.quat(character.rotation());
         digest.vec3(character.linear_velocity());
@@ -138,6 +136,7 @@ impl Walker {
         );
         digest.f32(self.vel_up);
         digest.bool(self.jumped);
+        Ok(())
     }
 }
 

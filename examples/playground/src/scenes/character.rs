@@ -202,12 +202,13 @@ impl Scene for Character {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.tracked.write_state(digest);
-        self.walker.write_state(&self.world, digest);
+        self.walker.write_state(&self.world, digest)?;
         digest.u32(self.tick);
         digest.u32(self.conveyor_ticks);
         digest.u32(self.ferry_ticks);
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

@@ -322,7 +322,7 @@ impl Scene for Pile {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.tracked.write_state(digest);
         digest.u64(self.asleep.len() as u64);
         for body in &self.asleep {
@@ -335,6 +335,7 @@ impl Scene for Pile {
         for value in &self.loudest {
             digest.f32(*value);
         }
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

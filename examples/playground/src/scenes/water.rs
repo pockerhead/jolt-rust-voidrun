@@ -235,11 +235,12 @@ impl Scene for Water {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.tracked.write_state(digest);
         digest.bool(self.current);
         digest.u32(self.tick);
         digest.u64(self.dropped as u64);
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

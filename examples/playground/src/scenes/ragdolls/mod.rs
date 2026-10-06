@@ -324,17 +324,15 @@ impl Scene for Ragdolls {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.tracked.write_state(digest);
         for id in self.world.ragdoll_ids() {
             digest.u32(id.to_raw());
-            if let Ok(ragdoll) = self.world.ragdoll(id) {
-                let pose = ragdoll.pose();
-                digest.rvec3(pose.root_offset);
-                for joint in &pose.joints {
-                    digest.vec3(joint.translation);
-                    digest.quat(joint.rotation);
-                }
+            let pose = self.world.ragdoll(id)?.pose();
+            digest.rvec3(pose.root_offset);
+            for joint in &pose.joints {
+                digest.vec3(joint.translation);
+                digest.quat(joint.rotation);
             }
         }
         for dropped in &self.dropped {
@@ -342,6 +340,7 @@ impl Scene for Ragdolls {
         }
         digest.bool(self.puppet_dynamic);
         digest.u32(self.tick);
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

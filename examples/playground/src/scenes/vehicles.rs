@@ -288,14 +288,8 @@ impl Vehicles {
         Ok(())
     }
 
-    fn write_vehicle<K: VehicleKind>(&self, id: VehicleId<K>, digest: &mut Digest) {
-        let Ok(vehicle) = self.world.vehicle(id) else {
-            return;
-        };
-        if let Ok(body) = self.world.body(vehicle.body()) {
-            digest.vec3(body.linear_velocity());
-            digest.vec3(body.angular_velocity());
-        }
+    fn write_vehicle<K: VehicleKind>(&self, id: VehicleId<K>, digest: &mut Digest) -> Result<()> {
+        let vehicle = self.world.vehicle(id)?;
         for wheel in vehicle.wheels() {
             digest.f32s(&[
                 wheel.suspension_length,
@@ -311,6 +305,7 @@ impl Vehicles {
         }
         digest.f32(vehicle.engine_rpm());
         digest.i32(vehicle.current_gear());
+        Ok(())
     }
 }
 
@@ -374,14 +369,15 @@ impl Scene for Vehicles {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.tracked.write_state(digest);
-        self.walker.write_state(&self.world, digest);
-        self.write_vehicle(self.car, digest);
-        self.write_vehicle(self.tank, digest);
-        self.write_vehicle(self.bike, digest);
+        self.walker.write_state(&self.world, digest)?;
+        self.write_vehicle(self.car, digest)?;
+        self.write_vehicle(self.tank, digest)?;
+        self.write_vehicle(self.bike, digest)?;
         digest.u32(self.driven as u32);
         digest.f32s(&[self.tank_heading.0, self.tank_heading.1]);
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

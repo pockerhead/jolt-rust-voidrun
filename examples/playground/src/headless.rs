@@ -43,7 +43,9 @@ pub fn run(kind: SceneKind, ticks: u32, config: SceneConfig) -> Result<Summary> 
         session
             .tick_scripted()
             .map_err(|error| format!("scene {} at tick {tick}: {error}", kind.name()))?;
-        session.scene().write_state(&mut digest);
+        session
+            .write_state(&mut digest)
+            .map_err(|error| format!("scene {} at tick {tick}: {error}", kind.name()))?;
         session.draw(&mut list)?;
         if !list.is_finite() {
             return Err(format!(

@@ -155,11 +155,12 @@ impl Scene for Constraints {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.parts.tracked.write_state(digest);
         self.mechanisms.write_state(digest);
         self.joints.write_state(digest);
         digest.u32(self.tick);
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

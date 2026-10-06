@@ -401,12 +401,13 @@ impl Scene for Contacts {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.tracked.write_state(digest);
         for body in &self.inside {
             digest.u32(body.to_raw());
         }
         digest.u64(self.drops as u64);
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

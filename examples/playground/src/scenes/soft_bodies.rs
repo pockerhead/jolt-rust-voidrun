@@ -401,16 +401,10 @@ impl Scene for SoftBodies {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.tracked.write_state(digest);
-        for soft in [&self.cloth, &self.balloon, &self.cube] {
-            if let Ok(positions) = self.positions(soft) {
-                for p in positions {
-                    digest.f32s(&p);
-                }
-            }
-        }
         digest.bool(self.pinned);
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

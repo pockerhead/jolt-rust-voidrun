@@ -189,11 +189,12 @@ jobs:
         run: echo "JOLTC_LIB_DIR=$RUNNER_TEMP/joltc-prefix" >> "$GITHUB_ENV"
 
       - run: cargo test --locked -p playground --no-default-features $FEATURE_ARGS
+      # The default length covers every scene's whole script, so both runs check every milestone.
       - name: Every scene headless with 1 and 4 worker threads
         run: |
           run="cargo run --locked -p playground --no-default-features $FEATURE_ARGS --"
-          $run --headless --scene all --frames 600 --threads 1 > "$RUNNER_TEMP/one.txt"
-          $run --headless --scene all --frames 600 --threads 4 > "$RUNNER_TEMP/four.txt"
+          $run --headless --scene all --threads 1 > "$RUNNER_TEMP/one.txt"
+          $run --headless --scene all --threads 4 > "$RUNNER_TEMP/four.txt"
           cat "$RUNNER_TEMP/one.txt"
           diff "$RUNNER_TEMP/one.txt" "$RUNNER_TEMP/four.txt"
       - run: cargo clippy --locked -p playground --all-targets --no-default-features $FEATURE_ARGS -- -D warnings

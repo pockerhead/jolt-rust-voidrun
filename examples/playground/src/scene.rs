@@ -77,8 +77,9 @@ pub trait Scene {
     fn update(&mut self, input: &Input) -> Result<()>;
     /// Appends what the binding reports (poses, vertices, lines) and the scene's HUD lines.
     fn draw(&self, out: &mut DrawList) -> Result<()>;
-    /// Folds the scene's simulation and control state into `digest`, with typed values.
-    fn write_state(&self, digest: &mut Digest);
+    /// Folds the scene's own state into `digest`, with typed values: characters, vehicles,
+    /// joints and the script's counters. The session folds every body of the world before it.
+    fn write_state(&self, digest: &mut Digest) -> Result<()>;
     /// The shape descriptions the draw list refers to.
     fn visuals(&self) -> &Visuals;
     /// The scene's world.

@@ -384,13 +384,14 @@ impl Scene for Destruction {
         Ok(())
     }
 
-    fn write_state(&self, digest: &mut Digest) {
+    fn write_state(&self, digest: &mut Digest) -> Result<()> {
         self.tracked.write_state(digest);
         digest.u64(self.bricks.len() as u64);
         for (id, _) in &self.bricks {
             digest.u32(*id);
         }
         digest.u32(self.publications);
+        Ok(())
     }
 
     fn visuals(&self) -> &Visuals {

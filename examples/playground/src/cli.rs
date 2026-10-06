@@ -25,8 +25,9 @@ pub enum Mode {
     Help,
 }
 
-/// Ticks a headless run takes unless told otherwise.
-pub const DEFAULT_FRAMES: u32 = 600;
+/// Ticks a headless run takes unless told otherwise: at least every scene's clip, so that a
+/// default run checks every milestone.
+pub const DEFAULT_FRAMES: u32 = 780;
 
 /// The usage text.
 pub const USAGE: &str = "\
@@ -151,10 +152,10 @@ mod tests {
             Ok(Mode::Interactive { scene: pile })
         );
         assert_eq!(
-            parse_str("--headless --scene all --frames 600 --threads 4"),
+            parse_str("--headless --scene all --frames 300 --threads 4"),
             Ok(Mode::Headless {
                 scenes: SceneKind::ALL.to_vec(),
-                frames: 600,
+                frames: 300,
                 threads: Some(4)
             })
         );
