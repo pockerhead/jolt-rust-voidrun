@@ -223,13 +223,17 @@ impl Queries {
         Ok(())
     }
 
-    /// Moves the origin to the point under the cursor, or under the camera target.
-    fn rebase(&mut self, aim: Option<RayCast>) -> Result<()> {
-        let focus = self
-            .found
-            .hit
-            .filter(|_| aim.is_some())
-            .map_or(self.camera().target, |(_, point, _)| point);
+    /// Moves the origin to the point the cursor ray `aim` hits now, or under the camera target
+    /// without a cursor or a hit; returns the translation.
+    fn rebase(&mut self, aim: Option<RayCast>) -> Result<[f32; 3]> {
+        let hit = match aim {
+            Some(ray) => self
+                .world
+                .cast_ray(ray, &QueryFilter::new())?
+                .map(|hit| position_f32(ray.point_at(hit.fraction))),
+            None => None,
+        };
+        let focus = hit.unwrap_or(self.camera().target);
         let shift = [-focus[0], 0.0, -focus[2]];
         let bodies = self.tracked.ids_in_order();
         self.world.rebase(&bodies, Quat::IDENTITY, rvec(shift))?;
@@ -239,7 +243,7 @@ impl Queries {
         }
         self.message = format!("origin moved by ({:.1}, 0, {:.1})", shift[0], shift[2]);
         self.milestones.reach("rebased");
-        Ok(())
+        Ok(shift)
     }
 
     fn restore(&mut self) -> Result<()> {
@@ -278,13 +282,21 @@ impl Scene for Queries {
         if input.edges.restore {
             self.restore()?;
         }
+        let mut aim = input.held.aim;
         if input.edges.rebase {
-            self.rebase(input.held.aim)?;
+            let shift = glam::Vec3::from(self.rebase(aim)?);
+            // The cursor ray was taken before the move; it moves along, like the camera.
+            aim = aim.map(|ray| {
+                RayCast::new(
+                    rvec((position(ray.origin) + shift).to_array()),
+                    ray.direction,
+                )
+            });
         }
         step(&mut self.world)?;
         let events = self.world.take_events();
         self.tracked.sync(&self.world, &events);
-        if let Some(aim) = input.held.aim {
+        if let Some(aim) = aim {
             self.query(aim)?;
         }
         Ok(())
@@ -413,5 +425,77 @@ impl Scene for Queries {
 
     fn shows_wireframe(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::Held;
+
+    fn scene() -> Queries {
+        Queries::new(
+            &SceneConfig {
+                worker_threads: Some(1),
+            },
+            1,
+        )
+        .unwrap()
+    }
+
+    /// Where `ray` hits a static body of `scene` now.
+    fn static_hit(scene: &Queries, ray: RayCast) -> [f32; 3] {
+        let hit = scene
+            .world
+            .cast_ray(ray, &QueryFilter::new())
+            .unwrap()
+            .expect("the ray hits");
+        let body = scene.world.body(hit.body).unwrap();
+        assert_eq!(body.motion_type(), MotionType::Static);
+        position_f32(ray.point_at(hit.fraction))
+    }
+
+    fn input(aim: RayCast, rebase: bool) -> Input {
+        Input {
+            held: Held {
+                aim: Some(aim),
+                ..Held::default()
+            },
+            edges: Edges {
+                rebase,
+                ..Edges::default()
+            },
+        }
+    }
+
+    #[test]
+    fn b_on_the_first_tick_moves_the_origin_to_the_point_under_the_cursor() {
+        let mut scene = scene();
+        let ray = scene.camera().ray([0.4, -0.45], 16.0 / 9.0);
+        let point = static_hit(&scene, ray);
+        assert!(
+            point[0].abs() > 1.0,
+            "away from the camera target: {point:?}"
+        );
+        scene.update(&input(ray, true)).unwrap();
+        assert_eq!(scene.origin, [-point[0], 0.0, -point[2]]);
+        // The tick's queries ran along the moved ray: the hit is the same point, moved.
+        let (_, moved, _) = scene.found.hit.unwrap();
+        let expected = [0.0, point[1], 0.0];
+        for (a, b) in moved.iter().zip(expected) {
+            assert!((a - b).abs() < 1e-3, "{moved:?} against {expected:?}");
+        }
+    }
+
+    #[test]
+    fn b_rebases_to_the_cursor_of_its_own_tick() {
+        let mut scene = scene();
+        let before = scene.camera().ray([-0.4, -0.45], 16.0 / 9.0);
+        let now = scene.camera().ray([0.4, -0.45], 16.0 / 9.0);
+        scene.update(&input(before, false)).unwrap();
+        let (old, new) = (static_hit(&scene, before), static_hit(&scene, now));
+        assert!((old[0] - new[0]).abs() > 1.0, "{old:?} and {new:?}");
+        scene.update(&input(now, true)).unwrap();
+        assert_eq!(scene.origin, [-new[0], 0.0, -new[2]]);
     }
 }
