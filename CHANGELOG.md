@@ -18,6 +18,11 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - Changed: `Shape::new_compound` refuses a hierarchy in which Jolt would form a sub-shape id past
   its 32 bits (a one-child compound under 32 bits of parents), which Jolt accepted and then shifted
   out of range.
+- Changed: `Shape::new_compound` and `MutableCompound` refuse a compound of more than
+  `limits::MAX_EXPANDED_SUB_SHAPES` (2^20) shapes, counting a child shared by several parents at
+  every use, with the new `ShapeError::TooManySubShapes`. Jolt walks every use of a shared child, so
+  a deeply shared graph made building, mass and stepping take minutes
+  ([limits](docs/limits.md#expanded-compounds)).
 
 - Plane shapes ([guide](docs/guide.md#shapes)): `Shape::new_plane` and `new_plane_with_material`, a
   static ground plane cut to a square of a half extent; static bodies only, like meshes and

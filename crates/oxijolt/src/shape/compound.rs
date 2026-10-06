@@ -38,7 +38,8 @@ pub(super) fn check_child_pose(position: Vec3, rotation: Quat) -> Result<(), Sha
     Ok(())
 }
 
-/// How a shape uses Jolt's 32-bit sub-shape ids.
+/// How a shape uses Jolt's 32-bit sub-shape ids, and how many shapes Jolt visits when it walks
+/// every child.
 ///
 /// Jolt checks only the total width. It also pushes the index of a one-child compound, which
 /// has 0 bits, at the bit where that compound starts (`CompoundShapeVisitors.h`), and a push at
@@ -50,6 +51,10 @@ pub(super) struct SubShapeIds {
     /// Largest bit, relative to the shape's own first bit, at which a 0-bit index is pushed;
     /// `None` when no such push happens.
     pub(super) zero_width_at: Option<u32>,
+    /// Shapes in the tree Jolt walks below and including this shape: a child shared by several
+    /// parents counts at every use (see [`limits::MAX_EXPANDED_SUB_SHAPES`]). Saturates at
+    /// `u32::MAX`.
+    pub(super) expanded: u32,
 }
 
 /// The ids of a compound of `count` children whose ids are `children`.
@@ -60,14 +65,26 @@ pub(super) fn compound_ids(children: impl Iterator<Item = SubShapeIds>, count: u
         SubShapeIds {
             width: bits,
             zero_width_at: own,
+            expanded: 1,
         },
         |ids, child| SubShapeIds {
             width: ids.width.max(bits + child.width),
             zero_width_at: ids
                 .zero_width_at
                 .max(child.zero_width_at.map(|at| at + bits)),
+            expanded: ids.expanded.saturating_add(child.expanded),
         },
     )
+}
+
+/// Refuses a compound whose expanded tree holds more than [`limits::MAX_EXPANDED_SUB_SHAPES`]
+/// shapes.
+pub(super) fn check_expanded(expanded: u32) -> Result<(), ShapeError> {
+    if expanded <= limits::MAX_EXPANDED_SUB_SHAPES {
+        Ok(())
+    } else {
+        Err(ShapeError::TooManySubShapes { expanded })
+    }
 }
 
 /// Whether Jolt can form every id of a root shape with `ids`. The width is left to Jolt's own
@@ -126,7 +143,12 @@ pub(super) unsafe fn sub_shape_ids(
         {
             // SAFETY: `shape` is live and a decorated shape (checked above); the inner shape is
             // kept alive by it. Decorators push no index of their own.
-            unsafe { sub_shape_ids(JPH_DecoratedShape_GetInnerShape(shape.cast()), memo) }
+            let inner =
+                unsafe { sub_shape_ids(JPH_DecoratedShape_GetInnerShape(shape.cast()), memo) };
+            SubShapeIds {
+                expanded: inner.expanded.saturating_add(1),
+                ..inner
+            }
         }
         // A leaf, or an empty compound, which has no child to walk (Jolt gives it 32 index
         // bits).
@@ -152,6 +174,7 @@ unsafe fn leaf_ids(shape: *const JPH_Shape) -> SubShapeIds {
         // nothing, heightfields at least 3 bits, meshes a triangle index after their block
         // index (`HeightFieldShape.cpp`, `MeshShape.cpp`).
         zero_width_at: None,
+        expanded: 1,
     }
 }
 
@@ -168,6 +191,7 @@ pub(super) struct RawCompoundChild {
 /// `MutableCompoundShape` for one (see [`Shape::new_compound`]).
 ///
 /// Fails with [`ShapeError::InvalidSettings`] for no children or ids Jolt cannot form, with
+/// [`ShapeError::TooManySubShapes`] above [`limits::MAX_EXPANDED_SUB_SHAPES`], with
 /// [`ShapeError::Rejected`] when Jolt refuses the settings (a hierarchy wider than 32 bits), and
 /// with [`ShapeError::InvalidDimensions`] when the compound's bounds, after Jolt moved its
 /// centre of mass, leave [`limits::MAX_SHAPE_EXTENT`].
@@ -186,6 +210,8 @@ pub(super) unsafe fn build_compound(children: &[RawCompoundChild]) -> Result<Sha
     if !fits_jolt_ids(ids) {
         return Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
     }
+    // Jolt's constructor walks the expanded tree (`StaticCompoundShape.cpp`).
+    check_expanded(ids.expanded)?;
     initialize()?;
     // SAFETY: Jolt is initialised. The returned settings hold one reference, which the guard
     // takes over.

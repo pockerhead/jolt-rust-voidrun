@@ -305,6 +305,58 @@ fn refused_edits_walk_a_shared_child_once() {
 }
 
 #[test]
+fn edits_above_the_expansion_bound_are_refused() {
+    use crate::limits::MAX_EXPANDED_SUB_SHAPES as MAX;
+
+    let refused = |expanded| Err(ShapeError::TooManySubShapes { expanded });
+    let cube = unit_box();
+    let at = |shape, x| CompoundChild {
+        shape,
+        position: Vec3::new(x, 0.0, 0.0),
+        rotation: Quat::IDENTITY,
+        user_data: 0,
+    };
+    // 18 shared levels over a box: 2^19 - 1 shapes once every use is counted.
+    let graph = shared_pairs(unit_box(), 18);
+    let mut editor = MutableCompound::from_children(&[at(&graph, 0.0), at(&graph, 0.0)]).unwrap();
+    // The editor, two graphs and a cube: exactly the bound.
+    assert_eq!(editor.add_shape(&at(&cube, 3.0)), Ok(2));
+    walk_count::take();
+    assert_eq!(
+        editor.add_shape(&at(&cube, 5.0)).map(|_| ()),
+        refused(MAX + 1)
+    );
+    assert_eq!(walk_count::take(), (1, 1));
+    assert_eq!(editor.sub_shape_count(), 3);
+    assert_eq!(
+        editor.modify_shape(2, Vec3::ZERO, Quat::IDENTITY, Some(&graph)),
+        refused(MAX + MAX / 2 - 2)
+    );
+    assert_eq!(walk_count::take(), (19, 1));
+    assert_eq!(holder_children(&editor)[2], cube.as_ptr());
+    editor.to_shape().unwrap();
+
+    // Removing a graph makes room for the one the cube is replaced by.
+    editor.remove_shape(0).unwrap();
+    editor
+        .modify_shape(1, Vec3::ZERO, Quat::IDENTITY, Some(&graph))
+        .unwrap();
+    assert_eq!(editor.add_shape(&at(&cube, 3.0)), Ok(2));
+    assert_eq!(
+        editor.add_shape(&at(&cube, 5.0)).map(|_| ()),
+        refused(MAX + 1)
+    );
+
+    walk_count::take();
+    assert_eq!(
+        MutableCompound::from_children(&[at(&graph, 0.0), at(&graph, 0.0), at(&graph, 0.0)])
+            .map(|_| ()),
+        refused(3 * (MAX / 2 - 1) + 1)
+    );
+    assert_eq!(walk_count::take(), (19, 1));
+}
+
+#[test]
 fn an_empty_holder_has_jolts_width() {
     let editor = MutableCompound::new().unwrap();
     let holder = editor.holder.as_ptr();

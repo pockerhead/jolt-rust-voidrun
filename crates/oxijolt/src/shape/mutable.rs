@@ -7,8 +7,8 @@ use std::ptr::{null, null_mut};
 use oxijolt_sys::*;
 
 use super::compound::{
-    build_compound, check_child_pose, compound_ids, fits_jolt_ids, sub_shape_ids, RawCompoundChild,
-    SubShapeIds, EMPTY_COMPOUND_RULE, SUB_SHAPE_ID_RULE,
+    build_compound, check_child_pose, check_expanded, compound_ids, fits_jolt_ids, sub_shape_ids,
+    RawCompoundChild, SubShapeIds, EMPTY_COMPOUND_RULE, SUB_SHAPE_ID_RULE,
 };
 use super::{initialize, CompoundChild, Shape, ShapeSettings};
 use crate::owned::Owned;
@@ -86,6 +86,11 @@ pub struct MutableCompound {
     children: Vec<ChildEntry>,
     /// The ids of `children`, counted.
     ids: IdHistogram,
+    /// The sum of [`SubShapeIds::expanded`] over `children`; with the compound itself, at most
+    /// [`limits::MAX_EXPANDED_SUB_SHAPES`].
+    ///
+    /// [`limits::MAX_EXPANDED_SUB_SHAPES`]: crate::limits::MAX_EXPANDED_SUB_SHAPES
+    expanded: u32,
 }
 
 /// What the editor keeps of a child besides the shape the holder keeps.
@@ -118,6 +123,11 @@ fn fits_child_count(count: usize) -> bool {
     count <= MAX_CHILDREN as usize
 }
 
+/// Refuses a compound whose children's expanded trees hold `children` shapes in all.
+fn check_children_expanded(children: u32) -> Result<(), ShapeError> {
+    check_expanded(children.saturating_add(1))
+}
+
 /// The ids of a child shape.
 fn child_ids(shape: &Shape) -> SubShapeIds {
     // SAFETY: `shape` is borrowed for the call.
@@ -134,7 +144,11 @@ impl MutableCompound {
     ///
     /// Fails with [`ShapeError::InvalidSettings`] when a position or rotation breaks the rules
     /// of [`Shape::new_compound`], when there are more than `u32::MAX - 3` children or when the
-    /// children's sub-shape ids would not fit Jolt's 32 bits. Nothing is built then.
+    /// children's sub-shape ids would not fit Jolt's 32 bits, and with
+    /// [`ShapeError::TooManySubShapes`] above [`limits::MAX_EXPANDED_SUB_SHAPES`]. Nothing is
+    /// built then.
+    ///
+    /// [`limits::MAX_EXPANDED_SUB_SHAPES`]: crate::limits::MAX_EXPANDED_SUB_SHAPES
     pub fn from_children(children: &[CompoundChild<'_>]) -> Result<Self, ShapeError> {
         if !fits_child_count(children.len()) {
             return Err(ShapeError::InvalidSettings(CHILD_COUNT_RULE));
@@ -144,12 +158,14 @@ impl MutableCompound {
         }
         let mut memo = BTreeMap::new();
         let mut ids = IdHistogram::new();
+        let mut expanded = 0_u32;
         let entries: Vec<_> = children
             .iter()
             .map(|child| {
                 // SAFETY: `children` borrows every shape for the call.
                 let child_ids = unsafe { sub_shape_ids(child.shape.as_ptr(), &mut memo) };
                 ids.count(child_ids, 1);
+                expanded = expanded.saturating_add(child_ids.expanded);
                 ChildEntry {
                     position: child.position,
                     rotation: child.rotation,
@@ -161,10 +177,13 @@ impl MutableCompound {
         if !ids.fits(entries.len() as u32, None) {
             return Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
         }
+        // Building the holder walks the expanded tree.
+        check_children_expanded(expanded)?;
         Ok(Self {
             holder: holder_of(children)?,
             children: entries,
             ids,
+            expanded,
         })
     }
 
@@ -184,8 +203,11 @@ impl MutableCompound {
     ///
     /// Fails with [`ShapeError::InvalidSettings`] when the pose breaks the rules of
     /// [`Shape::new_compound`], when the compound already holds `u32::MAX - 3` children or when
-    /// the ids of the compound with the new child would not fit Jolt's 32 bits; the compound is
-    /// unchanged then.
+    /// the ids of the compound with the new child would not fit Jolt's 32 bits, and with
+    /// [`ShapeError::TooManySubShapes`] when the compound would hold more than
+    /// [`limits::MAX_EXPANDED_SUB_SHAPES`] shapes; the compound is unchanged then.
+    ///
+    /// [`limits::MAX_EXPANDED_SUB_SHAPES`]: crate::limits::MAX_EXPANDED_SUB_SHAPES
     pub fn add_shape(&mut self, child: &CompoundChild<'_>) -> Result<u32, ShapeError> {
         let index = self.sub_shape_count();
         if !fits_child_count(self.children.len() + 1) {
@@ -196,6 +218,8 @@ impl MutableCompound {
         if !self.ids.fits(index + 1, Some(ids)) {
             return Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
         }
+        let expanded = self.expanded.saturating_add(ids.expanded);
+        check_children_expanded(expanded)?;
         let (position, rotation) = (Vec3::ZERO.to_jph(), Quat::IDENTITY.to_jph());
         // SAFETY: the holder is a live mutable compound that only `self`, borrowed mutably,
         // reads or changes. The child is live for the call and the holder takes its own
@@ -211,6 +235,7 @@ impl MutableCompound {
             );
         }
         self.ids.count(ids, 1);
+        self.expanded = expanded;
         self.children.push(ChildEntry {
             position: child.position,
             rotation: child.rotation,
@@ -231,6 +256,7 @@ impl MutableCompound {
         unsafe { JPH_MutableCompoundShape_RemoveShape(self.holder.as_ptr().cast(), index) };
         let entry = self.children.remove(index as usize);
         self.ids.count(entry.ids, -1);
+        self.expanded -= entry.ids.expanded;
         Ok(())
     }
 
@@ -239,8 +265,11 @@ impl MutableCompound {
     ///
     /// Fails with [`ShapeError::NoSubShape`] when there is no such child, with
     /// [`ShapeError::InvalidSettings`] when the pose breaks the rules of
-    /// [`Shape::new_compound`] or when the new shape's ids would not fit Jolt's 32 bits; the
-    /// compound is unchanged then.
+    /// [`Shape::new_compound`] or when the new shape's ids would not fit Jolt's 32 bits, and with
+    /// [`ShapeError::TooManySubShapes`] when the compound would hold more than
+    /// [`limits::MAX_EXPANDED_SUB_SHAPES`] shapes; the compound is unchanged then.
+    ///
+    /// [`limits::MAX_EXPANDED_SUB_SHAPES`]: crate::limits::MAX_EXPANDED_SUB_SHAPES
     pub fn modify_shape(
         &mut self,
         index: u32,
@@ -257,6 +286,9 @@ impl MutableCompound {
             if !self.ids.fits(self.sub_shape_count(), Some(ids)) {
                 return Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
             }
+            let old = self.children[index as usize].ids;
+            let expanded = (self.expanded - old.expanded).saturating_add(ids.expanded);
+            check_children_expanded(expanded)?;
             let (zero, identity) = (Vec3::ZERO.to_jph(), Quat::IDENTITY.to_jph());
             // SAFETY: the holder is a live mutable compound that only `self`, borrowed
             // mutably, reads or changes, and `index` names one of its children (checked
@@ -271,9 +303,9 @@ impl MutableCompound {
                     shape.as_ptr(),
                 );
             }
-            let old = self.children[index as usize].ids;
             self.ids.count(old, -1);
             self.ids.count(ids, 1);
+            self.expanded = expanded;
             self.children[index as usize].ids = ids;
         }
         let entry = &mut self.children[index as usize];
@@ -374,6 +406,8 @@ impl IdHistogram {
         let counted = SubShapeIds {
             width: highest(&self.widths).map_or(0, |slot| slot as u32),
             zero_width_at: highest(&self.zero_widths).map(|slot| slot as u32),
+            // The editor counts expanded shapes itself.
+            expanded: 0,
         };
         let ids = compound_ids([Some(counted), extra].into_iter().flatten(), count);
         ids.width <= 32 && fits_jolt_ids(ids)

@@ -29,6 +29,30 @@ they reach `max(|constant|, |constant + half_extent|)` along it, so with normal 
 square over two or three axes. The constructor checks `|constant|` and `half_extent` against
 `MAX_SHAPE_EXTENT` first and Jolt's computed bounds after.
 
+## Expanded compounds
+
+Jolt walks a compound's children without remembering the shapes it has already seen.
+`CompoundShape::GetSubShapeIDBitsRecursive` and `CompoundShape::GetMassProperties` call every
+child (`Collision/Shape/CompoundShape.cpp:68-90, 117-123`). The static compound constructor calls
+both (`StaticCompoundShape.cpp:204, 349`), so does the mutable one (`MutableCompoundShape.cpp:48,
+78`), and a body reads the mass properties when it is created. A shape that several children share
+is walked once per use. A compound that holds the level below twice at each of `d` levels therefore
+costs `2^(d+1) - 1` calls per walk. At `d = 31`, which still fits the 32-bit sub-shape id rule,
+that is about 4.3e9 calls, minutes of work from one safe call.
+
+The safe API counts that expanded tree: the compound itself, plus the expanded tree of each child at
+every use, with decorators and leaves counting one each. It refuses a compound above
+`MAX_EXPANDED_SUB_SHAPES` = 2^20 = 1 048 576 with `ShapeError::TooManySubShapes`. The count is kept
+per distinct shape, so a refusal costs one visit per distinct shape. `MutableCompound` checks it
+before every edit.
+
+Measured on the development machine (Windows, debug test build over the release Jolt library) with
+such a shared graph, the cost grows linearly at about 35-40 ns per expanded shape. At 2^20 - 1
+shapes, building the compound took 39 ms, creating a dynamic body with it 59 ms, and a step with that
+body awake 10 ms. A flat compound of 2^20 distinct children walks as many shapes, so the bound
+counts sharing at what it costs, not as an error, and still leaves room for flat compounds far
+larger than a game chunk.
+
 ## Convex hulls
 
 `Shape::new_convex_hull` replays the start of Jolt's hull builder (`ConvexHullBuilder::Initialize`,

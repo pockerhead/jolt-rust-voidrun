@@ -425,6 +425,7 @@ fn sub_shape_id_arithmetic_follows_jolt() {
     let leaf = SubShapeIds {
         width: 0,
         zero_width_at: None,
+        expanded: 1,
     };
     let single = compound_ids([leaf].into_iter(), 1);
     assert_eq!(single.zero_width_at, Some(0));
@@ -434,19 +435,64 @@ fn sub_shape_id_arithmetic_follows_jolt() {
         pair,
         SubShapeIds {
             width: 1,
-            zero_width_at: Some(1)
+            zero_width_at: Some(1),
+            expanded: 4,
         }
     );
     let at = |bit| SubShapeIds {
         width: bit,
         zero_width_at: Some(bit),
+        expanded: 1,
     };
     assert!(fits_jolt_ids(at(31)));
     assert!(!fits_jolt_ids(at(32)));
     assert!(fits_jolt_ids(SubShapeIds {
         width: 32,
-        zero_width_at: None
+        zero_width_at: None,
+        expanded: 1,
     }));
+    let saturated = SubShapeIds {
+        expanded: u32::MAX,
+        ..leaf
+    };
+    assert_eq!(
+        compound_ids([saturated, leaf].into_iter(), 2).expanded,
+        u32::MAX
+    );
+}
+
+#[test]
+fn compounds_above_the_expansion_bound_are_refused() {
+    use compound::walk_count;
+    use limits::MAX_EXPANDED_SUB_SHAPES as MAX;
+
+    // 19 shared levels over a box: 2^20 - 1 shapes once every use is counted.
+    let graph = shared_pairs(unit_box(), 19);
+    assert_eq!(walked_ids(&graph).expanded, MAX - 1);
+    let cube = unit_box();
+    let decorated = Shape::new_offset_center_of_mass(&graph, Vec3::ZERO).unwrap();
+    assert_eq!(walked_ids(&decorated).expanded, MAX);
+
+    // The bound itself: the compound and the graph.
+    let at_bound = Shape::new_compound(&[child(&graph, 0.0, 0)]).unwrap();
+    assert_eq!(walked_ids(&at_bound).expanded, MAX);
+    let refused = |expanded| Err(ShapeError::TooManySubShapes { expanded });
+    assert_eq!(
+        Shape::new_compound(&[child(&graph, 0.0, 0), child(&cube, 3.0, 1)]).map(|_| ()),
+        refused(MAX + 1)
+    );
+    assert_eq!(
+        Shape::new_compound(&[child(&decorated, 0.0, 0)]).map(|_| ()),
+        refused(MAX + 1)
+    );
+
+    // One more shared level is refused before Jolt walks it.
+    walk_count::take();
+    assert_eq!(
+        Shape::new_compound(&[child(&graph, 0.0, 20), child(&graph, 0.0, 20)]).map(|_| ()),
+        refused(2 * MAX - 1)
+    );
+    assert_eq!(walk_count::take(), (20, 1));
 }
 
 /// A compound of `deep` at the origin and `count - 1` boxes in a row beyond it.

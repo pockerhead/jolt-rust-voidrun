@@ -688,7 +688,9 @@ impl Shape {
     /// compound's local bounds must lie within [`limits::MAX_SHAPE_EXTENT`] on every axis
     /// ([`ShapeError::InvalidDimensions`]). A hierarchy whose sub-shape ids Jolt cannot form
     /// gives [`ShapeError::Rejected`] when it needs more than 32 bits and
-    /// [`ShapeError::InvalidSettings`] when a one-child compound would start at bit 32.
+    /// [`ShapeError::InvalidSettings`] when a one-child compound would start at bit 32. A
+    /// compound of more than [`limits::MAX_EXPANDED_SUB_SHAPES`] shapes, counting a child shared
+    /// by several parents at every use, gives [`ShapeError::TooManySubShapes`].
     pub fn new_compound(children: &[CompoundChild<'_>]) -> Result<Self, ShapeError> {
         if children.is_empty() {
             return Err(ShapeError::InvalidSettings(compound::EMPTY_COMPOUND_RULE));

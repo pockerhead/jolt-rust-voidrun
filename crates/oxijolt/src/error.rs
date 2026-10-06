@@ -65,6 +65,13 @@ pub enum ShapeError {
         /// The number of children the compound has.
         count: u32,
     },
+    /// A compound would hold more than
+    /// [`limits::MAX_EXPANDED_SUB_SHAPES`](crate::limits::MAX_EXPANDED_SUB_SHAPES) shapes,
+    /// counting a child shared by several parents at every use.
+    TooManySubShapes {
+        /// The shapes it would hold, at most `u32::MAX`.
+        expanded: u32,
+    },
 }
 
 impl fmt::Display for ShapeError {
@@ -81,6 +88,10 @@ impl fmt::Display for ShapeError {
             Self::NoSubShape { index, count } => {
                 write!(f, "compound has no sub-shape {index} (it has {count})")
             }
+            Self::TooManySubShapes { expanded } => write!(
+                f,
+                "compound expands to {expanded} shapes, above limits::MAX_EXPANDED_SUB_SHAPES"
+            ),
         }
     }
 }

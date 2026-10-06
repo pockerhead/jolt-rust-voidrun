@@ -130,6 +130,13 @@ fn shape_error_variants_display_their_payload() {
         ShapeError::NoSubShape { index: 4, count: 3 }.to_string(),
         "compound has no sub-shape 4 (it has 3)"
     );
+    assert_eq!(
+        ShapeError::TooManySubShapes {
+            expanded: 2_000_000
+        }
+        .to_string(),
+        "compound expands to 2000000 shapes, above limits::MAX_EXPANDED_SUB_SHAPES"
+    );
 }
 
 #[test]
