@@ -4,6 +4,8 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+## 0.6.0 — 2026-10-06
+
 - Skeleton mapper ([guide](docs/guide.md#ragdolls)): `SkeletonMapper` (Jolt's `SkeletonMapper`)
   between a ragdoll skeleton and a detailed animation skeleton matched by name, with
   `MappedSkeleton` and `TranslationLocks`. `map` turns a ragdoll pose and the animation's local
