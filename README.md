@@ -19,9 +19,9 @@ bindings to the [joltc] C wrapper. Everything runs headless and is tested withou
 
 ## Playground
 
-Ten small scenes in a window show what the binding does: a character, vehicles, a pile of bodies,
-ragdolls, constraints, soft bodies, buoyancy, destruction, contact control and queries. In a clone
-of the repository with Rust, CMake and a C++ toolchain:
+Twelve small scenes in a window show what the binding does: a character, vehicles, a pile of
+bodies, ragdolls, constraints, soft bodies, buoyancy, destruction, contact control, queries, real
+meshes and any model file. In a clone of the repository with Rust, CMake and a C++ toolchain:
 
 ```sh
 git clone --recursive https://github.com/pockerhead/oxijolt

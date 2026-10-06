@@ -21,21 +21,22 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   Shape::restore_binary_state` save a built shape with its children and materials to bytes and
   restore it, so level meshes are built once at asset-build time. The bytes carry a versioned,
   checksummed header that names the build (Jolt and joltc commits, extension revision, precision,
-  determinism mode, byte order); bytes of another build or damaged bytes are refused with
-  `ShapeError::BinaryState(BinaryStateError)`. Restoring is `unsafe` because Jolt does not validate
-  the inside of its records: the bytes must come from a save of the same build.
+  determinism mode, byte order); bytes of another build, cut-short bytes and most damage are
+  refused with `ShapeError::BinaryState(BinaryStateError)`. Restoring is `unsafe` because Jolt does
+  not validate the inside of its records: the bytes must be the unchanged output of a save by the
+  same build.
 - joltc extension: `JPH_Shape_SaveBinaryState`, `JPH_Shape_RestoreBinaryState`,
   `JPH_ShapeBinaryState_GetSize`, `_CopyData`, `_Destroy` and `JPH_Shape_GetBinaryStateVersion`,
-  which walk the shape graph themselves and check every record before Jolt reads it.
-  `JOLTC_EXT_REVISION` is 21: a `JOLTC_LIB_DIR` prefix built before this change is refused until
+  which walk the shape graph themselves and check every record's envelope before Jolt reads it.
+  `JOLTC_EXT_REVISION` is 22: a `JOLTC_LIB_DIR` prefix built before this change is refused until
   the next release's archives. `oxijolt-sys` exports `JOLT_COMMIT`, `JOLTC_COMMIT`,
   `JOLTC_EXT_REVISION` and `CROSS_PLATFORM_DETERMINISTIC_ENABLED`.
 - Real meshes from open sources tested in CI ([report](docs/real-meshes.md)): CC0 and
   public-domain models (Kenney props and level pieces, Crane's oloid and spot, the Khronos
   ScatteringSkull) with their sources, licences and SHA-256 in `assets/models/models.tsv`,
   `scripts/fetch_models.py` for the large ones, and a `real-meshes` CI job with and without
-  assertions. At its own size (0.25 m) the skull's triangles are too small for Jolt; the tests
-  use it at ten times that.
+  assertions. The skull is tested at its own size (0.25 m, built for convex shapes up to 2 m, which
+  drops 0.48 % of its area) and as a 2.5 m statue.
 - Playground: the scenes `meshes` (the real models with bodies raining onto them) and `model`
   (any OBJ or glTF file given with `--model PATH`); `--models DIR` adds the downloaded models.
 - Thin dynamic hulls on a floor ([limits](docs/limits.md#thin-dynamic-hulls-on-a-floor)): the
@@ -47,17 +48,25 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   `RayCast::origin`/`direction`, `PhysicsWorld::debug_lines` (allocating),
   `SliderConstraint`'s `remove_limits`, `SixDofAxis::default()` (`Free`),
   `QueryError::{WrongWorld, UnknownObjectLayer, AllocationFailed}`,
-  `CharacterError::{Query, RestoreFailed}` and `CollisionGroupError` in the prelude are new.
+  `CharacterError::{Query, RestoreFailed}` and `CollisionGroupError` in the prelude are new, as are
+  `character_count`, `contains_character`, `vehicle_count`, `contains_vehicle`, `ragdoll_count`,
+  `contains_ragdoll` and `contains_constraint`; `BodySelection` and `BinaryStateError` are in the
+  prelude, and `DebugLineSettings` is `PartialEq`.
 - Changed (breaking): `save_state_of` takes a `BodySelection` instead of `&[BodyId]` and returns
   `StateError`; a foreign or removed id is `StateError::Body` (was `BodyError`).
-- Changed (breaking): `MeshSettings::DEFAULT_MAX_CONVEX_EXTENT` is 200 m (was 1100 m), so meshes
+- Changed (breaking): `MeshSettings::DEFAULT_MAX_CONVEX_EXTENT` is 300 m (was 1100 m), so meshes
   keep thinner triangles, such as the 1 mm bevels of small props. A mesh that meets convex shapes
-  larger than 200 m is built with a larger `max_convex_extent`
+  larger than 300 m is built with a larger `max_convex_extent`
   ([limits](docs/limits.md#convex-shapes-against-meshes)).
+- Changed: mesh triangles are kept from twice the area of 1e-6 m², Jolt's own limit, plus the
+  rounding margin (was 1e-5 m²), so a right triangle with legs of 1.2 mm is kept at the default
+  extent (was 3.3 mm) ([limits](docs/limits.md#triangle-meshes)).
 - Changed (breaking), renames: `RayHit` to `RayCastHit`, `PointHit` to `CollidePointHit`,
   `HullError` to `ConvexHullError`, `BodyError::SoftBody` to `NotRigidBody`, `VehicleSettings`
   and `create_vehicle` to `WheeledVehicleSettings` and `create_wheeled_vehicle`,
-  `SuspensionSpring` to `SpringSettings`, `Shape::scaled` to `Shape::new_scaled`,
+  `SuspensionSpring` to `SpringSettings` (whose `Default` is 0 Hz and no damping, Jolt's spring
+  default; a wheel's 1.5 Hz and 0.5 is `WheelSettings::DEFAULT_SUSPENSION_SPRING`),
+  `Shape::scaled` to `Shape::new_scaled`,
   `PhysicsWorld::contains` to `contains_body`, `CharacterState::as_bytes` to `to_bytes`,
   `ContactPoint::{on1, on2}` to `point_on1`, `point_on2`, the `inv_*` contact scales to
   `inverse_*`, and the feature `glam` to `glam032`. The root `DEFAULT_*` vehicle curves are
@@ -75,7 +84,8 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   object layer or failed native object is `QueryError::WrongWorld`, `UnknownObjectLayer` or
   `AllocationFailed` (was `InvalidValue`); a character update wraps a filter error in
   `CharacterError::Query`, and a failed character restore is `CharacterError::RestoreFailed`;
-  errors that wrap another one return it from `source()`.
+  area errors that wrap another one return it from `source()`, and the umbrella `error::Error`
+  shows the area error it holds as its own `Display` and `source()`.
 - Changed (breaking): the readouts `DebugLine`, `ContactManifold`, `ContactSettingsRejection`,
   `SoftBodyVertexState`, `SoftBodyContacts`, `SoftBodyVertexContact` and `SoftBodyValidation` are
   `#[non_exhaustive]`.
