@@ -678,18 +678,30 @@ fn map2_refuses_degenerate_chains_and_writes_nothing() {
     let mid = R_MID as i32;
     let local = neutral_local();
 
-    // A tiny non-zero desired direction.
-    let tiny = chain_pose([0.0; 3], [1.0e-30, 0.0, 0.0]);
+    // A tiny non-zero desired direction along the actual one: Jolt's sFromTo would square it to
+    // zero and normalise a quaternion of length zero.
+    let tiny = chain_pose([0.0; 3], [0.0, 1.0e-30, 0.0]);
     assert_ne!(
-        to_jph(&tiny[R_MID]).column[3].x - to_jph(&tiny[R_ROOT]).column[3].x,
+        to_jph(&tiny[R_MID]).column[3].y - to_jph(&tiny[R_ROOT]).column[3].y,
         0.0
     );
     fixture.assert_map_refused(&tiny, &local, mid);
 
-    // A tiny actual direction.
-    let mut tiny_local = chain_local([0.0; 3]);
-    tiny_local[A_MID] = translation([1.0e-6, 0.0, 0.0]);
-    fixture.assert_map_refused(&pose1(), &tiny_local, mid);
+    // A tiny non-zero actual direction: the chain start at exactly the model origin (its direct
+    // translation cancelled by the ragdoll root's), two steps of 1e-30 m.
+    let start = fixture
+        .map(&chain_pose([0.0; 3], [0.0, 0.5, 0.0]), &local)
+        .unwrap()
+        .to_vec()[A_ROOT]
+        .column[3];
+    let origin = [-start.x, -start.y, -start.z].map(f64::from);
+    let tiny_actual = chain_pose(origin, [0.0, 0.5, 0.0]);
+    let tiny_local = chain_local([0.0, 1.0e-30, 0.0]);
+    fixture.assert_map_refused(&tiny_actual, &tiny_local, mid);
+    // A short actual direction far below the floor.
+    let mut short_local = chain_local([0.0; 3]);
+    short_local[A_MID] = translation([1.0e-6, 0.0, 0.0]);
+    fixture.assert_map_refused(&pose1(), &short_local, mid);
 
     let below = f64::from(MIN_CHAIN_LENGTH) * 0.999;
     let above = f64::from(MIN_CHAIN_LENGTH) * 1.001;
