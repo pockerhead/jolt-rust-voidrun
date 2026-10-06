@@ -1,7 +1,9 @@
 //! Humanoid ragdolls dropped on terrain and stairs, each watched by a settle detector, and a
 //! puppet on a pedestal that a skeleton mapper drives from a detailed animation skeleton:
-//! kinematically, or with its joint motors while it falls.
+//! kinematically, or with its joint motors while it falls. The puppet's joint limits are drawn
+//! around its joints.
 
+mod guides;
 mod humanoid;
 mod rig;
 
@@ -289,6 +291,11 @@ impl Scene for Ragdolls {
                 });
             }
         }
+        guides::draw(
+            &self.world,
+            self.world.ragdoll(self.puppet)?.body_ids(),
+            out,
+        )?;
         if let Some(shown) = &self.shown {
             let offset = glam::Vec3::from(SKELETON_OFFSET);
             let at = |index: usize| {

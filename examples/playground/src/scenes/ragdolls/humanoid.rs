@@ -153,56 +153,63 @@ fn neg(v: Vec3) -> Vec3 {
     Vec3::new(-v.x, -v.y, -v.z)
 }
 
-/// The joint of part `index` to its parent; `None` for the pelvis.
-fn joint(index: usize) -> Option<RagdollJoint> {
-    let cone = |at: [f32; 3], twist_axis: Vec3, plane_axis: Vec3, half: f32, twist: f32| {
-        RagdollJoint::SwingTwist(
-            SwingTwistConstraintSettings::new(rvec(at), twist_axis, plane_axis)
-                .half_cone_angles(half, half)
-                .twist_limits(-twist, twist)
-                .max_friction_torque(JOINT_FRICTION),
-        )
+/// The joint limits of a part to its parent, in the bind pose's model space with the pelvis at
+/// the origin; angles in radians.
+#[derive(Clone, Copy, Debug)]
+pub enum Limits {
+    /// A swing-twist joint: a cone of `half_cone` around `twist_axis`, twist within `twist`.
+    Cone {
+        at: [f32; 3],
+        twist_axis: Vec3,
+        plane_axis: Vec3,
+        half_cone: f32,
+        twist: f32,
+    },
+    /// A hinge about `axis`, from `min` to `max` measured from `normal`.
+    Hinge {
+        at: [f32; 3],
+        axis: Vec3,
+        normal: Vec3,
+        min: f32,
+        max: f32,
+    },
+    /// A six-DOF hip with pyramid swing limits about the plane axis (flexion) and its normal
+    /// (abduction), and a twist limit.
+    Hip {
+        at: [f32; 3],
+        twist_axis: Vec3,
+        plane_axis: Vec3,
+        flexion: (f32, f32),
+        abduction: (f32, f32),
+        twist: (f32, f32),
+    },
+}
+
+/// The limits of part `index` to its parent; `None` for the pelvis.
+pub fn limits(index: usize) -> Option<Limits> {
+    let cone = |at, twist_axis, plane_axis, half_cone, twist| Limits::Cone {
+        at,
+        twist_axis,
+        plane_axis,
+        half_cone,
+        twist,
     };
-    let hinge = |at: [f32; 3], axis: Vec3, normal: Vec3, min: f32, max: f32| {
-        RagdollJoint::Hinge(
-            HingeConstraintSettings::new(rvec(at), axis, normal)
-                .limits(min, max)
-                .max_friction_torque(JOINT_FRICTION),
-        )
+    let hinge = |at, axis, normal, min, max| Limits::Hinge {
+        at,
+        axis,
+        normal,
+        min,
+        max,
     };
     // The thigh is the twist axis; forward flexion is positive on the right leg and negative on
     // the left, which makes abduction positive on both.
-    let hip = |side: f32| {
-        let limited = |(min, max): (f32, f32)| SixDofAxis::Limited { min, max };
-        let axis_y = if side > 0.0 { X } else { neg(X) };
-        let flexion = if side > 0.0 { (-1.6, 0.3) } else { (-0.3, 1.6) };
-        let motor = MotorSettings::default().spring(SpringSettings::FrequencyAndDamping {
-            frequency: 4.0,
-            damping: 1.0,
-        });
-        let mut settings =
-            SixDofConstraintSettings::new(rvec([0.09 * side, -0.11, 0.0]), neg(Y), axis_y)
-                .swing_type(SwingType::Pyramid)
-                .axis(SixDofConstraintAxis::RotationX, limited((-0.3, 0.3)))
-                .axis(SixDofConstraintAxis::RotationY, limited(flexion))
-                .axis(SixDofConstraintAxis::RotationZ, limited((-0.2, 0.5)));
-        for axis in [
-            SixDofConstraintAxis::TranslationX,
-            SixDofConstraintAxis::TranslationY,
-            SixDofConstraintAxis::TranslationZ,
-        ] {
-            settings = settings.axis(axis, SixDofAxis::Fixed);
-        }
-        for axis in [
-            SixDofConstraintAxis::RotationX,
-            SixDofConstraintAxis::RotationY,
-            SixDofConstraintAxis::RotationZ,
-        ] {
-            settings = settings
-                .max_friction(axis, JOINT_FRICTION)
-                .motor(axis, motor);
-        }
-        RagdollJoint::SixDof(settings)
+    let hip = |side: f32| Limits::Hip {
+        at: [0.09 * side, -0.11, 0.0],
+        twist_axis: neg(Y),
+        plane_axis: if side > 0.0 { X } else { neg(X) },
+        flexion: if side > 0.0 { (-1.6, 0.3) } else { (-0.3, 1.6) },
+        abduction: (-0.2, 0.5),
+        twist: (-0.3, 0.3),
     };
     Some(match index {
         1 => cone([0.0, 0.14, 0.0], Y, X, 0.4, 0.3),
@@ -226,8 +233,83 @@ fn joint(index: usize) -> Option<RagdollJoint> {
     })
 }
 
+/// The joint of part `index` to its parent; `None` for the pelvis.
+fn joint(index: usize) -> Option<RagdollJoint> {
+    Some(match limits(index)? {
+        Limits::Cone {
+            at,
+            twist_axis,
+            plane_axis,
+            half_cone,
+            twist,
+        } => RagdollJoint::SwingTwist(
+            SwingTwistConstraintSettings::new(rvec(at), twist_axis, plane_axis)
+                .half_cone_angles(half_cone, half_cone)
+                .twist_limits(-twist, twist)
+                .max_friction_torque(JOINT_FRICTION),
+        ),
+        Limits::Hinge {
+            at,
+            axis,
+            normal,
+            min,
+            max,
+        } => RagdollJoint::Hinge(
+            HingeConstraintSettings::new(rvec(at), axis, normal)
+                .limits(min, max)
+                .max_friction_torque(JOINT_FRICTION),
+        ),
+        Limits::Hip {
+            at,
+            twist_axis,
+            plane_axis,
+            flexion,
+            abduction,
+            twist,
+        } => RagdollJoint::SixDof(hip(at, twist_axis, plane_axis, flexion, abduction, twist)),
+    })
+}
+
+/// A hip with fixed translation, its limits, friction and 4 Hz motors on every rotation.
+fn hip(
+    at: [f32; 3],
+    twist_axis: Vec3,
+    plane_axis: Vec3,
+    flexion: (f32, f32),
+    abduction: (f32, f32),
+    twist: (f32, f32),
+) -> SixDofConstraintSettings {
+    let limited = |(min, max): (f32, f32)| SixDofAxis::Limited { min, max };
+    let motor = MotorSettings::default().spring(SpringSettings::FrequencyAndDamping {
+        frequency: 4.0,
+        damping: 1.0,
+    });
+    let mut settings = SixDofConstraintSettings::new(rvec(at), twist_axis, plane_axis)
+        .swing_type(SwingType::Pyramid)
+        .axis(SixDofConstraintAxis::RotationX, limited(twist))
+        .axis(SixDofConstraintAxis::RotationY, limited(flexion))
+        .axis(SixDofConstraintAxis::RotationZ, limited(abduction));
+    for axis in [
+        SixDofConstraintAxis::TranslationX,
+        SixDofConstraintAxis::TranslationY,
+        SixDofConstraintAxis::TranslationZ,
+    ] {
+        settings = settings.axis(axis, SixDofAxis::Fixed);
+    }
+    for axis in [
+        SixDofConstraintAxis::RotationX,
+        SixDofConstraintAxis::RotationY,
+        SixDofConstraintAxis::RotationZ,
+    ] {
+        settings = settings
+            .max_friction(axis, JOINT_FRICTION)
+            .motor(axis, motor);
+    }
+    settings
+}
+
 /// The bind rotation of a part: identity, or a quarter turn about Z for the arms.
-fn bind_rotation(part: &Part) -> oxijolt::Quat {
+pub fn bind_rotation(part: &Part) -> oxijolt::Quat {
     if part.along_x {
         about_axis([0.0, 0.0, 1.0], -std::f32::consts::FRAC_PI_2)
     } else {
