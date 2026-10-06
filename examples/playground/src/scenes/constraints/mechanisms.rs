@@ -226,7 +226,11 @@ impl Mechanisms {
                 .constraint_mut(self.elevator)?
                 .set_target_position(target)?;
         }
-        let pinion_speed = if (tick / 120).is_multiple_of(2) { 1.2 } else { -1.2 };
+        let pinion_speed = if (tick / 120).is_multiple_of(2) {
+            1.2
+        } else {
+            -1.2
+        };
         world
             .constraint_mut(self.pinion_drive)?
             .set_target_angular_velocity(pinion_speed)?;
