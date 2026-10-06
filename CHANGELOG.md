@@ -4,6 +4,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- joltc extension: `JPH_PhysicsMaterial_AddRef` and `JPH_PhysicsMaterial_GetRefCount`.
+  `JOLTC_EXT_REVISION` is 18: a `JOLTC_LIB_DIR` prefix built before this change is refused until the
+  next release's archives.
+
 - Plane shapes ([guide](docs/guide.md#shapes)): `Shape::new_plane` and `new_plane_with_material`, a
   static ground plane cut to a square of a half extent; static bodies only, like meshes and
   heightfields.

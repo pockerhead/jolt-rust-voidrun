@@ -177,3 +177,40 @@ fn height_field_without_materials_is_refused() {
         JPH_PhysicsMaterial_Destroy(a);
     }
 }
+
+/// The reference count of `material`.
+fn ref_count(material: *const JPH_PhysicsMaterial) -> u32 {
+    // SAFETY: `material` is null or live; the getter only reads the count.
+    unsafe { JPH_PhysicsMaterial_GetRefCount(material) }
+}
+
+#[test]
+fn add_ref_and_count_follow_jolt() {
+    let material = material(5);
+    assert_eq!(ref_count(material), 1, "Create2 returns one reference");
+    // SAFETY: the material is live; the caller owns the added reference.
+    let again = unsafe { JPH_PhysicsMaterial_AddRef(material) };
+    assert_eq!(again, material, "AddRef returns the material it was given");
+    assert_eq!(ref_count(material), 2);
+
+    let shape = box_with_material(material);
+    assert_eq!(ref_count(material), 3, "the box holds its own reference");
+    // SAFETY: the shape is live and this test holds its one reference.
+    unsafe { JPH_Shape_Destroy(shape) };
+    assert_eq!(
+        ref_count(material),
+        2,
+        "destroying the box releases its reference"
+    );
+
+    // SAFETY: the test owns two references, released one at a time; the material is live
+    // until the second.
+    unsafe { JPH_PhysicsMaterial_Destroy(again) };
+    assert_eq!(ref_count(material), 1);
+    // SAFETY: as above, the last reference.
+    unsafe { JPH_PhysicsMaterial_Destroy(material) };
+
+    // SAFETY: null is allowed and changes nothing.
+    assert!(unsafe { JPH_PhysicsMaterial_AddRef(null()) }.is_null());
+    assert_eq!(ref_count(null()), 0);
+}

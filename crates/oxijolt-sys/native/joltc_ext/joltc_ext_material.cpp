@@ -67,6 +67,24 @@ bool JPH_PhysicsMaterial_GetUserData(const JPH_PhysicsMaterial* material, uint64
 	return true;
 }
 
+JPH_PhysicsMaterial* JPH_PhysicsMaterial_AddRef(const JPH_PhysicsMaterial* material)
+{
+	const JPH::PhysicsMaterial* joltMaterial = joltc_ext::AsJoltMaterial(material);
+	if (joltMaterial == nullptr)
+	{
+		return nullptr;
+	}
+	// Jolt's reference count is a mutable atomic: AddRef is const, as for RefConst.
+	joltMaterial->AddRef();
+	return const_cast<JPH_PhysicsMaterial*>(material);
+}
+
+uint32_t JPH_PhysicsMaterial_GetRefCount(const JPH_PhysicsMaterial* material)
+{
+	const JPH::PhysicsMaterial* joltMaterial = joltc_ext::AsJoltMaterial(material);
+	return joltMaterial != nullptr ? joltMaterial->GetRefCount() : 0;
+}
+
 void JPH_ConvexShapeSettings_SetMaterial(JPH_ConvexShapeSettings* settings, const JPH_PhysicsMaterial* material)
 {
 	reinterpret_cast<JPH::ConvexShapeSettings*>(settings)->mMaterial = joltc_ext::AsJoltMaterial(material);

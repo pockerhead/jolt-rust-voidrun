@@ -303,6 +303,13 @@ JPH_CAPI JPH_PhysicsMaterial* JPH_PhysicsMaterial_Create2(const char* name, uint
 /* true and *userData set for a material made by JPH_PhysicsMaterial_Create2; false, *userData
    untouched, for null, JPH::PhysicsMaterial::sDefault and every other material. */
 JPH_CAPI bool JPH_PhysicsMaterial_GetUserData(const JPH_PhysicsMaterial* material, uint64_t* userData);
+/* Adds one reference to material and returns it for the caller, who releases it with
+   JPH_PhysicsMaterial_Destroy. Returns null for null. Works for every material, also one that
+   holds references only from Jolt objects (shapes, character contacts). */
+JPH_CAPI JPH_PhysicsMaterial* JPH_PhysicsMaterial_AddRef(const JPH_PhysicsMaterial* material);
+/* Jolt's RefTarget::GetRefCount of material: the references every owner holds together. 0 for
+   null. For tests and diagnostics; another thread may change it at any time. */
+JPH_CAPI uint32_t JPH_PhysicsMaterial_GetRefCount(const JPH_PhysicsMaterial* material);
 /* Sets JPH::ConvexShapeSettings::mMaterial (null selects the default material); the settings keep their
    own reference. Call it before the first CreateShape: Jolt caches the created shape. */
 JPH_CAPI void JPH_ConvexShapeSettings_SetMaterial(JPH_ConvexShapeSettings* settings, const JPH_PhysicsMaterial* material);

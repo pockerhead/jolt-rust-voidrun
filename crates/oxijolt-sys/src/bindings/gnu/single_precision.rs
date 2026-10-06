@@ -11271,6 +11271,14 @@ unsafe extern "C" {
     ) -> bool;
 }
 unsafe extern "C" {
+    pub fn JPH_PhysicsMaterial_AddRef(
+        material: *const JPH_PhysicsMaterial,
+    ) -> *mut JPH_PhysicsMaterial;
+}
+unsafe extern "C" {
+    pub fn JPH_PhysicsMaterial_GetRefCount(material: *const JPH_PhysicsMaterial) -> u32;
+}
+unsafe extern "C" {
     pub fn JPH_ConvexShapeSettings_SetMaterial(
         settings: *mut JPH_ConvexShapeSettings,
         material: *const JPH_PhysicsMaterial,
