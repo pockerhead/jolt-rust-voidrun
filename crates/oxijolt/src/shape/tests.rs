@@ -232,11 +232,11 @@ fn height_field_settings_reach_jolt() {
     assert_eq!(block_size, 4);
 }
 
-fn unit_box() -> Shape {
+pub(super) fn unit_box() -> Shape {
     Shape::new_box(Vec3::new(0.5, 0.5, 0.5)).unwrap()
 }
 
-fn child(shape: &Shape, x: f32, user_data: u32) -> CompoundChild<'_> {
+pub(super) fn child(shape: &Shape, x: f32, user_data: u32) -> CompoundChild<'_> {
     CompoundChild {
         shape,
         position: Vec3::new(x, 0.0, 0.0),
@@ -282,7 +282,7 @@ fn out_of_range_sub_shape_ids_are_rejected() {
 
 /// `levels` nested two-child compounds, each holding the previous level and a box, around
 /// `innermost`; `None` once a level is refused, with that level's error.
-fn nested_pairs(innermost: Shape, levels: u32) -> Result<Shape, (u32, ShapeError)> {
+pub(super) fn nested_pairs(innermost: Shape, levels: u32) -> Result<Shape, (u32, ShapeError)> {
     let unit_box = unit_box();
     let mut shape = innermost;
     for level in 1..=levels {
@@ -292,7 +292,7 @@ fn nested_pairs(innermost: Shape, levels: u32) -> Result<Shape, (u32, ShapeError
     Ok(shape)
 }
 
-fn id_bits(shape: &Shape) -> u32 {
+pub(super) fn id_bits(shape: &Shape) -> u32 {
     // SAFETY: the shape is live; the getter only reads it.
     unsafe { JPH_Shape_GetSubShapeIDBitsRecursive(shape.as_ptr()) }
 }
@@ -356,22 +356,28 @@ fn sub_shape_id_arithmetic_follows_jolt() {
 }
 
 /// A compound of `deep` at the origin and `count - 1` boxes in a row beyond it.
-fn widened(deep: &Shape, count: u32, user_data: u32) -> Shape {
+pub(super) fn widened(deep: &Shape, count: u32, user_data: u32) -> Shape {
     let unit_box = unit_box();
     let mut children = vec![child(deep, 0.0, user_data)];
     children.extend((1..count).map(|i| child(&unit_box, 20.0 + 1.5 * i as f32, i)));
     Shape::new_compound(&children).unwrap()
 }
 
-#[test]
-fn height_field_ids_reach_exactly_32_bits() {
+/// A 33 x 33 heightfield (13 id bits) inside compounds of 64, 64 and 128 children (6, 6 and
+/// 7 bits): exactly 32 bits. The heightfield is child 0 at every level, around the origin.
+pub(super) fn height_field_at_32_bits() -> Shape {
     let settings = HeightFieldSettings::default().offset(Vec3::new(-16.0, 0.0, -16.0));
     let field = Shape::new_height_field(33, &[0.0; 33 * 33], &settings).unwrap();
     // 33 samples are stored as 34: 2 * 6 bits for the cell and 1 for the triangle.
     assert_eq!(id_bits(&field), 13);
     let inner = widened(&field, 64, 101);
     let middle = widened(&inner, 64, 102);
-    let outer = widened(&middle, 128, 103);
+    widened(&middle, 128, 103)
+}
+
+#[test]
+fn height_field_ids_reach_exactly_32_bits() {
+    let outer = height_field_at_32_bits();
     assert_eq!(id_bits(&outer), 32);
 
     let mut world = crate::PhysicsWorld::new(crate::WorldSettings::default()).unwrap();

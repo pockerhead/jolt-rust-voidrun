@@ -126,6 +126,10 @@ fn shape_error_variants_display_their_payload() {
         "Jolt rejected the shape settings: Too few points"
     );
     assert_eq!(format!("{message:?}"), "\"Too few points\"");
+    assert_eq!(
+        ShapeError::NoSubShape { index: 4, count: 3 }.to_string(),
+        "compound has no sub-shape 4 (it has 3)"
+    );
 }
 
 #[test]

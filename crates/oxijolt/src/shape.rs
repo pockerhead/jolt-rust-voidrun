@@ -16,6 +16,7 @@ mod create;
 mod geometry;
 mod hull;
 mod mesh;
+mod mutable;
 mod plane;
 mod scaled;
 mod static_only;
@@ -25,13 +26,15 @@ use crate::{Quat, ShapeError, Vec3};
 pub(crate) use compound::compound_sub_shape_of;
 use compound::{build_compound, check_child_pose, sub_shape_ids, RawCompoundChild};
 pub use mesh::{DroppedTriangles, MeshBuildQuality, MeshSettings};
+pub use mutable::MutableCompound;
 pub(crate) use static_only::static_only_leaves_are_meshes_of;
 
 /// A collision shape that bodies are created from.
 ///
 /// Owns one Jolt reference. Every body created from it holds its own reference, so the shape
 /// may be dropped while bodies use it. Jolt shapes cannot change after construction, so one
-/// shape may serve any number of bodies in any number of worlds.
+/// shape may serve any number of bodies in any number of worlds. To change a compound at run
+/// time, edit a [`MutableCompound`] and install the shapes it publishes.
 pub struct Shape(Owned<JPH_Shape>);
 
 // SAFETY: Jolt shapes are immutable after construction and `RefTarget` counts references
@@ -93,7 +96,8 @@ impl fmt::Debug for CompoundChild<'_> {
 /// [`PhysicsWorld::compound_sub_shape`](crate::PhysicsWorld::compound_sub_shape).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CompoundSubShape {
-    /// Position of the child in the `children` slice given to [`Shape::new_compound`].
+    /// Position of the child in the `children` slice given to [`Shape::new_compound`], or in the
+    /// [`MutableCompound`] when [`to_shape`](MutableCompound::to_shape) was called.
     pub index: u32,
     /// The child's [`CompoundChild::user_data`].
     pub user_data: u32,
