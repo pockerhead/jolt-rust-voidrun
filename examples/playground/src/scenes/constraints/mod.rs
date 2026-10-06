@@ -188,13 +188,18 @@ impl Scene for Constraints {
     }
 
     fn script(&self, tick: u32) -> Input {
-        Input {
+        let mut input = Input {
             edges: Edges {
                 action: tick == 30,
                 ..Edges::default()
             },
             ..Input::default()
+        };
+        // Up for a second speeds the windmill up by 0.5 rad/s.
+        if (60..120).contains(&tick) {
+            input.held.up_down = 1.0;
         }
+        input
     }
 
     fn milestones(&self) -> &Milestones {

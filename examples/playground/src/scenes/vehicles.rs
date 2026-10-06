@@ -434,8 +434,10 @@ impl Scene for Vehicles {
         };
         if tick < SWITCHES[0] {
             input.held.walk = [1.0, 0.0];
-        } else if tick < SWITCHES[1] {
+        } else if tick < SWITCHES[1] - 30 {
             input.held.throttle = 0.35;
+        } else if tick < SWITCHES[1] {
+            input.held.hand_brake = true;
         } else if tick < SWITCHES[2] {
             input.held.steer = 1.0;
         } else {
