@@ -132,11 +132,31 @@ sharpest edges (`ConvexHullShape.cpp:269-345`).
 
 ### Thin dynamic hulls on a floor
 
-Observed, under investigation: flat cones 0.4 to 7 cm thick of the families in
-[Clouds the hull builder asserts on](#clouds-the-hull-builder-asserts-on), built without asserts,
-do not come to rest as dynamic bodies dropped onto a box floor, whether or not they assert with
-asserts. After 2 s they still sink at about 0.3 to 0.6 m/s, with their origin about 7 cm below the floor's
-top (1.4 m in one case).
+The cause is the impact, not the hull. Flat cones and domes 0.4 to 7 cm thick and 1 to 14 m
+wide, set down 1 cm above a box floor base down or dome down, come to rest within 0.5 mm of the
+floor and fall asleep; convex radius 0 and 0.05 behave alike. Dropped tilted from 3 m, such a
+hull lands on its rim, tips over and slaps down: its far edge moves at the radius times the
+angular velocity (about 5 m/s for a 4 m dome), while Jolt's discrete step reacts to an approach
+only within its speculative contact distance (`mSpeculativeContactDistance`, 2 cm per step) and
+`MotionQuality::LinearCast` sweeps the centre of mass's translation, not the rotation.
+
+Measured with twelve random tilts per hull, 60 Hz, no convex radius (`tests/thin_hulls.rs` keeps
+the 4 m wide, 1 cm thick dome as its gate):
+
+- Box or plane floor: the slapping edge of the 1 cm dome sinks up to 24 cm, of the 1 cm flat
+  cone up to 13 cm. Flat cones then recover to the penetration slop (2 cm). Six of twelve domes
+  stay wedged about 11 cm deep after 6 s, rocking with a vertical velocity near 0.5 m/s: the
+  sinking seen first.
+- Flat mesh floor (a surface with nothing behind it): the edge passes through and the hull
+  falls. 7 to 12 of twelve cones and domes 0.4 to 7 cm thick fell through, one of twelve 20 cm
+  thick 4 m wide flat cones, and 3 and 6 of twelve 50 cm thick 14 m wide cones and domes; 20 cm
+  thick 1 m wide ones did not.
+- With `MotionQuality::LinearCast` none of the twelve 1 cm, 4 m domes stayed wedged in the box
+  floor (one of twelve 3 cm, 14 m domes did), and 6 of twelve instead of 11 fell through the
+  mesh. Four steps of 1/240 s per frame left none wedged and let 7 of twelve through the mesh.
+
+Wide thin dynamic shapes therefore belong on box or convex floors rather than meshes;
+`LinearCast` and shorter steps reduce, but do not remove, the slap's depth.
 
 ## Triangle meshes
 
