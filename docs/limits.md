@@ -49,7 +49,8 @@ before every edit.
 Measured on the development machine (Windows, debug test build over the release Jolt library) with
 such a shared graph, the cost grows linearly at about 35-40 ns per expanded shape. At 2^20 - 1
 shapes, building the compound took 39 ms, creating a dynamic body with it 59 ms, and a step with that
-body awake 10 ms. A flat compound of 2^20 distinct children walks as many shapes, so the bound
+body awake and touching nothing 10 ms; a cube resting on a static compound of 2^20 overlapping
+leaves cost about 50 ms per step. A flat compound of 2^20 distinct children walks as many shapes, so the bound
 counts sharing at what it costs, not as an error, and still leaves room for flat compounds far
 larger than a game chunk.
 
