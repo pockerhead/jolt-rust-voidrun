@@ -77,7 +77,15 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo xtask bindings                # regenerates the committed bindings and src/bindings/inputs.txt
 cargo xtask bindings --check        # fails if the committed bindings differ from the generator
+cargo test -p playground --no-default-features   # the playground's scenes, headless
+cargo run -p playground --release                # the playground window
 ```
+
+`--workspace` includes the playground (`examples/playground`), whose default features add the
+window and the debug renderer: that is a second native build, and a `JOLTC_LIB_DIR` without the
+debug renderer is refused. Plain `cargo build` and `cargo test` leave it out (`default-members`);
+CI runs the workspace commands with `--exclude playground` and checks the playground in a job of
+its own.
 
 One cargo process at a time on shared machines: the C++ build is heavy.
 
