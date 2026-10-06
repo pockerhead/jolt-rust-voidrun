@@ -107,7 +107,9 @@ which differ from the wheeled ones.
 A motorcycle is a wheeled vehicle with exactly two wheels, apart along its forward, and a lean
 controller: a spring and damper about the chassis' forward axis that tilt it toward a target lean,
 the direction of the ground's push on both wheels. `MotorcycleSettings::new(vehicle)` wraps a
-`VehicleSettings`; the driver input is the wheeled `DriverInput`.
+`VehicleSettings`; the driver input is the wheeled `DriverInput`. `MotorcycleSettings::bike` builds
+the motorcycle of Jolt's `MotorcycleTest` sample, the one below, from its front wheel's position and
+radius.
 
 ```rust
 use oxijolt::*;

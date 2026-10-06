@@ -204,7 +204,8 @@ of the update and is not added to the velocity; the caller feeds the vertical sp
 - **Shape and pose.** The character position is where the shape's offset starts. With a capsule of
   half height `h` and radius `r`, `shape_offset(0, h + r, 0)` puts the capsule's bottom at the
   position, and Jolt adds `character_padding` (0.02 m) along up, so a character at rest stands that
-  far above the ground.
+  far above the ground. `CharacterSettings::humanoid(height, radius)` builds such a capsule and keeps
+  it in the settings, so no `Shape` has to outlive them.
 - **Up.** Up and rotation can change before every update (`CharacterMut::set_up`, `set_rotation`),
   so on a planet up is radial. The `ExtendedUpdateSettings` vectors are in world space and default
   to +Y; with another up, pass them along it.
@@ -636,7 +637,9 @@ follows holds for every kind unless it names the wheeled settings.
   and anti-roll bars name them by index; Jolt's samples put the left wheels at +X. A vehicle needs
   at least one differential, and the engine torque ratios of all differentials add up to 1.
   Values Jolt asserts on or divides by are checked first: `create_vehicle` returns
-  `VehicleError::InvalidValue` for them and creates nothing.
+  `VehicleError::InvalidValue` for them and creates nothing. `VehicleSettings::car` is a ready
+  front-wheel-drive car of four wheels mirrored from the front left one, with Jolt's default engine
+  and transmission.
 - **Wheels and the ground.** `VehicleCollisionTester::ray`, `cast_sphere` or `cast_cylinder`.
   The wheels see the bodies whose object layer collides with the tester's object layer, never
   their own chassis. A tester cannot skip compound children by group, so give the wheels their
@@ -655,6 +658,8 @@ follows holds for every kind unless it names the wheeled settings.
   start of the step, at the chassis pose before the step moved it. Normals are the ground's
   outward normal, as in queries. A wheel whose cast starts inside a solid body reports suspension
   length 0 and `hit_hard_point`, not how deep it is; `collide_shape` gives the depth.
+  `wheel_world_transform` gives a wheel's centre and rotation in world space for drawing it, for a
+  wheel model whose axle is its local Y.
 - **Rebase.** `PhysicsWorld::rebase` moves the chassis like any body and rotates each vehicle's
   gravity override, the up of a ray or sphere tester and a motorcycle's target lean; the reported
   contacts stay in the old frame until the next step.

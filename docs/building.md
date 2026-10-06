@@ -35,7 +35,14 @@ git submodule update --init
 cargo build                         # builds joltc + Jolt through CMake (always Release)
 cargo test --workspace              # everything, headless
 cargo run -p oxijolt --example hello_world
+cargo run -p playground --release   # the playground window
 ```
+
+`cargo build` and `cargo test` leave the playground (`examples/playground`) out. `--workspace`
+includes it, and its default features turn on the window and `debug-renderer` for the whole build:
+a second native build, and a `JOLTC_LIB_DIR` prefix without the debug renderer is refused. Use
+`--workspace --exclude playground` for the library alone, as CI does, and
+`cargo test -p playground --no-default-features` for the playground's scenes without a window.
 
 Checkouts made before the crate rename run `git submodule sync && git submodule update --init` once.
 

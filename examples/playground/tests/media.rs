@@ -1,5 +1,5 @@
 //! The committed media: a GIF and a PNG still for every scene, within the size limits, each GIF
-//! a readable looping animation.
+//! a readable looping animation, all of them shown in the README.
 
 use std::fs;
 
@@ -29,4 +29,16 @@ fn every_scene_has_its_media_within_the_limits() {
         assert!(frames > 10, "{} has {frames} frames", gif.display());
     }
     assert!(total <= MAX_TOTAL_BYTES, "the GIFs have {total} bytes");
+}
+
+#[test]
+fn the_readme_shows_every_scene() {
+    let readme_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md");
+    let readme = fs::read_to_string(readme_path).unwrap();
+    for kind in SceneKind::ALL {
+        for extension in ["gif", "png"] {
+            let path = format!("docs/media/{}.{extension}", kind.name());
+            assert!(readme.contains(&path), "the README does not show {path}");
+        }
+    }
 }

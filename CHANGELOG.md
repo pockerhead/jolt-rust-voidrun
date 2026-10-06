@@ -15,6 +15,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - `VehicleRef::wheel_world_transform(index)`: a wheel's centre and rotation in world space (Jolt's
   `GetWheelWorldTransform`) for a wheel model whose axle is its local Y, so a renderer can draw
   wheels from what the binding reports.
+- Playground (`examples/playground`, [guide](docs/playground.md)): ten scenes in a window that show
+  the binding's features, a headless mode that runs every scene's script and prints a digest
+  (compared with 1 and 4 worker threads in CI), and a record mode that makes the README's GIFs and
+  stills in `docs/media`. The playground is a workspace member outside the default members.
 
 ## 0.6.0 — 2026-10-06
 
