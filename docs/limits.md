@@ -1113,7 +1113,11 @@ the ragdoll joint at the chain's end (`RagdollError::DegenerateChain`). Notation
   two components have a squared sum of at least `|a|² / 2`. Any `F` above `2^-10.5` (about
   0.69 mm) works; 1 mm is the round value above it and leaves room for terms flushed to zero below
   `2^-126`. An exactly zero `actual` would be safe too; the guard refuses it with every other short
-  one.
+  one. The floor makes the turn a unit quaternion, not an accurate one: near opposite directions
+  `w` is a difference of nearly equal terms, and on a 2-link chain whose ragdoll direction lies
+  `ε` from the exact opposite of its animation direction the turned chain missed its target by
+  0.77° at `ε` = 3e-5 rad, 24° at 1e-6 rad and by an arbitrary angle below 2e-7 rad, with no NaN
+  and no assert.
 - **Upper bounds.** The guard also requires `|actual| + Δ <= 1e18` and `|desired| <= 1e18`, so
   each squared length stays below 1e36 (`f32::MAX` is 3.4e38), and
   `(|actual| + Δ) |desired| <= 4e18`, so the product of the squared lengths (at most 1.6e37) and
