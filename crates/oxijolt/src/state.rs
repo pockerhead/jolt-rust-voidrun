@@ -2,14 +2,17 @@
 //! `PhysicsSystem::SaveState` and `RestoreState`, plus every character's own state).
 
 mod record;
+mod selection;
 
 use std::fmt;
 use std::mem::MaybeUninit;
 
 use oxijolt_sys::*;
 
+pub use selection::BodySelection;
+
 use crate::world::WorldTag;
-use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
+use crate::{CharacterState, PhysicsWorld, StateError};
 
 /// A world's simulation state at one moment, from [`PhysicsWorld::save_state`] or
 /// [`PhysicsWorld::save_state_of`], to go back to with [`PhysicsWorld::restore_state`].
@@ -98,21 +101,18 @@ impl PhysicsWorld {
         self.state_with(self.record(None))
     }
 
-    /// Saves the simulation state with only the bodies in `bodies` (any order, duplicates
-    /// allowed, no body for an empty slice); global state, contacts, constraints and characters
-    /// are saved whole.
+    /// Saves the simulation state with only the bodies `bodies` selects; global state, contacts,
+    /// constraints and characters are saved whole.
     ///
     /// Restoring it leaves every other body in its current state, except that a character's
     /// inner body moves to the restored character's pose, so a replay from it is exact
     /// only when those bodies did not change since the save, for example static bodies the caller
-    /// never moved. Fails with [`BodyError::WrongWorld`] for an id of another world and
-    /// [`BodyError::NotFound`] for a removed body, before anything is saved.
-    pub fn save_state_of(&self, bodies: &[BodyId]) -> Result<WorldState, BodyError> {
-        for &id in bodies {
-            self.check(id)?;
-        }
-        let raw: Vec<u32> = bodies.iter().map(|id| id.to_raw()).collect();
-        Ok(self.state_with(self.record(Some(&raw))))
+    /// never moved. Fails with [`StateError::Body`] for an id of another world or a removed body,
+    /// before anything is saved.
+    pub fn save_state_of(&self, bodies: BodySelection<'_>) -> Result<WorldState, StateError> {
+        let mut ids = Vec::new();
+        let listed = self.select_bodies(bodies, &mut ids)?;
+        Ok(self.state_with(self.record(listed)))
     }
 
     /// Returns the world to `state`. See [`WorldState`] for what this restores and what it

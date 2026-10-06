@@ -10,18 +10,15 @@ use crate::PhysicsWorld;
 
 impl PhysicsWorld {
     /// Jolt's saved stream of every part of the system's state, with only the bodies whose raw
-    /// ids are in `bodies`, or with every body for `None`.
+    /// ids are in `bodies` (distinct bodies of this world, from `select_bodies`), or with every
+    /// body for `None`.
     pub(super) fn record(&self, bodies: Option<&[u32]>) -> Vec<MaybeUninit<u8>> {
         // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
         let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
             .unwrap_or_else(|| unreachable!("`new` does not return null"));
         let (ids, count) = match bodies {
-            // A world holds at most 2^23 bodies, and every id was checked to be one of them, but
-            // duplicates may make the list longer.
-            Some(ids) => (
-                ids.as_ptr(),
-                u32::try_from(ids.len()).expect("more than u32::MAX body ids"),
-            ),
+            // Distinct bodies of this world, so no more than its body count, a `u32`.
+            Some(ids) => (ids.as_ptr(), ids.len() as u32),
             None => (std::ptr::null(), 0),
         };
         // SAFETY: the system is live and no step runs: `step` needs `&mut self`. `SaveState` is

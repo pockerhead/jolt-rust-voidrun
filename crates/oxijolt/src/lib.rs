@@ -234,7 +234,7 @@ pub use soft_body::{
     SoftBodyRef, SoftBodySettings, SoftBodySharedSettings, SoftBodySharedSettingsBuilder,
     SoftBodyVertex, SoftBodyVertexAttributes, SoftBodyVertexState, SoftBodyVolume,
 };
-pub use state::WorldState;
+pub use state::{BodySelection, WorldState};
 pub use vehicle::{
     AnyVehicleId, DriverInput, Motorcycle, MotorcycleLean, MotorcycleSettings, SuspensionSpring,
     TrackSide, TrackState, TrackedDriverInput, TrackedVehicle, TrackedVehicleSettings,
