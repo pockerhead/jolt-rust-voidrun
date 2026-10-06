@@ -477,6 +477,19 @@ mod tests {
         }
     }
 
+    /// The digest of `ticks` scripted ticks of `session`.
+    fn scripted(session: &mut crate::session::Session, ticks: u32) -> u64 {
+        let mut digest = Digest::default();
+        let mut list = DrawList::default();
+        for _ in 0..ticks {
+            session.tick_scripted().unwrap();
+            session.write_state(&mut digest).unwrap();
+            session.draw(&mut list).unwrap();
+            digest.draw_list(&list);
+        }
+        digest.finish()
+    }
+
     #[test]
     fn reset_after_complete_destruction_rebuilds_the_wall() {
         use crate::scene::SceneKind;
@@ -484,17 +497,45 @@ mod tests {
         let config = SceneConfig {
             worker_threads: Some(1),
         };
+        let fresh_bodies = scene().world.body_count();
         let mut session = Session::new(SceneKind::Destruction, config).unwrap();
-        let bodies = session.scene().world().body_count();
-        let mut scene = scene();
-        let every: Vec<(u32, Vec3)> = (0..48).map(|brick| (brick, Vec3::ZERO)).collect();
-        scene.knock_out(every).unwrap();
-        assert!(scene.wall.is_none());
+        let first = scripted(&mut session, 60);
+        // Click every brick of the wall, from the front and then from the back, until none is
+        // left: a loose brick can lie in front of one still in the wall.
+        let bricks = scene().bricks;
+        let hud = |session: &mut Session| {
+            let mut list = DrawList::default();
+            session.draw(&mut list).unwrap();
+            list.hud[0].clone()
+        };
+        for side in [1.0, -1.0, 1.0, -1.0] {
+            if hud(&mut session).starts_with("wall: 0 bricks") {
+                break;
+            }
+            for (_, [x, y, z]) in &bricks {
+                let from = rvec([*x, *y, z + 3.0 * side]);
+                let click = RayCast::new(from, Vec3::new(0.0, 0.0, -6.0 * side));
+                let input = Input {
+                    edges: Edges {
+                        pick: Some(click),
+                        ..Edges::default()
+                    },
+                    ..Input::default()
+                };
+                session.tick(input).unwrap();
+            }
+        }
+        assert!(
+            hud(&mut session).starts_with("wall: 0 bricks"),
+            "{}",
+            hud(&mut session)
+        );
+        assert!(session.scene().world().body_count() > fresh_bodies);
+
         session.reset().unwrap();
-        assert_eq!(session.scene().world().body_count(), bodies);
-        let mut list = DrawList::default();
-        session.draw(&mut list).unwrap();
-        assert!(list.hud[0].starts_with("wall: 48 bricks"));
+        assert_eq!(session.scene().world().body_count(), fresh_bodies);
+        assert!(hud(&mut session).starts_with("wall: 48 bricks, published 0 times"));
+        assert_eq!(scripted(&mut session, 60), first);
     }
 
     #[test]
