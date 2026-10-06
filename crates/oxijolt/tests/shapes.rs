@@ -14,7 +14,7 @@ fn ray_hits_a_body_right_after_creation() {
     let mut world = world(Vec3::ZERO, 1);
     let floor = add_floor(&mut world);
     let hit = world
-        .cast_ray(down_from(0.0, 5.0, 0.0, 10.0), &QueryFilter::new())
+        .cast_ray(&down_from(0.0, 5.0, 0.0, 10.0), &QueryFilter::new())
         .unwrap()
         .expect("the floor is hit");
     assert_eq!(hit.body, floor);
@@ -26,7 +26,7 @@ fn ray_misses_return_none() {
     let mut world = world(Vec3::ZERO, 1);
     add_floor(&mut world);
     let up = RayCast::new(RVec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
-    assert_eq!(world.cast_ray(up, &QueryFilter::new()), Ok(None));
+    assert_eq!(world.cast_ray(&up, &QueryFilter::new()), Ok(None));
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn ray_starting_inside_a_box_hits_at_zero() {
     let mut world = world(Vec3::ZERO, 1);
     let floor = add_floor(&mut world);
     let hit = world
-        .cast_ray(down_from(0.0, -0.5, 0.0, 10.0), &QueryFilter::new())
+        .cast_ray(&down_from(0.0, -0.5, 0.0, 10.0), &QueryFilter::new())
         .unwrap()
         .expect("the floor is hit");
     assert_eq!(hit.body, floor);
@@ -55,7 +55,7 @@ fn invalid_rays_are_rejected() {
     for ray in invalid {
         assert!(
             matches!(
-                world.cast_ray(ray, &QueryFilter::new()),
+                world.cast_ray(&ray, &QueryFilter::new()),
                 Err(QueryError::InvalidValue(_))
             ),
             "{ray:?} was accepted"
@@ -84,7 +84,7 @@ fn add_static(world: &mut PhysicsWorld, shape: &Shape, position: RVec3) -> BodyI
 /// World height where a downward ray from `y = 20` at `(x, z)` hits, if it does.
 fn surface_height(world: &PhysicsWorld, x: Real, z: Real) -> Option<Real> {
     let ray = down_from(x, 20.0, z, 40.0);
-    let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap()?;
+    let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap()?;
     Some(ray.point_at(hit.fraction).y)
 }
 
@@ -120,7 +120,7 @@ fn height_field_rising_along_z_matches_analytic_surface() {
             Vec3::new(0.0, -30.0, 0.0),
         );
         let hit = world
-            .cast_ray(ray, &QueryFilter::new())
+            .cast_ray(&ray, &QueryFilter::new())
             .unwrap()
             .expect("the terrain is hit");
         assert_eq!(hit.body, terrain);
@@ -235,7 +235,7 @@ fn height_field_is_hit_from_below() {
     let terrain = add_static(&mut world, &shape, RVec3::new(0.0, 0.0, 0.0));
     let ray = RayCast::new(RVec3::new(0.5, -1.0, 0.5), Vec3::new(0.0, 2.0, 0.0));
     let hit = world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .expect("the underside is hit");
     assert_eq!(hit.body, terrain);
@@ -520,10 +520,10 @@ fn child(shape: &Shape, position: Vec3, rotation: Quat, user_data: u32) -> Compo
 }
 
 /// The closest hit of a downward ray from `y = 20` at `(x, z)` and the world height it hits.
-fn hit_below(world: &PhysicsWorld, x: Real, z: Real) -> (RayHit, Real) {
+fn hit_below(world: &PhysicsWorld, x: Real, z: Real) -> (RayCastHit, Real) {
     let ray = down_from(x, 20.0, z, 40.0);
     let hit = world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .expect("something is hit");
     (hit, ray.point_at(hit.fraction).y)
@@ -755,7 +755,7 @@ fn sharp_box_edge_ray_hits_the_exact_corner() {
     let mut world = world(Vec3::ZERO, 1);
     add_static(&mut world, &sharp, RVec3::new(0.0, 0.0, 0.0));
     let hit = world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .expect("the edge is hit");
     assert_eq!(hit.fraction, 0.5);
@@ -766,7 +766,7 @@ fn sharp_box_edge_ray_hits_the_exact_corner() {
     let mut world = common::world(Vec3::ZERO, 1);
     add_static(&mut world, &rounded, RVec3::new(0.0, 0.0, 0.0));
     let hit = world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .expect("the edge is hit");
     assert_eq!(hit.fraction, 0.5);
@@ -859,7 +859,7 @@ fn shapes_are_shared_across_bodies_and_worlds() {
         rays.iter()
             .map(|&ray| {
                 let hit = world
-                    .cast_ray(ray, &QueryFilter::new())
+                    .cast_ray(&ray, &QueryFilter::new())
                     .unwrap()
                     .expect("every ray hits");
                 hit.fraction.to_bits()
@@ -984,7 +984,7 @@ fn shapes_with_materials_collide_like_their_plain_siblings() {
             let mut world = PhysicsWorld::new(WorldSettings::default()).unwrap();
             add_static(&mut world, shape, RVec3::ZERO);
             let hit = world
-                .cast_ray(down_from(0.1, 5.0, 0.2, 10.0), &QueryFilter::new())
+                .cast_ray(&down_from(0.1, 5.0, 0.2, 10.0), &QueryFilter::new())
                 .unwrap()
                 .expect("the ray hits the shape");
             distances.push(hit.distance);

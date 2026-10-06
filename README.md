@@ -59,7 +59,7 @@ fn main() -> oxijolt::error::Result<()> {
 
     // A ray cast down from above hits the ball first.
     let ray = RayCast::new(RVec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -20.0, 0.0));
-    let hit = world.cast_ray(ray, &QueryFilter::new())?.expect("the ray hits");
+    let hit = world.cast_ray(&ray, &QueryFilter::new())?.expect("the ray hits");
     assert_eq!(hit.body, ball);
     Ok(())
 }

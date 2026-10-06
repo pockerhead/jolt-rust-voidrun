@@ -532,7 +532,7 @@ fn queries_find_a_cloth() {
         )
         .unwrap();
     let ray = RayCast::new(RVec3::new(0.1, 3.0, 0.1), Vec3::new(0.0, -5.0, 0.0));
-    let hit = world.cast_ray(ray, &ALL).unwrap().expect("the cloth");
+    let hit = world.cast_ray(&ray, &ALL).unwrap().expect("the cloth");
     assert_eq!(hit.body, id);
     assert!(finite(hit.normal));
     assert!((hit.distance - 2.0).abs() < 1.0e-3, "{}", hit.distance);

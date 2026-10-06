@@ -676,7 +676,7 @@ fn an_inner_body_is_a_body_of_the_world_owned_by_its_character() {
     // Queries find it, in its layer.
     let hit = world
         .cast_ray(
-            RayCast::new(RVec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -10.0, 0.0)),
+            &RayCast::new(RVec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -10.0, 0.0)),
             &QueryFilter::new(),
         )
         .unwrap()

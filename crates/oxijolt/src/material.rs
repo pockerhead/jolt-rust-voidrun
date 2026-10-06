@@ -381,7 +381,7 @@ mod tests {
                 RVec3::new(3.0 * i as crate::Real, 5.0, 0.0),
                 Vec3::new(0.0, -10.0, 0.0),
             );
-            let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap().unwrap();
+            let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap().unwrap();
             assert_eq!(material_at(&compound, hit.sub_shape_id.to_raw()), expected);
         }
     }

@@ -530,12 +530,9 @@ fn height_field_ids_reach_exactly_32_bits() {
     world
         .create_body(&outer, &crate::BodySettings::new_static())
         .unwrap();
-    let ray = crate::RayCast {
-        origin: crate::RVec3::new(1.3, 5.0, 2.7),
-        direction: Vec3::new(0.0, -10.0, 0.0),
-    };
+    let ray = crate::RayCast::new(crate::RVec3::new(1.3, 5.0, 2.7), Vec3::new(0.0, -10.0, 0.0));
     let hit = world
-        .cast_ray(ray, &crate::QueryFilter::new())
+        .cast_ray(&ray, &crate::QueryFilter::new())
         .unwrap()
         .expect("the ray hits the heightfield");
     assert_eq!(

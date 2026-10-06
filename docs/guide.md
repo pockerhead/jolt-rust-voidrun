@@ -344,14 +344,14 @@ fn main() -> oxijolt::error::Result<()> {
         .object_layers(&ground_layers)
         .child_groups(1 << STRUCTURE);
     let down = RayCast::new(RVec3::new(5.0, 10.0, 5.0), Vec3::new(0.0, -20.0, 0.0));
-    let hit = world.cast_ray(down, &ground_filter)?.expect("the porch");
+    let hit = world.cast_ray(&down, &ground_filter)?.expect("the porch");
     assert_eq!(hit.body, chunk_body);
     assert_eq!(hit.compound_child.map(|child| child.user_data), Some(STRUCTURE));
     assert!((down.point_at(hit.fraction).y - 1.0).abs() < 1e-3);
     assert!(hit.normal.y > 0.99, "a floor's normal points up");
 
     // The same ray without a group filter stops on the canopy.
-    let hit = world.cast_ray(down, &QueryFilter::new())?.expect("the canopy");
+    let hit = world.cast_ray(&down, &QueryFilter::new())?.expect("the canopy");
     assert_eq!(hit.compound_child.map(|child| child.user_data), Some(FEATURE));
 
     // An actor capsule (feet 0.8 m below its origin) cast 5 m down onto the terrain.
@@ -387,7 +387,7 @@ fn main() -> oxijolt::error::Result<()> {
     assert!((moved.x - (resting.x - 5.0)).abs() < 1e-4);
     assert!((moved.z - (resting.z - 5.0)).abs() < 1e-4);
     let down = RayCast::new(RVec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -20.0, 0.0));
-    let hit = world.cast_ray(down, &ground_filter)?.expect("the porch");
+    let hit = world.cast_ray(&down, &ground_filter)?.expect("the porch");
     assert_eq!(hit.body, chunk_body);
 
     // The world keeps stepping in the new frame.
@@ -839,7 +839,7 @@ fn terrain() -> Result<Shape, Error> {
 fn ground_at(world: &PhysicsWorld, layers: &Layers, x: Real, z: Real) -> Result<Real, Error> {
     let ray = RayCast::new(RVec3::new(x, 10.0, z), Vec3::new(0.0, -20.0, 0.0));
     let ground = [layers.ground];
-    let hit = world.cast_ray(ray, &QueryFilter::new().object_layers(&ground))?;
+    let hit = world.cast_ray(&ray, &QueryFilter::new().object_layers(&ground))?;
     Ok(ray.point_at(hit.ok_or("no ground")?.fraction).y)
 }
 

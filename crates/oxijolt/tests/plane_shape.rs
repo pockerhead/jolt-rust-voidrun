@@ -436,12 +436,12 @@ fn rays_hit_a_plane_from_above_and_start_inside_it_from_below() {
     let (world, floor) = plane_world();
     let filter = QueryFilter::new();
     let down = RayCast::new(RVec3::new(1.0, 2.0, -3.0), Vec3::new(0.0, -4.0, 0.0));
-    let hit = world.cast_ray(down, &filter).unwrap().unwrap();
+    let hit = world.cast_ray(&down, &filter).unwrap().unwrap();
     assert_eq!(hit.body, floor);
     assert_eq!(hit.fraction, 0.5);
     assert!((hit.normal.y - 1.0).abs() < 1.0e-6, "{:?}", hit.normal);
     let up = RayCast::new(RVec3::new(1.0, -1.0, -3.0), Vec3::new(0.0, 4.0, 0.0));
-    let hit = world.cast_ray(up, &filter).unwrap().unwrap();
+    let hit = world.cast_ray(&up, &filter).unwrap().unwrap();
     assert_eq!((hit.body, hit.fraction), (floor, 0.0));
 }
 

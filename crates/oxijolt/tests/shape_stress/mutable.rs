@@ -247,7 +247,7 @@ fn use_publication(
         .unwrap();
     let ray = RayCast::new(RVec3::new(0.0, 2100.0, 0.0), Vec3::new(0.0, -2200.0, 0.0));
     let top = world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .map_or(0.0, |hit| ray.point_at(hit.fraction).y);
     let cube = world

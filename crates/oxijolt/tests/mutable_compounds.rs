@@ -55,23 +55,17 @@ fn commit(
 }
 
 /// The first hit of a ray straight down through `(x, z)` from 10 m up.
-fn ray_down(world: &PhysicsWorld, x: Real, z: Real) -> Option<RayHit> {
-    let ray = RayCast {
-        origin: RVec3::new(x, 10.0, z),
-        direction: Vec3::new(0.0, -20.0, 0.0),
-    };
-    world.cast_ray(ray, &QueryFilter::new()).unwrap()
+fn ray_down(world: &PhysicsWorld, x: Real, z: Real) -> Option<RayCastHit> {
+    let ray = RayCast::new(RVec3::new(x, 10.0, z), Vec3::new(0.0, -20.0, 0.0));
+    world.cast_ray(&ray, &QueryFilter::new()).unwrap()
 }
 
 /// The compound child of `body` at `(x, 0)` in the tiles' height: a ray from inside a tile
 /// hits that tile at its start, below anything resting on it.
 fn child_below(world: &PhysicsWorld, body: BodyId, x: Real) -> Option<CompoundSubShape> {
-    let ray = RayCast {
-        origin: RVec3::new(x, LEDGE_Y + 0.1, 0.0),
-        direction: Vec3::new(0.0, -0.2, 0.0),
-    };
+    let ray = RayCast::new(RVec3::new(x, LEDGE_Y + 0.1, 0.0), Vec3::new(0.0, -0.2, 0.0));
     world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .filter(|hit| hit.body == body)
         .and_then(|hit| hit.compound_child)

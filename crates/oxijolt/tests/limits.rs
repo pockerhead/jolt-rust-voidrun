@@ -728,9 +728,9 @@ fn query_inputs_are_bounded_by_the_frame() {
     let beyond = RVec3::new(bound.next_up(), 0.0, 0.0);
     let across = Vec3::new(-span, -span, -span);
 
-    world.cast_ray(RayCast::new(corner, across), &all).unwrap();
+    world.cast_ray(&RayCast::new(corner, across), &all).unwrap();
     assert!(query_invalid(world.cast_ray(
-        RayCast::new(beyond, Vec3::new(0.0, -1.0, 0.0)),
+        &RayCast::new(beyond, Vec3::new(0.0, -1.0, 0.0)),
         &all
     )));
 
@@ -826,7 +826,7 @@ fn a_ray_with_a_huge_finite_direction_is_cast() {
     let floor = add_floor(&mut world);
     let hit = world
         .cast_ray(
-            RayCast::new(RVec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -1.0e30, 0.0)),
+            &RayCast::new(RVec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -1.0e30, 0.0)),
             &QueryFilter::new(),
         )
         .unwrap()

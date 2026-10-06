@@ -109,7 +109,7 @@ fn surface_height(world: &PhysicsWorld, layer: ObjectLayer, x: f64, z: f64) -> f
     let layers = [layer];
     let ray = down_ray(x, z);
     let hit = world
-        .cast_ray(ray, &QueryFilter::new().object_layers(&layers))
+        .cast_ray(&ray, &QueryFilter::new().object_layers(&layers))
         .unwrap()
         .unwrap_or_else(|| panic!("no static surface below ({x}, {z})"));
     v3(ray.point_at(hit.fraction))[1]
@@ -222,7 +222,7 @@ fn settled_scene() -> (Scene, RagdollId, Settled) {
 
 fn ray_bits(world: &PhysicsWorld, x: f64, z: f64) -> u32 {
     let hit = world
-        .cast_ray(down_ray(x, z), &QueryFilter::new())
+        .cast_ray(&down_ray(x, z), &QueryFilter::new())
         .unwrap()
         .unwrap();
     hit.fraction.to_bits()
@@ -402,13 +402,13 @@ fn an_environment_ray_passes_through_a_resting_part() {
     let fixed = [scene.layers.fixed];
     let environment = scene
         .world
-        .cast_ray(ray, &QueryFilter::new().object_layers(&fixed))
+        .cast_ray(&ray, &QueryFilter::new().object_layers(&fixed))
         .unwrap()
         .unwrap();
     assert_eq!(environment.body, scene.statics.terrain);
     let anything = scene
         .world
-        .cast_ray(ray, &QueryFilter::new())
+        .cast_ray(&ray, &QueryFilter::new())
         .unwrap()
         .unwrap();
     assert_eq!(scene.world.ragdoll_of_body(anything.body), Some(ragdoll));

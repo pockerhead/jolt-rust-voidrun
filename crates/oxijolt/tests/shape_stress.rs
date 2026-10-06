@@ -261,7 +261,7 @@ impl Arena {
             RVec3::new(real(c.x), top, real(c.z)),
             Vec3::new(0.0, -(extent.height() + 2.0), 0.0),
         );
-        if let Some(hit) = self.world.cast_ray(ray, &QueryFilter::new()).unwrap() {
+        if let Some(hit) = self.world.cast_ray(&ray, &QueryFilter::new()).unwrap() {
             let y = ray.point_at(hit.fraction).y;
             assert!(
                 y.is_finite() && hit.normal.y.is_finite(),
@@ -313,7 +313,7 @@ impl Arena {
             RVec3::new(real(c.x), top, real(c.z)),
             Vec3::new(0.0, -(extent.height() + 2.0), 0.0),
         );
-        if let Some(hit) = self.world.cast_ray(ray, &QueryFilter::new()).unwrap() {
+        if let Some(hit) = self.world.cast_ray(&ray, &QueryFilter::new()).unwrap() {
             assert!(ray.point_at(hit.fraction).y.is_finite(), "{what}: {hit:?}");
         }
         let sphere = Shape::new_sphere(0.3).unwrap();

@@ -80,7 +80,9 @@ pub use crate::{
 };
 pub use crate::{BroadPhaseLayer, CollisionLayers, ObjectLayer};
 pub use crate::{CharacterId, CharacterSettings, ExtendedUpdateSettings};
-pub use crate::{CollideShape, CollideShapeHit, PointHit, QueryFilter, RayCast, RayHit, ShapeCast};
+pub use crate::{
+    CollidePointHit, CollideShape, CollideShapeHit, QueryFilter, RayCast, RayCastHit, ShapeCast,
+};
 pub use crate::{CompoundChild, HeightFieldSettings, PhysicsMaterial, Shape, SubShapeId};
 pub use crate::{DroppedTriangles, MeshBuildQuality, MeshSettings};
 pub use crate::{PhysicsWorld, StepReport, WorldSettings, WorldState};

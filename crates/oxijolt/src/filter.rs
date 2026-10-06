@@ -557,7 +557,7 @@ pub(crate) mod tests {
         let down = Vec3::new(0.0, -10.0, 0.0);
         match query {
             Query::Ray => world
-                .cast_ray(RayCast::new(above, down), filter)
+                .cast_ray(&RayCast::new(above, down), filter)
                 .unwrap()
                 .map(|hit| hit.body),
             Query::ShapeCast => world

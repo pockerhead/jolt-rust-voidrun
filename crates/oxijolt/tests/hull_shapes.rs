@@ -117,7 +117,7 @@ fn static_hull_world() -> (PhysicsWorld, BodyId) {
 fn queries_hit_a_static_hull_from_above() {
     let (world, id) = static_hull_world();
     let ray = RayCast::new(RVec3::new(0.2, 5.0, -0.3), Vec3::new(0.0, -10.0, 0.0));
-    let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap().unwrap();
+    let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap().unwrap();
     assert_eq!(hit.body, id);
     assert!(
         (ray.point_at(hit.fraction).y - 1.5).abs() < 1.0e-4,
@@ -229,7 +229,7 @@ fn clouds_the_hull_builder_asserts_on_are_refused_or_built_without_asserts() {
             RVec3::new(mean_x as Real, 300.0, mean_z as Real),
             Vec3::new(0.0, -400.0, 0.0),
         );
-        let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap();
+        let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap();
         assert_eq!(hit.map(|hit| hit.body), Some(id), "{name}");
     }
 }

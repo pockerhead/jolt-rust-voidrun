@@ -287,7 +287,7 @@ fn concurrent_shared_reads_and_saves_agree() {
                         assert_eq!(world.body(id).unwrap().position(), pose.position);
                     }
                     let ray = RayCast::new(RVec3::new(-5.0, 0.0, 0.0), Vec3::new(20.0, 0.0, 0.0));
-                    assert!(world.cast_ray(ray, &QueryFilter::new()).unwrap().is_some());
+                    assert!(world.cast_ray(&ray, &QueryFilter::new()).unwrap().is_some());
                 }
             });
         }

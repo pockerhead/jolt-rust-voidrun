@@ -193,8 +193,8 @@ impl Pile {
             .held
             .aim
             .unwrap_or_else(|| self.camera().ray([0.0, 0.0], 16.0 / 9.0));
-        let direction = glam(ray.direction).normalize();
-        let origin = position(ray.origin) + direction;
+        let direction = glam(ray.direction()).normalize();
+        let origin = position(ray.origin()) + direction;
         let settings = BodySettings::new_dynamic()
             .position(rvec(origin.to_array()))
             .linear_velocity(Vec3::from((direction * 22.0).to_array()))

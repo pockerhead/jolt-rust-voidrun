@@ -14,7 +14,7 @@ fn world_and_shape_are_send_and_sync() {
     assert_send_sync::<Shape>();
     assert_send_sync::<BodyId>();
     assert_send_sync::<RayCast>();
-    assert_send_sync::<RayHit>();
+    assert_send_sync::<RayCastHit>();
     assert_send_sync::<SubShapeId>();
     assert_send_sync::<CompoundSubShape>();
     assert_send_sync::<HeightFieldSettings>();
@@ -255,7 +255,7 @@ fn rays_are_cast_from_many_threads() {
         rays.iter()
             .map(|&ray| {
                 let hit = world
-                    .cast_ray(ray, &QueryFilter::new())
+                    .cast_ray(&ray, &QueryFilter::new())
                     .unwrap()
                     .expect("every ray hits the floor");
                 (hit.body, hit.fraction.to_bits())

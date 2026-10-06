@@ -142,9 +142,9 @@ impl SoftBodies {
             .held
             .aim
             .unwrap_or_else(|| self.camera().ray([0.0, 0.0], 16.0 / 9.0));
-        let direction = glam(ray.direction).normalize();
+        let direction = glam(ray.direction()).normalize();
         let settings = BodySettings::new_dynamic()
-            .position(rvec((position(ray.origin) + direction).to_array()))
+            .position(rvec((position(ray.origin()) + direction).to_array()))
             .linear_velocity(Vec3::from((direction * 14.0).to_array()))
             .motion_quality(MotionQuality::LinearCast)
             .object_layer(self.layers.moving)

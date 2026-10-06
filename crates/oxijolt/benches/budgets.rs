@@ -522,7 +522,7 @@ struct HitCounts {
 }
 
 impl HitCounts {
-    fn count(&mut self, hit: Option<&RayHit>, terrain: ObjectLayer) {
+    fn count(&mut self, hit: Option<&RayCastHit>, terrain: ObjectLayer) {
         match hit {
             None => self.miss += 1,
             Some(hit) if hit.object_layer == terrain => self.terrain += 1,
@@ -575,7 +575,7 @@ fn run_rays() -> Result<[Row; 4], Box<dyn Error>> {
             (RayCast::new(rvec3(origin), vec3(direction)), &sight)
         };
         let start = Instant::now();
-        let hit = world.cast_ray(ray, filter)?;
+        let hit = world.cast_ray(&ray, filter)?;
         let us = micros(start);
         if n == 0 {
             cold = us;
@@ -656,7 +656,8 @@ fn structure_spots(
         for z in -45..=45 {
             let (x, z) = (f64::from(x), f64::from(z));
             let ground = ground_at(x, z);
-            if x * x + z * z <= 45.0 * 45.0 && world.cast_ray(mid_ray(ground), &filter)?.is_some() {
+            if x * x + z * z <= 45.0 * 45.0 && world.cast_ray(&mid_ray(ground), &filter)?.is_some()
+            {
                 spots.push(ground);
             }
         }
@@ -708,7 +709,7 @@ fn run_ticks(mid: MidBand) -> Result<[Row; 2], Box<dyn Error>> {
             grounded[n] = near_tick(&mut world, walker, carry, desired[n]).grounded;
         }
         for (top, &ray) in tops.iter_mut().zip(&rays) {
-            *top = world.cast_ray(ray, &structures)?.is_some();
+            *top = world.cast_ray(&ray, &structures)?.is_some();
         }
         let us = micros(start);
         if tick == 0 {

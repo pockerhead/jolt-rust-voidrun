@@ -473,7 +473,7 @@ fn rays_answer_the_same_across_a_rebase() {
         let before: Vec<_> = rays
             .iter()
             .map(|(name, ray)| {
-                let hit = scene.world.cast_ray(*ray, &ALL).unwrap();
+                let hit = scene.world.cast_ray(ray, &ALL).unwrap();
                 hit.unwrap_or_else(|| panic!("{tag}, {name}: no hit before the rebase"))
             })
             .collect();
@@ -494,12 +494,14 @@ fn rays_answer_the_same_across_a_rebase() {
                 scene.world.optimize_broad_phase();
             }
             for ((name, ray), old) in rays.iter().zip(&before) {
-                let mapped =
-                    RayCast::new(frame.map_point(ray.origin), frame.map_vector(ray.direction));
+                let mapped = RayCast::new(
+                    frame.map_point(ray.origin()),
+                    frame.map_vector(ray.direction()),
+                );
                 let context = format!("{tag}, {name}, optimized {optimized}");
                 let hit = scene
                     .world
-                    .cast_ray(mapped, &ALL)
+                    .cast_ray(&mapped, &ALL)
                     .unwrap()
                     .unwrap_or_else(|| panic!("{context}: no hit after the rebase"));
                 assert_eq!(hit.body, old.body, "{context}");

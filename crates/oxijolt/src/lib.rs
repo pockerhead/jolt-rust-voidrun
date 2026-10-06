@@ -218,7 +218,7 @@ pub use listener::{
 pub use material::PhysicsMaterial;
 pub use math::{Quat, RVec3, Real, Vec3};
 pub use query::{
-    CollideShape, CollideShapeHit, PointHit, RayCast, RayHit, ShapeCast, ShapeCastHit,
+    CollidePointHit, CollideShape, CollideShapeHit, RayCast, RayCastHit, ShapeCast, ShapeCastHit,
 };
 pub use ragdoll::{
     JointReading, JointTransform, MappedSkeleton, RagdollId, RagdollJoint, RagdollMut, RagdollPart,

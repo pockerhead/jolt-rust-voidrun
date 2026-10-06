@@ -101,7 +101,7 @@ impl Scene {
             bytes.extend(body.mass().unwrap_or(0.0).to_bits().to_le_bytes());
             let p = body.position();
             let ray = RayCast::new(RVec3::new(p.x, p.y + 5.0, p.z), Vec3::new(0.0, -10.0, 0.0));
-            let hit = self.world.cast_ray(ray, &QueryFilter::new()).unwrap();
+            let hit = self.world.cast_ray(&ray, &QueryFilter::new()).unwrap();
             bytes.extend(hit.map_or(-1.0, |hit| hit.distance).to_bits().to_le_bytes());
         }
         bytes

@@ -190,7 +190,11 @@ fn heightfields_contain_nothing() {
 }
 
 /// The ids and compound children `world` reports for `point`.
-fn world_hits(world: &PhysicsWorld, point: RVec3, filter: &QueryFilter<'_>) -> Vec<PointHit> {
+fn world_hits(
+    world: &PhysicsWorld,
+    point: RVec3,
+    filter: &QueryFilter<'_>,
+) -> Vec<CollidePointHit> {
     world.collide_point(point, filter).unwrap()
 }
 
