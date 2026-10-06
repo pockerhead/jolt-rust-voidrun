@@ -24,6 +24,14 @@ pub struct CharacterRef<'w> {
     pub(super) character: NonNull<JPH_CharacterVirtual>,
 }
 
+impl std::fmt::Debug for CharacterRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CharacterRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl CharacterRef<'_> {
     fn ptr(&self) -> *mut JPH_CharacterVirtual {
         self.character.as_ptr()
@@ -215,6 +223,12 @@ impl CharacterRef<'_> {
 pub struct CharacterMut<'w> {
     pub(super) character: NonNull<JPH_CharacterVirtual>,
     pub(super) _world: PhantomData<&'w mut PhysicsWorld>,
+}
+
+impl std::fmt::Debug for CharacterMut<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CharacterMut").finish_non_exhaustive()
+    }
 }
 
 impl CharacterMut<'_> {

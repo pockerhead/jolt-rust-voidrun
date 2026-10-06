@@ -116,6 +116,12 @@ pub struct VehicleMut<'w, K: VehicleKind = WheeledVehicle> {
     pub(super) kind: PhantomData<fn() -> K>,
 }
 
+impl<K: VehicleKind> std::fmt::Debug for VehicleMut<'_, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VehicleMut").finish_non_exhaustive()
+    }
+}
+
 impl<K: VehicleKind> VehicleMut<'_, K> {
     pub(super) fn ptr(&self) -> *mut JPH_VehicleConstraint {
         self.entry.constraint.as_ptr()

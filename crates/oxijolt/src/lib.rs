@@ -141,6 +141,7 @@
 //! [coverage]: https://github.com/pockerhead/oxijolt/blob/main/docs/coverage.md#not-covered
 #![warn(
     missing_docs,
+    missing_debug_implementations,
     unsafe_op_in_unsafe_fn,
     clippy::undocumented_unsafe_blocks,
     clippy::missing_safety_doc

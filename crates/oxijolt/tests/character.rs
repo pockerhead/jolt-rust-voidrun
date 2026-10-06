@@ -881,7 +881,7 @@ fn record(world: &PhysicsWorld, id: CharacterId) -> Record {
         position: v3(character.position()).map(f64::to_bits).to_vec(),
         velocity: velocity.map(f32::to_bits).to_vec(),
         ground: character.ground_state(),
-        state: character.save_state().as_bytes(),
+        state: character.save_state().to_bytes(),
         contacts: character
             .active_contacts()
             .iter()

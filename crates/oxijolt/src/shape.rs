@@ -38,6 +38,12 @@ pub(crate) use static_only::static_only_leaves_are_meshes_of;
 /// time, edit a [`MutableCompound`] and install the shapes it publishes.
 pub struct Shape(Owned<JPH_Shape>);
 
+impl fmt::Debug for Shape {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Shape").finish_non_exhaustive()
+    }
+}
+
 // SAFETY: Jolt shapes are immutable after construction and `RefTarget` counts references
 // atomically, so a shape may be used and released from any thread
 // (https://jrouwe.github.io/JoltPhysicsDocs/5.6.0/index.html#memory-management).

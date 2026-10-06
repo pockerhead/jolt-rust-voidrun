@@ -138,6 +138,14 @@ pub(crate) mod sealed {
         pub(crate) constraint: NonNull<JPH_Constraint>,
         pub(crate) bodies: [BodyId; 2],
     }
+
+    impl std::fmt::Debug for ReferencedConstraint {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("ReferencedConstraint")
+                .field("bodies", &self.bodies)
+                .finish_non_exhaustive()
+        }
+    }
 }
 
 /// A kind of world constraint, named by the zero-sized markers such as [`HingeConstraint`]. It
@@ -258,6 +266,14 @@ pub struct ConstraintRef<'w, K> {
     entry: &'w ConstraintEntry,
 }
 
+impl<K: ConstraintKind> std::fmt::Debug for ConstraintRef<'_, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConstraintRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<K: ConstraintKind> ConstraintRef<'_, K> {
     /// The constraint as the joltc handle `T` of its kind, which is the same object
     /// (joltc casts the most derived object).
@@ -298,6 +314,14 @@ impl<K: ConstraintKind> ConstraintRef<'_, K> {
 pub struct ConstraintMut<'w, K> {
     world: &'w mut PhysicsWorld,
     id: ConstraintId<K>,
+}
+
+impl<K: ConstraintKind> std::fmt::Debug for ConstraintMut<'_, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConstraintMut")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<K: ConstraintKind> ConstraintMut<'_, K> {

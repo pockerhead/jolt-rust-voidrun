@@ -61,7 +61,7 @@ impl ContactListener for Policy {
         settings: &mut SoftBodyContactSettings,
     ) -> SoftBodyValidateResult {
         if other.index().is_multiple_of(2) {
-            settings.set_inv_mass_scale2(0.5).unwrap();
+            settings.set_inverse_mass_scale2(0.5).unwrap();
         }
         SoftBodyValidateResult::AcceptContact
     }

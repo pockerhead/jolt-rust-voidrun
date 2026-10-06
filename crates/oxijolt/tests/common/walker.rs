@@ -835,7 +835,7 @@ pub fn record_walker(
 ) {
     let character = world.character(walker.id).unwrap();
     assert!(!character.max_hits_exceeded());
-    digest.extend_from_slice(&character.save_state().as_bytes());
+    digest.extend_from_slice(&character.save_state().to_bytes());
     for value in out.pos.iter().chain(&out.velocity) {
         digest.extend_from_slice(&value.to_bits().to_le_bytes());
     }

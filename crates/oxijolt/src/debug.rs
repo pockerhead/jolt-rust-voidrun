@@ -67,6 +67,7 @@ impl DebugLineSettings {
 
 /// One line segment of a collider's wireframe, in world space.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct DebugLine {
     /// Start point.
     pub from: RVec3,

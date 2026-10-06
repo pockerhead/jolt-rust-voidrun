@@ -423,6 +423,15 @@ pub struct PhysicsWorld {
     pub(crate) character_listener: Option<Arc<dyn CharacterContactListener>>,
 }
 
+impl fmt::Debug for PhysicsWorld {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PhysicsWorld")
+            .field("body_count", &self.body_count())
+            .field("constraint_count", &self.constraint_count())
+            .finish_non_exhaustive()
+    }
+}
+
 impl Drop for PhysicsWorld {
     fn drop(&mut self) {
         // First: removing constraints, ragdolls and characters' inner bodies deactivates bodies,

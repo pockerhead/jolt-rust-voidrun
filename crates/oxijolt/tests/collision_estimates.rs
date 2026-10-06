@@ -348,8 +348,8 @@ struct HalfMass;
 
 impl ContactListener for HalfMass {
     fn contact_added(&self, _: &ContactManifold, settings: &mut ContactSettings) {
-        settings.set_inv_mass_scale1(0.5).unwrap();
-        settings.set_inv_mass_scale2(0.5).unwrap();
+        settings.set_inverse_mass_scale1(0.5).unwrap();
+        settings.set_inverse_mass_scale2(0.5).unwrap();
     }
 }
 

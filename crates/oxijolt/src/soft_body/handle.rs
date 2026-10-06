@@ -168,6 +168,7 @@ impl PhysicsWorld {
 
 /// One vertex of a soft body in the world, as [`SoftBodyRef::vertices`] reads it.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct SoftBodyVertexState {
     /// Position in world space, in metres.
     pub position: RVec3,
@@ -190,6 +191,14 @@ pub struct SoftBodyRef<'w> {
     body_lock_interface: NonNull<JPH_BodyLockInterface>,
     id: BodyId,
     _world: PhantomData<&'w PhysicsWorld>,
+}
+
+impl std::fmt::Debug for SoftBodyRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SoftBodyRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
 }
 
 /// World positions, world velocities and inverse masses of a soft body's vertices.
@@ -290,6 +299,14 @@ impl SoftBodyRef<'_> {
 pub struct SoftBodyMut<'w> {
     inner: SoftBodyRef<'w>,
     _world: PhantomData<&'w mut PhysicsWorld>,
+}
+
+impl std::fmt::Debug for SoftBodyMut<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SoftBodyMut")
+            .field("id", &self.inner.id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'w> Deref for SoftBodyMut<'w> {

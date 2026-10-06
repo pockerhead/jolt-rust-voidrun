@@ -150,10 +150,10 @@ fn settings_bits(s: &ContactSettings) -> [u32; 13] {
     [
         s.combined_friction().to_bits(),
         s.combined_restitution().to_bits(),
-        s.inv_mass_scale1().to_bits(),
-        s.inv_inertia_scale1().to_bits(),
-        s.inv_mass_scale2().to_bits(),
-        s.inv_inertia_scale2().to_bits(),
+        s.inverse_mass_scale1().to_bits(),
+        s.inverse_inertia_scale1().to_bits(),
+        s.inverse_mass_scale2().to_bits(),
+        s.inverse_inertia_scale2().to_bits(),
         u32::from(s.is_sensor()),
         lx,
         ly,
@@ -180,7 +180,7 @@ fn compare_manifolds(a: &ContactManifold, b: &ContactManifold) -> Ordering {
 fn point_bits(m: &ContactManifold) -> impl Iterator<Item = impl Ord> + '_ {
     m.points
         .iter()
-        .map(|p| (rvec3_bits(p.on1), rvec3_bits(p.on2)))
+        .map(|p| (rvec3_bits(p.point_on1), rvec3_bits(p.point_on2)))
 }
 
 fn result_rank(result: SoftBodyValidateResult) -> u8 {
@@ -192,9 +192,9 @@ fn result_rank(result: SoftBodyValidateResult) -> u8 {
 
 fn soft_settings_bits(s: &SoftBodyContactSettings) -> [u32; 4] {
     [
-        s.inv_mass_scale1().to_bits(),
-        s.inv_mass_scale2().to_bits(),
-        s.inv_inertia_scale2().to_bits(),
+        s.inverse_mass_scale1().to_bits(),
+        s.inverse_mass_scale2().to_bits(),
+        s.inverse_inertia_scale2().to_bits(),
         u32::from(s.is_sensor()),
     ]
 }
@@ -273,8 +273,8 @@ mod tests {
             normal: Vec3::new(0.0, 1.0, 0.0),
             penetration_depth: depth,
             points: vec![ContactPoint {
-                on1: RVec3::new(0.0, 0.0, 0.0),
-                on2: RVec3::new(0.0, -0.01, 0.0),
+                point_on1: RVec3::new(0.0, 0.0, 0.0),
+                point_on2: RVec3::new(0.0, -0.01, 0.0),
             }],
             materials: [None, Some(3)],
         }
@@ -371,7 +371,7 @@ mod tests {
         m.materials = [Some(1), Some(3)];
         variants.push(event(m, settings()));
         let mut m = base.clone();
-        m.points[0].on2.z = -0.0;
+        m.points[0].point_on2.z = -0.0;
         variants.push(event(m, settings()));
         let mut m = base.clone();
         m.points.push(m.points[0]);
@@ -386,7 +386,7 @@ mod tests {
             settings_with(|s| s.relativeAngularSurfaceVelocity.y = -0.0),
         ));
         let mut m = base.clone();
-        m.points[0].on1.x = -0.0;
+        m.points[0].point_on1.x = -0.0;
         variants.push(event(m, settings()));
         let changes: [fn(&mut JPH_ContactSettings); 6] = [
             |s| s.combinedRestitution = 0.5,
@@ -463,7 +463,7 @@ mod tests {
         let other = f32::from_bits(0x7fc0_0001);
         let with = |depth: f32, z: crate::Real| {
             let mut m = manifold(pair(world, 1, 2), depth);
-            m.points[0].on1.z = z;
+            m.points[0].point_on1.z = z;
             ContactEvent::Added {
                 manifold: m,
                 settings: settings(),

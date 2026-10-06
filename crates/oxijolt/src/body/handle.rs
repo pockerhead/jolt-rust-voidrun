@@ -34,6 +34,14 @@ pub struct BodyRef<'w> {
     pub(super) _world: PhantomData<&'w PhysicsWorld>,
 }
 
+impl std::fmt::Debug for BodyRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BodyRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl BodyRef<'_> {
     /// The body's id.
     pub fn id(&self) -> BodyId {
@@ -210,6 +218,14 @@ impl BodyRef<'_> {
 pub struct BodyMut<'w> {
     pub(super) inner: BodyRef<'w>,
     pub(super) world: &'w mut PhysicsWorld,
+}
+
+impl std::fmt::Debug for BodyMut<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BodyMut")
+            .field("id", &self.inner.id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'w> Deref for BodyMut<'w> {
