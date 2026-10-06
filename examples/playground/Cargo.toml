@@ -19,4 +19,5 @@ asserts = ["oxijolt/asserts"]
 oxijolt = { path = "../../crates/oxijolt", features = ["glam"] }
 glam = "0.32"
 gif = "0.14"
+mesh-import = { path = "../../crates/mesh-import" }
 macroquad = { version = "0.4.16", default-features = false, optional = true }

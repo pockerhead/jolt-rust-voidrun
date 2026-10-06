@@ -507,6 +507,7 @@ dependencies = [
  "gif",
  "glam 0.32.1",
  "macroquad",
+ "mesh-import",
  "oxijolt",
 ]
 

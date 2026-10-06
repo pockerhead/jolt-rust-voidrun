@@ -451,6 +451,7 @@ mod tests {
         Destruction::new(
             &SceneConfig {
                 worker_threads: Some(1),
+                ..SceneConfig::default()
             },
             1,
         )
@@ -505,6 +506,7 @@ mod tests {
         use crate::session::Session;
         let config = SceneConfig {
             worker_threads: Some(1),
+            ..SceneConfig::default()
         };
         let fresh_bodies = scene().world.body_count();
         let mut session = Session::new(SceneKind::Destruction, config).unwrap();

@@ -4,7 +4,6 @@ use std::process::ExitCode;
 
 use playground::cli::{self, Mode};
 use playground::headless;
-use playground::scene::SceneConfig;
 
 #[cfg(feature = "window")]
 mod window;
@@ -25,13 +24,10 @@ fn main() -> ExitCode {
         Mode::Headless {
             scenes,
             frames,
-            threads,
+            config,
         } => {
-            let config = SceneConfig {
-                worker_threads: threads,
-            };
             for kind in scenes {
-                match headless::run(kind, frames, config) {
+                match headless::run(kind, frames, config.clone()) {
                     Ok(summary) => println!("{summary}"),
                     Err(error) => {
                         eprintln!("{error}");
