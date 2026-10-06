@@ -63,8 +63,6 @@ pub struct Model {
     pub name: String,
     pub vertices: Vec<Vec3>,
     pub triangles: Vec<[u32; 3]>,
-    /// [`MeshSettings::max_convex_extent`] for the mesh; `None` keeps the default.
-    pub max_convex_extent: Option<f32>,
 }
 
 impl Model {
@@ -99,7 +97,6 @@ impl Model {
                 .map(|&[x, y, z]| Vec3::new(x, y, z))
                 .collect(),
             triangles: mesh.triangles,
-            max_convex_extent: None,
         }
     }
 
@@ -108,12 +105,6 @@ impl Model {
         for vertex in &mut self.vertices {
             *vertex = Vec3::new(vertex.x * factor, vertex.y * factor, vertex.z * factor);
         }
-        self
-    }
-
-    /// The model built for convex shapes up to `metres` ([`MeshSettings::max_convex_extent`]).
-    pub fn max_convex_extent(mut self, metres: f32) -> Self {
-        self.max_convex_extent = Some(metres);
         self
     }
 
@@ -133,7 +124,8 @@ impl Model {
         )
     }
 
-    fn surface_area(&self) -> f64 {
+    /// The area of every triangle, m².
+    pub fn surface_area(&self) -> f64 {
         self.triangles
             .iter()
             .map(|&[a, b, c]| {
@@ -158,23 +150,18 @@ pub struct Built {
     pub dropped_share: f64,
 }
 
-/// Builds the mesh and the convex hull of `model`, checks the dropped share and cooking, and
-/// prints the numbers.
+/// Builds the mesh (default settings) and the convex hull of `model`, checks the dropped share
+/// and cooking, and prints the numbers.
 pub fn build(model: &Model) -> Built {
-    let settings = match model.max_convex_extent {
-        Some(metres) => MeshSettings::default().max_convex_extent(metres),
-        None => MeshSettings::default(),
-    };
     let started = Instant::now();
-    let (mesh, dropped) =
-        Shape::new_mesh_with_settings(&model.vertices, &model.triangles, &settings)
-            .unwrap_or_else(|error| panic!("{}: {error}", model.name));
+    let (mesh, dropped) = Shape::new_mesh(&model.vertices, &model.triangles)
+        .unwrap_or_else(|error| panic!("{}: {error}", model.name));
     let build_time = started.elapsed();
     let total = model.surface_area();
     let dropped_share = f64::from(dropped.area()) / total;
 
     let started = Instant::now();
-    let hull = Shape::new_convex_hull(&model.vertices, 0.05);
+    let hull = Shape::new_convex_hull(&model.vertices);
     let hull_time = started.elapsed();
     if let Err(error) = hull {
         panic!("{}: convex hull of every vertex: {error}", model.name);
@@ -278,7 +265,7 @@ fn surface_at(
         RVec3::new(real(x), real(top), real(z)),
         Vec3::new(0.0, -depth, 0.0),
     );
-    let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap()?;
+    let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap()?;
     (hit.body == mesh_body).then_some((top - hit.distance, hit.normal.y))
 }
 
@@ -396,7 +383,7 @@ fn step_watching_crossings(
             if path.x != 0.0 || path.y != 0.0 || path.z != 0.0 {
                 let filter = QueryFilter::new().exclude_body(body.id);
                 let crossed = world
-                    .cast_ray(RayCast::new(*before, path), &filter)
+                    .cast_ray(&RayCast::new(*before, path), &filter)
                     .unwrap();
                 assert!(
                     crossed.is_none_or(|hit| hit.body != mesh_body),
@@ -416,7 +403,7 @@ fn resting_on(world: &PhysicsWorld, body: &Dropped, name: &str) -> BodyId {
     let filter = QueryFilter::new().exclude_body(body.id);
     let down = RayCast::new(position, Vec3::new(0.0, -1.0, 0.0));
     let under = world
-        .cast_ray(down, &filter)
+        .cast_ray(&down, &filter)
         .unwrap()
         .unwrap_or_else(|| panic!("{name}: nothing under {:?} at {position:?}", body.id));
     // Resting contacts sink up to the slop; 1 mm more covers the solver's last iteration.

@@ -199,7 +199,7 @@ impl RollbackScene {
             record_body(&self.world, id, &mut tick.state);
         }
         let character = self.world.character(self.character).unwrap().save_state();
-        tick.state.extend(character.as_bytes());
+        tick.state.extend(character.to_bytes());
         record_vehicle(&self.world, self.car, &mut tick.state);
     }
 

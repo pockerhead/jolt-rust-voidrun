@@ -94,6 +94,7 @@ fn sources_are_reported() {
     assert_eq!(source_of(VehicleError::Body(body)), Some(body));
     assert_eq!(source_of(RagdollError::Body(body)), Some(body));
     assert_eq!(source_of(ConstraintError::Body(body)), Some(body));
+    assert_eq!(source_of(StateError::Body(body)), Some(body));
     let query = QueryError::AllocationFailed;
     assert_eq!(source_of(CharacterError::Query(query)), Some(query));
     let hull = ConvexHullError::Coplanar;
@@ -105,6 +106,8 @@ fn sources_are_reported() {
         max_convex_extent: 2.0,
     };
     assert_eq!(source_of(ShapeError::ThinTriangles(thin)), Some(thin));
+    let binary = BinaryStateError::Corrupt;
+    assert_eq!(source_of(ShapeError::BinaryState(binary)), Some(binary));
     assert_eq!(
         source_of::<_, BodyError>(ShapeError::AllocationFailed),
         None

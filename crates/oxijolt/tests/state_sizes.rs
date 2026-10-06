@@ -151,7 +151,7 @@ fn a_hinge_adds_its_index_and_solver_state() {
 
 /// The length of a character's stream: `CharacterState::as_bytes` without up's 12 bytes.
 fn character_stream_len(world: &PhysicsWorld, id: CharacterId) -> usize {
-    world.character(id).unwrap().save_state().as_bytes().len() - 12
+    world.character(id).unwrap().save_state().to_bytes().len() - 12
 }
 
 #[test]

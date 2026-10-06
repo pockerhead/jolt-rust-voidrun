@@ -33,12 +33,19 @@ fn scattering_skull() {
 
 /// At its own size the skull's 188 871 triangles average 1.5 mm² (twice the area, the length
 /// of Jolt's cross product, 3e-6 m²), against the 1e-5 m² floor the mesh rule keeps above
-/// Jolt's sliver assertion at 1e-6 m² (`EPAPenetrationDepth.h`): every triangle is dropped and
-/// the constructor refuses the mesh instead of building an empty one.
+/// Jolt's sliver assertion at 1e-6 m² (`EPAPenetrationDepth.h`), whatever the convex extent:
+/// all but a few dozen triangles are dropped (12 kept at the default extent).
 #[test]
 #[ignore = "needs scripts/fetch_models.py"]
 fn the_skull_at_its_own_size_is_too_fine_for_jolt() {
     let model = Model::load("ScatteringSkull");
-    let refused = Shape::new_mesh(&model.vertices, &model.triangles).err();
-    assert_eq!(refused, Some(ShapeError::Mesh(MeshError::NoTriangles)));
+    let (_, dropped) = Shape::new_mesh(&model.vertices, &model.triangles).unwrap();
+    let share = f64::from(dropped.area()) / model.surface_area();
+    println!(
+        "{} of {} triangles dropped, {:.4} % of the area",
+        dropped.count(),
+        model.triangles.len(),
+        100.0 * share
+    );
+    assert!(share > 0.999, "{share}");
 }

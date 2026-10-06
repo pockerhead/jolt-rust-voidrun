@@ -188,9 +188,9 @@ area is at least `1e-5 + 2 · Δ`, where `Δ` bounds how much the cross product 
 
 Moves within the triangle's plane across an edge shrink it; moves along an edge or out of the plane
 do not, so a thin strip keeps its width wherever the quantization along its narrow direction is
-fine. With the default convex extent a right triangle with legs of 3.8 mm near the origin is kept
-and one with legs of 3.7 mm dropped. A strip 1 m long near the origin, made of two triangles split
-along either diagonal, is kept from 0.54 mm wide along the axes and from 0.93 mm in the worst of
+fine. With the default convex extent a right triangle with legs of 3.3 mm near the origin is kept
+and one with legs of 3.2 mm dropped. A strip 1 m long near the origin, made of two triangles split
+along either diagonal, is kept from 0.11 mm wide along the axes and from 0.18 mm in the worst of
 2000 seeded orientations; a single triangle with its apex at mid-length needs the same. In a level mesh with one triangle 1500 m out along x, the x step is 0.7 mm and
 the z step 5 µm: a 1 m by 2 mm strip is kept when its 2 mm lie along z and dropped when they lie
 along x. Triangles that fail the rule without any quantization are left out of the bounds first;
@@ -224,20 +224,24 @@ predictive contact distance; compound children count one by one. The sphere is c
 mesh's space instead (`CollideSphereVsTriangles`), which the rule covers too. Shape casts keep the
 triangle in the mesh's space (`CastConvexVsTriangles`).
 
-The default `E = 1100 m` is the largest round extent at which the rule keeps a strip 1 m long and
-1 mm wide, made of two triangles, near the mesh origin in every one of 2000 seeded orientations:
-along the axes it is kept up to about 2050 m, turned the worst way up to about 1175 m. That is
-below `MAX_SHAPE_EXTENT`, so a convex shape whose bounds reach beyond 1100 m from its centre (a
-box of half extent above 1100 m, or above 1099.98 m for a body, whose 0.02 m speculative distance
-counts) can meet a triangle the rule kept for 1100 m and trip `EPAPenetrationDepth.h:113` in an
-asserts build, or get a distorted contact in a release one. A mesh that must collide with such
-shapes needs a larger `max_convex_extent`, up to `2 · MAX_SHAPE_EXTENT`, and keeps only thicker
-triangles. Near the origin the thinnest 1 m strip kept is:
+The default `E = 200 m` is the largest round extent at which every prop of the real models tested
+in CI loses under 0.1 % of its area ([real meshes](real-meshes.md)). The radio, whose bevels are
+strips 1 mm wide, loses 0.084 % at 200 m, 0.20 % at 300 m and 0.75 % at 1100 m. The default
+trades reach for thin triangles: a convex shape whose bounds reach beyond 200 m from its centre (a
+box of half extent above 200 m, or above 199.98 m for a body, whose 0.02 m speculative distance
+counts) can meet a triangle the rule kept for 200 m and trip `EPAPenetrationDepth.h:113` in an
+asserts build, or get a distorted contact in a release one. The sweeps below found no assertion
+up to seven times a mesh's extent and found some at ten times. A mesh that must collide with
+larger shapes is built with a larger `max_convex_extent`, up to `2 · MAX_SHAPE_EXTENT`, and keeps
+only thicker triangles: a strip 1 m long and 1 mm wide near the mesh origin is kept up to about
+2050 m along the axes and up to about 1175 m turned the worst of 2000 seeded ways. Near the origin
+the thinnest 1 m strip kept is:
 
 | `E` | along the axes | worst orientation |
 |---|---|---|
+| 200 m (default) | 0.11 mm | 0.18 mm |
 | 750 m | 0.37 mm | 0.64 mm |
-| 1100 m (default) | 0.54 mm | 0.93 mm |
+| 1100 m | 0.54 mm | 0.93 mm |
 | 2000 m | 0.97 mm | 1.7 mm |
 | 4000 m | 1.9 mm | 3.3 mm |
 
@@ -245,15 +249,16 @@ A mesh keeps the extent it was built with, and `Shape::new_scaled` checks its tr
 extent.
 
 In an asserts build the thinnest sliver the rule keeps (to 1 %) rests under boxes of half extent
-300 and 1100 m with the default and 1500 and 2000 m with an extent of 2000 m, queried in three
-orientations and as a heavy body (`the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent`).
+100 and 200 m with the default, 300 and 1100 m with an extent of 1100 m and 1500 and 2000 m with
+an extent of 2000 m, queried in three orientations and as a heavy body
+(`the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent`).
 With the convex term scaled by 0.25 or 0.1 Jolt finds no contact with the sliver in that test, and
 at 0 it asserts. In seeded sweeps of the thinnest kept slivers lying along a convex shape's axes,
-about 35 000 cases with convex shapes as large as the 1100 m default and 1.8 and 3 times larger
+about 35 000 cases with convex shapes as large as an extent of 1100 m and 1.8 and 3 times larger
 asserted nothing. With a mesh built for 110 m, convex shapes 2, 3, 5 and 7 times larger asserted
 nothing in 10 000 cases each, and 10 times larger asserted in 9 of 10 seeds of 2000 cases: the
-margin is about 7. At the default no factor above about 3.6 can be built: a convex shape's extent
-stops at 2000 m plus a separation distance of at most 2000 m.
+margin is about 7. A convex shape's extent stops at 2000 m plus a separation distance of at most
+2000 m, so against a mesh of the default extent a shape up to 20 times larger can be built.
 
 ## Scaled shapes
 

@@ -63,7 +63,7 @@ fn ray_grid(shape: &Shape, half: f32) -> Vec<RayReading> {
                     Vec3::new(reach, 0.0, 0.0),
                 ),
             ] {
-                let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap();
+                let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap();
                 readings.push(hit.map(|hit| {
                     (
                         [hit.fraction, hit.normal.x, hit.normal.y, hit.normal.z].map(f32::to_bits),
@@ -117,7 +117,7 @@ fn height_field() -> Shape {
 fn every_kind() -> Vec<(&'static str, Shape, f32, bool)> {
     let block = Shape::new_box(Vec3::new(0.5, 1.0, 1.5)).unwrap();
     let ball = Shape::new_sphere(0.7).unwrap();
-    let hull = Shape::new_convex_hull(&irregular_points(), 0.05).unwrap();
+    let hull = Shape::new_convex_hull(&irregular_points()).unwrap();
     let mesh = bumpy_mesh();
     let compound = Shape::new_compound(&[
         child(&block, Vec3::new(-1.0, 0.0, 0.0), 11),
@@ -157,13 +157,13 @@ fn every_kind() -> Vec<(&'static str, Shape, f32, bool)> {
         ),
         (
             "tapered cylinder",
-            Shape::new_tapered_cylinder(0.5, 0.1, 0.4, 0.05).unwrap(),
+            Shape::new_tapered_cylinder(0.5, 0.1, 0.4).unwrap(),
             1.0,
             true,
         ),
         (
             "convex hull",
-            Shape::new_convex_hull(&irregular_points(), 0.05).unwrap(),
+            Shape::new_convex_hull(&irregular_points()).unwrap(),
             1.5,
             true,
         ),
@@ -181,7 +181,7 @@ fn every_kind() -> Vec<(&'static str, Shape, f32, bool)> {
         ),
         (
             "scaled",
-            Shape::scaled(&hull, Vec3::new(1.0, 2.0, 0.5)).unwrap(),
+            Shape::new_scaled(&hull, Vec3::new(1.0, 2.0, 0.5)).unwrap(),
             1.0,
             true,
         ),
@@ -196,7 +196,7 @@ fn every_kind() -> Vec<(&'static str, Shape, f32, bool)> {
         ("mesh", bumpy_mesh(), 4.0, false),
         (
             "scaled mesh",
-            Shape::scaled(&mesh, Vec3::new(1.5, 2.0, 1.5)).unwrap(),
+            Shape::new_scaled(&mesh, Vec3::new(1.5, 2.0, 1.5)).unwrap(),
             6.0,
             false,
         ),
@@ -266,12 +266,12 @@ fn materials_round_trip_with_their_user_data() {
     let field_indices: Vec<u8> = (0..(n - 1) * (n - 1))
         .map(|i| u8::from(i % 8 >= 4))
         .collect();
-    let field = Shape::new_height_field_with_materials(
+    let field = Shape::new_height_field(
         n,
         &vec![0.0; (n * n) as usize],
-        &HeightFieldSettings::default().offset(Vec3::new(-4.0, 0.0, -4.0)),
-        &list,
-        &field_indices,
+        &HeightFieldSettings::default()
+            .offset(Vec3::new(-4.0, 0.0, -4.0))
+            .materials(&list, &field_indices),
     )
     .unwrap();
     let ball = Shape::new_sphere_with_material(6.0, &east).unwrap();
@@ -315,13 +315,13 @@ fn a_restored_mesh_keeps_its_convex_extent() {
     assert!(dropped.is_empty());
     let restored = round_trip(&mesh);
     let shrunk = Vec3::new(0.2, 0.2, 0.2);
-    let refused = Shape::scaled(&mesh, shrunk).err();
+    let refused = Shape::new_scaled(&mesh, shrunk).err();
     assert!(matches!(
         refused,
         Some(ShapeError::ThinTriangles(error)) if error.max_convex_extent == 1.0
     ));
-    assert_eq!(Shape::scaled(&restored, shrunk).err(), refused);
-    assert!(Shape::scaled(&restored, Vec3::new(2.0, 2.0, 2.0)).is_ok());
+    assert_eq!(Shape::new_scaled(&restored, shrunk).err(), refused);
+    assert!(Shape::new_scaled(&restored, Vec3::new(2.0, 2.0, 2.0)).is_ok());
 }
 
 /// The bits of a world coordinate in either precision.

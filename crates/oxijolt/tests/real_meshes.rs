@@ -9,13 +9,9 @@ mod common;
 use checks::*;
 use oxijolt::*;
 
-/// Props meet hand-sized items and characters: their meshes are built for convex shapes up to
-/// 2 m. With the default extent (1100 m) the radio's 1 mm bevel strips are dropped: 0.75 % of
-/// its area (`docs/real-meshes.md`).
-const PROP_CONVEX_EXTENT: f32 = 2.0;
-
+/// A prop built with the default convex extent, and bodies dropped on it.
 fn prop(name: &str, sizes: DropSizes) {
-    let model = Model::load(name).max_convex_extent(PROP_CONVEX_EXTENT);
+    let model = Model::load(name);
     let built = build(&model);
     drop_bodies(&model, &built.mesh, sizes);
 }
@@ -81,7 +77,7 @@ fn oloid_mesh_and_hull() {
 /// of it. Jolt keeps at most 256 of the 258 points and lets a point it leaves out lie up to its
 /// hull tolerance (1 mm, more for large hulls) outside.
 fn hull_holds_every_vertex(model: &Model) {
-    let hull = Shape::new_convex_hull(&model.vertices, 0.0).unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(&model.vertices, 0.0).unwrap();
     let mut world = common::world(Vec3::ZERO, 1);
     world
         .create_body(&hull, &BodySettings::new_static())
@@ -100,7 +96,7 @@ fn hull_holds_every_vertex(model: &Model) {
             real(centre.z + 2.0 * out.z),
         );
         let ray = RayCast::new(start, Vec3::new(-2.0 * out.x, -2.0 * out.y, -2.0 * out.z));
-        let hit = world.cast_ray(ray, &QueryFilter::new()).unwrap().unwrap();
+        let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap().unwrap();
         let length = (out.x * out.x + out.y * out.y + out.z * out.z).sqrt();
         let gap = (hit.fraction - 0.5).abs() * 2.0 * length;
         worst = worst.max(gap);

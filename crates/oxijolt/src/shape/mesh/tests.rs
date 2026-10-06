@@ -334,7 +334,7 @@ fn slivers_that_collapse_under_quantization_are_dropped() {
 #[test]
 fn small_and_thin_triangles_are_dropped() {
     // Twice the area of a right triangle with legs `leg` is `leg^2`; the threshold is 1e-5 m²
-    // plus the rounding margin, here mostly the rounding of coordinates 1100 m out in the space
+    // plus the rounding margin, here mostly the rounding of coordinates 200 m out in the space
     // of the largest convex shape of the default settings.
     let triangle = |leg: f32| {
         [
@@ -343,10 +343,10 @@ fn small_and_thin_triangles_are_dropped() {
             Vec3::new(leg, 0.0, 0.0),
         ]
     };
-    assert_eq!(kept(&triangle(0.0038), &[[0, 1, 2]]), [0]);
-    assert!(kept(&triangle(0.0037), &[[0, 1, 2]]).is_empty());
+    assert_eq!(kept(&triangle(0.0033), &[[0, 1, 2]]), [0]);
+    assert!(kept(&triangle(0.0032), &[[0, 1, 2]]).is_empty());
     assert!(no_triangles(Shape::new_mesh(
-        &triangle(0.0037),
+        &triangle(0.0032),
         &[[0, 1, 2]]
     )));
     // A 10 m sliver 1e-5 m wide has a cross product of 1e-4, above the floor, but each corner
@@ -508,11 +508,11 @@ fn the_default_convex_extent_keeps_millimetre_bevels() {
 
 #[test]
 fn the_rule_does_not_depend_on_the_corner_order() {
-    // Strips 1 m long and 0.5 to 1 mm wide, split along either diagonal, at the default
+    // Strips 1 m long and 0.1 to 0.2 mm wide, split along either diagonal, at the default
     // extent near the thinnest they keep: each triangle gets the same verdict from each corner.
     let mut verdicts = 0;
     for turn in turns(200) {
-        for width in [5.0e-4, 5.4e-4, 6.0e-4, 9.3e-4, 1.0e-3] {
+        for width in [1.0e-4, 1.08e-4, 1.2e-4, 1.8e-4, 2.0e-4] {
             let strip = turned_strip(width, turn);
             for [i, j, k] in [[0, 1, 2], [0, 2, 3], [0, 1, 3], [1, 2, 3]] {
                 let corners = [i, j, k].map(|index| v3(strip[index]));
@@ -571,6 +571,6 @@ fn slivers_too_thin_for_large_convex_shapes_are_dropped() {
         thinnest(MeshSettings::DEFAULT_MAX_CONVEX_EXTENT),
         thinnest(2.0 * limits::MAX_SHAPE_EXTENT),
     );
-    assert!((5.3e-4..5.5e-4).contains(&default), "{default}");
+    assert!((1.07e-4..1.09e-4).contains(&default), "{default}");
     assert!((1.9e-3..2.0e-3).contains(&largest), "{largest}");
 }

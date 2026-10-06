@@ -55,33 +55,34 @@ applied.
 
 ## Dropped triangles and timings
 
-Measured on one Windows machine with the release build. Props are built with
-`MeshSettings::max_convex_extent(2.0)`, the size of the convex shapes that meet them (hand-sized
-items, characters); the other models keep the default extent (1100 m). "Default extent" gives
-the props' numbers with the default.
+Measured on one Windows machine with the release build. Every model is built with the default
+`MeshSettings`, so for convex shapes up to 200 m. "At 1100 m" gives the props' numbers with
+`MeshSettings::max_convex_extent(1100.0)`.
 
-| Model | Dropped | Dropped area | Default extent | Mesh build | Saved bytes | Save | Restore |
+| Model | Dropped | Dropped area | At 1100 m | Mesh build | Saved bytes | Save | Restore |
 |---|---|---|---|---|---|---|---|
-| radio | 30 | 0.038 % | 88, 0.75 % | 0.22 ms | 9 322 | 14 µs | 2.3 µs |
-| kitchenFridgeLarge | 8 | 0.0004 % | 25, 0.012 % | 0.22 ms | 9 730 | 11 µs | 2.3 µs |
-| bathtub | 3 (degenerate) | 0 | 17, 0.018 % | 0.35 ms | 14 278 | 24 µs | 2.1 µs |
-| bookcaseOpen | 28 (zero area) | 0 | the same | 0.15 ms | 6 618 | 5 µs | 1.4 µs |
-| oloid | 28 | 0.041 % | | 0.26 ms | 7 726 | 9 µs | 2.1 µs |
-| track-straight | 12 (degenerate) | 0 | | 0.06 ms | 2 562 | 4 µs | 2.2 µs |
-| corridor-wide-corner | 0 | 0 | | 0.91 ms | 43 990 | 73 µs | 15 µs |
-| spot | 0 | 0 | | 3.1 ms | 88 750 | 138 µs | 28 µs |
-| ScatteringSkull at 10x | 14 | 0.0004 % | | 113 ms | 3 026 318 | 3.0 ms | 0.54 ms |
+| radio | 46 | 0.084 % | 88, 0.75 % | 0.23 ms | 8 914 | 11 µs | 3 µs |
+| kitchenFridgeLarge | 8 | 0.0004 % | 25, 0.012 % | 0.22 ms | 9 730 | 11 µs | 4 µs |
+| bathtub | 5 | 0.0005 % | 17, 0.018 % | 0.70 ms | 14 262 | 51 µs | 12 µs |
+| bookcaseOpen | 28 (zero area) | 0 | the same | 0.17 ms | 6 618 | 9 µs | 4 µs |
+| oloid | 12 | 0.0039 % | | 0.28 ms | 7 686 | 9 µs | 4 µs |
+| track-straight | 12 (degenerate) | 0 | | 0.06 ms | 2 562 | 4 µs | 2 µs |
+| corridor-wide-corner | 0 | 0 | | 0.93 ms | 43 990 | 88 µs | 17 µs |
+| spot | 0 | 0 | | 3.3 ms | 88 750 | 175 µs | 30 µs |
+| ScatteringSkull at 10x | 5 | 0.0001 % | | 118 ms | 3 026 118 | 3.3 ms | 0.54 ms |
 
 Two findings:
 
-- The default convex extent is generous for small props: the radio's 1 mm bevel strips are kept
-  for convex shapes up to 2 m but dropped for 1100 m, which is 0.75 % of its area. Build props
-  for the convex shapes that will touch them ([limits](limits.md#convex-shapes-against-meshes)).
+- The convex extent decides how thin a kept triangle can be. The radio's 1 mm bevel strips are
+  kept at the default extent and dropped at 1100 m, where they are 0.75 % of its area. A mesh
+  that must meet convex shapes larger than 200 m is built with a larger extent and loses such
+  bevels ([limits](limits.md#convex-shapes-against-meshes)).
 - The skull is 0.25 m tall. At that size its 188 871 triangles average 1.5 mm², twice which is
   below the 1e-5 m² the mesh rule keeps above Jolt's sliver assertion (1e-6 m², see
-  [limits](limits.md#triangle-meshes)), so every triangle is dropped and `Shape::new_mesh` returns
-  `MeshError::NoTriangles` (`the_skull_at_its_own_size_is_too_fine_for_jolt` pins it). The tests
-  use it as a 2.5 m statue. Use a convex hull or a decimated mesh for small detailed objects.
+  [limits](limits.md#triangle-meshes)) at any convex extent: `Shape::new_mesh` keeps 12 of them
+  and drops 99.97 % of the area (`the_skull_at_its_own_size_is_too_fine_for_jolt` pins it). The
+  tests use it as a 2.5 m statue. Use a convex hull or a decimated mesh for small detailed
+  objects.
 
 Restoring a cooked mesh was about 200 times faster than building it for the skull and 30 to 110
 times for the other models ([shape cooking](shape-cooking.md)).

@@ -346,10 +346,11 @@ fn the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent() {
         quat_about(Vec3::new(0.0, 1.0, 0.0), 0.6),
         quat_about(Vec3::new(0.6, 0.8, 0.0), 2.0),
     ];
-    // The two largest boxes are those that tripped Jolt's assertions on slivers the rule
+    // The boxes of 300 and 1100 m are those that tripped Jolt's assertions on slivers the rule
     // kept before it counted the convex shape's space.
     for (extent, halves) in [
-        (MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, [300.0, 1100.0]),
+        (MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, [100.0, 200.0]),
+        (1100.0, [300.0, 1100.0]),
         (limits::MAX_SHAPE_EXTENT, [1500.0, 2000.0]),
     ] {
         let mesh = thinnest_kept_sliver(extent);

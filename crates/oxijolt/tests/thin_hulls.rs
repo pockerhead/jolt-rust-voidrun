@@ -92,7 +92,7 @@ fn drop_tilted(
     seconds: usize,
 ) -> (f32, f32) {
     let turned: Vec<Vec3> = points.iter().map(|&p| rotate(tilt, p)).collect();
-    let hull = Shape::new_convex_hull(&turned, 0.0).unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(&turned, 0.0).unwrap();
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
     world
         .create_body(
@@ -124,7 +124,7 @@ fn thin_hulls_set_down_rest_and_sleep() {
                     .into_iter()
                     .map(|p| rotate(turn, p))
                     .collect();
-                let hull = Shape::new_convex_hull(&points, 0.05).unwrap();
+                let hull = Shape::new_convex_hull(&points).unwrap();
                 let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
                 add_floor(&mut world);
                 let position = RVec3::new(0.0, lift as Real, 0.0);

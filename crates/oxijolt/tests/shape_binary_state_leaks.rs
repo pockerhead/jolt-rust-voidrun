@@ -40,7 +40,7 @@ fn compound() -> Shape {
         &MeshSettings::default().materials(&list, &indices),
     )
     .unwrap();
-    let hull = Shape::new_convex_hull(&irregular_points(), 0.05).unwrap();
+    let hull = Shape::new_convex_hull(&irregular_points()).unwrap();
     let block = Shape::new_box(Vec3::new(0.2, 0.2, 0.2)).unwrap();
     let child = |shape, x, user_data| CompoundChild {
         shape,

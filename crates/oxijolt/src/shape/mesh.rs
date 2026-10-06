@@ -68,13 +68,16 @@ impl Default for MeshSettings<'_> {
 }
 
 impl<'a> MeshSettings<'a> {
-    /// The default of [`max_convex_extent`](Self::max_convex_extent), metres: the largest
-    /// extent at which the triangle rule still keeps a strip 1 m long and 1 mm wide, made of two
-    /// triangles, near the mesh origin in any orientation, rounded down. It is below
-    /// [`limits::MAX_SHAPE_EXTENT`]; see [docs/limits.md#convex-shapes-against-meshes].
+    /// The default of [`max_convex_extent`](Self::max_convex_extent), metres: the largest round
+    /// extent at which every prop of the real models tested in CI loses under 0.1 % of its area
+    /// to the triangle rule ([docs/real-meshes.md]). Convex shapes larger than the extent a mesh
+    /// was built for can trip Jolt's assertions on its thinnest triangles in an asserts build;
+    /// a mesh that must meet them is built with a larger extent. See
+    /// [docs/limits.md#convex-shapes-against-meshes].
     ///
+    /// [docs/real-meshes.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/real-meshes.md
     /// [docs/limits.md#convex-shapes-against-meshes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-shapes-against-meshes
-    pub const DEFAULT_MAX_CONVEX_EXTENT: f32 = 1100.0;
+    pub const DEFAULT_MAX_CONVEX_EXTENT: f32 = 200.0;
 
     /// Gives triangle `i` the material `list[indices[i]]`. `list` holds 1 to 32 materials,
     /// `indices` one entry per triangle, each naming a material of the list. Without materials
@@ -254,8 +257,8 @@ impl Shape {
     /// twice the largest change Jolt's 21-bit vertex quantization and `f32` rounding can make
     /// to it. That margin follows the triangle's own shape and distance from the shape origin,
     /// the quantization step of the mesh's bounds on each axis and the size of the convex shapes
-    /// it collides with ([`MeshSettings::max_convex_extent`]); with the defaults a strip near
-    /// the origin is kept from about 0.54 mm wide along the axes and from 0.93 mm in any
+    /// it collides with ([`MeshSettings::max_convex_extent`]); with the defaults a strip 1 m long
+    /// near the origin is kept from about 0.11 mm wide along the axes and from 0.18 mm in any
     /// orientation ([docs/limits.md#triangle-meshes]). Jolt itself
     /// keeps one copy of duplicate triangles and reorders the rest, so sub-shape ids do not
     /// follow the input order. Closest-hit rays hit back faces too.

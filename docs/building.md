@@ -34,7 +34,7 @@ In a clone of the repository, fetch the submodules once:
 ```bash
 git submodule update --init
 cargo build                         # builds joltc + Jolt through CMake (always Release)
-cargo test --workspace              # everything, headless
+cargo test --workspace              # everything, also the playground window and a debug-renderer native build
 cargo run -p oxijolt --example hello_world
 cargo run -p playground --release   # the playground window
 ```

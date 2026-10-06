@@ -4,6 +4,10 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- The public API follows one set of rules, written down in
+  [docs/api-guidelines.md](docs/api-guidelines.md).
+- Both crates declare `rust-version = "1.88"`, the first Rust with `<[T]>::as_chunks`, and CI
+  checks the workspace with that toolchain. Raising it will be a minor release.
 - `PhysicsWorld::save_state_into(bodies, &mut state)`: saves into an existing `WorldState` and
   reuses its memory, so a rollback ring allocates nothing on the Rust heap per save;
   `WorldState::new` (and `Default`) is an empty state of no world, and `WorldState::data_size`
@@ -11,9 +15,6 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - `BodySelection` (`All`, `Movable`, `Only`) for `save_state_of`, `save_state_into` and the new
   `PhysicsWorld::restore_state_of`, which restores only the selected bodies and leaves every
   other body in its current state.
-- Changed: `save_state_of` takes a `BodySelection` instead of `&[BodyId]` and returns
-  `StateError`; a foreign or removed id is `StateError::Body` (was `BodyError`). Migration:
-  `save_state_of(&ids)` becomes `save_state_of(BodySelection::Only(&ids))`.
 - Shape cooking ([guide](docs/shape-cooking.md)): `Shape::save_binary_state` and `unsafe
   Shape::restore_binary_state` save a built shape with its children and materials to bytes and
   restore it, so level meshes are built once at asset-build time. The bytes carry a versioned,
@@ -31,84 +32,51 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   public-domain models (Kenney props and level pieces, Crane's oloid and spot, the Khronos
   ScatteringSkull) with their sources, licences and SHA-256 in `assets/models/models.tsv`,
   `scripts/fetch_models.py` for the large ones, and a `real-meshes` CI job with and without
-  assertions. Findings: the default `max_convex_extent` (1100 m) drops 0.75 % of a 30 cm radio's
-  area (its bevels), and the 0.25 m skull's triangles are too small for Jolt at their own size.
+  assertions. At its own size (0.25 m) the skull's triangles are too small for Jolt; the tests
+  use it at ten times that.
 - Playground: the scenes `meshes` (the real models with bodies raining onto them) and `model`
   (any OBJ or glTF file given with `--model PATH`); `--models DIR` adds the downloaded models.
 - Thin dynamic hulls on a floor ([limits](docs/limits.md#thin-dynamic-hulls-on-a-floor)): the
   sinking reported earlier is the impact of a wide thin hull that tips over and slaps down faster
   than Jolt's discrete step resolves, not its hull or convex radius. It sinks deep into box floors
   and can pass through mesh floors; `LinearCast` and shorter steps reduce it.
-- The public API follows one set of rules, written down in
-  [docs/api-guidelines.md](docs/api-guidelines.md). The changes below apply them to the 0.7 API.
-- Both crates declare `rust-version = "1.88"`, the first Rust with `<[T]>::as_chunks`, and CI
-  checks the workspace with that toolchain. Raising it will be a minor release.
 - Every public type implements `Debug`. `WorldSettings::MAX_BODIES` (2^23),
   `CollisionLayers::MAX_OBJECT_LAYERS` (65535), `WheelSettings::DEFAULT_SUSPENSION_SPRING`,
   `RayCast::origin`/`direction`, `PhysicsWorld::debug_lines` (allocating),
   `SliderConstraint`'s `remove_limits`, `SixDofAxis::default()` (`Free`),
   `QueryError::{WrongWorld, UnknownObjectLayer, AllocationFailed}`,
   `CharacterError::{Query, RestoreFailed}` and `CollisionGroupError` in the prelude are new.
-
-### Migration to 1.0
-
-Every rename and reshape of this release, old to new. Calls not listed keep their name and
-shape.
-
-| 0.7 | 1.0 |
-|---|---|
-| `RayHit` | `RayCastHit` |
-| `PointHit` | `CollidePointHit` |
-| `RayCast { origin, direction }`, `ray.origin`, `ray.direction` | `RayCast::new(origin, direction)`, `ray.origin()`, `ray.direction()` |
-| `world.cast_ray(ray, &filter)` | `world.cast_ray(&ray, &filter)` |
-| `HullError` | `ConvexHullError` |
-| `BodyError::SoftBody(id)` | `BodyError::NotRigidBody(id)` |
-| `WorldError::InvalidSettings(_)`, `ShapeError::InvalidSettings(_)`, `ShapeError::InvalidDimensions(_)` | `WorldError::InvalidValue(_)`, `ShapeError::InvalidValue(_)` |
-| `QueryError::InvalidValue(_)` for a filter's body of another world, its unknown object layer, or a native object joltc could not create | `QueryError::WrongWorld(id)`, `QueryError::UnknownObjectLayer(layer)`, `QueryError::AllocationFailed` |
-| `CharacterError::InvalidValue(_)` for an update's or refresh's filter | `CharacterError::Query(QueryError)` |
-| `CharacterError::InvalidValue(_)` from `CharacterMut::restore_state` | `CharacterError::RestoreFailed` |
-| `world.contains(id)` | `world.contains_body(id)` |
-| `world.body_ids()` returns `Vec<BodyId>` | an iterator that does not borrow the world (`.collect::<Vec<_>>()` for a vector) |
-| `world.constraints_of_body(body)` returns `Vec<AnyConstraintId>` | an iterator |
-| `world.constraint_count()` returns `usize` | `u32`, like `body_count` |
-| `world.debug_lines(&settings, &filter, &mut lines)` | `world.debug_lines_into(&settings, &filter, &mut lines)`, or `let lines = world.debug_lines(&settings, &filter)?` |
-| `CharacterState::as_bytes()` | `CharacterState::to_bytes()` |
-| `Shape::scaled(&shape, scale)` | `Shape::new_scaled(&shape, scale)` |
-| `Shape::new_convex_hull(&points, radius)` | `Shape::new_convex_hull_with_convex_radius(&points, radius)`; `new_convex_hull(&points)` takes Jolt's 0.05 m |
-| `Shape::new_tapered_cylinder(half_height, top, bottom, radius)` | `Shape::new_tapered_cylinder_with_convex_radius(..)`; `new_tapered_cylinder(half_height, top, bottom)` takes Jolt's 0.05 m |
-| `Shape::new_height_field_with_materials(n, &samples, &settings, &list, &indices)` | `Shape::new_height_field(n, &samples, &settings.materials(&list, &indices))`; `HeightFieldSettings` has a lifetime, `HeightFieldSettings<'static>` without materials |
-| `FixedConstraintSettings::auto_detect_point()`, `SliderConstraintSettings::auto_detect_point()` | `auto_detect_point(true)` |
-| `GearConstraintSettings::hinges(hinge1, hinge2)` | `constraints(hinge1, hinge2)` |
-| slider `set_limits(Some((min, max)))`, `set_limits(None)` | `set_limits(min, max)`, `remove_limits()` |
-| `VehicleSettings`, `VehicleSettings::car` | `WheeledVehicleSettings`, `WheeledVehicleSettings::car` |
-| `world.create_vehicle(body, &settings)` | `world.create_wheeled_vehicle(body, &settings)` |
-| `SuspensionSpring::{FrequencyAndDamping, StiffnessAndDamping}` | `SpringSettings::{FrequencyAndDamping, StiffnessAndDamping}` |
-| `SuspensionSpring::default()` (1.5 Hz, 0.5) | `WheelSettings::DEFAULT_SUSPENSION_SPRING`; `SpringSettings::default()` is 0 Hz, which a wheel refuses |
-| `oxijolt::DEFAULT_LATERAL_FRICTION`, `oxijolt::DEFAULT_LONGITUDINAL_FRICTION` | `WheelSettings::DEFAULT_LATERAL_FRICTION`, `WheelSettings::DEFAULT_LONGITUDINAL_FRICTION` |
-| `oxijolt::DEFAULT_NORMALIZED_TORQUE` | `VehicleEngineSettings::DEFAULT_NORMALIZED_TORQUE` |
-| `*vehicle.collision_tester()` (a reference) | `vehicle.collision_tester()` (a copy) |
-| `ContactPoint { on1, on2 }` | `ContactPoint { point_on1, point_on2 }` |
-| `ContactSettings::inv_mass_scale1`, `set_inv_mass_scale1` and the other `inv_*` scales, also on `SoftBodyContactSettings` | `inverse_mass_scale1`, `set_inverse_mass_scale1`, ... |
-| struct literals or exhaustive patterns of `DebugLine`, `ContactManifold`, `ContactSettingsRejection`, `SoftBodyVertexState`, `SoftBodyContacts`, `SoftBodyVertexContact`, `SoftBodyValidation` | patterns with `..`; these readouts are `#[non_exhaustive]` |
-| feature `glam` | feature `glam032` (`oxijolt = { version = "1", features = ["glam032"] }`) |
-
-Changed behaviour without a rename:
-
-- A query whose filter names a body of another world or an object layer the world does not have
-  returns the typed `QueryError::WrongWorld` or `UnknownObjectLayer`, and a native object joltc
-  could not create returns `QueryError::AllocationFailed`; all three were `InvalidValue` before.
-- `ShapeError::ConvexHull`, `Mesh` and `ThinTriangles` and `CharacterError::Query` return the
-  error they wrap from `source()`, so `oxijolt::error::Error::source` reports it too.
-- `Shape::new_convex_hull(&points)` and `Shape::new_tapered_cylinder(h, top, bottom)` are new
-  calls with Jolt's default convex radius: code that passed `0.05` by position compiles only after
-  the rename above, and gets the same shape.
-
-The game port in `voidrun_physics` uses six of these: `cast_ray(&RayCast::new(..), ..)`,
-`debug_lines_into` (or the allocating `debug_lines`), `WheeledVehicleSettings` and
-`create_wheeled_vehicle` (also as the argument of `MotorcycleSettings::new`),
-`SpringSettings::StiffnessAndDamping` for the suspension, and the `WheelSettings::` and
-`VehicleEngineSettings::` default curves in its vehicle tests. It builds `RagdollJoint` values,
-which stay constructible, and does not use the `glam` feature.
+- Changed (breaking): `save_state_of` takes a `BodySelection` instead of `&[BodyId]` and returns
+  `StateError`; a foreign or removed id is `StateError::Body` (was `BodyError`).
+- Changed (breaking): `MeshSettings::DEFAULT_MAX_CONVEX_EXTENT` is 200 m (was 1100 m), so meshes
+  keep thinner triangles, such as the 1 mm bevels of small props. A mesh that meets convex shapes
+  larger than 200 m is built with a larger `max_convex_extent`
+  ([limits](docs/limits.md#convex-shapes-against-meshes)).
+- Changed (breaking), renames: `RayHit` to `RayCastHit`, `PointHit` to `CollidePointHit`,
+  `HullError` to `ConvexHullError`, `BodyError::SoftBody` to `NotRigidBody`, `VehicleSettings`
+  and `create_vehicle` to `WheeledVehicleSettings` and `create_wheeled_vehicle`,
+  `SuspensionSpring` to `SpringSettings`, `Shape::scaled` to `Shape::new_scaled`,
+  `PhysicsWorld::contains` to `contains_body`, `CharacterState::as_bytes` to `to_bytes`,
+  `ContactPoint::{on1, on2}` to `point_on1`, `point_on2`, the `inv_*` contact scales to
+  `inverse_*`, and the feature `glam` to `glam032`. The root `DEFAULT_*` vehicle curves are
+  associated consts of `WheelSettings` and `VehicleEngineSettings`.
+- Changed (breaking), call shapes: `RayCast` has private fields and `cast_ray` borrows it;
+  `body_ids` and `constraints_of_body` return iterators and `constraint_count` a `u32`;
+  `debug_lines` returns the lines and `debug_lines_into` fills a buffer;
+  `new_convex_hull(points)` and `new_tapered_cylinder(half_height, top, bottom)` take Jolt's
+  0.05 m convex radius and their `_with_convex_radius` forms take one; height-field materials
+  are set with `HeightFieldSettings::materials`; `auto_detect_point(bool)`; the gear's
+  `constraints(..)`; the slider's `set_limits(min, max)` and `remove_limits()`;
+  `collision_tester()` returns a copy.
+- Changed (breaking), errors: out-of-range values are `InvalidValue` in every area (was
+  `InvalidSettings` or `InvalidDimensions`); a query filter's body of another world, unknown
+  object layer or failed native object is `QueryError::WrongWorld`, `UnknownObjectLayer` or
+  `AllocationFailed` (was `InvalidValue`); a character update wraps a filter error in
+  `CharacterError::Query`, and a failed character restore is `CharacterError::RestoreFailed`;
+  errors that wrap another one return it from `source()`.
+- Changed (breaking): the readouts `DebugLine`, `ContactManifold`, `ContactSettingsRejection`,
+  `SoftBodyVertexState`, `SoftBodyContacts`, `SoftBodyVertexContact` and `SoftBodyValidation` are
+  `#[non_exhaustive]`.
 
 ## 0.7.0 — 2026-10-06
 
