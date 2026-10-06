@@ -928,3 +928,42 @@ fn outputs_may_alias_inputs() {
     assert!(ok);
     assert_eq!(in_place.bits(), expected);
 }
+
+#[test]
+fn map_reverse2_writes_identity_for_unmapped_joints_and_may_alias() {
+    // `extra` has no animation joint of its name: Jolt's MapReverse leaves it alone, and the
+    // extension writes the identity there.
+    let ragdoll = Skeleton::new(&[("root", -1), ("mid", 0), ("extra", 1)]);
+    let animation = Skeleton::animation();
+    let mapper = Mapper::new();
+    assert!(mapper.initialize(
+        &ragdoll,
+        &jph(&neutral1()),
+        3,
+        &animation,
+        &jph(&neutral2()),
+        6
+    ));
+    assert_eq!(mapper.mapped(2), -1);
+    let pose2 = jph(&neutral2());
+    let mut out = Matrices::filled(3, 7.0);
+    assert!(mapper.map_reverse(&pose2, 6, &mut out, 3));
+    let out: Vec<M> = out.to_vec().iter().map(from_jph).collect();
+    assert_close(&out[R_ROOT], &neutral1()[R_ROOT], 1e-6);
+    assert_close(&out[R_MID], &neutral1()[R_MID], 1e-6);
+    assert_close(&out[2], &translation([0.0; 3]), 0.0);
+
+    // The output written over the input it was mapped from.
+    let mut expected = Matrices::zeroed(3);
+    let fixture = Fixture::new();
+    let input = jph(&local2());
+    assert!(fixture.mapper.map_reverse(&input, 6, &mut expected, 3));
+    let mut in_place = jph(&local2());
+    let pointer = in_place.as_mut_ptr();
+    // SAFETY: live mapper; `in_place` holds 6 matrices, which MapReverse2 reads in full before it
+    // writes 3 through the same pointer.
+    let ok = unsafe { JPH_SkeletonMapper_MapReverse2(fixture.mapper.0, pointer, 6, pointer, 3) };
+    assert!(ok);
+    assert_eq!(in_place.bits()[..48], expected.bits()[..]);
+    assert_eq!(in_place.bits()[48..], input.bits()[48..]);
+}
