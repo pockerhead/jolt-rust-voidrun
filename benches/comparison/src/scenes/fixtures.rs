@@ -19,19 +19,27 @@ fn cube(half_extent: f32) -> Shape {
     }
 }
 
-/// Five 0.8 m cubes in a row along +x, 1 m apart, hanging from a fixed cube at 10 m, each joined
-/// to the one before by a `kind` joint anchored at the earlier body's centre.
+/// Five 0.8 m cubes 1 m apart hanging from a fixed cube at 10 m, each joined to the one before by
+/// a `kind` joint anchored at the earlier body's centre. The chain starts horizontal along +x, so
+/// gravity swings it; a fixed chain hangs straight down instead, so its joints carry the weight
+/// without a lever.
 pub fn chain(name: &'static str, kind: JointKind) -> SceneSpec {
-    let mut bodies = vec![BodySpec::fixed(cube(0.4), [0.0, 10.0, 0.0])];
+    let step: [f32; 3] = match kind {
+        JointKind::Fixed => [0.0, -1.0, 0.0],
+        _ => [1.0, 0.0, 0.0],
+    };
+    let anchor = [0.0, 10.0, 0.0];
+    let mut bodies = vec![BodySpec::fixed(cube(0.4), anchor)];
     let mut joints = Vec::new();
     for i in 1..=CHAIN_LINKS {
-        bodies.push(BodySpec::dynamic(cube(0.4), [i as f32, 10.0, 0.0]));
+        let position = [0, 1, 2].map(|axis| anchor[axis] + i as f32 * step[axis]);
+        bodies.push(BodySpec::dynamic(cube(0.4), position));
         joints.push(JointSpec {
             kind,
             body1: i - 1,
             body2: i,
             local_anchor1: [0.0; 3],
-            local_anchor2: [-1.0, 0.0, 0.0],
+            local_anchor2: step.map(|c| -c),
         });
     }
     SceneSpec {
