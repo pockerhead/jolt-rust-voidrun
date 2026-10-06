@@ -18,6 +18,7 @@ commands:
   time      one timed run: --variant --scene --profile --threads [--steps 600]
             [--iterations N] [--run-id ID] [--out DIR]; prints its runs.tsv row
   validate  one validation run with the same options; prints its quality.tsv row
+  split     one Avian timed run that also records its physics schedule's time per tick
   size-jolt Jolt's buffer probe: --scene [--steps 600]; prints its jolt_sizes.tsv row
   machine   prints the machine line
   help      prints this text
@@ -55,9 +56,21 @@ fn run_command(args: &[String]) -> Result<String, String> {
             run::time(&options.run_args()?)
         }
         "validate" => run::validate(&options.run_args()?),
+        "split" => split(&options),
         "size-jolt" => size_jolt(&options),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
+}
+
+#[cfg(feature = "avian")]
+fn split(options: &Options) -> Result<String, String> {
+    require_build_isa()?;
+    run::split(&options.run_args()?)
+}
+
+#[cfg(not(feature = "avian"))]
+fn split(_: &Options) -> Result<String, String> {
+    Err("this binary was built without avian".to_owned())
 }
 
 #[cfg(feature = "jolt")]

@@ -5,6 +5,8 @@ use std::fmt;
 
 use crate::engine::Engine;
 
+#[cfg(feature = "avian")]
+pub mod avian;
 #[cfg(feature = "jolt")]
 pub mod jolt;
 #[cfg(feature = "rapier")]
@@ -121,6 +123,9 @@ pub fn compiled_engines() -> Vec<EngineKind> {
     if cfg!(feature = "rapier") {
         engines.push(EngineKind::Rapier);
     }
+    if cfg!(feature = "avian") {
+        engines.push(EngineKind::Avian);
+    }
     engines
 }
 
@@ -137,6 +142,10 @@ pub fn dispatch<W: WithEngine>(engine: EngineKind, work: W) -> Result<W::Output,
         EngineKind::Jolt => Ok(work.run::<jolt::Jolt>()),
         #[cfg(feature = "rapier")]
         EngineKind::Rapier => Ok(work.run::<rapier::Rapier>()),
+        #[cfg(feature = "avian")]
+        EngineKind::Avian => Ok(work.run::<avian::Avian>()),
+        // Reached in builds without every engine.
+        #[allow(unreachable_patterns)]
         other => {
             drop(work);
             Err(format!("this binary was built without {other}"))

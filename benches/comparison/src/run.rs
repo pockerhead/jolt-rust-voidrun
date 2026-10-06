@@ -107,42 +107,78 @@ fn write_file(path: &Path, text: &str) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Times one run: `build` once, then `steps` calls of `tick`, which returns the tick's samples
+/// in ns (its own wall time first). CPU time and memory are read right after the last tick,
+/// before the world is dropped.
+fn time_run<W>(
+    args: &RunArgs,
+    build: impl FnOnce(&SceneSpec) -> Result<W, String>,
+    mut tick: impl FnMut(&mut W) -> Result<Vec<u64>, String>,
+) -> Result<(TimeResult, Vec<Vec<u64>>), String> {
+    let spec = args.scene.build();
+    let baseline = os::memory();
+    let started = Instant::now();
+    let mut world = build(&spec)?;
+    let build_ns = started.elapsed().as_nanos() as u64;
+
+    let mut samples = Vec::with_capacity(args.steps);
+    let cpu_start = os::cpu_time_ns();
+    let loop_start = Instant::now();
+    for index in 1..=args.steps {
+        samples.push(tick(&mut world).map_err(|e| format!("tick {index}: {e}"))?);
+    }
+    let wall_ns = loop_start.elapsed().as_nanos() as u64;
+    let cpu_ns = os::cpu_time_ns() - cpu_start;
+    let memory = os::memory();
+    drop(world);
+    let result = TimeResult {
+        build_ns,
+        cpu_ns,
+        wall_ns,
+        peak_resident: memory.peak_resident,
+        peak_commit: memory.peak_commit,
+        baseline_resident: baseline.resident,
+        baseline_commit: baseline.peak_commit,
+    };
+    Ok((result, samples))
+}
+
+/// Writes the per-tick samples under `header` and returns the run's result row.
+fn finish_timing(
+    args: &RunArgs,
+    header: &str,
+    (result, samples): (TimeResult, Vec<Vec<u64>>),
+) -> Result<String, String> {
+    let mut text = format!(
+        "tick	{header}
+"
+    );
+    for (i, tick) in samples.iter().enumerate() {
+        let columns: Vec<String> = tick.iter().map(u64::to_string).collect();
+        writeln!(text, "{}	{}", i + 1, columns.join("	")).unwrap();
+    }
+    write_file(&samples_path(&args.out, &args.run_id), &text)?;
+    Ok(format!("{}	{}", args.key_columns(), result.columns()))
+}
+
 struct Timed<'a> {
     args: &'a RunArgs,
 }
 
 impl WithEngine for Timed<'_> {
-    type Output = Result<(TimeResult, Vec<u64>), String>;
+    type Output = Result<(TimeResult, Vec<Vec<u64>>), String>;
 
     fn run<E: Engine>(self) -> Self::Output {
-        let spec = self.args.scene.build();
-        let baseline = os::memory();
-        let started = Instant::now();
-        let mut engine = E::build(&spec, &self.args.config())?;
-        let build_ns = started.elapsed().as_nanos() as u64;
-
-        let mut samples = Vec::with_capacity(self.args.steps);
-        let cpu_start = os::cpu_time_ns();
-        let loop_start = Instant::now();
-        for tick in 1..=self.args.steps {
-            let start = Instant::now();
-            engine.step().map_err(|e| format!("tick {tick}: {e}"))?;
-            samples.push(start.elapsed().as_nanos() as u64);
-        }
-        let wall_ns = loop_start.elapsed().as_nanos() as u64;
-        let cpu_ns = os::cpu_time_ns() - cpu_start;
-        let memory = os::memory();
-        drop(engine);
-        let result = TimeResult {
-            build_ns,
-            cpu_ns,
-            wall_ns,
-            peak_resident: memory.peak_resident,
-            peak_commit: memory.peak_commit,
-            baseline_resident: baseline.resident,
-            baseline_commit: baseline.peak_commit,
-        };
-        Ok((result, samples))
+        let config = self.args.config();
+        time_run(
+            self.args,
+            |spec| E::build(spec, &config),
+            |engine| {
+                let start = Instant::now();
+                engine.step()?;
+                Ok(vec![start.elapsed().as_nanos() as u64])
+            },
+        )
     }
 }
 
@@ -150,13 +186,36 @@ impl WithEngine for Timed<'_> {
 /// result row.
 pub fn time(args: &RunArgs) -> Result<String, String> {
     args.variant.check_build()?;
-    let (result, samples) = dispatch(args.variant.engine, Timed { args })??;
-    let mut text = String::from("tick\tns\n");
-    for (i, ns) in samples.iter().enumerate() {
-        writeln!(text, "{}\t{ns}", i + 1).unwrap();
+    let timing = dispatch(args.variant.engine, Timed { args })??;
+    finish_timing(args, "ns", timing)
+}
+
+/// A timing run of Avian with its total step timer: per tick the update's time and the time of
+/// Avian's physics schedule inside it.
+#[cfg(feature = "avian")]
+pub fn split(args: &RunArgs) -> Result<String, String> {
+    use crate::engines::avian::Avian;
+    use crate::engines::EngineKind;
+
+    args.variant.check_build()?;
+    if args.variant.engine != EngineKind::Avian {
+        return Err(format!("{}: split runs are Avian's", args.variant.name));
     }
-    write_file(&samples_path(&args.out, &args.run_id), &text)?;
-    Ok(format!("{}\t{}", args.key_columns(), result.columns()))
+    let config = args.config();
+    let timing = time_run(
+        args,
+        |spec| Avian::build_app(spec, &config, true),
+        |avian| {
+            let start = Instant::now();
+            avian.step()?;
+            let update = start.elapsed().as_nanos() as u64;
+            let physics = avian
+                .last_physics_step_time()
+                .ok_or("no physics step timer")?;
+            Ok(vec![update, physics.as_nanos() as u64])
+        },
+    )?;
+    finish_timing(args, "ns	physics_ns", timing)
 }
 
 /// What a validation run recorded.
