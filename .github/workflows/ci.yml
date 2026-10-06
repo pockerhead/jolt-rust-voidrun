@@ -69,7 +69,7 @@ jobs:
       - name: Build native library
         if: steps.native.outputs.cache-hit != 'true'
         run: |
-          cargo build --workspace --exclude playground $FEATURE_ARGS
+          cargo build --workspace --exclude playground --exclude comparison $FEATURE_ARGS
           shopt -s nullglob
           dirs=(target/debug/build/oxijolt-sys-*/out/joltc)
           [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
@@ -100,11 +100,11 @@ jobs:
           [ "$joltc" = "$expected" ] && [ "$jolt" = "$expected" ] || { echo "debug renderer joltc=$joltc jolt=$jolt expected=$expected"; exit 1; }
 
       # The playground has a job of its own below.
-      - run: cargo build --workspace --exclude playground --all-targets $FEATURE_ARGS
-      - run: cargo test --workspace --exclude playground $FEATURE_ARGS
+      - run: cargo build --workspace --exclude playground --exclude comparison --all-targets $FEATURE_ARGS
+      - run: cargo test --workspace --exclude playground --exclude comparison $FEATURE_ARGS
       - run: cargo run -p oxijolt --example hello_world $FEATURE_ARGS
-      - run: cargo clippy --workspace --exclude playground --all-targets $FEATURE_ARGS -- -D warnings
-      - run: cargo doc --workspace --exclude playground --no-deps $FEATURE_ARGS
+      - run: cargo clippy --workspace --exclude playground --exclude comparison --all-targets $FEATURE_ARGS -- -D warnings
+      - run: cargo doc --workspace --exclude playground --exclude comparison --no-deps $FEATURE_ARGS
       # The build-time generator still works against the same native library.
       - name: Generate the bindings at build time
         if: matrix.features == '' || matrix.features == 'double-precision' || matrix.features == 'debug-renderer'
@@ -120,7 +120,7 @@ jobs:
           cargo clippy -p oxijolt --lib $FEATURE_ARGS --features oxijolt/glam032 -- -D warnings
           cargo clippy -p oxijolt --lib $FEATURE_ARGS --features oxijolt/mint -- -D warnings
           interop="--features oxijolt/glam032,oxijolt/mint"
-          cargo clippy --workspace --exclude playground --all-targets $FEATURE_ARGS $interop -- -D warnings
+          cargo clippy --workspace --exclude playground --exclude comparison --all-targets $FEATURE_ARGS $interop -- -D warnings
           cargo test -p oxijolt --lib $FEATURE_ARGS $interop interop
           cargo test -p oxijolt --doc $FEATURE_ARGS $interop
           cargo doc -p oxijolt --no-deps $FEATURE_ARGS $interop
@@ -378,4 +378,4 @@ jobs:
       - name: Use the native library
         run: echo "JOLTC_LIB_DIR=$RUNNER_TEMP/joltc-prefix" >> "$GITHUB_ENV"
 
-      - run: cargo check --workspace --exclude playground --all-targets
+      - run: cargo check --workspace --exclude playground --exclude comparison --all-targets

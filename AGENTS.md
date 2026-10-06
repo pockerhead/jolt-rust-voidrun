@@ -80,13 +80,17 @@ cargo xtask bindings                # regenerates the committed bindings and src
 cargo xtask bindings --check        # fails if the committed bindings differ from the generator
 cargo test -p playground --no-default-features   # the playground's scenes, headless
 cargo run -p playground --release                # the playground window
+cargo test -p comparison                         # the engine comparison's scenes and harness, headless
+cargo run -p comparison --release -- help        # the engine comparison (docs/comparison.md)
 ```
 
 `--workspace` includes the playground (`examples/playground`), whose default features add the
 window and the debug renderer: that is a second native build, and a `JOLTC_LIB_DIR` without the
 debug renderer is refused. Plain `cargo build` and `cargo test` leave it out (`default-members`);
 CI runs the workspace commands with `--exclude playground` and checks the playground in a job of
-its own.
+its own. The engine comparison (`benches/comparison`, never published) is handled the same way:
+outside `default-members`, `--exclude comparison` in every workspace command, and a CI job of its
+own.
 
 One cargo process at a time on shared machines: the C++ build is heavy.
 

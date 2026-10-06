@@ -1,0 +1,23 @@
+[package]
+name = "comparison"
+description = "Benchmarks oxijolt against Rapier and Avian on scenes ported from Rapier's stress tests"
+version = "0.0.0"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+publish = false
+default-run = "comparison"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "comparison"
+path = "src/main.rs"
+
+[features]
+default = ["jolt"]
+# Each engine is its own feature, so a published run builds one engine per binary.
+jolt = ["dep:oxijolt"]
+
+[dependencies]
+oxijolt = { path = "../../crates/oxijolt", optional = true }
