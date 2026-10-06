@@ -169,10 +169,14 @@ are those of its referenced vertices, so the extent bound applies to the vertice
 Jolt stores the vertices quantized to 21 bits over the bounds of the triangles it keeps, with one
 step per axis (`TriangleCodecIndexed8BitPackSOA4Flags`), and, when it collides a triangle, scales it
 and transforms it into the convex shape's space in `f32` (`CollideConvexVsTriangles::Collide`). Its
-collision then asserts when the triangle's cross product `(v1 - v0) × (v2 - v0)` is shorter than
-1e-6 (`IsNearZero` in `Geometry/EPAPenetrationDepth.h:113`; Jolt's comment there blames slivers).
-The constructor therefore drops a triangle, and reports it in `DroppedTriangles`, unless twice its
-area is at least `1e-5 + 2 · Δ`, where `Δ` bounds how much the cross product can shrink:
+collision then asserts when the triangle's `f32` cross product `(v1 - v0) × (v2 - v0)` has a
+squared length of at most 1e-12, a length of 1e-6 (`IsNearZero` in
+`Geometry/EPAPenetrationDepth.h:113`; Jolt's comment there blames slivers). Jolt's own clean-up drops
+triangles below that limit in the mesh's space (`IndexedTriangle::IsDegenerate`), but the cross
+product it collides with is formed again in the convex shape's space. The constructor therefore
+drops a triangle, and reports it in `DroppedTriangles`, unless twice its area is at least
+`1.000001e-6 + 2 · Δ`: Jolt's limit raised by a relative 1e-6, about eight times the rounding of
+Jolt's `f32` squared length, where `Δ` bounds how much the cross product can shrink:
 
 - each corner can move by the quantization step on each axis (the bounds' side on that axis over
   `2^21 - 1`), plus `4 · FLT_EPSILON` times the triangle's largest distance from the shape origin
@@ -188,10 +192,11 @@ area is at least `1e-5 + 2 · Δ`, where `Δ` bounds how much the cross product 
 
 Moves within the triangle's plane across an edge shrink it; moves along an edge or out of the plane
 do not, so a thin strip keeps its width wherever the quantization along its narrow direction is
-fine. With the default convex extent a right triangle with legs of 3.3 mm near the origin is kept
-and one with legs of 3.2 mm dropped. A strip 1 m long near the origin, made of two triangles split
-along either diagonal, is kept from 0.11 mm wide along the axes and from 0.18 mm in the worst of
-2000 seeded orientations; a single triangle with its apex at mid-length needs the same. In a level mesh with one triangle 1500 m out along x, the x step is 0.7 mm and
+fine. With the default convex extent a right triangle with legs of 1.17 mm near the origin is kept
+and one with legs of 1.16 mm dropped; without a convex shape to round in (an extent of 0) legs of
+1.001 mm are kept and 1 mm, Jolt's own limit, dropped. A strip 1 m long near the origin, made of two
+triangles split along either diagonal, is kept from 0.15 mm wide along the axes and from 0.26 mm in
+the worst of 2000 seeded orientations; a single triangle with its apex at mid-length needs the same. In a level mesh with one triangle 1500 m out along x, the x step is 0.7 mm and
 the z step 5 µm: a 1 m by 2 mm strip is kept when its 2 mm lie along z and dropped when they lie
 along x. Triangles that fail the rule without any quantization are left out of the bounds first;
 they are dropped either way, and a far degenerate triangle then does not coarsen the grid for the
@@ -205,6 +210,15 @@ along x, along z or below (a quarter of them at the origin, where the thinnest s
 drops its probes onto every such mesh and overlaps it with a box as large as the default convex
 extent, the mesh near one of the box's bottom corners. Without the convex shape's term it hits the
 assertion at its normal size.
+
+The floor is Jolt's limit and not more. In an asserts build the smallest right triangle kept for a
+2 m extent (legs 1.001 mm at the mesh origin, 1.16 mm 70 m out) and for the default one collide with
+boxes up to their extent in three orientations, and with boxes up to ten times larger than a 110 m
+extent in 40 seeded orientations each
+(`the_smallest_kept_triangles_collide_with_convex_shapes_up_to_the_extent`). With the floor lowered
+to 0.8e-6 the smallest triangle kept for 200 m (legs 1.003 mm) trips `EPAPenetrationDepth.h:113`
+under a box of half extent 100 m; at 0.9e-6 and above nothing asserts there, because the margin
+`2 · Δ` still covers it.
 
 ## Convex shapes against meshes
 
@@ -224,32 +238,35 @@ predictive contact distance; compound children count one by one. The sphere is c
 mesh's space instead (`CollideSphereVsTriangles`), which the rule covers too. Shape casts keep the
 triangle in the mesh's space (`CastConvexVsTriangles`).
 
-The default `E = 200 m` is the largest round extent at which every prop of the real models tested
+The default `E = 300 m` is the largest round extent at which every prop of the real models tested
 in CI loses under 0.1 % of its area ([real meshes](real-meshes.md)). The radio, whose bevels are
-strips 1 mm wide, loses 0.084 % at 200 m, 0.20 % at 300 m and 0.75 % at 1100 m. The default
-trades reach for thin triangles: a convex shape whose bounds reach beyond 200 m from its centre (a
-box of half extent above 200 m, or above 199.98 m for a body, whose 0.02 m speculative distance
-counts) can meet a triangle the rule kept for 200 m and trip `EPAPenetrationDepth.h:113` in an
-asserts build, or get a distorted contact in a release one. The sweeps below found no assertion
-up to seven times a mesh's extent and found some at ten times. A mesh that must collide with
-larger shapes is built with a larger `max_convex_extent`, up to `2 · MAX_SHAPE_EXTENT`, and keeps
-only thicker triangles: a strip 1 m long and 1 mm wide near the mesh origin is kept up to about
-2050 m along the axes and up to about 1175 m turned the worst of 2000 seeded ways. Near the origin
-the thinnest 1 m strip kept is:
+strips 1 mm wide, loses 0.021 % at 200 m, 0.024 % at 300 m, 0.17 % at 400 m and 0.69 % at 1100 m.
+The default trades reach for thin triangles: a convex shape whose bounds reach beyond 300 m from its
+centre (a box of half extent above 300 m, or above 299.98 m for a body, whose 0.02 m speculative
+distance counts) can meet a triangle the rule kept for 300 m and trip `EPAPenetrationDepth.h:113`
+in an asserts build, or get a distorted contact in a release one. The sweeps below found no
+assertion up to seven times a mesh's extent and found some at ten times. A mesh that must collide
+with larger shapes is built with a larger `max_convex_extent`, up to `2 · MAX_SHAPE_EXTENT`, and
+keeps only thicker triangles: a strip 1 m long and 1 mm wide near the mesh origin is kept up to
+about 2080 m along the axes and up to about 1200 m turned the worst of 2000 seeded ways. A mesh
+of small detailed objects, which meets only small bodies, keeps more with a smaller extent: the
+ScatteringSkull at its own 0.25 m loses 0.48 % of its area at 2 m against 4.2 % at the default.
+Near the origin the thinnest 1 m strip kept is:
 
 | `E` | along the axes | worst orientation |
 |---|---|---|
-| 200 m (default) | 0.11 mm | 0.18 mm |
-| 750 m | 0.37 mm | 0.64 mm |
-| 1100 m | 0.54 mm | 0.93 mm |
-| 2000 m | 0.97 mm | 1.7 mm |
+| 200 m | 0.099 mm | 0.17 mm |
+| 300 m (default) | 0.15 mm | 0.26 mm |
+| 750 m | 0.36 mm | 0.63 mm |
+| 1100 m | 0.53 mm | 0.92 mm |
+| 2000 m | 0.96 mm | 1.7 mm |
 | 4000 m | 1.9 mm | 3.3 mm |
 
 A mesh keeps the extent it was built with, and `Shape::new_scaled` checks its triangles for that
 extent.
 
 In an asserts build the thinnest sliver the rule keeps (to 1 %) rests under boxes of half extent
-100 and 200 m with the default, 300 and 1100 m with an extent of 1100 m and 1500 and 2000 m with
+200 and 300 m with the default, 300 and 1100 m with an extent of 1100 m and 1500 and 2000 m with
 an extent of 2000 m, queried in three orientations and as a heavy body
 (`the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent`).
 With the convex term scaled by 0.25 or 0.1 Jolt finds no contact with the sliver in that test, and
@@ -327,9 +344,9 @@ keeps its centre of mass, which Jolt's `EmptyShape` does not save.
 
 What stays unchecked is the inside of Jolt's records: array lengths that Jolt resizes to before
 reading (`StreamIn.h:43-53`), mesh tree offsets (`NodeCodecQuadTreeHalfFloat.h:231-318`), hull face
-and vertex indices, static compound nodes and heightfield block sizes. The checksum refuses every
-accidental change, so the contract of the `unsafe` restore is that the bytes come from a save of
-the same build and were not crafted.
+and vertex indices, static compound nodes and heightfield block sizes. The checksum detects
+common damage but proves nothing about these, so the contract of the `unsafe` restore is that the
+bytes are the unchanged output of a save by the same build.
 
 The saved bytes reach Rust as `Vec<u8>`, so every one of them must have a value. Jolt grows its
 byte buffers without initialising them (`Array.h:197-206`, `ByteBuffer::Allocate`), so the

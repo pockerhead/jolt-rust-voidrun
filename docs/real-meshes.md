@@ -35,7 +35,8 @@ applied.
 `real-meshes` fetches them, with and without assertions) check per model:
 
 - `Shape::new_mesh` builds the mesh, and the triangles it drops cover at most 0.1 % of the
-  surface area; above that the test fails and the mesh rule has to change.
+  surface area; above that the test fails and the mesh rule has to change. The skull at its own
+  size is built for convex shapes up to 2 m and may drop at most 0.5 %.
 - `Shape::new_convex_hull` of all vertices builds; the oloid's hull passes within 2 mm of every
   vertex (measured 1.02 mm; Jolt keeps at most 256 points and lets a left-out point lie up to its
   hull tolerance, 1 mm, outside).
@@ -46,43 +47,50 @@ applied.
   slop (2 cm), and no body's centre crosses a mesh surface between two ticks. On the closed curved
   models (spot, skull), which have no flat place, the bodies fall from up to 2 m with
   `MotionQuality::LinearCast`; there the check is that none crosses the surface and each ends on
-  the mesh or the floor.
+  the mesh or the floor. The skull gets 3 cm spheres and 4 cm boxes at its own size and 0.1 m
+  ones as a 2.5 m statue.
+- Every file of a model, the skull's glTF buffer too, must match its SHA-256 before it is read;
+  `a_changed_skull_buffer_is_refused` changes one byte of a normal, which the importer ignores.
 - A humanoid character (`CharacterSettings::humanoid(1.8, 0.3)`) walks 8 m along the track tile
   and 6.25 m across the corridor's two-sided floor, on the ground every tick, ending within 0.5 m
   of the goal (measured 0.3 m short of it in the corridor, at the goal on the track).
 - `tests/real_meshes_determinism.rs` drops 20 spheres and boxes on the track tile, the corridor
-  and the skull and compares 300 ticks of every body with 1 and 4 workers in separate processes.
+  and the skull statue and compares 300 ticks of every body, and which bodies start touching the
+  mesh in each tick, with 1 and 4 workers in separate processes; at least 15 of the 20 must touch
+  the mesh (measured 19, 20 and 18).
 
 ## Dropped triangles and timings
 
 Measured on one Windows machine with the release build. Every model is built with the default
-`MeshSettings`, so for convex shapes up to 200 m. "At 1100 m" gives the props' numbers with
+`MeshSettings`, so for convex shapes up to 300 m, except the skull at its own size, built with
+`MeshSettings::max_convex_extent(2.0)`. "At 1100 m" gives the props' numbers with
 `MeshSettings::max_convex_extent(1100.0)`.
 
 | Model | Dropped | Dropped area | At 1100 m | Mesh build | Saved bytes | Save | Restore |
 |---|---|---|---|---|---|---|---|
-| radio | 46 | 0.084 % | 88, 0.75 % | 0.23 ms | 8 914 | 11 µs | 3 µs |
-| kitchenFridgeLarge | 8 | 0.0004 % | 25, 0.012 % | 0.22 ms | 9 730 | 11 µs | 4 µs |
-| bathtub | 5 | 0.0005 % | 17, 0.018 % | 0.70 ms | 14 262 | 51 µs | 12 µs |
-| bookcaseOpen | 28 (zero area) | 0 | the same | 0.17 ms | 6 618 | 9 µs | 4 µs |
-| oloid | 12 | 0.0039 % | | 0.28 ms | 7 686 | 9 µs | 4 µs |
-| track-straight | 12 (degenerate) | 0 | | 0.06 ms | 2 562 | 4 µs | 2 µs |
-| corridor-wide-corner | 0 | 0 | | 0.93 ms | 43 990 | 88 µs | 17 µs |
-| spot | 0 | 0 | | 3.3 ms | 88 750 | 175 µs | 30 µs |
-| ScatteringSkull at 10x | 5 | 0.0001 % | | 118 ms | 3 026 118 | 3.3 ms | 0.54 ms |
+| radio | 14 | 0.024 % | 64, 0.69 % | 0.25 ms | 9 558 | 13 µs | 3 µs |
+| kitchenFridgeLarge | 2 | 0.00002 % | 15, 0.0091 % | 0.23 ms | 10 094 | 9 µs | 3 µs |
+| bathtub | 3 | < 0.00001 % | 15, 0.018 % | 0.56 ms | 14 278 | 32 µs | 12 µs |
+| bookcaseOpen | 28 (zero area) | 0 | the same | 0.17 ms | 6 618 | 8 µs | 3 µs |
+| oloid | 12 | 0.0039 % | | 0.25 ms | 7 686 | 15 µs | 5 µs |
+| track-straight | 12 (degenerate) | 0 | | 0.07 ms | 2 562 | 5 µs | 3 µs |
+| corridor-wide-corner | 0 | 0 | | 0.98 ms | 43 990 | 77 µs | 17 µs |
+| spot | 0 | 0 | | 3.5 ms | 88 750 | 146 µs | 29 µs |
+| ScatteringSkull, 0.25 m, for 2 m | 3 426 | 0.48 % | | 115 ms | 2 976 438 | 3.1 ms | 0.59 ms |
+| ScatteringSkull at 10x | 0 | 0 | | 113 ms | 3 026 002 | 3.3 ms | 0.56 ms |
 
 Two findings:
 
 - The convex extent decides how thin a kept triangle can be. The radio's 1 mm bevel strips are
-  kept at the default extent and dropped at 1100 m, where they are 0.75 % of its area. A mesh
-  that must meet convex shapes larger than 200 m is built with a larger extent and loses such
+  kept at the default extent and dropped at 1100 m, where they are 0.69 % of its area. A mesh
+  that must meet convex shapes larger than 300 m is built with a larger extent and loses such
   bevels ([limits](limits.md#convex-shapes-against-meshes)).
-- The skull is 0.25 m tall. At that size its 188 871 triangles average 1.5 mm², twice which is
-  below the 1e-5 m² the mesh rule keeps above Jolt's sliver assertion (1e-6 m², see
-  [limits](limits.md#triangle-meshes)) at any convex extent: `Shape::new_mesh` keeps 12 of them
-  and drops 99.97 % of the area (`the_skull_at_its_own_size_is_too_fine_for_jolt` pins it). The
-  tests use it as a 2.5 m statue. Use a convex hull or a decimated mesh for small detailed
-  objects.
+- The skull is 0.25 m tall and its 188 871 triangles average 1.5 mm². Twice the area of 0.47 % of
+  it (by area) is at or below 1e-6 m², where Jolt's collision asserts
+  ([limits](limits.md#triangle-meshes)); no rule can keep those. Built for convex shapes up to 2 m
+  it loses 0.48 %, at the default 300 m 4.2 % (19 452 triangles), because rounding in the space of
+  a large convex shape takes more from small triangles. A mesh of a small detailed object that
+  only meets small bodies is built with a small `max_convex_extent`.
 
 Restoring a cooked mesh was about 200 times faster than building it for the skull and 30 to 110
 times for the other models ([shape cooking](shape-cooking.md)).

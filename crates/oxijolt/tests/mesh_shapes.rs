@@ -327,57 +327,117 @@ fn finite(v: Vec3) -> bool {
     v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
 }
 
-/// A box of half extent `(half, 1, half)` turned by `turn`, placed so the sliver lies 0.1 m
-/// inside its bottom face near a far corner: in the box's space the sliver's coordinates are
+/// A box of half extent `(half, 1, half)` turned by `turn`, placed so `point` of the mesh lies
+/// 0.1 m inside its bottom face near a far corner: in the box's space the coordinates there are
 /// close to the extent.
 // `Real` is `f64` with the `double-precision` feature.
 #[allow(clippy::unnecessary_cast)]
-fn box_over_sliver(half: f32, turn: Quat) -> (Shape, RVec3) {
+fn box_over(point: Vec3, half: f32, turn: Quat) -> (Shape, RVec3) {
     let boxed = Shape::new_box(Vec3::new(half, 1.0, half)).unwrap();
     let in_box = turned(turn, Vec3::new(1.0 - half, -0.9, 1.0 - half));
-    let centre = [-in_box[0], -in_box[1], 0.5 - in_box[2]].map(|c| c as Real);
+    let point = [point.x, point.y, point.z].map(f64::from);
+    let centre = [0, 1, 2].map(|axis| (point[axis] - in_box[axis]) as Real);
     (boxed, RVec3::from(centre))
 }
 
-#[test]
-fn the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent() {
+/// Collides boxes of each half extent in `halves`, turned three ways, with `mesh` around
+/// `point`, and rests a heavy box on it: Jolt reports finite contacts (and asserts nothing in an
+/// asserts build).
+fn boxes_collide_with(mesh: &Shape, point: Vec3, halves: [f32; 2], what: &str) {
     let turns = [
         Quat::IDENTITY,
         quat_about(Vec3::new(0.0, 1.0, 0.0), 0.6),
         quat_about(Vec3::new(0.6, 0.8, 0.0), 2.0),
     ];
+    let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
+    add_static(&mut world, mesh);
+    for half in halves {
+        for turn in turns {
+            let (boxed, centre) = box_over(point, half, turn);
+            let query = CollideShape::new(&boxed, centre, turn);
+            let hits = world.collide_shape(&query, &QueryFilter::new()).unwrap();
+            assert!(!hits.is_empty(), "{what}, box {half} m");
+            for hit in hits {
+                assert!(finite(hit.normal) && hit.penetration_depth.is_finite());
+            }
+        }
+        // A heavy box resting on the mesh; the speculative contact distance, 0.02 m, counts
+        // toward the extent.
+        let (boxed, centre) = box_over(point, half - 0.02, Quat::IDENTITY);
+        let resting = RVec3::new(centre.x, centre.y + 0.09, centre.z);
+        let settings = BodySettings::new_dynamic().position(resting).mass(1.0e5);
+        let id = world.create_body(&boxed, &settings).unwrap();
+        for _ in 0..30 {
+            assert!(world.step(DT).unwrap().is_complete());
+        }
+        let body = world.body(id).unwrap();
+        assert!(finite(body.linear_velocity()) && finite(body.angular_velocity()));
+        world.remove_body(id).unwrap();
+    }
+}
+
+#[test]
+fn the_thinnest_kept_slivers_collide_with_convex_shapes_up_to_the_extent() {
     // The boxes of 300 and 1100 m are those that tripped Jolt's assertions on slivers the rule
     // kept before it counted the convex shape's space.
     for (extent, halves) in [
-        (MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, [100.0, 200.0]),
+        (MeshSettings::DEFAULT_MAX_CONVEX_EXTENT, [200.0, 300.0]),
         (1100.0, [300.0, 1100.0]),
         (limits::MAX_SHAPE_EXTENT, [1500.0, 2000.0]),
     ] {
         let mesh = thinnest_kept_sliver(extent);
-        let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
-        add_static(&mut world, &mesh);
-        for half in halves {
-            for turn in turns {
-                let (boxed, centre) = box_over_sliver(half, turn);
-                let query = CollideShape::new(&boxed, centre, turn);
-                let hits = world.collide_shape(&query, &QueryFilter::new()).unwrap();
-                assert!(!hits.is_empty(), "{extent} m, box {half} m");
-                for hit in hits {
-                    assert!(finite(hit.normal) && hit.penetration_depth.is_finite());
-                }
+        let what = format!("sliver for {extent} m");
+        boxes_collide_with(&mesh, Vec3::new(0.0, 0.0, 0.5), halves, &what);
+    }
+}
+
+/// A right triangle with legs `leg` along +z and +x from `corner`, front face up.
+fn right_triangle(corner: Vec3, leg: f32) -> [Vec3; 3] {
+    [
+        corner,
+        Vec3::new(corner.x, corner.y, corner.z + leg),
+        Vec3::new(corner.x + leg, corner.y, corner.z),
+    ]
+}
+
+/// The smallest right triangle at `corner` that a mesh for convex shapes up to `extent` keeps,
+/// within 0.1 %, and its leg.
+fn smallest_kept_triangle(corner: Vec3, extent: f32) -> (Shape, f32) {
+    let settings = MeshSettings::default().max_convex_extent(extent);
+    let build =
+        |leg| Shape::new_mesh_with_settings(&right_triangle(corner, leg), &[[0, 1, 2]], &settings);
+    let (mut dropped, mut kept) = (0.0f32, 0.01f32);
+    while kept > 1.001 * dropped {
+        let middle = 0.5 * (dropped + kept);
+        if build(middle).is_ok() {
+            kept = middle;
+        } else {
+            dropped = middle;
+        }
+    }
+    (build(kept).unwrap().0, kept)
+}
+
+/// The floor of the triangle rule is Jolt's own limit: at the mesh origin, twice the area of the
+/// smallest kept triangle is within 2 % of 1e-6 m² for small convex shapes and within 40 % at the
+/// default extent, and boxes up to the extent collide with it there and 70 m out.
+#[test]
+fn the_smallest_kept_triangles_collide_with_convex_shapes_up_to_the_extent() {
+    for (extent, halves, largest_leg) in [
+        (2.0, [1.0, 2.0], 1.01e-3),
+        (
+            MeshSettings::DEFAULT_MAX_CONVEX_EXTENT,
+            [200.0, 300.0],
+            1.18e-3,
+        ),
+    ] {
+        for corner in [Vec3::ZERO, Vec3::new(50.0, 0.0, -50.0)] {
+            let (mesh, leg) = smallest_kept_triangle(corner, extent);
+            if corner == Vec3::ZERO {
+                assert!((1.0e-3..largest_leg).contains(&leg), "{extent} m: {leg}");
             }
-            // A heavy box resting on the sliver; the speculative contact distance, 0.02 m,
-            // counts toward the extent.
-            let (boxed, centre) = box_over_sliver(half - 0.02, Quat::IDENTITY);
-            let resting = RVec3::new(centre.x, centre.y + 0.09, centre.z);
-            let settings = BodySettings::new_dynamic().position(resting).mass(1.0e5);
-            let id = world.create_body(&boxed, &settings).unwrap();
-            for _ in 0..30 {
-                assert!(world.step(DT).unwrap().is_complete());
-            }
-            let body = world.body(id).unwrap();
-            assert!(finite(body.linear_velocity()) && finite(body.angular_velocity()));
-            world.remove_body(id).unwrap();
+            let what = format!("{leg} m triangle at {corner:?} for {extent} m");
+            boxes_collide_with(&mesh, corner, halves, &what);
         }
     }
 }

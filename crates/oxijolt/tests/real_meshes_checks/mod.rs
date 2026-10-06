@@ -36,7 +36,9 @@ fn models_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/models")
 }
 
-fn row(name: &str) -> Row {
+/// The rows of model `name`: its own first, then the files listed next to it under names that
+/// start with `name` and a space (a glTF buffer).
+fn rows(name: &str) -> Vec<Row> {
     let table = std::fs::read_to_string(models_dir().join("models.tsv")).unwrap();
     let mut lines = table.lines();
     let header: Vec<&str> = lines.next().unwrap().split('\t').collect();
@@ -47,15 +49,25 @@ fn row(name: &str) -> Row {
         column("sha256"),
         column("where"),
     );
-    lines
+    let part = format!("{name} ");
+    let mut rows: Vec<(bool, Row)> = lines
         .map(|line| line.split('\t').collect::<Vec<_>>())
-        .find(|cells| cells[name_at] == name)
-        .map(|cells| Row {
-            file: cells[file_at].to_owned(),
-            sha256: cells[sha_at].to_owned(),
-            committed: cells[where_at] == "commit",
+        .filter(|cells| cells[name_at] == name || cells[name_at].starts_with(&part))
+        .map(|cells| {
+            let row = Row {
+                file: cells[file_at].to_owned(),
+                sha256: cells[sha_at].to_owned(),
+                committed: cells[where_at] == "commit",
+            };
+            (cells[name_at] != name, row)
         })
-        .unwrap_or_else(|| panic!("{name} is not in models.tsv"))
+        .collect();
+    rows.sort_by_key(|&(listed_next, _)| listed_next);
+    assert!(
+        rows.first().is_some_and(|&(listed_next, _)| !listed_next),
+        "{name} is not in models.tsv"
+    );
+    rows.into_iter().map(|(_, row)| row).collect()
 }
 
 /// A model's triangles as the tests build them.
@@ -67,29 +79,39 @@ pub struct Model {
 
 impl Model {
     /// The model `name` of `models.tsv`, read from `assets/models` when it is committed and
-    /// from the [`MODELS_ENV`] directory otherwise. Fails when the variable is not set, the
-    /// file is missing or its SHA-256 differs from the table's, and for other files the table
-    /// lists next to a downloaded one (a glTF buffer).
+    /// from the [`MODELS_ENV`] directory otherwise. Fails when the variable is not set, or as
+    /// [`try_load`](Self::try_load) does.
     pub fn load(name: &str) -> Self {
-        let row = row(name);
-        let path = if row.committed {
-            models_dir().join(&row.file)
-        } else {
-            let dir = std::env::var_os(MODELS_ENV).unwrap_or_else(|| {
-                panic!("{MODELS_ENV} must name the directory scripts/fetch_models.py filled")
-            });
-            PathBuf::from(dir).join(&row.file)
-        };
-        let bytes =
-            std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        assert_eq!(
-            sha256::hex(&bytes),
-            row.sha256,
-            "{}: SHA-256 differs from models.tsv",
-            path.display()
-        );
-        let mesh = mesh_import::load(&path).unwrap();
-        Self {
+        let downloaded = std::env::var_os(MODELS_ENV).map(PathBuf::from);
+        Self::try_load(name, downloaded.as_deref()).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// The model `name` of `models.tsv`, its downloaded files read from `downloaded`. Fails
+    /// before importing anything when a file of the model (the files listed next to it, such as
+    /// a glTF buffer, too) is missing or its SHA-256 differs from the table's.
+    pub fn try_load(name: &str, downloaded: Option<&Path>) -> Result<Self, String> {
+        let mut paths = Vec::new();
+        for row in rows(name) {
+            let path = if row.committed {
+                models_dir().join(&row.file)
+            } else {
+                let dir = downloaded.ok_or_else(|| {
+                    format!("{MODELS_ENV} must name the directory scripts/fetch_models.py filled")
+                })?;
+                dir.join(&row.file)
+            };
+            let bytes =
+                std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+            if sha256::hex(&bytes) != row.sha256 {
+                return Err(format!(
+                    "{}: SHA-256 differs from models.tsv",
+                    path.display()
+                ));
+            }
+            paths.push(path);
+        }
+        let mesh = mesh_import::load(&paths[0]).map_err(|error| format!("{error:?}"))?;
+        Ok(Self {
             name: name.to_owned(),
             vertices: mesh
                 .vertices
@@ -97,7 +119,7 @@ impl Model {
                 .map(|&[x, y, z]| Vec3::new(x, y, z))
                 .collect(),
             triangles: mesh.triangles,
-        }
+        })
     }
 
     /// The model scaled uniformly by `factor`.
@@ -150,12 +172,18 @@ pub struct Built {
     pub dropped_share: f64,
 }
 
-/// Builds the mesh (default settings) and the convex hull of `model`, checks the dropped share
-/// and cooking, and prints the numbers.
+/// Builds the mesh (default settings) and the convex hull of `model`, checks that the dropped
+/// share is at most [`MAX_DROPPED_SHARE`] and cooking, and prints the numbers.
 pub fn build(model: &Model) -> Built {
+    build_with(model, &MeshSettings::default(), MAX_DROPPED_SHARE)
+}
+
+/// [`build`] with mesh `settings` and a largest dropped share of `max_dropped_share`.
+pub fn build_with(model: &Model, settings: &MeshSettings, max_dropped_share: f64) -> Built {
     let started = Instant::now();
-    let (mesh, dropped) = Shape::new_mesh(&model.vertices, &model.triangles)
-        .unwrap_or_else(|error| panic!("{}: {error}", model.name));
+    let (mesh, dropped) =
+        Shape::new_mesh_with_settings(&model.vertices, &model.triangles, settings)
+            .unwrap_or_else(|error| panic!("{}: {error}", model.name));
     let build_time = started.elapsed();
     let total = model.surface_area();
     let dropped_share = f64::from(dropped.area()) / total;
@@ -196,11 +224,11 @@ pub fn build(model: &Model) -> Built {
         millis(restore_time),
     );
     assert!(
-        dropped_share <= MAX_DROPPED_SHARE,
+        dropped_share <= max_dropped_share,
         "{}: the sliver rule drops {:.4} % of the surface area, above {} %",
         model.name,
         100.0 * dropped_share,
-        100.0 * MAX_DROPPED_SHARE
+        100.0 * max_dropped_share
     );
     Built {
         mesh: restored,
