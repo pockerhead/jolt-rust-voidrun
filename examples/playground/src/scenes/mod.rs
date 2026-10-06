@@ -2,6 +2,7 @@
 
 pub mod character;
 pub mod constraints;
+pub mod contacts;
 pub mod destruction;
 pub mod pile;
 pub mod ragdolls;

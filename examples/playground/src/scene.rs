@@ -125,11 +125,13 @@ pub enum SceneKind {
     Water,
     /// A wall of bricks in a mutable compound that impacts break.
     Destruction,
+    /// Contact listener effects, a sensor, collision groups and materials.
+    Contacts,
 }
 
 impl SceneKind {
     /// Every scene in menu order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Character,
         Self::Vehicles,
         Self::Pile,
@@ -138,6 +140,7 @@ impl SceneKind {
         Self::SoftBodies,
         Self::Water,
         Self::Destruction,
+        Self::Contacts,
     ];
 
     /// The command-line name, the number key and the menu title.
@@ -151,6 +154,7 @@ impl SceneKind {
             Self::SoftBodies => ("soft-bodies", '6', "Cloth, balloon and soft cube"),
             Self::Water => ("water", '7', "Buoyancy and water"),
             Self::Destruction => ("destruction", '8', "Breakable wall"),
+            Self::Contacts => ("contacts", '9', "Contact control and sensors"),
         }
     }
 
@@ -189,6 +193,7 @@ impl SceneKind {
             Self::Destruction => {
                 Box::new(scenes::destruction::Destruction::new(config, generation)?)
             }
+            Self::Contacts => Box::new(scenes::contacts::Contacts::new(config, generation)?),
         })
     }
 }
