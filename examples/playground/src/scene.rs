@@ -123,11 +123,13 @@ pub enum SceneKind {
     SoftBodies,
     /// Buoyancy and drag in a pool, with a current.
     Water,
+    /// A wall of bricks in a mutable compound that impacts break.
+    Destruction,
 }
 
 impl SceneKind {
     /// Every scene in menu order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Character,
         Self::Vehicles,
         Self::Pile,
@@ -135,6 +137,7 @@ impl SceneKind {
         Self::Constraints,
         Self::SoftBodies,
         Self::Water,
+        Self::Destruction,
     ];
 
     /// The command-line name, the number key and the menu title.
@@ -147,6 +150,7 @@ impl SceneKind {
             Self::Constraints => ("constraints", '5', "Constraints and motors"),
             Self::SoftBodies => ("soft-bodies", '6', "Cloth, balloon and soft cube"),
             Self::Water => ("water", '7', "Buoyancy and water"),
+            Self::Destruction => ("destruction", '8', "Breakable wall"),
         }
     }
 
@@ -182,6 +186,9 @@ impl SceneKind {
             }
             Self::SoftBodies => Box::new(scenes::soft_bodies::SoftBodies::new(config, generation)?),
             Self::Water => Box::new(scenes::water::Water::new(config, generation)?),
+            Self::Destruction => {
+                Box::new(scenes::destruction::Destruction::new(config, generation)?)
+            }
         })
     }
 }
