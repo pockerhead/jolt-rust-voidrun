@@ -23,7 +23,8 @@ what is planned next.
 - Wheeled vehicles with suspension, engine, automatic transmission, differentials and anti-roll
   bars; tracked vehicles (tanks) with two tracks; motorcycles with a lean controller
   ([guide](vehicles.md)).
-- Ragdolls from a skeleton, posed, motor-driven or kinematic, with settle detection.
+- Ragdolls from a skeleton, posed, motor-driven or kinematic, with settle detection, and a skeleton
+  mapper to and from a detailed animation skeleton ([guide](guide.md#ragdolls)).
 - Twelve kinds of constraints with motors, springs and limits: fixed, point, distance, hinge,
   slider, cone, swing-twist, six-DOF, gear, rack and pinion, pulley and path
   ([guide](constraints.md)).

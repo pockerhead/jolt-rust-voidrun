@@ -4,6 +4,18 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Skeleton mapper ([guide](docs/guide.md#ragdolls)): `SkeletonMapper` (Jolt's `SkeletonMapper`)
+  between a ragdoll skeleton and a detailed animation skeleton matched by name, with
+  `MappedSkeleton` and `TranslationLocks`. `map` turns a ragdoll pose and the animation's local
+  pose into an animation pose, `map_reverse` an animation pose into a ragdoll pose for `set_pose`
+  and the drives. New `RagdollError::UnmappedJoint`, `HierarchyMismatch` and `DegenerateChain`;
+  `limits::MIN_MAPPED_CHAIN_LENGTH` is the shortest chain direction
+  ([limits](docs/limits.md#skeleton-mapper-chains)).
+- joltc extension: `JPH_SkeletonMapper_Initialize2`, `_LockAllTranslations2`, `_LockTranslations2`,
+  `_Map2` and `_MapReverse2`, which copy matrix arrays through aligned storage (joltc's own five
+  cast 4-aligned arrays to 16-aligned `Mat44` and stay unbound) and refuse inputs that would make
+  Jolt assert or read out of bounds. `JOLTC_EXT_REVISION` is 19: a `JOLTC_LIB_DIR` prefix built
+  before this change is refused until the next release's archives.
 - Compound edits at run time ([guide](docs/bodies.md#compound-edits)): `MutableCompound` adds,
   removes, moves and replaces compound children, checks every edit before Jolt sees it, and
   publishes the current children as a new `Shape` (equal to `Shape::new_compound` of them) that
