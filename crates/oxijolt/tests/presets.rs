@@ -94,6 +94,44 @@ fn humanoid_settings_outlive_their_clones() {
 }
 
 #[test]
+fn humanoid_settings_cross_threads() {
+    fn send_and_sync<T: Send + Sync>() {}
+    send_and_sync::<CharacterSettings<'static>>();
+
+    let original = CharacterSettings::humanoid(1.8, 0.3).unwrap();
+    let clone = original.clone();
+    // The clone walks a character on another thread and is dropped there, while the original
+    // is still alive here; then the original is used here after the clone is gone.
+    let walker = std::thread::spawn(move || {
+        let mut world = world(GRAVITY, 1);
+        add_floor(&mut world);
+        let id = world
+            .create_character(&clone, RVec3::ZERO, Quat::IDENTITY)
+            .unwrap();
+        drop(clone);
+        for _ in 0..60 {
+            walk_tick(&mut world, id, Vec3::new(1.0, 0.0, 0.0));
+        }
+        world.character(id).unwrap().ground_state()
+    });
+    assert_eq!(walker.join().unwrap(), GroundState::OnGround);
+
+    let mut world = world(GRAVITY, 1);
+    add_floor(&mut world);
+    let id = world
+        .create_character(&original, RVec3::ZERO, Quat::IDENTITY)
+        .unwrap();
+    drop(original);
+    for _ in 0..60 {
+        walk_tick(&mut world, id, Vec3::new(0.0, 0.0, 1.0));
+    }
+    assert_eq!(
+        world.character(id).unwrap().ground_state(),
+        GroundState::OnGround
+    );
+}
+
+#[test]
 fn a_humanoid_accepts_a_borrowed_inner_body() {
     let mut world = world(GRAVITY, 1);
     add_floor(&mut world);

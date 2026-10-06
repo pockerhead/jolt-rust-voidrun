@@ -1,10 +1,10 @@
 //! Wheel poses in world space: on the suspension of a resting car, turned by steering and by
-//! rolling, on tank tracks and a raked motorcycle fork, past the last wheel, and across a
-//! rebase.
+//! rolling, on tank tracks and a raked motorcycle fork, past the last wheel, across a rebase,
+//! and far from the origin.
 
 mod common;
 
-use common::math::{add, cross, dot, f3, norm, rotate, scale, sub, v3, V3};
+use common::math::{add, cross, dot, f3, norm, rotate, rvec3, scale, sub, v3, V3};
 use common::vehicle::*;
 use common::vehicle_kinds::*;
 use common::*;
@@ -247,6 +247,48 @@ fn wheel_transforms_move_with_a_rebase() {
                 rotate(rotation, rotate(wheel_rotation, axis)),
                 1e-4,
                 &format!("wheel {index} axis {axis:?}"),
+            );
+        }
+    }
+}
+
+#[test]
+// `Real` is already `f64` with the `double-precision` feature.
+#[allow(clippy::useless_conversion)]
+fn wheel_transforms_keep_a_far_fractional_chassis_position() {
+    let (mut world, ground, chassis, car) = settled_car();
+    // Far out with a fraction: with `f64` positions an `f32` step anywhere in the composition
+    // would round the centre by centimetres.
+    let far = rvec3(if std::mem::size_of::<Real>() == 8 {
+        [1_000_000.125, 0.5, -2_000_000.375]
+    } else {
+        [4_000.125, 0.5, -3_000.375]
+    });
+    let rotation = quat_about(Vec3::new(0.6, 0.8, 0.0), 1.1);
+    world.rebase(&[ground, chassis], rotation, far).unwrap();
+    let pose = chassis_pose(&world, chassis);
+    assert!(
+        pose.0[0].fract() != 0.0 && pose.0[2].fract() != 0.0,
+        "{pose:?}"
+    );
+    let tolerance = 1e-4 + 4.0 * f64::from(Real::EPSILON) * norm(pose.0);
+    let vehicle = world.vehicle(car).unwrap();
+    for (index, attachment) in WHEEL_POSITIONS.iter().enumerate() {
+        let wheel = vehicle.wheel(index as u32).unwrap();
+        let (position, rotation) = vehicle.wheel_world_transform(index as u32).unwrap();
+        let local = suspended_centre(*attachment, [0.0, -1.0, 0.0], wheel.suspension_length);
+        assert_close(
+            v3(position),
+            to_world(pose, local),
+            tolerance,
+            &format!("wheel {index} centre"),
+        );
+        if index == 0 {
+            assert_close(
+                rotate(rotation, [0.0, 1.0, 0.0]),
+                rotate(pose.1, [-1.0, 0.0, 0.0]),
+                1e-4,
+                "front left axle",
             );
         }
     }
