@@ -102,8 +102,9 @@ through such a prefix.
 
 ## Release archives
 
-No version has been released yet. Each tagged release will carry prebuilt prefixes on its GitHub
-release page, one archive per target and feature subset, with a `.sha256` file each:
+Each tagged release carries prebuilt prefixes on its
+[GitHub release page](https://github.com/pockerhead/oxijolt/releases), one archive per target and
+feature subset, with a `.sha256` file each:
 
 - targets `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`, each with the eight subsets of
   `double-precision`, `cross-platform-deterministic` and `debug-renderer`; `asserts` and other
