@@ -67,7 +67,8 @@ fn round(shape: &Shape) {
     let mut damaged = bytes.clone();
     let last = damaged.len() - 1;
     damaged[last] ^= 1;
-    // SAFETY: the checksum refuses the damaged copy before joltc reads it.
+    // SAFETY: the copy is not a save's unchanged output, but the checksum check, which runs in
+    // Rust before any native call, refuses this one (asserted), so no record of it reaches Jolt.
     assert!(unsafe { Shape::restore_binary_state(&damaged) }.is_err());
     let mut payload = bytes[48..].to_vec();
     payload.push(0);

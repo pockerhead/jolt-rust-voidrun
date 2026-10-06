@@ -21,8 +21,11 @@ fn compound() -> Shape {
 }
 
 fn restore(bytes: &[u8]) -> Result<Shape, ShapeError> {
-    // SAFETY: every test passes bytes this build saved, or such bytes changed in a way the header
-    // checks or joltc's record checks refuse before Jolt reads a record.
+    // SAFETY: every test passes bytes this build saved, or such bytes changed so that the header
+    // and checksum checks in Rust or joltc's envelope checks refuse them before Jolt reads the
+    // changed record (each test asserts the refusal). The one changed record Jolt reads is a box
+    // whose three half-extent floats were replaced: a box record holds no length, offset or
+    // index, so Jolt reads just those floats.
     unsafe { Shape::restore_binary_state(bytes) }
 }
 

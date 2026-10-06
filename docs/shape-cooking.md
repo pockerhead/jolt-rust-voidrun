@@ -72,11 +72,13 @@ file of the old build is refused, not misread.
 
 ## Why restoring is `unsafe`
 
-The checksum detects damage, not forgery: anyone can compute it. Jolt does not validate the inside
-of its own records (array lengths, mesh tree offsets, hull indices), so bytes made to pass the
-checksum can make Jolt read and write out of bounds. Restore only bytes your own build wrote, such
-as the game's shipped assets; never bytes from another player or a server you do not control.
-Every accidental change is refused without undefined behaviour.
+Jolt does not validate the inside of its own records (array lengths, mesh tree offsets, hull
+indices), so changed bytes can make Jolt read and write out of bounds. The contract is that the
+bytes are unchanged output of a save by the same build, such as the game's shipped assets. The
+header, the checksum and the extension's record checks refuse bytes of another build, cut-short
+bytes and most damage, which makes a mistake visible, but bytes that pass them are not proven
+valid: the checksum is a hash, not a proof, and anyone can compute it. Never restore bytes from
+another player or a server you do not control.
 
 `docs/limits.md` ([shape binary state](limits.md#shape-binary-state)) lists the checks and why no
 saved byte is left without a value.

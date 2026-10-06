@@ -81,21 +81,23 @@ impl Shape {
     /// Restores a shape from bytes written by [`save_binary_state`](Self::save_binary_state).
     ///
     /// The header must name this build, and the checksum must match, before anything reaches
-    /// Jolt. joltc then checks the record structure (types, lengths, child and material counts
-    /// and indices) before Jolt reads each shape. After restoring, the shape's local bounds must
+    /// Jolt. joltc then checks each record's envelope (type, lengths, child and material
+    /// indices) before Jolt reads the record, and the record's child and material counts after
+    /// Jolt read it, before they are attached. After restoring, the shape's local bounds must
     /// lie within [`limits::MAX_SHAPE_EXTENT`](crate::limits::MAX_SHAPE_EXTENT) and a compound
     /// must fit Jolt's sub-shape ids and
     /// [`limits::MAX_EXPANDED_SUB_SHAPES`](crate::limits::MAX_EXPANDED_SUB_SHAPES), the rules
     /// [`Shape::new_compound`] applies.
     ///
     /// # Safety
-    /// `bytes` were written by [`save_binary_state`](Self::save_binary_state) of a build with the
-    /// same build id, in any process, and may have been stored or sent, but were not crafted.
-    /// Every accidental change (bytes of another build, truncation, bit rot, another file) is
-    /// refused with an error. The checksum detects damage, not forgery: Jolt does not validate
-    /// the inside of its own records (array lengths, mesh tree offsets, hull indices), so bytes
-    /// built to pass the checksum can make Jolt read and write out of bounds. Do not restore
-    /// bytes from a source you do not trust, such as another player.
+    /// `bytes` are the unchanged output of [`save_binary_state`](Self::save_binary_state) of a
+    /// build with the same build id, in any process; they may have been stored or sent on the
+    /// way. The header, the checksum and joltc's record checks refuse bytes of another build,
+    /// truncated bytes and most damage with an error, but passing them does not make other bytes
+    /// valid: Jolt does not validate the inside of its own records (array lengths, mesh tree
+    /// offsets, hull indices), so changed bytes that pass, whether damaged or crafted, can make
+    /// Jolt read and write out of bounds. Do not restore bytes from a source you do not trust,
+    /// such as another player.
     ///
     /// # Errors
     /// [`ShapeError::BinaryState`] with:
@@ -114,9 +116,9 @@ impl Shape {
         let mut message = [0u8; JoltMessage::CAPACITY + 2];
         // SAFETY: Jolt is initialised; `payload` is live for the call and holds `payload.len()`
         // bytes, which joltc only reads; `message` is a live buffer of the capacity passed. The
-        // caller guarantees that the records inside were written by this build's save (the
-        // header and checksum checked above refuse other builds and damaged bytes). A returned
-        // shape holds one reference, which `from_raw` takes over.
+        // caller guarantees that the bytes are the unchanged output of a save of this build (the
+        // header checked above, which names the build, is part of them), so every record inside
+        // is one Jolt wrote. A returned shape holds one reference, which `from_raw` takes over.
         let shape = unsafe {
             JPH_Shape_RestoreBinaryState(
                 payload.as_ptr().cast(),
