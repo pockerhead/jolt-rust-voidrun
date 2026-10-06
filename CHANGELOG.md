@@ -6,6 +6,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 - `CharacterSettings::humanoid(height, radius)`: settings that own a capsule `height` tall standing
   on the character position, with Jolt's defaults for the rest; their clones share the capsule.
+- `VehicleSettings::car(front_left_wheel, wheel_radius, tester)`: a front-wheel-drive car of four
+  mirrored wheels with steering, hand brake, anti-roll bars and Jolt's default engine and
+  transmission, validated by `create_vehicle` like any settings.
 
 ## 0.6.0 — 2026-10-06
 

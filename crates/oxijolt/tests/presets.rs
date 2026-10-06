@@ -1,7 +1,10 @@
-//! Settings presets: a humanoid character standing and walking on a floor.
+//! Settings presets: a humanoid character standing and walking on a floor, and a car that
+//! drives, brakes, steers and shifts.
 
 mod common;
 
+use common::math::{f3, norm, rotate, v3};
+use common::vehicle::{car_world, chassis_settings, CarLayers, GRAVITY as CAR_GRAVITY};
 use common::*;
 use oxijolt::*;
 
@@ -107,4 +110,144 @@ fn a_humanoid_accepts_a_borrowed_inner_body() {
         world.remove_character(id).unwrap();
     }
     assert_eq!(world.body_count(), bodies);
+}
+
+/// The preset car of the test chassis with a sphere tester, on a 400 m box floor, level at rest.
+fn preset_car() -> (PhysicsWorld, CarLayers, BodyId, VehicleId) {
+    let (mut world, layers) = car_world(Vec3::ZERO, 1);
+    world
+        .create_body(
+            &Shape::new_box(Vec3::new(200.0, 1.0, 200.0)).unwrap(),
+            &BodySettings::new_static()
+                .position(RVec3::new(0.0, -1.0, 0.0))
+                .object_layer(layers.ground),
+        )
+        .unwrap();
+    let chassis = world
+        .create_body(
+            &common::vehicle::chassis_shape(),
+            &chassis_settings(&layers, RVec3::new(0.0, 0.9, -150.0), Quat::IDENTITY),
+        )
+        .unwrap();
+    let tester = VehicleCollisionTester::cast_sphere(layers.probe, 0.2);
+    let settings = VehicleSettings::car(Vec3::new(0.9, -0.1, 1.4), 0.35, tester);
+    let car = world.create_vehicle(chassis, &settings).unwrap();
+    drive_car(&mut world, car, DriverInput::default(), 30);
+    (world, layers, chassis, car)
+}
+
+/// Drives `car` with `input` for `ticks` ticks under the fixture's gravity, which the chassis
+/// takes from the vehicle only (gravity factor 0).
+fn drive_car(world: &mut PhysicsWorld, car: VehicleId, input: DriverInput, ticks: usize) {
+    for _ in 0..ticks {
+        let mut vehicle = world.vehicle_mut(car).unwrap();
+        vehicle.set_gravity(CAR_GRAVITY).unwrap();
+        vehicle.set_driver_input(input).unwrap();
+        assert!(world.step(DT).unwrap().is_complete());
+    }
+}
+
+/// The chassis' heading about +Y, radians from +Z toward +X.
+fn heading(world: &PhysicsWorld, chassis: BodyId) -> f64 {
+    let forward = rotate(world.body(chassis).unwrap().rotation(), [0.0, 0.0, 1.0]);
+    forward[0].atan2(forward[2])
+}
+
+#[test]
+fn a_car_preset_drives_brakes_steers_and_shifts() {
+    let full_throttle = DriverInput {
+        forward: 1.0,
+        ..DriverInput::default()
+    };
+    // Measured on this fixture: 14.5 m in 4 s of full throttle, in first gear.
+    let (mut world, _, chassis, car) = preset_car();
+    let start = v3(world.body(chassis).unwrap().position());
+    drive_car(&mut world, car, full_throttle, 240);
+    let end = v3(world.body(chassis).unwrap().position());
+    assert!(end[2] - start[2] > 10.0, "moved from {start:?} to {end:?}");
+    assert!(
+        (end[0] - start[0]).abs() < 0.1,
+        "moved from {start:?} to {end:?}"
+    );
+    assert_eq!(world.vehicle(car).unwrap().current_gear(), 1);
+
+    // Measured: stopped after 114 ticks of full brake.
+    let brake = DriverInput {
+        brake: 1.0,
+        ..DriverInput::default()
+    };
+    let stopped = (0..240).any(|_| {
+        drive_car(&mut world, car, brake, 1);
+        norm(f3(world.body(chassis).unwrap().linear_velocity())) < 0.1
+    });
+    assert!(
+        stopped,
+        "{:?}",
+        world.body(chassis).unwrap().linear_velocity()
+    );
+
+    // Measured: the automatic transmission shifts into second gear at tick 949 of full
+    // throttle, at the engine's maximum rpm, while the driven wheels slip below it.
+    let (mut world, _, _, car) = preset_car();
+    let shifted = (0..1200).any(|_| {
+        drive_car(&mut world, car, full_throttle, 1);
+        world.vehicle(car).unwrap().current_gear() == 2
+    });
+    assert!(
+        shifted,
+        "gear {}",
+        world.vehicle(car).unwrap().current_gear()
+    );
+
+    // Steering right turns toward −X for forward +Z. Measured: −0.70 rad in 2 s.
+    let (mut world, _, chassis, car) = preset_car();
+    let steer_right = DriverInput {
+        forward: 1.0,
+        right: 1.0,
+        ..DriverInput::default()
+    };
+    let before = heading(&world, chassis);
+    drive_car(&mut world, car, steer_right, 120);
+    let turned = heading(&world, chassis) - before;
+    assert!(turned < -0.5, "heading changed by {turned}");
+    let steer = world.vehicle(car).unwrap().wheel(0).unwrap().steer_angle;
+    assert!(
+        (steer + 30.0_f32.to_radians()).abs() < 1e-4,
+        "steer angle {steer}"
+    );
+}
+
+#[test]
+fn car_preset_values_are_validated() {
+    const POSITION_RULE: &str = "wheel position must be finite and within limits::MAX_SHAPE_EXTENT";
+    const RADIUS_RULE: &str = "wheel radius must be positive and at most limits::MAX_SHAPE_EXTENT";
+    let (mut world, layers) = car_world(Vec3::ZERO, 1);
+    let chassis = world
+        .create_body(
+            &common::vehicle::chassis_shape(),
+            &chassis_settings(&layers, RVec3::new(0.0, 0.9, 0.0), Quat::IDENTITY),
+        )
+        .unwrap();
+    let bodies = world.body_count();
+    let tester = VehicleCollisionTester::ray(layers.probe);
+    let cases = [
+        (Vec3::new(f32::NAN, -0.1, 1.4), 0.35, POSITION_RULE),
+        (
+            Vec3::new(0.9, -0.1, limits::MAX_SHAPE_EXTENT * 2.0),
+            0.35,
+            POSITION_RULE,
+        ),
+        (Vec3::new(0.9, -0.1, 1.4), 0.0, RADIUS_RULE),
+        (Vec3::new(0.9, -0.1, 1.4), -1.0, RADIUS_RULE),
+    ];
+    for (front_left, radius, rule) in cases {
+        let settings = VehicleSettings::car(front_left, radius, tester);
+        assert_eq!(
+            world.create_vehicle(chassis, &settings),
+            Err(VehicleError::InvalidValue(rule)),
+            "{front_left:?}, radius {radius}"
+        );
+        assert_eq!(world.body_count(), bodies);
+        assert_eq!(world.vehicle_ids().count(), 0);
+    }
 }

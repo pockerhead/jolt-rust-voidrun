@@ -15,6 +15,7 @@ use crate::{PhysicsWorld, Vec3, VehicleError, VehicleType};
 mod collision_tester;
 mod drivetrain;
 mod motorcycle;
+mod presets;
 mod tracked;
 mod wheel;
 
