@@ -193,3 +193,28 @@ fn the_shape_error_reports_its_source() {
     assert_eq!(source.to_string(), "the checksum does not match");
     assert!(ShapeError::AllocationFailed.source().is_none());
 }
+
+#[test]
+fn a_restored_shape_beyond_the_extent_is_malformed() {
+    let half_extent = Vec3::new(0.123, 0.234, 0.345);
+    let mut bytes = Shape::new_box(half_extent)
+        .unwrap()
+        .save_binary_state()
+        .unwrap();
+    // The box record holds the half extent as three floats: make them far too large, as a
+    // writer that skipped the constructor's checks would.
+    let mut replaced = 0;
+    for value in [half_extent.x, half_extent.y, half_extent.z] {
+        let (from, to) = (value.to_le_bytes(), 1.0e9f32.to_le_bytes());
+        let at = (HEADER_LEN..bytes.len() - 3)
+            .find(|&i| bytes[i..i + 4] == from)
+            .unwrap();
+        bytes[at..at + 4].copy_from_slice(&to);
+        replaced += 1;
+    }
+    assert_eq!(replaced, 3);
+    assert_eq!(
+        error(&resealed(bytes)),
+        BinaryStateError::Malformed("the shape's bounds exceed limits::MAX_SHAPE_EXTENT")
+    );
+}
