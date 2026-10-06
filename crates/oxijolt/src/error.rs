@@ -6,6 +6,9 @@
 //! [`Result`] defaults to it; both are named by this module's path (`oxijolt::error::Result`, as
 //! `std::io::Result`), so `use oxijolt::*` does not bring in an `Error` or `Result` that would
 //! clash with another glob import.
+//!
+//! Every error is `Copy`: payloads are static strings, ids, numbers or a fixed-size
+//! [`JoltMessage`]. That is part of the API from 1.0 on.
 
 use std::fmt;
 
@@ -17,8 +20,8 @@ use crate::{AnyConstraintId, AnyVehicleId, BodyId, CharacterId, ObjectLayer, Rag
 pub enum WorldError {
     /// Jolt's one-time global initialisation failed.
     InitFailed,
-    /// A world setting is out of range; the payload names it.
-    InvalidSettings(&'static str),
+    /// A world setting or the gravity is out of range; the payload names it.
+    InvalidValue(&'static str),
     /// The collision layer tables are inconsistent; the payload says how.
     InvalidLayers(&'static str),
     /// Jolt or joltc returned null when creating the named object.
@@ -29,7 +32,7 @@ impl fmt::Display for WorldError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InitFailed => f.write_str("Jolt initialisation failed"),
-            Self::InvalidSettings(what) => write!(f, "invalid world setting: {what}"),
+            Self::InvalidValue(what) => write!(f, "invalid world value: {what}"),
             Self::InvalidLayers(what) => write!(f, "invalid collision layers: {what}"),
             Self::AllocationFailed(what) => write!(f, "could not create the {what}"),
         }
@@ -44,12 +47,10 @@ impl std::error::Error for WorldError {}
 pub enum ShapeError {
     /// Jolt's one-time global initialisation failed.
     InitFailed,
-    /// A dimension is not finite or not positive; the payload names it.
-    InvalidDimensions(&'static str),
-    /// A setting other than a dimension is out of range; the payload names it.
-    InvalidSettings(&'static str),
+    /// A dimension, position or setting is out of range; the payload names it.
+    InvalidValue(&'static str),
     /// The points of a convex hull do not span a volume.
-    ConvexHull(HullError),
+    ConvexHull(ConvexHullError),
     /// A triangle mesh has nothing Jolt can build.
     Mesh(MeshError),
     /// A scale leaves mesh or heightfield triangles too thin to collide with.
@@ -78,8 +79,7 @@ impl fmt::Display for ShapeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InitFailed => f.write_str("Jolt initialisation failed"),
-            Self::InvalidDimensions(what) => write!(f, "invalid shape dimensions: {what}"),
-            Self::InvalidSettings(what) => write!(f, "invalid shape setting: {what}"),
+            Self::InvalidValue(what) => write!(f, "invalid shape value: {what}"),
             Self::ConvexHull(error) => write!(f, "invalid convex hull: {error}"),
             Self::Mesh(error) => write!(f, "invalid triangle mesh: {error}"),
             Self::ThinTriangles(error) => write!(f, "invalid scale: {error}"),
@@ -96,12 +96,21 @@ impl fmt::Display for ShapeError {
     }
 }
 
-impl std::error::Error for ShapeError {}
+impl std::error::Error for ShapeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ConvexHull(error) => Some(error),
+            Self::Mesh(error) => Some(error),
+            Self::ThinTriangles(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 /// Why [`Shape::new_convex_hull`](crate::Shape::new_convex_hull) refused its points.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum HullError {
+pub enum ConvexHullError {
     /// Fewer than 4 points.
     TooFewPoints,
     /// The points lie in one spot, on a line, or so close to a line that Jolt's hull builder
@@ -111,7 +120,7 @@ pub enum HullError {
     Coplanar,
 }
 
-impl fmt::Display for HullError {
+impl fmt::Display for ConvexHullError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::TooFewPoints => "a convex hull needs at least 4 points",
@@ -123,7 +132,7 @@ impl fmt::Display for HullError {
     }
 }
 
-impl std::error::Error for HullError {}
+impl std::error::Error for ConvexHullError {}
 
 /// Why [`Shape::new_mesh`](crate::Shape::new_mesh) built nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,7 +154,7 @@ impl fmt::Display for MeshError {
 
 impl std::error::Error for MeshError {}
 
-/// Why [`Shape::scaled`](crate::Shape::scaled) refused a scale: a stored triangle of a mesh or
+/// Why [`Shape::new_scaled`](crate::Shape::new_scaled) refused a scale: a stored triangle of a mesh or
 /// heightfield inside the shape, scaled, would be too thin for Jolt to collide with convex shapes
 /// up to `max_convex_extent`.
 #[derive(Clone, Copy, Debug)]
@@ -337,12 +346,25 @@ impl std::error::Error for CollisionGroupError {}
 pub enum QueryError {
     /// A query input is out of range; the payload names it.
     InvalidValue(&'static str),
+    /// A body the filter excludes belongs to another world.
+    WrongWorld(BodyId),
+    /// An object layer the filter selects does not exist in this world's collision layers.
+    UnknownObjectLayer(ObjectLayer),
+    /// joltc returned null for a native object the query creates or reads.
+    AllocationFailed,
 }
 
 impl fmt::Display for QueryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidValue(what) => write!(f, "invalid query value: {what}"),
+            Self::WrongWorld(id) => write!(f, "body {id:?} of the filter belongs to another world"),
+            Self::UnknownObjectLayer(layer) => write!(
+                f,
+                "object layer {} of the filter does not exist in this world",
+                layer.get()
+            ),
+            Self::AllocationFailed => f.write_str("could not create a native query object"),
         }
     }
 }
@@ -402,7 +424,7 @@ pub enum BodyError {
     UsedByConstraint(BodyId),
     /// The operation needs a rigid body and the body is a soft body; Jolt ignores it on soft
     /// bodies or cannot attach it to one.
-    SoftBody(BodyId),
+    NotRigidBody(BodyId),
     /// The operation needs a soft body and the body is a rigid body.
     NotSoftBody(BodyId),
     /// The operation needs a body with all six degrees of freedom and the body was created with
@@ -440,7 +462,7 @@ impl fmt::Display for BodyError {
                 f,
                 "body {id:?} is used by a constraint; remove the constraint first"
             ),
-            Self::SoftBody(id) => {
+            Self::NotRigidBody(id) => {
                 write!(
                     f,
                     "body {id:?} is a soft body; this operation needs a rigid body"
@@ -473,6 +495,12 @@ pub enum CharacterError {
     TooManyBodies,
     /// The world has given out every character id.
     TooManyCharacters,
+    /// The query filter of an update or refresh is not valid for this world, or joltc could
+    /// not create it.
+    Query(QueryError),
+    /// Jolt could not read a saved [`CharacterState`](crate::CharacterState). A state saved by
+    /// this build should never cause it; if it does, the character may be partly restored.
+    RestoreFailed,
 }
 
 impl fmt::Display for CharacterError {
@@ -483,11 +511,20 @@ impl fmt::Display for CharacterError {
             Self::InvalidValue(what) => write!(f, "invalid character value: {what}"),
             Self::TooManyBodies => f.write_str("the world is full; no room for the inner body"),
             Self::TooManyCharacters => f.write_str("the world has no character ids left"),
+            Self::Query(error) => write!(f, "unusable character query filter: {error}"),
+            Self::RestoreFailed => f.write_str("the character state could not be restored"),
         }
     }
 }
 
-impl std::error::Error for CharacterError {}
+impl std::error::Error for CharacterError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Query(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 /// Why a vehicle operation failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -727,8 +764,9 @@ impl std::error::Error for StateError {}
 /// Every fallible call still returns its own area's error; `?` converts each of them into this
 /// type, so code that calls several areas can return [`Result<T>`](Result). The enum is
 /// `#[non_exhaustive]`: a `match` on it needs a `_` arm. `Display` and `source` are those of
-/// the wrapped error: a leaf area error has no source; `VehicleError::Body` reports its
-/// `BodyError`.
+/// the wrapped error: an area error that wraps another one reports it as its source
+/// (`VehicleError::Body` its `BodyError`, `ShapeError::Mesh` its `MeshError`), the others have
+/// none.
 ///
 /// ```
 /// use oxijolt::prelude::*;

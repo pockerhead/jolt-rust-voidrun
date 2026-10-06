@@ -203,7 +203,7 @@ pub use constraint::{
 pub use debug::{DebugLine, DebugLineSettings, DebugLines};
 pub use error::{
     BodyError, CharacterError, CollisionGroupError, ConstraintError, ContactSettingsError,
-    HullError, MeshError, QueryError, RagdollError, ShapeError, SoftBodyError, StateError,
+    ConvexHullError, MeshError, QueryError, RagdollError, ShapeError, SoftBodyError, StateError,
     StepError, ThinTrianglesError, VehicleError, WorldError,
 };
 pub use filter::QueryFilter;

@@ -35,7 +35,7 @@ impl BodyMut<'_> {
     /// at most [`limits::MAX_VELOCITY_CHANGE`]; otherwise [`BodyError::InvalidValue`] is
     /// returned and nothing changes. Jolt then clamps the new velocity to
     /// [`limits::MAX_LINEAR_VELOCITY`] and zeroes its locked axes. Static and kinematic bodies
-    /// ignore impulses, as they ignore forces. Fails with [`BodyError::SoftBody`] for a soft
+    /// ignore impulses, as they ignore forces. Fails with [`BodyError::NotRigidBody`] for a soft
     /// body.
     ///
     /// [`limits::MAX_VELOCITY_CHANGE`]: crate::limits::MAX_VELOCITY_CHANGE
@@ -63,7 +63,7 @@ impl BodyMut<'_> {
     /// principal inverse inertia at most [`limits::MAX_ANGULAR_VELOCITY_CHANGE`]; otherwise
     /// [`BodyError::InvalidValue`] is returned and nothing changes. Jolt clamps the new angular
     /// velocity to [`limits::MAX_ANGULAR_VELOCITY`]. Static and kinematic bodies ignore it;
-    /// fails with [`BodyError::SoftBody`] for a soft body.
+    /// fails with [`BodyError::NotRigidBody`] for a soft body.
     ///
     /// [`limits::MAX_ANGULAR_VELOCITY_CHANGE`]: crate::limits::MAX_ANGULAR_VELOCITY_CHANGE
     /// [`limits::MAX_ANGULAR_VELOCITY`]: crate::limits::MAX_ANGULAR_VELOCITY
@@ -95,7 +95,7 @@ impl BodyMut<'_> {
     /// [`add_angular_impulse`](Self::add_angular_impulse) apply, the angular rule to the angular
     /// impulse Jolt's `f32` cross product can produce, rounding included; otherwise
     /// [`BodyError::InvalidValue`] is returned and nothing changes. Static and kinematic bodies
-    /// ignore it; fails with [`BodyError::SoftBody`] for a soft body. [docs/limits.md#impulses]
+    /// ignore it; fails with [`BodyError::NotRigidBody`] for a soft body. [docs/limits.md#impulses]
     /// has the rounding bound.
     ///
     /// [`limits::MAX_POSITION`]: crate::limits::MAX_POSITION
@@ -147,7 +147,7 @@ impl BodyMut<'_> {
     /// [`limits::MAX_ANGULAR_VELOCITY`] long, as Jolt computes them; otherwise
     /// [`BodyError::InvalidValue`] is returned and nothing changes. Fails with
     /// [`BodyError::NotKinematic`] for a static or dynamic body and with
-    /// [`BodyError::SoftBody`] for a soft body. [docs/limits.md#kinematic-drive] has the
+    /// [`BodyError::NotRigidBody`] for a soft body. [docs/limits.md#kinematic-drive] has the
     /// derivation.
     ///
     /// [`limits::MAX_POSITION`]: crate::limits::MAX_POSITION
@@ -241,7 +241,7 @@ impl BodyMut<'_> {
     /// itself, but awake bodies still produce sensor contacts with it, so this does not turn a
     /// sensor off.
     /// [`PhysicsWorld::restore_state`] puts bodies back to sleep or wakes them without
-    /// activation events. Static bodies ignore it; fails with [`BodyError::SoftBody`] for a soft
+    /// activation events. Static bodies ignore it; fails with [`BodyError::NotRigidBody`] for a soft
     /// body.
     ///
     /// [`ActivationEvent::Deactivated`]: crate::ActivationEvent::Deactivated

@@ -90,7 +90,7 @@ impl JobSystemChoice {
                 if (1..=WorldSettings::MAX_CONCURRENCY).contains(&value) {
                     Ok(value)
                 } else {
-                    Err(WorldError::InvalidSettings(
+                    Err(WorldError::InvalidValue(
                         "job system max_concurrency must be between 1 and 65",
                     ))
                 }
@@ -219,7 +219,7 @@ impl WorldSettings {
     }
 
     pub(crate) fn validate(&self) -> Result<(), WorldError> {
-        let invalid = |what| Err(WorldError::InvalidSettings(what));
+        let invalid = |what| Err(WorldError::InvalidValue(what));
         if !(1..=Self::MAX_BODIES_LIMIT).contains(&self.max_bodies) {
             return invalid("max_bodies must be between 1 and 2^23");
         }
@@ -626,7 +626,7 @@ impl PhysicsWorld {
     /// zero is allowed. Sleeping bodies stay asleep.
     pub fn set_gravity(&mut self, gravity: Vec3) -> Result<(), WorldError> {
         if !limits::is_acceleration(gravity) {
-            return Err(WorldError::InvalidSettings(limits::GRAVITY_RULE));
+            return Err(WorldError::InvalidValue(limits::GRAVITY_RULE));
         }
         let gravity = gravity.to_jph();
         // SAFETY: the system is live and borrowed mutably; `gravity` is a live local.

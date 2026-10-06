@@ -279,7 +279,7 @@ impl HeightFieldSettings {
     /// Checks the settings Jolt relies on before it looks at the samples and returns the
     /// padded sample count; `sample_count` is at least 2.
     fn validate_layout(&self, sample_count: u32) -> Result<u64, ShapeError> {
-        let invalid = |what| Err(ShapeError::InvalidSettings(what));
+        let invalid = |what| Err(ShapeError::InvalidValue(what));
         if !(2..=8).contains(&self.block_size) {
             return invalid("block_size must be between 2 and 8");
         }
@@ -305,13 +305,13 @@ impl HeightFieldSettings {
     /// count and the range of the samples that are not holes.
     fn validate_extents(&self, padded: u64, heights: Option<(f32, f32)>) -> Result<(), ShapeError> {
         if !self.offset.is_finite() {
-            return Err(ShapeError::InvalidDimensions(
+            return Err(ShapeError::InvalidValue(
                 "height field offset must be finite",
             ));
         }
         let scale = [self.scale.x, self.scale.y, self.scale.z];
         if !scale.into_iter().all(is_finite_positive) {
-            return Err(ShapeError::InvalidDimensions(
+            return Err(ShapeError::InvalidValue(
                 "height field scale must be finite and positive",
             ));
         }
@@ -319,14 +319,14 @@ impl HeightFieldSettings {
         let far_x = self.offset.x + self.scale.x * last;
         let far_z = self.offset.z + self.scale.z * last;
         if !(far_x.is_finite() && far_z.is_finite()) {
-            return Err(ShapeError::InvalidDimensions(
+            return Err(ShapeError::InvalidValue(
                 "height field extent along x or z must be finite",
             ));
         }
         if let Some((min, max)) = heights {
             let (offset, scale) = (self.offset.y, self.scale.y);
             if !((offset + scale * min).is_finite() && (offset + scale * max).is_finite()) {
-                return Err(ShapeError::InvalidDimensions(
+                return Err(ShapeError::InvalidValue(
                     "height field extent along y must be finite",
                 ));
             }
@@ -364,12 +364,12 @@ fn height_range(samples: &[f32]) -> Option<(f32, f32)> {
 pub(crate) fn validate_box(half_extent: Vec3, convex_radius: f32) -> Result<(), ShapeError> {
     let components = [half_extent.x, half_extent.y, half_extent.z];
     if !components.into_iter().all(is_finite_positive) {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "box half extents must be finite and positive",
         ));
     }
     if !components.into_iter().all(within_extent) {
-        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+        return Err(ShapeError::InvalidValue(BEYOND_EXTENT));
     }
     validate_convex_radius(convex_radius)
 }
@@ -378,7 +378,7 @@ fn validate_convex_radius(convex_radius: f32) -> Result<(), ShapeError> {
     if is_finite_non_negative(convex_radius) {
         Ok(())
     } else {
-        Err(ShapeError::InvalidDimensions(
+        Err(ShapeError::InvalidValue(
             "convex radius must be finite and not negative",
         ))
     }
@@ -387,7 +387,7 @@ fn validate_convex_radius(convex_radius: f32) -> Result<(), ShapeError> {
 /// The checks of [`Shape::new_sphere`].
 pub(crate) fn validate_sphere(radius: f32) -> Result<(), ShapeError> {
     if radius > limits::MAX_SHAPE_EXTENT {
-        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+        return Err(ShapeError::InvalidValue(BEYOND_EXTENT));
     }
     validate_positive_sphere(radius)
 }
@@ -396,7 +396,7 @@ fn validate_positive_sphere(radius: f32) -> Result<(), ShapeError> {
     if is_finite_positive(radius) {
         Ok(())
     } else {
-        Err(ShapeError::InvalidDimensions(
+        Err(ShapeError::InvalidValue(
             "sphere radius must be finite and positive",
         ))
     }
@@ -408,7 +408,7 @@ pub(crate) fn validate_capsule(
     radius: f32,
 ) -> Result<(), ShapeError> {
     if half_height_of_cylinder + radius > limits::MAX_SHAPE_EXTENT {
-        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+        return Err(ShapeError::InvalidValue(BEYOND_EXTENT));
     }
     validate_positive_capsule(half_height_of_cylinder, radius)
 }
@@ -417,7 +417,7 @@ fn validate_positive_capsule(half_height_of_cylinder: f32, radius: f32) -> Resul
     if is_finite_positive(half_height_of_cylinder) && is_finite_positive(radius) {
         Ok(())
     } else {
-        Err(ShapeError::InvalidDimensions(
+        Err(ShapeError::InvalidValue(
             "capsule half height and radius must be finite and positive",
         ))
     }
@@ -430,12 +430,12 @@ pub(crate) fn validate_cylinder(
     convex_radius: f32,
 ) -> Result<(), ShapeError> {
     if !(is_finite_positive(half_height) && is_finite_positive(radius)) {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "cylinder half height and radius must be finite and positive",
         ));
     }
     if !(within_extent(half_height) && within_extent(radius)) {
-        return Err(ShapeError::InvalidDimensions(BEYOND_EXTENT));
+        return Err(ShapeError::InvalidValue(BEYOND_EXTENT));
     }
     validate_convex_radius(convex_radius)
 }
@@ -447,27 +447,23 @@ pub(crate) fn validate_height_field(
     settings: &HeightFieldSettings,
 ) -> Result<(), ShapeError> {
     if sample_count < 2 {
-        return Err(ShapeError::InvalidDimensions(
-            "sample_count must be at least 2",
-        ));
+        return Err(ShapeError::InvalidValue("sample_count must be at least 2"));
     }
     // Jolt divides by the block size before it checks it, so the settings are checked first.
     let padded = settings.validate_layout(sample_count)?;
     let count = sample_count as usize;
     if count.checked_mul(count) != Some(samples.len()) {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "samples must hold sample_count^2 values",
         ));
     }
     if !samples.iter().all(|sample| sample.is_finite()) {
-        return Err(ShapeError::InvalidDimensions(
-            "height samples must be finite",
-        ));
+        return Err(ShapeError::InvalidValue("height samples must be finite"));
     }
     let heights = height_range(samples);
     // Jolt quantises with `65534 / (max - min)`, so the range must be finite too.
     if heights.is_some_and(|(min, max)| !(max - min).is_finite()) {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "height sample range must be finite",
         ));
     }
@@ -615,7 +611,7 @@ impl Shape {
     ///
     /// # Extent
     /// The shape's local bounds must lie within [`limits::MAX_SHAPE_EXTENT`] on every axis;
-    /// otherwise [`ShapeError::InvalidDimensions`] is returned. A field of holes only has empty
+    /// otherwise [`ShapeError::InvalidValue`] is returned. A field of holes only has empty
     /// bounds and passes.
     pub fn new_height_field(
         sample_count: u32,
@@ -684,19 +680,19 @@ impl Shape {
     /// (`StaticCompoundShape.cpp`); oxijolt never changes it after construction.
     ///
     /// Every child position must be finite with each component at most
-    /// [`limits::MAX_SHAPE_EXTENT`] in absolute value ([`ShapeError::InvalidSettings`]), and the
+    /// [`limits::MAX_SHAPE_EXTENT`] in absolute value ([`ShapeError::InvalidValue`]), and the
     /// compound's local bounds must lie within [`limits::MAX_SHAPE_EXTENT`] on every axis
-    /// ([`ShapeError::InvalidDimensions`]). A hierarchy whose sub-shape ids Jolt cannot form
+    /// ([`ShapeError::InvalidValue`]). A hierarchy whose sub-shape ids Jolt cannot form
     /// gives [`ShapeError::Rejected`] when it needs more than 32 bits and
-    /// [`ShapeError::InvalidSettings`] when a one-child compound would start at bit 32. A
+    /// [`ShapeError::InvalidValue`] when a one-child compound would start at bit 32. A
     /// compound of more than [`limits::MAX_EXPANDED_SUB_SHAPES`] shapes, counting a child shared
     /// by several parents at every use, gives [`ShapeError::TooManySubShapes`].
     pub fn new_compound(children: &[CompoundChild<'_>]) -> Result<Self, ShapeError> {
         if children.is_empty() {
-            return Err(ShapeError::InvalidSettings(compound::EMPTY_COMPOUND_RULE));
+            return Err(ShapeError::InvalidValue(compound::EMPTY_COMPOUND_RULE));
         }
         if u32::try_from(children.len()).is_err() {
-            return Err(ShapeError::InvalidSettings(
+            return Err(ShapeError::InvalidValue(
                 "a compound has at most u32::MAX children",
             ));
         }
@@ -734,7 +730,7 @@ impl Shape {
     /// returns `None` for an offset compound.
     pub fn new_offset_center_of_mass(shape: &Shape, offset: Vec3) -> Result<Self, ShapeError> {
         if !limits::is_local_offset(offset) {
-            return Err(ShapeError::InvalidDimensions(
+            return Err(ShapeError::InvalidValue(
                 "centre of mass offset must be finite and within limits::MAX_SHAPE_EXTENT",
             ));
         }
@@ -764,7 +760,7 @@ impl Shape {
         if empty || (limits::is_local_offset(min) && limits::is_local_offset(max)) {
             Ok(self)
         } else {
-            Err(ShapeError::InvalidDimensions(BEYOND_EXTENT))
+            Err(ShapeError::InvalidValue(BEYOND_EXTENT))
         }
     }
 

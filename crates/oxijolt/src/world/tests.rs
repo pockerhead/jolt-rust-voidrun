@@ -99,7 +99,7 @@ fn contact_constraint_capacity_is_bounded() {
     for invalid in [0, WorldSettings::MAX_CONTACT_CONSTRAINTS + 1, u32::MAX] {
         assert!(matches!(
             settings(invalid).validate(),
-            Err(WorldError::InvalidSettings(_))
+            Err(WorldError::InvalidValue(_))
         ));
     }
 }
@@ -115,7 +115,7 @@ fn worker_thread_bounds_are_validated() {
     for invalid in [0, WorldSettings::MAX_WORKER_THREADS + 1, u32::MAX] {
         assert!(matches!(
             WorldSettings::default().worker_threads(invalid).validate(),
-            Err(WorldError::InvalidSettings(_))
+            Err(WorldError::InvalidValue(_))
         ));
     }
 }

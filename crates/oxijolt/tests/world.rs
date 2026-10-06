@@ -57,7 +57,7 @@ fn invalid_settings_are_rejected() {
         assert!(
             matches!(
                 result,
-                Err(WorldError::InvalidSettings(_) | WorldError::InvalidLayers(_))
+                Err(WorldError::InvalidValue(_) | WorldError::InvalidLayers(_))
             ),
             "{settings:?} was accepted"
         );

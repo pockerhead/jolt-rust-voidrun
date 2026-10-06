@@ -825,7 +825,7 @@ fn invalid_rebase_changes_nothing() {
     let gravity = world.gravity();
     assert!(matches!(
         world.set_gravity(Vec3::new(f32::MAX, f32::MAX, 0.0)),
-        Err(WorldError::InvalidSettings(_))
+        Err(WorldError::InvalidValue(_))
     ));
     let bits = |v: Vec3| <[f32; 3]>::from(v).map(f32::to_bits);
     assert_eq!(bits(world.gravity()), bits(gravity));

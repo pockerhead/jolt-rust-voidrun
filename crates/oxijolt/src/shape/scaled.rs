@@ -13,8 +13,8 @@ impl Shape {
     /// `shape` scaled by `scale` along its local axes, a Jolt `ScaledShape`. The new shape holds
     /// its own reference to `shape`, which may be dropped afterwards.
     ///
-    /// Each component must be finite ([`ShapeError::InvalidDimensions`]) and the scale valid for
-    /// the shape under Jolt's rules ([`ShapeError::InvalidSettings`]): every component at least
+    /// Each component must be finite ([`ShapeError::InvalidValue`]) and the scale valid for
+    /// the shape under Jolt's rules ([`ShapeError::InvalidValue`]): every component at least
     /// 1e-6 in absolute value; uniform for spheres, capsules and tapered capsules; uniform in X
     /// and Z for cylinders and tapered cylinders; for a compound, uniform unless every rotated
     /// child is turned so the scale maps onto its own axes. Negative components mirror the
@@ -31,7 +31,7 @@ impl Shape {
     ///
     /// The scaled shape's local bounds must lie within [`limits::MAX_SHAPE_EXTENT`] on every
     /// axis, and so must its centre of mass, which moves with the scale
-    /// ([`ShapeError::InvalidDimensions`]). Mass and inertia scale with the shape; a body made
+    /// ([`ShapeError::InvalidValue`]). Mass and inertia scale with the shape; a body made
     /// of it goes through the usual mass and inertia checks of
     /// [`PhysicsWorld::create_body`](crate::PhysicsWorld::create_body). A shape that only
     /// static bodies may use stays static-only, and a scaled mesh stays usable by kinematic
@@ -43,14 +43,14 @@ impl Shape {
     pub fn scaled(shape: &Shape, scale: Vec3) -> Result<Self, ShapeError> {
         // Jolt's own check lets NaN and infinity through (`ScaleHelpers::IsZeroScale`).
         if !scale.is_finite() {
-            return Err(ShapeError::InvalidDimensions("scale must be finite"));
+            return Err(ShapeError::InvalidValue("scale must be finite"));
         }
         initialize()?;
         let jolt_scale = scale.to_jph();
         // SAFETY: `shape` is live for the call and `jolt_scale` is a live local; the check only
         // reads them.
         if !unsafe { JPH_Shape_IsValidScale(shape.as_ptr(), &jolt_scale) } {
-            return Err(ShapeError::InvalidSettings(
+            return Err(ShapeError::InvalidValue(
                 "scale is not valid for this shape",
             ));
         }
@@ -66,7 +66,7 @@ impl Shape {
         let scaled = settings.create()?.within_extent_bounds()?;
         // Bounds are relative to the centre of mass, which the scale moves too.
         if !limits::is_local_offset(scaled.center_of_mass()) {
-            return Err(ShapeError::InvalidDimensions(
+            return Err(ShapeError::InvalidValue(
                 "scaled centre of mass must lie within limits::MAX_SHAPE_EXTENT",
             ));
         }
@@ -91,7 +91,7 @@ type Placement = M3;
 /// already quantized), against convex shapes up to the extent each mesh was built for.
 fn check_scaled_triangles(shape: &Shape, scale: Vec3) -> Result<(), ShapeError> {
     let Some(leaves) = triangle_leaves(shape, scale) else {
-        return Err(ShapeError::InvalidSettings(
+        return Err(ShapeError::InvalidValue(
             "scale cannot be checked for this shape",
         ));
     };

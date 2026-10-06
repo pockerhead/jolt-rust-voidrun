@@ -377,7 +377,7 @@ fn invalid_tracked_vehicles_create_nothing() {
         (restricted, BodyError::RestrictedDofs(restricted)),
         (inner, BodyError::OwnedByCharacter(inner)),
         (part, BodyError::OwnedByRagdoll(part)),
-        (cloth, BodyError::SoftBody(cloth)),
+        (cloth, BodyError::NotRigidBody(cloth)),
     ];
     for (body, error) in body_refusals {
         assert_eq!(

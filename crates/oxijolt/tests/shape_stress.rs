@@ -548,17 +548,19 @@ fn cloud(rng: &mut Rng, kind: Cloud) -> Vec<Vec3> {
 }
 
 /// The outcome the hull rules define for `kind`, when they define one.
-fn expected_hull_error(kind: Cloud, points: &[Vec3]) -> Option<&'static [HullError]> {
+fn expected_hull_error(kind: Cloud, points: &[Vec3]) -> Option<&'static [ConvexHullError]> {
     let within = points.iter().all(|p| {
         [p.x, p.y, p.z]
             .iter()
             .all(|c| c.abs() <= limits::MAX_SHAPE_EXTENT)
     });
     match kind {
-        Cloud::TooFew => Some(&[HullError::TooFewPoints]),
-        Cloud::ExactLine if within => Some(&[HullError::Degenerate]),
+        Cloud::TooFew => Some(&[ConvexHullError::TooFewPoints]),
+        Cloud::ExactLine if within => Some(&[ConvexHullError::Degenerate]),
         // A tiny plane is also smaller than Jolt's minimum initial triangle.
-        Cloud::ExactPlane if within => Some(&[HullError::Coplanar, HullError::Degenerate]),
+        Cloud::ExactPlane if within => {
+            Some(&[ConvexHullError::Coplanar, ConvexHullError::Degenerate])
+        }
         _ => None,
     }
 }

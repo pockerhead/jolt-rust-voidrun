@@ -17,11 +17,11 @@ fn quad() -> (Vec<Vec3>, Vec<[u32; 3]>) {
 }
 
 fn invalid_settings<T>(result: Result<T, ShapeError>) -> bool {
-    matches!(result, Err(ShapeError::InvalidSettings(_)))
+    matches!(result, Err(ShapeError::InvalidValue(_)))
 }
 
 fn invalid_dimensions<T>(result: Result<T, ShapeError>) -> bool {
-    matches!(result, Err(ShapeError::InvalidDimensions(_)))
+    matches!(result, Err(ShapeError::InvalidValue(_)))
 }
 
 fn no_triangles<T>(result: Result<T, ShapeError>) -> bool {

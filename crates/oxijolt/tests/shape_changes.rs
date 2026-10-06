@@ -476,7 +476,7 @@ fn set_shape_refuses_owned_bodies() {
     for (id, error) in [
         (part, BodyError::OwnedByRagdoll(part)),
         (inner, BodyError::OwnedByCharacter(inner)),
-        (cloth, BodyError::SoftBody(cloth)),
+        (cloth, BodyError::NotRigidBody(cloth)),
     ] {
         assert_eq!(
             world

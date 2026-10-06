@@ -301,7 +301,7 @@ fn invalid_height_fields_are_rejected() {
     for (count, samples, settings) in dimension_cases {
         let result = Shape::new_height_field(count, &samples, &settings);
         assert!(
-            matches!(result, Err(ShapeError::InvalidDimensions(_))),
+            matches!(result, Err(ShapeError::InvalidValue(_))),
             "n = {count}, {settings:?}"
         );
     }
@@ -332,7 +332,7 @@ fn invalid_height_fields_are_rejected() {
     for (count, samples, settings) in settings_cases {
         let result = Shape::new_height_field(count, &samples, &settings);
         assert!(
-            matches!(result, Err(ShapeError::InvalidSettings(_))),
+            matches!(result, Err(ShapeError::InvalidValue(_))),
             "n = {count}, {settings:?}"
         );
     }
@@ -714,7 +714,7 @@ fn empty_or_invalid_compounds_are_rejected() {
         )]),
     ];
     for result in invalid {
-        assert!(matches!(result, Err(ShapeError::InvalidSettings(_))));
+        assert!(matches!(result, Err(ShapeError::InvalidValue(_))));
     }
 }
 
@@ -936,7 +936,7 @@ fn height_field_material_lists_are_validated() {
         )
         .err()
     };
-    let invalid = |error: Option<ShapeError>| matches!(error, Some(ShapeError::InvalidSettings(_)));
+    let invalid = |error: Option<ShapeError>| matches!(error, Some(ShapeError::InvalidValue(_)));
     assert!(invalid(field(&[], &[0; 4])), "no material");
     assert!(invalid(field(&refs, &[0; 4])), "257 materials");
     assert_eq!(field(&refs[..256], &[255, 0, 0, 0]), None, "256 materials");
@@ -953,7 +953,7 @@ fn height_field_material_lists_are_validated() {
         &[],
     )
     .err();
-    assert!(matches!(error, Some(ShapeError::InvalidDimensions(_))));
+    assert!(matches!(error, Some(ShapeError::InvalidValue(_))));
 }
 
 #[test]

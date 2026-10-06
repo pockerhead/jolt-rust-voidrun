@@ -127,7 +127,7 @@ impl BodyMut<'_> {
     /// angular drag the spin by at most the spin, so a current takes a few steps to catch a
     /// slow body; only a body exactly at rest, as in zero gravity, stays put.
     ///
-    /// Fails with [`BodyError::SoftBody`] for a soft body and with [`BodyError::InvalidValue`],
+    /// Fails with [`BodyError::NotRigidBody`] for a soft body and with [`BodyError::InvalidValue`],
     /// changing nothing, when `settings`, `gravity` (at most [`limits::MAX_ACCELERATION`] long)
     /// or `delta_time` (within the bounds of [`PhysicsWorld::step`]) is out of range, when the
     /// buoyant velocity change `buoyancy · submerged / total volume · |gravity factor| ·

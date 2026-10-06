@@ -544,7 +544,7 @@ fn commits_follow_the_body_rules_of_set_shape() {
             None,
             Activation::Activate
         ),
-        Err(BodyError::SoftBody(cloth))
+        Err(BodyError::NotRigidBody(cloth))
     );
     let capsule = Shape::new_capsule(0.7, 0.4).unwrap();
     let character = world
@@ -598,7 +598,7 @@ fn editing_and_publishing_do_not_touch_the_world() {
         .unwrap();
     assert!(matches!(
         editor.to_shape(),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
     world.restore_state(&saved).unwrap();
 
@@ -769,7 +769,7 @@ fn a_committed_shape_nests_and_scales() {
     .unwrap();
     assert!(matches!(
         Shape::scaled(&turned, Vec3::new(2.0, 1.0, 1.0)),
-        Err(ShapeError::InvalidSettings(_))
+        Err(ShapeError::InvalidValue(_))
     ));
 
     // Nested past 32 bits: a two-child publication is 1 bit wide and Jolt refuses 33.
@@ -795,7 +795,7 @@ fn a_committed_shape_nests_and_scales() {
             nested = next.unwrap();
         } else {
             assert!(
-                matches!(next, Err(ShapeError::InvalidSettings(_))),
+                matches!(next, Err(ShapeError::InvalidValue(_))),
                 "{:?}",
                 next.err()
             );

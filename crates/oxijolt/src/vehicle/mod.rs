@@ -226,7 +226,7 @@ impl PhysicsWorld {
         // A vehicle is a constraint, and Jolt's constraints cannot operate on soft bodies
         // (`Docs/Architecture.md:462`).
         if self.body(body).map_err(VehicleError::Body)?.is_soft_body() {
-            return Err(VehicleError::Body(BodyError::SoftBody(body)));
+            return Err(VehicleError::Body(BodyError::NotRigidBody(body)));
         }
         if self.body(body).map_err(VehicleError::Body)?.motion_type() != MotionType::Dynamic {
             return Err(VehicleError::NotDynamic(body));

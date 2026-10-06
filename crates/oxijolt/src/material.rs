@@ -196,7 +196,7 @@ impl Shape {
     /// caller's `(n - 1)^2` cells, and the cells Jolt adds for padding (see [`new_height_field`]
     /// under "Block size") get material 0. All rules of [`new_height_field`] apply, and
     /// `materials` must hold 1 to 256 materials and every index must name one of them
-    /// ([`ShapeError::InvalidSettings`]). The shape holds its own reference to each material.
+    /// ([`ShapeError::InvalidValue`]). The shape holds its own reference to each material.
     ///
     /// [`new_height_field`]: Self::new_height_field
     pub fn new_height_field_with_materials(
@@ -208,13 +208,13 @@ impl Shape {
     ) -> Result<Self, ShapeError> {
         validate_height_field(sample_count, samples, settings)?;
         if !(1..=MAX_HEIGHT_FIELD_MATERIALS).contains(&materials.len()) {
-            return Err(ShapeError::InvalidSettings(
+            return Err(ShapeError::InvalidValue(
                 "material list must hold 1 to 256 materials",
             ));
         }
         let cells = (sample_count as usize - 1).checked_mul(sample_count as usize - 1);
         if cells != Some(material_indices.len()) {
-            return Err(ShapeError::InvalidSettings(
+            return Err(ShapeError::InvalidValue(
                 "material indices must hold (sample_count - 1)^2 values",
             ));
         }
@@ -222,7 +222,7 @@ impl Shape {
             .iter()
             .any(|&index| usize::from(index) >= materials.len())
         {
-            return Err(ShapeError::InvalidSettings(
+            return Err(ShapeError::InvalidValue(
                 "material indices must name a material of the list",
             ));
         }
@@ -343,7 +343,7 @@ mod tests {
         ];
         for error in errors {
             assert!(
-                matches!(error, Some(ShapeError::InvalidDimensions(_))),
+                matches!(error, Some(ShapeError::InvalidValue(_))),
                 "{error:?}"
             );
         }

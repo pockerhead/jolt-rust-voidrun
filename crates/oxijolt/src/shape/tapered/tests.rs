@@ -6,7 +6,7 @@ use crate::Vec3;
 const TAPERED_CYLINDER: i64 = 32;
 
 fn dimensions(result: Result<Shape, ShapeError>) -> bool {
-    matches!(result, Err(ShapeError::InvalidDimensions(_)))
+    matches!(result, Err(ShapeError::InvalidValue(_)))
 }
 
 #[test]
@@ -118,12 +118,12 @@ fn tapered_shapes_follow_jolts_scale_rules() {
     assert!(Shape::scaled(&capsule, Vec3::new(2.0, 2.0, -2.0)).is_ok());
     assert!(matches!(
         Shape::scaled(&capsule, Vec3::new(1.0, 2.0, 1.0)),
-        Err(ShapeError::InvalidSettings(_))
+        Err(ShapeError::InvalidValue(_))
     ));
     let cylinder = Shape::new_tapered_cylinder(0.5, 0.2, 0.4, 0.0).unwrap();
     assert!(Shape::scaled(&cylinder, Vec3::new(2.0, 3.0, 2.0)).is_ok());
     assert!(matches!(
         Shape::scaled(&cylinder, Vec3::new(2.0, 1.0, 1.0)),
-        Err(ShapeError::InvalidSettings(_))
+        Err(ShapeError::InvalidValue(_))
     ));
 }

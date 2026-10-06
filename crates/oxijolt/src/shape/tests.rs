@@ -22,7 +22,7 @@ fn offset_center_of_mass_moves_only_the_center() {
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
         assert!(matches!(
             Shape::new_offset_center_of_mass(&unit_box(), Vec3::new(0.0, bad, 0.0)),
-            Err(ShapeError::InvalidDimensions(_))
+            Err(ShapeError::InvalidValue(_))
         ));
     }
     let terrain = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
@@ -33,7 +33,7 @@ fn offset_center_of_mass_moves_only_the_center() {
 #[test]
 fn invalid_dimensions_are_rejected() {
     let invalid =
-        |result: Result<Shape, ShapeError>| matches!(result, Err(ShapeError::InvalidDimensions(_)));
+        |result: Result<Shape, ShapeError>| matches!(result, Err(ShapeError::InvalidValue(_)));
     for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
         assert!(invalid(Shape::new_box(Vec3::new(1.0, bad, 1.0))));
         assert!(invalid(Shape::new_sphere(bad)));
@@ -58,7 +58,7 @@ fn invalid_dimensions_are_rejected() {
 #[test]
 fn primitive_extents_are_bounded() {
     let invalid =
-        |result: Result<Shape, ShapeError>| matches!(result, Err(ShapeError::InvalidDimensions(_)));
+        |result: Result<Shape, ShapeError>| matches!(result, Err(ShapeError::InvalidValue(_)));
     let bound = limits::MAX_SHAPE_EXTENT;
     let beyond = bound.next_up();
     assert!(Shape::new_box(Vec3::new(1.0, bound, 1.0)).is_ok());
@@ -83,7 +83,7 @@ fn decorated_and_compound_extents_are_bounded() {
     assert!(Shape::new_offset_center_of_mass(&unit_box, edge).is_ok());
     assert!(matches!(
         Shape::new_offset_center_of_mass(&unit_box, Vec3::new(0.0, bound, 0.0)),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
     let large = Shape::new_box(Vec3::new(bound, 1.0, 1.0)).unwrap();
     let centred = [child(&large, 0.0, 1), child(&large, 0.0, 2)];
@@ -91,12 +91,12 @@ fn decorated_and_compound_extents_are_bounded() {
     let beside = [child(&large, 0.0, 1), child(&large, 2.0, 2)];
     assert!(matches!(
         Shape::new_compound(&beside),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
     let far = [child(&unit_box, bound.next_up(), 1)];
     assert!(matches!(
         Shape::new_compound(&far),
-        Err(ShapeError::InvalidSettings(_))
+        Err(ShapeError::InvalidValue(_))
     ));
 }
 
@@ -315,7 +315,7 @@ pub(super) fn id_bits(shape: &Shape) -> u32 {
 fn a_one_child_compound_at_bit_32_is_refused() {
     let cube = unit_box();
     let single = || Shape::new_compound(&[child(&cube, 0.0, 7)]).unwrap();
-    let refused = Err((32, ShapeError::InvalidSettings(compound::SUB_SHAPE_ID_RULE)));
+    let refused = Err((32, ShapeError::InvalidValue(compound::SUB_SHAPE_ID_RULE)));
 
     let at_31 = nested_pairs(single(), 31).unwrap();
     assert_eq!(id_bits(&at_31), 31);

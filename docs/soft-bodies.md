@@ -103,11 +103,11 @@ changes nothing when it fails, and wakes the body when it succeeds:
 ## What a soft body refuses
 
 - `BodyMut::set_linear_velocity`, `set_angular_velocity` and `add_torque`: Jolt keeps velocities per
-  vertex and ignores these for a soft body (`BodyError::SoftBody`).
+  vertex and ignores these for a soft body (`BodyError::NotRigidBody`).
 - `BodyMut::add_force_at_point`: Jolt applies the force at the centre but also adds its torque,
   which a soft body never clears.
 - Constraints and vehicles: Jolt's constraints cannot operate on soft bodies
-  (`ConstraintError::Body(BodyError::SoftBody)`); pin a vertex and move it instead.
+  (`ConstraintError::Body(BodyError::NotRigidBody)`); pin a vertex and move it instead.
 - Wheels look through soft bodies: Jolt's vehicle constraint solves the body under a wheel as a
   rigid body, so the wheel collision testers report only the rigid ground below.
 - Soft bodies collide with rigid bodies, not with each other; Jolt does not implement that.

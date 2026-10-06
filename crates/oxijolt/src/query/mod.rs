@@ -138,8 +138,10 @@ impl PhysicsWorld {
     /// face.
     ///
     /// The origin must be finite with every component at most [`limits::MAX_POSITION`] in
-    /// absolute value, the direction finite and not zero, and the filter valid for this world;
-    /// otherwise [`QueryError::InvalidValue`] is returned.
+    /// absolute value and the direction finite and not zero; otherwise
+    /// [`QueryError::InvalidValue`] is returned.
+    /// A filter that names an object layer this world does not have, or a body of another
+    /// world, gives [`QueryError::UnknownObjectLayer`] or [`QueryError::WrongWorld`].
     pub fn cast_ray(
         &self,
         ray: RayCast,
@@ -211,7 +213,7 @@ impl PhysicsWorld {
                 let layer = unsafe { JPH_Body_GetObjectLayer(locked.as_ptr()) };
                 (Vec3::from_jph(normal), ObjectLayer::new(layer))
             })
-            .ok_or(QueryError::InvalidValue("the hit body could not be read"))?;
+            .ok_or(QueryError::AllocationFailed)?;
         let sub_shape_id = SubShapeId::new(hit.subShapeID2);
         Ok(Some(RayHit {
             body,

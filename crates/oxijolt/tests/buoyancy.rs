@@ -348,7 +348,7 @@ fn only_submerged_dynamic_bodies_are_pushed() {
     }
     assert_eq!(
         buoy(&mut world, cloth, &surface, GRAVITY),
-        Err(BodyError::SoftBody(cloth))
+        Err(BodyError::NotRigidBody(cloth))
     );
     world.take_events();
 

@@ -316,7 +316,7 @@ fn motion_type_changes_refuse_owned_bodies() {
     for (id, error) in [
         (part, BodyError::OwnedByRagdoll(part)),
         (inner, BodyError::OwnedByCharacter(inner)),
-        (cloth, BodyError::SoftBody(cloth)),
+        (cloth, BodyError::NotRigidBody(cloth)),
     ] {
         for motion_type in [
             MotionType::Static,

@@ -109,11 +109,11 @@ fn world_gravity_is_bounded_by_max_acceleration() {
     for gravity in beyond {
         assert!(matches!(
             PhysicsWorld::new(WorldSettings::default().gravity(gravity)),
-            Err(WorldError::InvalidSettings(_))
+            Err(WorldError::InvalidValue(_))
         ));
         assert!(matches!(
             world.set_gravity(gravity),
-            Err(WorldError::InvalidSettings(_))
+            Err(WorldError::InvalidValue(_))
         ));
         assert_eq!(bits(world.gravity()), before);
     }
@@ -706,11 +706,11 @@ fn height_field_extent_is_bounded() {
     assert!(field(-1999.0, 1333.0).is_ok());
     assert!(matches!(
         field(-1999.0, 1333.0f32.next_up()),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
     assert!(matches!(
         field(-extent.next_up(), 1.0),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
 }
 

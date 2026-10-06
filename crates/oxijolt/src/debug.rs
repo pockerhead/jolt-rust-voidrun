@@ -147,7 +147,8 @@ impl PhysicsWorld {
     /// # Errors
     /// [`QueryError::InvalidValue`] when the center is not finite or not within
     /// [`limits::MAX_POSITION`](crate::limits::MAX_POSITION), the radius is negative, not finite
-    /// or above twice that bound, or `filter` names a layer or body of another world.
+    /// or above twice that bound. [`QueryError::UnknownObjectLayer`] or [`QueryError::WrongWorld`]
+    /// when `filter` names an object layer this world does not have or a body of another world.
     pub fn debug_lines(
         &self,
         settings: &DebugLineSettings,
@@ -427,9 +428,8 @@ fn create_renderer(state: &DrawState<'_>) -> Result<Owned<JPH_DebugRenderer>, Qu
     let user_data = (state as *const DrawState<'_>).cast_mut().cast::<c_void>();
     // SAFETY: joltc `new`s a renderer that only stores `user_data` and that the handle owns
     // entirely; the caller keeps `state` alive until the handle is dropped.
-    unsafe { Owned::from_raw(JPH_DebugRenderer_Create(user_data)) }.ok_or(QueryError::InvalidValue(
-        "could not create a debug renderer",
-    ))
+    unsafe { Owned::from_raw(JPH_DebugRenderer_Create(user_data)) }
+        .ok_or(QueryError::AllocationFailed)
 }
 
 /// What the `DrawLine` callback of one [`PhysicsWorld::debug_lines`] call needs, on the stack of

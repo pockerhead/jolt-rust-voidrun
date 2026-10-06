@@ -185,7 +185,7 @@ fn edit(
             let ids_fit = !(holds(model, deep) || (shape == deep && len >= 1));
             if !valid_pose || !ids_fit {
                 assert!(
-                    matches!(result, Err(ShapeError::InvalidSettings(_))),
+                    matches!(result, Err(ShapeError::InvalidValue(_))),
                     "{what}: add {result:?}"
                 );
             } else {
@@ -218,7 +218,7 @@ fn edit(
                 );
             } else if !valid_pose || (replace && shape == deep && len >= 2) {
                 assert!(
-                    matches!(result, Err(ShapeError::InvalidSettings(_))),
+                    matches!(result, Err(ShapeError::InvalidValue(_))),
                     "{what}: modify {result:?}"
                 );
             } else {
@@ -366,9 +366,9 @@ pub fn mutable_family(arena: &mut Arena) {
         }
         let published = match editor.to_shape() {
             Ok(shape) => shape,
-            Err(ShapeError::InvalidSettings(_)) if model.is_empty() => continue,
+            Err(ShapeError::InvalidValue(_)) if model.is_empty() => continue,
             // A child at the extent edge can end up beyond it once the centre of mass moves.
-            Err(ShapeError::InvalidDimensions(_)) => continue,
+            Err(ShapeError::InvalidValue(_)) => continue,
             Err(error) => panic!("{what}: to_shape {error}"),
         };
         published_count += 1;

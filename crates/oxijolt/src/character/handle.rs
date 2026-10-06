@@ -317,6 +317,9 @@ impl CharacterMut<'_> {
     /// before stay alive until the character's next update, refresh or removal
     /// ([`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) releases them at
     /// once).
+    ///
+    /// # Errors
+    /// [`CharacterError::RestoreFailed`] when Jolt could not read the state.
     pub fn restore_state(&mut self, state: &CharacterState) -> Result<(), CharacterError> {
         // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
         let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
@@ -345,9 +348,7 @@ impl CharacterMut<'_> {
         };
         debug_assert!(!failed, "a saved character state failed to restore");
         if failed {
-            return Err(CharacterError::InvalidValue(
-                "character state stream failed",
-            ));
+            return Err(CharacterError::RestoreFailed);
         }
         Ok(())
     }

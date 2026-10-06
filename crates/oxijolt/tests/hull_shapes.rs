@@ -82,7 +82,7 @@ fn needles_too_thin_for_the_hull_builder_are_degenerate() {
         .collect();
     assert!(matches!(
         Shape::new_convex_hull(&points, 0.0),
-        Err(ShapeError::ConvexHull(HullError::Degenerate))
+        Err(ShapeError::ConvexHull(ConvexHullError::Degenerate))
     ));
 }
 

@@ -395,7 +395,7 @@ impl PhysicsWorld {
     ///
     /// Fails with [`ConstraintError::InvalidValue`] when a setting or a lever-arm ratio is out of
     /// range, with [`ConstraintError::NotDynamic`] as above, with
-    /// [`ConstraintError::Body`]`(`[`BodyError::SoftBody`]`)` for a soft body (Jolt's constraints
+    /// [`ConstraintError::Body`]`(`[`BodyError::NotRigidBody`]`)` for a soft body (Jolt's constraints
     /// cannot operate on soft bodies; pin a vertex and move it instead), with
     /// [`ConstraintError::NotFound`] or [`ConstraintError::WrongWorld`] for a referenced
     /// constraint that is not in this world, and with [`ConstraintError::TooManyConstraints`]
@@ -468,7 +468,7 @@ impl PhysicsWorld {
                 .map_err(ConstraintError::Body)?
                 .is_soft_body()
             {
-                return Err(ConstraintError::Body(BodyError::SoftBody(body)));
+                return Err(ConstraintError::Body(BodyError::NotRigidBody(body)));
             }
             // The lever-arm and spring checks below assume unmasked inverse mass and inertia.
             let allowed_dofs = self

@@ -40,7 +40,7 @@ fn plane_inputs_are_validated() {
         assert!(
             matches!(
                 Shape::new_plane(normal, constant, half_extent),
-                Err(ShapeError::InvalidDimensions(_))
+                Err(ShapeError::InvalidValue(_))
             ),
             "{normal:?} {constant} {half_extent}"
         );
@@ -54,7 +54,7 @@ fn plane_inputs_are_validated() {
         assert!(
             matches!(
                 Shape::new_plane(normal, 0.0, 1.0),
-                Err(ShapeError::InvalidSettings(_))
+                Err(ShapeError::InvalidValue(_))
             ),
             "{normal:?}"
         );
@@ -62,7 +62,7 @@ fn plane_inputs_are_validated() {
     let material = PhysicsMaterial::new(7).unwrap();
     assert!(matches!(
         Shape::new_plane_with_material(UP, 0.0, 0.0, &material),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
 
     // The plane at y = 1 with a half extent of 2000 m reaches down to y = -1999; the bounds
@@ -71,7 +71,7 @@ fn plane_inputs_are_validated() {
     Shape::new_plane(Vec3::new(0.0, -1.0, 0.0), 1.0, 1999.0).unwrap();
     assert!(matches!(
         Shape::new_plane(Vec3::new(0.0, -1.0, 0.0), 1.0, 2000.0),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
 }
 
@@ -85,7 +85,7 @@ fn a_tilted_plane_is_checked_against_jolts_bounds() {
     Shape::new_plane(normal, 0.0, largest * (1.0 - 1.0e-5)).unwrap();
     assert!(matches!(
         Shape::new_plane(normal, 0.0, largest * (1.0 + 1.0e-5)),
-        Err(ShapeError::InvalidDimensions(_))
+        Err(ShapeError::InvalidValue(_))
     ));
 }
 
@@ -158,7 +158,7 @@ fn planes_are_refused_where_shapes_must_move_or_query() {
     let plane = ground(10.0);
     assert!(matches!(
         Shape::scaled(&plane, Vec3::new(2.0, 2.0, 2.0)),
-        Err(ShapeError::InvalidSettings(_))
+        Err(ShapeError::InvalidValue(_))
     ));
 
     let capsule = Shape::new_capsule(0.5, 0.3).unwrap();

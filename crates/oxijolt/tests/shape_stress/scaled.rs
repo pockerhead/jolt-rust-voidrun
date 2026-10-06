@@ -191,7 +191,7 @@ pub fn scaled_family(arena: &mut Arena) {
         let result = Shape::scaled(&base.shape, scale);
         if refused_by_kind(base.name, scale) {
             assert!(
-                matches!(result, Err(ShapeError::InvalidSettings(_))),
+                matches!(result, Err(ShapeError::InvalidValue(_))),
                 "{what}: {:?}",
                 result.err()
             );

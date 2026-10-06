@@ -11,17 +11,17 @@ use crate::{limits, PhysicsMaterial, ShapeError, Vec3};
 /// The checks of [`Shape::new_plane`] that come before Jolt's bounds.
 fn validate_plane(normal: Vec3, constant: f32, half_extent: f32) -> Result<(), ShapeError> {
     if !is_unit(normal) {
-        return Err(ShapeError::InvalidSettings(
+        return Err(ShapeError::InvalidValue(
             "plane normal must be a finite unit vector",
         ));
     }
     if !(constant.is_finite() && constant.abs() <= limits::MAX_SHAPE_EXTENT) {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "plane constant must be finite and within limits::MAX_SHAPE_EXTENT",
         ));
     }
     if !(half_extent > 0.0 && half_extent <= limits::MAX_SHAPE_EXTENT) {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "plane half extent must be positive and within limits::MAX_SHAPE_EXTENT",
         ));
     }
@@ -49,8 +49,8 @@ impl Shape {
     /// `normal` must be a finite unit vector, `constant` finite and at most
     /// [`limits::MAX_SHAPE_EXTENT`] in absolute value, `half_extent` positive and at most
     /// [`limits::MAX_SHAPE_EXTENT`], and the bounds within [`limits::MAX_SHAPE_EXTENT`] on
-    /// every axis; otherwise [`ShapeError::InvalidDimensions`] or, for the normal,
-    /// [`ShapeError::InvalidSettings`]. For a normal along an axis the bounds reach
+    /// every axis; otherwise [`ShapeError::InvalidValue`] or, for the normal,
+    /// [`ShapeError::InvalidValue`]. For a normal along an axis the bounds reach
     /// `max(|constant|, |constant + half_extent|)` along it: with normal +Y a half extent of
     /// 2000 m fits for `constant = -1` (plane at y = 1) but not for `constant = 1`.
     ///

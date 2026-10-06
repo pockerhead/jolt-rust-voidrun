@@ -97,8 +97,10 @@ impl PhysicsWorld {
     /// the parity of its faces above the point. Child groups of the filter apply when
     /// the body's shape is a compound; a compound inside a decorator is not filtered by child.
     ///
-    /// The point must be finite and within [`limits::MAX_POSITION`], and the filter valid for
-    /// this world; otherwise [`QueryError::InvalidValue`] is returned.
+    /// The point must be finite and within [`limits::MAX_POSITION`]; otherwise
+    /// [`QueryError::InvalidValue`] is returned.
+    /// A filter that names an object layer this world does not have, or a body of another
+    /// world, gives [`QueryError::UnknownObjectLayer`] or [`QueryError::WrongWorld`].
     pub fn collide_point(
         &self,
         point: RVec3,

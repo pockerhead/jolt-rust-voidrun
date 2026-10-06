@@ -306,15 +306,14 @@ fn filter_rejects_unknown_layer_and_foreign_body() {
     let foreign = add_floor(&mut other);
     let ray = down_from(0.0, 5.0, 0.0, 10.0);
     let unknown = [ObjectLayer::new(5)];
-    for filter in [
-        QueryFilter::new().object_layers(&unknown),
-        QueryFilter::new().exclude_body(foreign),
-    ] {
-        assert!(matches!(
-            world.cast_ray(ray, &filter),
-            Err(QueryError::InvalidValue(_))
-        ));
-    }
+    assert_eq!(
+        world.cast_ray(ray, &QueryFilter::new().object_layers(&unknown)),
+        Err(QueryError::UnknownObjectLayer(unknown[0]))
+    );
+    assert_eq!(
+        world.cast_ray(ray, &QueryFilter::new().exclude_body(foreign)),
+        Err(QueryError::WrongWorld(foreign))
+    );
 }
 
 #[test]

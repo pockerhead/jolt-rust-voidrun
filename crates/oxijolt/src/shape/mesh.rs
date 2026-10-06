@@ -129,7 +129,7 @@ impl<'a> MeshSettings<'a> {
 
     /// Checks everything but the geometry against `triangle_count`.
     fn validate(&self, triangle_count: usize) -> Result<(), ShapeError> {
-        let invalid = |what| Err(ShapeError::InvalidSettings(what));
+        let invalid = |what| Err(ShapeError::InvalidValue(what));
         let threshold = self.active_edge_cos_threshold_angle;
         if !(threshold.is_finite() && (-1.0..=1.0).contains(&threshold)) {
             return invalid("active_edge_cos_threshold_angle must be between -1 and 1");
@@ -168,12 +168,12 @@ fn mesh_counts_fit(vertices: usize, triangles: usize) -> bool {
 /// The geometry checks of [`Shape::new_mesh_with_settings`].
 fn validate_geometry(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Result<(), ShapeError> {
     if vertices.is_empty() || triangles.is_empty() {
-        return Err(ShapeError::InvalidSettings(
+        return Err(ShapeError::InvalidValue(
             "a mesh needs vertices and triangles",
         ));
     }
     if !mesh_counts_fit(vertices.len(), triangles.len()) {
-        return Err(ShapeError::InvalidSettings(
+        return Err(ShapeError::InvalidValue(
             "a mesh has at most i32::MAX vertices and triangles",
         ));
     }
@@ -181,7 +181,7 @@ fn validate_geometry(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Result<(), Sh
         .iter()
         .all(|&vertex| limits::is_local_offset(vertex))
     {
-        return Err(ShapeError::InvalidDimensions(
+        return Err(ShapeError::InvalidValue(
             "mesh vertices must be finite and within limits::MAX_SHAPE_EXTENT",
         ));
     }
@@ -191,7 +191,7 @@ fn validate_geometry(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Result<(), Sh
         .flatten()
         .any(|&index| index as usize >= vertices.len())
     {
-        return Err(ShapeError::InvalidSettings(
+        return Err(ShapeError::InvalidValue(
             "triangle index beyond the vertex list",
         ));
     }
@@ -276,9 +276,9 @@ impl Shape {
     /// dynamic bodies.
     ///
     /// # Errors
-    /// - [`ShapeError::InvalidSettings`]: no vertices or no triangles, more than `i32::MAX` of
+    /// - [`ShapeError::InvalidValue`]: no vertices or no triangles, more than `i32::MAX` of
     ///   either, an index beyond `vertices`, or a setting out of range (see [`MeshSettings`]);
-    /// - [`ShapeError::InvalidDimensions`]: a vertex (referenced or not) that is not finite or
+    /// - [`ShapeError::InvalidValue`]: a vertex (referenced or not) that is not finite or
     ///   has a component beyond [`limits::MAX_SHAPE_EXTENT`] in absolute value;
     /// - [`ShapeError::Mesh`]: no triangle is left after dropping small, thin and degenerate
     ///   ones;

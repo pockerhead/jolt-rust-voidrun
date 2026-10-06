@@ -208,7 +208,7 @@ fn invalid_settings_and_poses_are_rejected_without_side_effects() {
             &extended,
             &QueryFilter::new().object_layers(&unknown)
         ),
-        Err(CharacterError::InvalidValue(_))
+        Err(CharacterError::Query(QueryError::UnknownObjectLayer(_)))
     ));
     let mut character = world.character_mut(id).unwrap();
     assert!(character.set_up(Vec3::new(0.0, 0.5, 0.0)).is_err());

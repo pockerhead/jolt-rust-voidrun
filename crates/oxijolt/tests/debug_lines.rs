@@ -211,10 +211,10 @@ fn invalid_input_is_rejected() {
     let mut lines = DebugLines::new();
     let settings = DebugLineSettings::new(RVec3::ZERO, 20.0);
     let foreign = QueryFilter::new().exclude_body(other.capsule);
-    assert!(matches!(
+    assert_eq!(
         scene.world.debug_lines(&settings, &foreign, &mut lines),
-        Err(QueryError::InvalidValue(_))
-    ));
+        Err(QueryError::WrongWorld(other.capsule))
+    );
     for settings in [
         DebugLineSettings::new(RVec3::ZERO, -1.0),
         DebugLineSettings::new(RVec3::ZERO, f32::NAN),

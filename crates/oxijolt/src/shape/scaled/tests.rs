@@ -24,7 +24,7 @@ fn bounds(shape: &Shape) -> [[f32; 3]; 2] {
 }
 
 fn invalid_settings(result: Result<Shape, ShapeError>) -> bool {
-    matches!(result, Err(ShapeError::InvalidSettings(_)))
+    matches!(result, Err(ShapeError::InvalidValue(_)))
 }
 
 /// Whether `Shape::scaled` refused thin triangles, checked for the default convex extent.
@@ -39,7 +39,7 @@ fn thin_triangles(result: Result<Shape, ShapeError>) -> bool {
 }
 
 fn invalid_dimensions(result: Result<Shape, ShapeError>) -> bool {
-    matches!(result, Err(ShapeError::InvalidDimensions(_)))
+    matches!(result, Err(ShapeError::InvalidValue(_)))
 }
 
 fn child(shape: &Shape, position: Vec3, rotation: Quat) -> CompoundChild<'_> {
