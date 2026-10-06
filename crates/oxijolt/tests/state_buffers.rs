@@ -217,3 +217,125 @@ fn a_ring_of_buffers_rolls_back_over_a_detour_bit_for_bit() {
         );
     }
 }
+
+/// Bytes Jolt's stream holds for a static body: id, active flag, position and rotation
+/// (`BodyManager::SaveState`, `Body::SaveState`).
+fn static_body_bytes() -> usize {
+    4 + 1 + 3 * size_of::<Real>() + 16
+}
+
+/// The bodies of `scene` that are not static, in creation order.
+fn movable_bodies(scene: &RollbackScene) -> Vec<BodyId> {
+    let statics = scene.static_bodies();
+    scene
+        .all_bodies()
+        .into_iter()
+        .filter(|id| !statics.contains(id))
+        .collect()
+}
+
+#[test]
+fn a_movable_state_leaves_static_bodies_out() {
+    let mut scene = RollbackScene::new(1);
+    for _ in 0..BEFORE {
+        scene.tick(Inputs::PLAYED);
+    }
+    let all = scene.world.save_state();
+    let movable = scene.world.save_state_of(BodySelection::Movable).unwrap();
+    assert_eq!(
+        all.data_size() - movable.data_size(),
+        scene.static_bodies().len() * static_body_bytes()
+    );
+    let listed = scene
+        .world
+        .save_state_of(BodySelection::Only(&movable_bodies(&scene)))
+        .unwrap();
+    assert_eq!(listed.data_size(), movable.data_size());
+
+    let wall_at_save = scene.world.body(scene.wall).unwrap().position();
+    let moved = RVec3::new(-9.0, 1.0, 5.0);
+    scene
+        .world
+        .body_mut(scene.wall)
+        .unwrap()
+        .set_position(moved, Activation::DontActivate)
+        .unwrap();
+    scene.tick(Inputs::PREDICTED);
+    scene.world.restore_state(&movable).unwrap();
+    assert_eq!(scene.world.body(scene.wall).unwrap().position(), moved);
+    scene.world.restore_state(&all).unwrap();
+    assert_eq!(
+        scene.world.body(scene.wall).unwrap().position(),
+        wall_at_save
+    );
+}
+
+/// Bytes Jolt's stream holds for a body with motion properties: those of a static body plus
+/// linear and angular velocity, force, torque, the sleep test offset in double precision, the
+/// three sleep test spheres, the sleep timer and the allow-sleep flag
+/// (`MotionProperties::SaveState`).
+fn moving_body_bytes() -> usize {
+    let sleep_test_offset = if size_of::<Real>() == 8 { 24 } else { 0 };
+    static_body_bytes() + 4 * 12 + sleep_test_offset + 3 * 16 + 4 + 1
+}
+
+#[test]
+fn a_movable_state_holds_kinematic_and_inner_bodies() {
+    let mut scene = RollbackScene::new(1);
+    for _ in 0..BEFORE {
+        scene.tick(Inputs::PLAYED);
+    }
+    let inner = scene.inner_body();
+    assert_eq!(
+        scene.world.body(scene.platform).unwrap().motion_type(),
+        MotionType::Kinematic
+    );
+    assert_eq!(
+        scene.world.body(inner).unwrap().motion_type(),
+        MotionType::Kinematic
+    );
+    let movable = scene.world.save_state_of(BodySelection::Movable).unwrap();
+    let without: Vec<BodyId> = movable_bodies(&scene)
+        .into_iter()
+        .filter(|&id| id != scene.platform && id != inner)
+        .collect();
+    let without = scene
+        .world
+        .save_state_of(BodySelection::Only(&without))
+        .unwrap();
+    assert_eq!(
+        movable.data_size() - without.data_size(),
+        2 * moving_body_bytes()
+    );
+
+    let at_save = scene.body_bits();
+    for _ in 0..20 {
+        scene.tick(Inputs::PREDICTED);
+    }
+    assert!(scene.body_bits() != at_save);
+    scene.world.restore_state(&movable).unwrap();
+    assert!(scene.body_bits() == at_save);
+}
+
+#[test]
+fn a_movable_state_replays_like_a_full_one() {
+    for threads in [1, 4] {
+        let mut scene = RollbackScene::new(threads);
+        for _ in 0..BEFORE {
+            scene.tick(Inputs::PLAYED);
+        }
+        let all = scene.world.save_state();
+        let movable = scene.world.save_state_of(BodySelection::Movable).unwrap();
+        let first = recorded_run(&mut scene, Inputs::PLAYED, 60);
+
+        scene.world.restore_state(&all).unwrap();
+        scene.detour();
+        scene.world.restore_state(&movable).unwrap();
+        let from_movable = recorded_run(&mut scene, Inputs::PLAYED, 60);
+        assert_same(
+            &format!("replay from a movable state, {threads} workers"),
+            &first,
+            &from_movable,
+        );
+    }
+}

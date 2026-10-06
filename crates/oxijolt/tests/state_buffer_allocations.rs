@@ -63,7 +63,11 @@ fn saving_into_a_used_buffer_allocates_nothing() {
         scene.tick(Inputs::PLAYED);
     }
     let selected = [scene.sleeper, scene.platform, scene.floor];
-    let selections = [BodySelection::All, BodySelection::Only(&selected)];
+    let selections = [
+        BodySelection::All,
+        BodySelection::Movable,
+        BodySelection::Only(&selected),
+    ];
     let mut state = WorldState::new();
     for &selection in &selections {
         scene.world.save_state_into(selection, &mut state).unwrap();
