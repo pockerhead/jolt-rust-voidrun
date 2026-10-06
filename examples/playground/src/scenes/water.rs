@@ -230,7 +230,7 @@ impl Scene for Water {
             "still water".to_owned()
         };
         out.hud.push(format!(
-            "{current}; crates of buoyancy 0.5 (grey), 1, 2 and 4 (yellow)"
+            "{current}; crates of buoyancy 0.5 (lavender), 1, 2 and 4 (yellow)"
         ));
         Ok(())
     }

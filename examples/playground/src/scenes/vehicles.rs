@@ -368,9 +368,9 @@ impl Scene for Vehicles {
         ));
         let lean = self.world.vehicle(self.bike)?.lean();
         out.hud.push(format!(
-            "motorcycle lean {:.0}°, tank turned {:.0}°",
-            lean.angle.to_degrees(),
-            self.tank_heading.1.to_degrees()
+            "motorcycle lean {}°, tank turned {}°",
+            whole_degrees(lean.angle),
+            whole_degrees(self.tank_heading.1)
         ));
         Ok(())
     }
@@ -585,5 +585,27 @@ fn wrap_angle(angle: f32) -> f32 {
         wrapped - tau
     } else {
         wrapped
+    }
+}
+
+/// `radians` in whole degrees, with a small negative angle shown as 0 rather than -0.
+fn whole_degrees(radians: f32) -> f32 {
+    // Adding +0 turns the -0 that rounding leaves into +0.
+    radians.to_degrees().round() + 0.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::whole_degrees;
+
+    #[test]
+    fn a_small_negative_angle_reads_as_zero_degrees() {
+        assert_eq!(format!("{}", whole_degrees(-0.001)), "0");
+        assert_eq!(format!("{}", whole_degrees(-0.0)), "0");
+        assert_eq!(format!("{}", whole_degrees(-0.1)), "-6");
+        assert_eq!(
+            format!("{}", whole_degrees(std::f32::consts::FRAC_PI_2)),
+            "90"
+        );
     }
 }
