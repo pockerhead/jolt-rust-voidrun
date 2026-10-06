@@ -121,17 +121,20 @@ pub enum SceneKind {
     Constraints,
     /// Soft bodies: a cloth, a pressurised balloon and a soft cube.
     SoftBodies,
+    /// Buoyancy and drag in a pool, with a current.
+    Water,
 }
 
 impl SceneKind {
     /// Every scene in menu order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Character,
         Self::Vehicles,
         Self::Pile,
         Self::Ragdolls,
         Self::Constraints,
         Self::SoftBodies,
+        Self::Water,
     ];
 
     /// The command-line name, the number key and the menu title.
@@ -143,6 +146,7 @@ impl SceneKind {
             Self::Ragdolls => ("ragdolls", '4', "Ragdolls and a mapped puppet"),
             Self::Constraints => ("constraints", '5', "Constraints and motors"),
             Self::SoftBodies => ("soft-bodies", '6', "Cloth, balloon and soft cube"),
+            Self::Water => ("water", '7', "Buoyancy and water"),
         }
     }
 
@@ -177,6 +181,7 @@ impl SceneKind {
                 Box::new(scenes::constraints::Constraints::new(config, generation)?)
             }
             Self::SoftBodies => Box::new(scenes::soft_bodies::SoftBodies::new(config, generation)?),
+            Self::Water => Box::new(scenes::water::Water::new(config, generation)?),
         })
     }
 }

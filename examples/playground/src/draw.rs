@@ -30,7 +30,7 @@ pub mod colours {
     /// Sleeping bodies.
     pub const ASLEEP: Colour = [0.6, 0.6, 0.8];
     /// Water.
-    pub const WATER: Colour = [0.2, 0.4, 0.8];
+    pub const WATER: Colour = [0.2, 0.6, 0.8];
     /// Debug wireframe lines.
     pub const WIREFRAME: Colour = [0.2, 1.0, 0.4];
     /// Lines of query results.
