@@ -462,4 +462,39 @@ JPH_CAPI bool JPH_SkeletonMapper_Map2(const JPH_SkeletonMapper* mapper, const JP
    that bottom row. */
 JPH_CAPI bool JPH_SkeletonMapper_MapReverse2(const JPH_SkeletonMapper* mapper, const JPH_Mat4* pose2ModelSpace, uint32_t count2, JPH_Mat4* outPose1ModelSpace, uint32_t count1);
 
+/* Shape binary state */
+/* A shape saved with its children and materials (Jolt's cooked shape data): one record per shape,
+   children before their parents, each record holding the sub-shape type, child and material indices
+   and the bytes of Jolt's Shape::SaveBinaryState. The bytes are in the host's byte order and are
+   restored only by a build of the same Jolt and joltc commits and the same version below; the
+   caller records and checks those, and a checksum if the bytes are stored or sent. */
+typedef struct JPH_ShapeBinaryState JPH_ShapeBinaryState; /* a byte array */
+
+/* The version of the record layout; it changes whenever the layout does. */
+JPH_CAPI uint32_t JPH_Shape_GetBinaryStateVersion(void);
+/* Saves shape with its children and materials. Supported shapes: sphere, box, capsule, tapered
+   capsule, cylinder, tapered cylinder, convex hull, static and mutable compound, rotated-translated,
+   scaled, offset centre of mass, mesh, heightfield, plane and empty. Supported materials: none (the
+   default), JPH::PhysicsMaterial::sDefault, a JPH::PhysicsMaterialSimple (JPH_PhysicsMaterial_Create)
+   and a JPH_PhysicsMaterial_Create2 material; a shared child or material is saved once. Returns the
+   state, destroyed with JPH_ShapeBinaryState_Destroy, and an empty message; or null and a message
+   for any other shape or material. error may be null; the message is cut to errorCapacity - 1 bytes. */
+JPH_CAPI JPH_ShapeBinaryState* JPH_Shape_SaveBinaryState(const JPH_Shape* shape, char* error, uint32_t errorCapacity);
+JPH_CAPI size_t JPH_ShapeBinaryState_GetSize(const JPH_ShapeBinaryState* state);
+/* Copies min(size, state size) bytes to data, which may be null when that is 0. */
+JPH_CAPI void JPH_ShapeBinaryState_CopyData(const JPH_ShapeBinaryState* state, void* data, size_t size);
+JPH_CAPI void JPH_ShapeBinaryState_Destroy(JPH_ShapeBinaryState* state);
+/* Restores the bytes of a JPH_ShapeBinaryState. Before Jolt reads a record it checks that every
+   length lies inside the data, that the sub-shape type is a supported one and matches Jolt's bytes,
+   that child indices name earlier records and material indices existing materials, and that the
+   data ends with the last record; after Jolt read a record, that Jolt read exactly its bytes and that
+   the child and material counts are the ones the shape takes (decorated shapes one child, compounds
+   their sub-shape count, convex shapes and planes one material). Every record but the last must be
+   used. Returns the last record's shape holding one reference (release it with JPH_Shape_Destroy)
+   and an empty message, or null and a message naming the failed check.
+   Precondition, not checked: the bytes inside each record were written by Jolt's SaveBinaryState of
+   this build. Jolt does not validate them (array lengths, tree offsets, hull indices), so crafted
+   records can make it read and write out of bounds. */
+JPH_CAPI JPH_Shape* JPH_Shape_RestoreBinaryState(const void* data, size_t size, char* error, uint32_t errorCapacity);
+
 #endif /* JOLT_C_EXT_H_ */

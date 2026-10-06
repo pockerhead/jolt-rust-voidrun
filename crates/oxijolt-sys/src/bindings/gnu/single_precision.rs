@@ -11553,3 +11553,39 @@ unsafe extern "C" {
         count1: u32,
     ) -> bool;
 }
+#[repr(C)]
+#[derive(Debug)]
+pub struct JPH_ShapeBinaryState {
+    _unused: [u8; 0],
+}
+unsafe extern "C" {
+    pub fn JPH_Shape_GetBinaryStateVersion() -> u32;
+}
+unsafe extern "C" {
+    pub fn JPH_Shape_SaveBinaryState(
+        shape: *const JPH_Shape,
+        error: *mut ::std::os::raw::c_char,
+        errorCapacity: u32,
+    ) -> *mut JPH_ShapeBinaryState;
+}
+unsafe extern "C" {
+    pub fn JPH_ShapeBinaryState_GetSize(state: *const JPH_ShapeBinaryState) -> usize;
+}
+unsafe extern "C" {
+    pub fn JPH_ShapeBinaryState_CopyData(
+        state: *const JPH_ShapeBinaryState,
+        data: *mut ::std::os::raw::c_void,
+        size: usize,
+    );
+}
+unsafe extern "C" {
+    pub fn JPH_ShapeBinaryState_Destroy(state: *mut JPH_ShapeBinaryState);
+}
+unsafe extern "C" {
+    pub fn JPH_Shape_RestoreBinaryState(
+        data: *const ::std::os::raw::c_void,
+        size: usize,
+        error: *mut ::std::os::raw::c_char,
+        errorCapacity: u32,
+    ) -> *mut JPH_Shape;
+}

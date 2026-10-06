@@ -43,7 +43,7 @@ const JOLT_COMMIT: &str = "e77f175595e64cb44218cc9d9d56fc365ad0e36a";
 const JOLT_VERSION: &str = "5.6.0";
 /// Revision of the fork's joltc additions in `native/joltc_ext/`. Bump it whenever
 /// anything there changes, so prebuilt prefixes built before the change are refused.
-const JOLTC_EXT_REVISION: &str = "20";
+const JOLTC_EXT_REVISION: &str = "21";
 /// Name of the manifest file in an install prefix.
 const MANIFEST_FILE: &str = "oxijolt-sys-manifest.txt";
 
@@ -194,6 +194,9 @@ fn main() -> anyhow::Result<()> {
 
     let bindings = select_bindings(&prefix, &cfg)?;
     println!("cargo:rustc-env=JOLTC_BINDINGS={}", bindings.display());
+    println!("cargo:rustc-env=OXIJOLT_SYS_JOLT_COMMIT={JOLT_COMMIT}");
+    println!("cargo:rustc-env=OXIJOLT_SYS_JOLTC_COMMIT={JOLTC_COMMIT}");
+    println!("cargo:rustc-env=OXIJOLT_SYS_JOLTC_EXT_REVISION={JOLTC_EXT_REVISION}");
     Ok(())
 }
 
