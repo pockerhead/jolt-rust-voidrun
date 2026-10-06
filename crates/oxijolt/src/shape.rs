@@ -22,7 +22,8 @@ mod scaled;
 mod static_only;
 mod tapered;
 
-use crate::{Quat, ShapeError, Vec3};
+use crate::material::height_field_materials;
+use crate::{PhysicsMaterial, Quat, ShapeError, Vec3};
 pub(crate) use compound::compound_sub_shape_of;
 use compound::{build_compound, check_child_pose, sub_shape_ids, RawCompoundChild};
 pub use mesh::{DroppedTriangles, MeshBuildQuality, MeshSettings};
@@ -212,9 +213,11 @@ pub(crate) fn initialize() -> Result<(), ShapeError> {
 }
 
 /// Settings of [`Shape::new_height_field`] other than the samples. The defaults are Jolt's
-/// (`HeightFieldShapeSettings`).
-#[derive(Clone, Debug, PartialEq)]
-pub struct HeightFieldSettings {
+/// (`HeightFieldShapeSettings`): no materials, no offset, unit scale, block size 2, 8 bits per
+/// sample and an active-edge threshold of 5 degrees.
+#[derive(Clone, Debug)]
+pub struct HeightFieldSettings<'a> {
+    materials: Option<(&'a [&'a PhysicsMaterial], &'a [u8])>,
     offset: Vec3,
     scale: Vec3,
     block_size: u32,
@@ -222,9 +225,34 @@ pub struct HeightFieldSettings {
     active_edge_cos_threshold_angle: f32,
 }
 
-impl Default for HeightFieldSettings {
+/// Equal when every value is equal and both name the same material objects with equal indices.
+impl PartialEq for HeightFieldSettings<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        let same_materials = match (self.materials, other.materials) {
+            (None, None) => true,
+            (Some((list, indices)), Some((other_list, other_indices))) => {
+                indices == other_indices
+                    && list.len() == other_list.len()
+                    && list
+                        .iter()
+                        .zip(other_list)
+                        .all(|(a, b)| std::ptr::eq(*a, *b))
+            }
+            _ => false,
+        };
+        same_materials
+            && self.offset == other.offset
+            && self.scale == other.scale
+            && self.block_size == other.block_size
+            && self.bits_per_sample == other.bits_per_sample
+            && self.active_edge_cos_threshold_angle == other.active_edge_cos_threshold_angle
+    }
+}
+
+impl Default for HeightFieldSettings<'_> {
     fn default() -> Self {
         Self {
+            materials: None,
             offset: Vec3::ZERO,
             scale: Vec3::new(1.0, 1.0, 1.0),
             block_size: 2,
@@ -234,7 +262,20 @@ impl Default for HeightFieldSettings {
     }
 }
 
-impl HeightFieldSettings {
+impl<'a> HeightFieldSettings<'a> {
+    /// Gives cell `(x, y)`, the cell between samples `(x, y)` and `(x + 1, y + 1)`, the
+    /// material `list[indices[y * (n - 1) + x]]`, `n` the sample count. `list` holds 1 to 256
+    /// materials and `indices` one entry for each of the caller's `(n - 1)^2` cells, each naming
+    /// a material of the list; [`Shape::new_height_field`] checks both
+    /// ([`ShapeError::InvalidValue`]). The cells Jolt adds for padding (see
+    /// [`Shape::new_height_field`] under "Block size") get material 0. Without materials every
+    /// cell uses Jolt's default material. The shape holds its own reference to each material.
+    #[must_use]
+    pub fn materials(mut self, list: &'a [&'a PhysicsMaterial], indices: &'a [u8]) -> Self {
+        self.materials = Some((list, indices));
+        self
+    }
+
     /// Shape-local position of sample (0, 0) at height 0, metres; finite. Default zero.
     #[must_use]
     pub fn offset(mut self, value: Vec3) -> Self {
@@ -616,11 +657,18 @@ impl Shape {
     pub fn new_height_field(
         sample_count: u32,
         samples: &[f32],
-        settings: &HeightFieldSettings,
+        settings: &HeightFieldSettings<'_>,
     ) -> Result<Self, ShapeError> {
         validate_height_field(sample_count, samples, settings)?;
-        // SAFETY: `samples` and `settings` were validated above; there are no materials.
-        unsafe { Self::height_field(sample_count, samples, settings, None) }
+        let Some((list, indices)) = settings.materials else {
+            // SAFETY: `samples` and `settings` were validated above; there are no materials.
+            return unsafe { Self::height_field(sample_count, samples, settings, None) };
+        };
+        let list = height_field_materials(sample_count, list, indices)?;
+        // SAFETY: `samples` and `settings` were validated above; the index count is
+        // `(sample_count - 1)^2` and the list holds 1 to 256 live materials, which `settings`
+        // keeps alive for the call.
+        unsafe { Self::height_field(sample_count, samples, settings, Some((indices, &list))) }
     }
 
     /// The heightfield of [`new_height_field`](Self::new_height_field), with `materials` when

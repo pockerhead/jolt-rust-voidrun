@@ -157,7 +157,7 @@ impl Shaped {
     /// A tapered cylinder along Y with Jolt's default convex radius.
     pub fn tapered_cylinder(half_height: f32, top_radius: f32, bottom_radius: f32) -> Result<Self> {
         Ok(Self {
-            shape: Shape::new_tapered_cylinder(half_height, top_radius, bottom_radius, 0.05)?,
+            shape: Shape::new_tapered_cylinder(half_height, top_radius, bottom_radius)?,
             visual: Visual::TaperedCylinder {
                 half_height,
                 top_radius,
@@ -169,7 +169,7 @@ impl Shaped {
     /// `of` scaled per axis.
     pub fn scaled(of: &Shaped, scale: [f32; 3]) -> Result<Self> {
         Ok(Self {
-            shape: Shape::scaled(&of.shape, scale.into())?,
+            shape: Shape::new_scaled(&of.shape, scale.into())?,
             visual: Visual::Scaled(Box::new(of.visual.clone()), scale),
         })
     }
@@ -187,7 +187,7 @@ impl Shaped {
     pub fn hull(points: &[[f32; 3]], faces: &[[u32; 3]]) -> Result<Self> {
         let jolt_points: Vec<Vec3> = points.iter().map(|&p| p.into()).collect();
         Ok(Self {
-            shape: Shape::new_convex_hull(&jolt_points, 0.05)?,
+            shape: Shape::new_convex_hull(&jolt_points)?,
             visual: Visual::Triangles {
                 vertices: points.to_vec(),
                 triangles: face_outward(points, faces),

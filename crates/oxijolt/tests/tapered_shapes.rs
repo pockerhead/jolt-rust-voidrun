@@ -19,7 +19,7 @@ fn tapered_capsule_and_cone_rest_on_a_mesh() {
         .create_body(&flat_grid(16, 1.0), &BodySettings::new_static())
         .unwrap();
     let capsule = Shape::new_tapered_capsule(0.4, 0.15, 0.3).unwrap();
-    let cone = Shape::new_tapered_cylinder(0.5, 0.0, 0.4, 0.05).unwrap();
+    let cone = Shape::new_tapered_cylinder_with_convex_radius(0.5, 0.0, 0.4, 0.05).unwrap();
     let ids = [(&capsule, -2.0), (&cone, 2.0)].map(|(shape, x)| {
         world
             .create_body(
@@ -45,7 +45,7 @@ fn tapered_capsule_and_cone_rest_on_a_mesh() {
 fn queries_hit_tapered_shapes() {
     let mut world = world(Vec3::ZERO, 1);
     let capsule = Shape::new_tapered_capsule(0.4, 0.15, 0.3).unwrap();
-    let cone = Shape::new_tapered_cylinder(0.5, 0.0, 0.4, 0.0).unwrap();
+    let cone = Shape::new_tapered_cylinder_with_convex_radius(0.5, 0.0, 0.4, 0.0).unwrap();
     let ids = [(&capsule, -2.0), (&cone, 2.0)].map(|(shape, x)| {
         world
             .create_body(

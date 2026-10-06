@@ -326,7 +326,7 @@ fn a_one_child_compound_at_bit_32_is_refused() {
     assert_eq!(id_bits(&plain), 32);
 
     // Decorators push no index: the one-child compound still starts at bit 32.
-    let scaled = Shape::scaled(&single(), Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let scaled = Shape::new_scaled(&single(), Vec3::new(2.0, 2.0, 2.0)).unwrap();
     assert_eq!(nested_pairs(scaled, 32).map(|_| ()), refused);
     let offset = Shape::new_offset_center_of_mass(&single(), Vec3::new(0.0, 0.1, 0.0)).unwrap();
     assert_eq!(nested_pairs(offset, 32).map(|_| ()), refused);
@@ -363,7 +363,7 @@ fn shared_shapes_are_walked_once() {
     use compound::walk_count;
     const DEPTH: u32 = 16;
     let graph = shared_pairs(unit_box(), DEPTH);
-    let scaled = Shape::scaled(&graph, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let scaled = Shape::new_scaled(&graph, Vec3::new(2.0, 2.0, 2.0)).unwrap();
     let offset = Shape::new_offset_center_of_mass(&graph, Vec3::new(0.0, 0.1, 0.0)).unwrap();
     let turned = rotated_translated(&graph, Vec3::new(0.0, 0.5, 0.0), quarter_turn());
 
@@ -403,7 +403,7 @@ fn walked_widths_follow_jolt() {
     let shapes = [
         nested_pairs(single, 5).unwrap(),
         height_field_at_32_bits(),
-        Shape::scaled(&mesh, Vec3::new(1.0, 2.0, 1.0)).unwrap(),
+        Shape::new_scaled(&mesh, Vec3::new(1.0, 2.0, 1.0)).unwrap(),
         shared_pairs(height_field_13_bits(), 3),
         rotated_translated(&widened(&mesh, 5, 0), Vec3::ZERO, quarter_turn()),
     ];

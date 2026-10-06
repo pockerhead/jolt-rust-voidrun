@@ -98,7 +98,7 @@ drive. It uses `VehicleSettings::car`, `TrackedVehicleSettings`, `MotorcycleSett
 the bin asleep in grey, and one more layer.*
 
 400 bodies of nine shape kinds fall into a bin; estimated impacts flash, sleeping bodies turn grey.
-It uses boxes, spheres, capsules, cylinders, tapered shapes, convex hulls, `Shape::scaled`,
+It uses boxes, spheres, capsules, cylinders, tapered shapes, convex hulls, `Shape::new_scaled`,
 `MotionQuality::LinearCast`, `EventSettings::collision_estimates`, `ActivationEvent` and
 `active_body_poses_into`.
 

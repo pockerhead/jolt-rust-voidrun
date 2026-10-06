@@ -43,7 +43,7 @@ fn palette() -> Palette {
         Shape::new_sphere(0.35).unwrap(),
         Shape::new_capsule(0.4, 0.2).unwrap(),
         Shape::new_cylinder(0.3, 0.4).unwrap(),
-        Shape::new_convex_hull(
+        Shape::new_convex_hull_with_convex_radius(
             &[
                 Vec3::new(-0.3, -0.2, -0.3),
                 Vec3::new(0.3, -0.25, -0.2),

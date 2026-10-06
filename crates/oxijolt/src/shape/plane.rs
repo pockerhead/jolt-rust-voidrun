@@ -42,7 +42,7 @@ impl Shape {
     /// marks it `MustBeStatic`, it has no volume or mass, and Jolt cannot collide it with
     /// meshes, heightfields or other planes. It collides with convex shapes (also as compound
     /// or decorated children), soft bodies and characters, and ray and shape casts hit it. It
-    /// cannot be scaled ([`scaled`](Self::scaled) refuses it), and query, character and ragdoll
+    /// cannot be scaled ([`new_scaled`](Self::new_scaled) refuses it), and query, character and ragdoll
     /// shapes refuse it. A ray that starts behind the plane hits it at fraction 0 (solid,
     /// `<= 0`), while a point query reports only points strictly behind it (`< 0`).
     ///

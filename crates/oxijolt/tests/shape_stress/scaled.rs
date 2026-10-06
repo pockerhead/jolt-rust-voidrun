@@ -124,7 +124,7 @@ fn bases() -> Vec<Base> {
         },
         Base {
             name: "hull",
-            shape: Shape::new_convex_hull(&hull_points, 0.05).unwrap(),
+            shape: Shape::new_convex_hull_with_convex_radius(&hull_points, 0.05).unwrap(),
             corners: hull_points,
         },
         Base {
@@ -188,7 +188,7 @@ pub fn scaled_family(arena: &mut Arena) {
         let kind = SCALE_KINDS[(index / bases.len()) % SCALE_KINDS.len()];
         let scale = scale(&mut rng, kind);
         let what = format!("scaled {index} ({} {kind:?} {scale:?})", base.name);
-        let result = Shape::scaled(&base.shape, scale);
+        let result = Shape::new_scaled(&base.shape, scale);
         if refused_by_kind(base.name, scale) {
             assert!(
                 matches!(result, Err(ShapeError::InvalidValue(_))),

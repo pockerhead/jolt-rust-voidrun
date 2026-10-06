@@ -111,13 +111,13 @@ impl Scene {
 /// 30 shapes: irregular hulls, scaled hulls, scaled boxes, a compound with a scaled hull child,
 /// tapered capsules and cones, five of each.
 fn dynamic_shapes() -> Vec<Shape> {
-    let hull = Shape::new_convex_hull(&irregular_points(), 0.05).unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(&irregular_points(), 0.05).unwrap();
     let block = Shape::new_box(Vec3::new(0.4, 0.4, 0.4)).unwrap();
     let mut shapes = Vec::new();
     for i in 0..5 {
         let k = i as f32;
         let stretch = Vec3::new(0.6 + 0.1 * k, 0.5, 0.8 - 0.05 * k);
-        let scaled_hull = Shape::scaled(&hull, stretch).unwrap();
+        let scaled_hull = Shape::new_scaled(&hull, stretch).unwrap();
         let compound = Shape::new_compound(&[
             CompoundChild {
                 shape: &scaled_hull,
@@ -133,12 +133,16 @@ fn dynamic_shapes() -> Vec<Shape> {
             },
         ])
         .unwrap();
-        shapes.push(Shape::new_convex_hull(&irregular_points(), 0.02 * k).unwrap());
-        shapes.push(Shape::scaled(&hull, stretch).unwrap());
-        shapes.push(Shape::scaled(&block, Vec3::new(1.0, 0.5 + 0.2 * k, 1.5)).unwrap());
+        shapes.push(
+            Shape::new_convex_hull_with_convex_radius(&irregular_points(), 0.02 * k).unwrap(),
+        );
+        shapes.push(Shape::new_scaled(&hull, stretch).unwrap());
+        shapes.push(Shape::new_scaled(&block, Vec3::new(1.0, 0.5 + 0.2 * k, 1.5)).unwrap());
         shapes.push(compound);
         shapes.push(Shape::new_tapered_capsule(0.3, 0.1 + 0.02 * k, 0.25).unwrap());
-        shapes.push(Shape::new_tapered_cylinder(0.4, 0.0, 0.3 + 0.02 * k, 0.02).unwrap());
+        shapes.push(
+            Shape::new_tapered_cylinder_with_convex_radius(0.4, 0.0, 0.3 + 0.02 * k, 0.02).unwrap(),
+        );
     }
     shapes
 }

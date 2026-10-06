@@ -40,7 +40,7 @@ impl Shape {
     /// `2 * half_height * (1 - 2^-21)`; otherwise one sphere contains the other and the shape
     /// is a sphere, which [`new_sphere`](Self::new_sphere) builds
     /// ([`ShapeError::InvalidValue`]; [docs/limits.md#tapered-shapes]). Only a uniform
-    /// [`scaled`](Self::scaled) applies.
+    /// [`new_scaled`](Self::new_scaled) applies.
     ///
     /// [docs/limits.md#tapered-shapes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#tapered-shapes
     pub fn new_tapered_capsule(
@@ -61,6 +61,21 @@ impl Shape {
         settings.create()?.within_extent_bounds()
     }
 
+    /// A tapered cylinder with Jolt's default convex radius, 0.05 m; otherwise as
+    /// [`new_tapered_cylinder_with_convex_radius`](Self::new_tapered_cylinder_with_convex_radius).
+    pub fn new_tapered_cylinder(
+        half_height: f32,
+        top_radius: f32,
+        bottom_radius: f32,
+    ) -> Result<Self, ShapeError> {
+        Self::new_tapered_cylinder_with_convex_radius(
+            half_height,
+            top_radius,
+            bottom_radius,
+            JPH_DEFAULT_CONVEX_RADIUS as f32,
+        )
+    }
+
     /// A cylinder along the local Y axis whose ends differ: `2 * half_height` metres high with
     /// a disc of `top_radius` at the top and one of `bottom_radius` at the bottom, a Jolt
     /// `TaperedCylinderShape`. A radius of 0 makes a cone. The centre of mass lies on the axis
@@ -72,11 +87,11 @@ impl Shape {
     /// radius at least `2^-63` m, and all of them at most [`limits::MAX_SHAPE_EXTENT`]
     /// ([`ShapeError::InvalidValue`]; [docs/limits.md#tapered-shapes]). The convex radius
     /// must be finite and not negative; Jolt clamps it to the smaller radius, and contacts use
-    /// at most 0.05 m of it. Only a [`scaled`](Self::scaled) that is uniform in X and Z
+    /// at most 0.05 m of it. Only a [`new_scaled`](Self::new_scaled) that is uniform in X and Z
     /// applies.
     ///
     /// [docs/limits.md#tapered-shapes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#tapered-shapes
-    pub fn new_tapered_cylinder(
+    pub fn new_tapered_cylinder_with_convex_radius(
         half_height: f32,
         top_radius: f32,
         bottom_radius: f32,

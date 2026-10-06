@@ -40,7 +40,7 @@ impl Shape {
     /// through the decorator: it returns `None` for a scaled compound.
     ///
     /// [docs/limits.md#scaled-shapes]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#scaled-shapes
-    pub fn scaled(shape: &Shape, scale: Vec3) -> Result<Self, ShapeError> {
+    pub fn new_scaled(shape: &Shape, scale: Vec3) -> Result<Self, ShapeError> {
         // Jolt's own check lets NaN and infinity through (`ScaleHelpers::IsZeroScale`).
         if !scale.is_finite() {
             return Err(ShapeError::InvalidValue("scale must be finite"));

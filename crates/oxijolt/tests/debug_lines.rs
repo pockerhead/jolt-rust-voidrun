@@ -608,10 +608,10 @@ fn new_shapes_are_drawn_within_their_bounds() {
     let points = common::meshes::irregular_points();
     let hull = add(
         &mut world,
-        &Shape::new_convex_hull(&points, 0.05).unwrap(),
+        &Shape::new_convex_hull_with_convex_radius(&points, 0.05).unwrap(),
         BodySettings::new_dynamic().position(RVec3::new(0.0, 3.0, 0.0)),
     );
-    let scaled_box = Shape::scaled(&cube_shape(), Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    let scaled_box = Shape::new_scaled(&cube_shape(), Vec3::new(1.0, 2.0, 3.0)).unwrap();
     let scaled = add(
         &mut world,
         &scaled_box,

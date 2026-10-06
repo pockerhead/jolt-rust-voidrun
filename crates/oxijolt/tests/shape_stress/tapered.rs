@@ -63,7 +63,7 @@ pub fn tapered_family(arena: &mut Arena) {
             let convex_radius = [0.0, 0.05][index / 2 % 2];
             (
                 format!("tapered {index} (cylinder {h} {top} {bottom})"),
-                Shape::new_tapered_cylinder(h, top, bottom, convex_radius),
+                Shape::new_tapered_cylinder_with_convex_radius(h, top, bottom, convex_radius),
                 Extent::of(&[
                     Vec3::new(-larger, -h, -larger),
                     Vec3::new(larger, h, larger),

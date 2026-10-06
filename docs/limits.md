@@ -221,7 +221,7 @@ triangles. Near the origin the thinnest 1 m strip kept is:
 | 2000 m | 0.97 mm | 1.7 mm |
 | 4000 m | 1.9 mm | 3.3 mm |
 
-A mesh keeps the extent it was built with, and `Shape::scaled` checks its triangles for that
+A mesh keeps the extent it was built with, and `Shape::new_scaled` checks its triangles for that
 extent.
 
 In an asserts build the thinnest sliver the rule keeps (to 1 %) rests under boxes of half extent
@@ -237,7 +237,7 @@ stops at 2000 m plus a separation distance of at most 2000 m.
 
 ## Scaled shapes
 
-`Shape::scaled` adds no numeric bound of its own on the scale. Jolt checks the rest
+`Shape::new_scaled` adds no numeric bound of its own on the scale. Jolt checks the rest
 (`Shape::IsValidScale`, `ScaleHelpers.h`): every component at least `1e-6` in absolute value, uniform
 within a squared tolerance of `1e-8` for spheres, capsules and tapered capsules (an absolute
 tolerance, so very small scales count as uniform), uniform in X and Z for cylinders and tapered

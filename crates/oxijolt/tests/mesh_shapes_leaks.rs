@@ -64,7 +64,7 @@ fn round(world: &mut PhysicsWorld, inputs: &Inputs) {
         PhysicsMaterial::new(1).unwrap(),
         PhysicsMaterial::new(2).unwrap(),
     );
-    let hull = Shape::new_convex_hull(&inputs.cloud, 0.05).unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(&inputs.cloud, 0.05).unwrap();
     let hull_with_material = Shape::new_convex_hull_with_material(&inputs.cloud, 0.05, &a).unwrap();
     let list = [&a, &b];
     let (mesh, _) = Shape::new_mesh_with_settings(
@@ -73,8 +73,8 @@ fn round(world: &mut PhysicsWorld, inputs: &Inputs) {
         &MeshSettings::default().materials(&list, &inputs.material_indices),
     )
     .unwrap();
-    let scaled_hull = Shape::scaled(&hull, Vec3::new(1.0, 2.0, 0.5)).unwrap();
-    let scaled_mesh = Shape::scaled(&mesh, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let scaled_hull = Shape::new_scaled(&hull, Vec3::new(1.0, 2.0, 0.5)).unwrap();
+    let scaled_mesh = Shape::new_scaled(&mesh, Vec3::new(2.0, 2.0, 2.0)).unwrap();
     let block = Shape::new_box(Vec3::new(0.2, 0.2, 0.2)).unwrap();
     let compound = Shape::new_compound(&[
         CompoundChild {
@@ -92,17 +92,18 @@ fn round(world: &mut PhysicsWorld, inputs: &Inputs) {
     ])
     .unwrap();
     let tapered_capsule = Shape::new_tapered_capsule(0.4, 0.1, 0.2).unwrap();
-    let tapered_cylinder = Shape::new_tapered_cylinder(0.4, 0.0, 0.2, 0.0).unwrap();
+    let tapered_cylinder =
+        Shape::new_tapered_cylinder_with_convex_radius(0.4, 0.0, 0.2, 0.0).unwrap();
 
     let flat: Vec<Vec3> = inputs
         .cloud
         .iter()
         .map(|p| Vec3::new(p.x, 0.0, p.z))
         .collect();
-    assert!(Shape::new_convex_hull(&flat, 0.05).is_err());
+    assert!(Shape::new_convex_hull_with_convex_radius(&flat, 0.05).is_err());
     let degenerate = [[0, 0, 1], [2, 3, 3]];
     assert!(Shape::new_mesh(&inputs.vertices, &degenerate).is_err());
-    assert!(Shape::scaled(&mesh, Vec3::new(1.0e-3, 1.0, 1.0e-3)).is_err());
+    assert!(Shape::new_scaled(&mesh, Vec3::new(1.0e-3, 1.0, 1.0e-3)).is_err());
     raw_refused_hull();
 
     let hull_body = world
@@ -204,7 +205,7 @@ fn new_shapes_do_not_leak() {
     ];
     let blocks = block_growth(|| {
         round(&mut world, &inputs);
-        std::mem::forget(Shape::new_convex_hull(&tetrahedron, 0.05).unwrap());
+        std::mem::forget(Shape::new_convex_hull_with_convex_radius(&tetrahedron, 0.05).unwrap());
     });
     eprintln!("control: growth per block of {BLOCK_ROUNDS} rounds: {blocks:?}");
     assert!(

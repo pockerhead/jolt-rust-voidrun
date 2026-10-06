@@ -172,7 +172,7 @@ description), not what they time, and the table shows the labels and notes the b
 Building a triangle mesh or a convex hull costs time once, when the shape is created, not per step.
 The `shape creation` case of the budgets bench (`benches/budgets/shapes.rs`) times it. The meshes are
 height grids of 0.5 m cells, 23, 71, 224 and 708 cells per side, built with both build qualities and
-then scaled by 2 with `Shape::scaled`; the hulls are 100 to 100 000 points uniform in a 1 m cube from
+then scaled by 2 with `Shape::new_scaled`; the hulls are 100 to 100 000 points uniform in a 1 m cube from
 the bench's linear congruential generator, seed `0x1234_5678`. Each row times five calls after one
 untimed call, and the shape is dropped outside the timing. The medians below come from a run of the
 case alone on 2026-10-04, on the machine above:
@@ -181,7 +181,7 @@ case alone on 2026-10-04, on the machine above:
 cargo bench -p oxijolt --bench budgets -- creation
 ```
 
-| triangles | `FavorRuntimePerformance` ms | `FavorBuildSpeed` ms | `Shape::scaled` by 2 ms |
+| triangles | `FavorRuntimePerformance` ms | `FavorBuildSpeed` ms | `Shape::new_scaled` by 2 ms |
 |---:|---:|---:|---:|
 | 1 058 | 0.45 | 0.36 | 0.08 |
 | 10 082 | 5.1 | 3.7 | 0.49 |
@@ -195,7 +195,7 @@ cargo bench -p oxijolt --bench budgets -- creation
 | 100 000 | 32 |
 
 The slowest of the five calls was up to 45 % above the median for the meshes of 10 082 triangles and
-fewer and for the smallest hull, and within 7 % for the rest. `Shape::scaled` reads every stored
+fewer and for the smallest hull, and within 7 % for the rest. `Shape::new_scaled` reads every stored
 triangle of the mesh back from Jolt, once to count them and once to copy them, to check that they
 stay collidable; that is the last column. A game that streams meshes builds them off the simulation
 thread, like the chunk shapes above.

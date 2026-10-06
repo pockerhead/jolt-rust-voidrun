@@ -288,7 +288,7 @@ fn a_commit_reaches_only_the_body_it_is_set_on() {
     ])
     .unwrap();
     let first = editor.to_shape().unwrap();
-    let scaled = Shape::scaled(&first, Vec3::new(1.5, 1.5, 1.5)).unwrap();
+    let scaled = Shape::new_scaled(&first, Vec3::new(1.5, 1.5, 1.5)).unwrap();
 
     let mut world = world(GRAVITY, 1);
     world.set_event_settings(EventSettings::default().contacts(true));
@@ -750,8 +750,8 @@ fn a_committed_shape_nests_and_scales() {
         child(&tile, Vec3::new(10.0, 0.0, 0.0), 1),
     ])
     .unwrap();
-    Shape::scaled(&published, Vec3::new(2.0, 2.0, 2.0)).unwrap();
-    Shape::scaled(&published, Vec3::new(2.0, 1.0, 1.0)).unwrap();
+    Shape::new_scaled(&published, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    Shape::new_scaled(&published, Vec3::new(2.0, 1.0, 1.0)).unwrap();
 
     // A non-uniform scale needs children turned onto the scale's axes.
     let turned = MutableCompound::from_children(&[CompoundChild {
@@ -762,7 +762,7 @@ fn a_committed_shape_nests_and_scales() {
     .to_shape()
     .unwrap();
     assert!(matches!(
-        Shape::scaled(&turned, Vec3::new(2.0, 1.0, 1.0)),
+        Shape::new_scaled(&turned, Vec3::new(2.0, 1.0, 1.0)),
         Err(ShapeError::InvalidValue(_))
     ));
 

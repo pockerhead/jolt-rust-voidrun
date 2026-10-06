@@ -6,10 +6,9 @@ use oxijolt_sys::*;
 
 use crate::owned::{JoltObject, Owned};
 use crate::shape::{
-    initialize, validate_box, validate_capsule, validate_cylinder, validate_height_field,
-    validate_sphere, ShapeSettings,
+    initialize, validate_box, validate_capsule, validate_cylinder, validate_sphere, ShapeSettings,
 };
-use crate::{HeightFieldSettings, Shape, ShapeError, SubShapeId, Vec3};
+use crate::{Shape, ShapeError, SubShapeId, Vec3};
 
 /// Jolt's `Color::sGrey`, the debug colour of every material made here.
 const GREY: u32 = 0xFF80_8080;
@@ -189,57 +188,6 @@ impl Shape {
         settings.create()
     }
 
-    /// [`new_height_field`](Self::new_height_field) with a material per cell.
-    ///
-    /// `material_indices[y * (n - 1) + x]` is the index into `materials` of cell `(x, y)`, the
-    /// cell between samples `(x, y)` and `(x + 1, y + 1)`, `n = sample_count`; it covers the
-    /// caller's `(n - 1)^2` cells, and the cells Jolt adds for padding (see [`new_height_field`]
-    /// under "Block size") get material 0. All rules of [`new_height_field`] apply, and
-    /// `materials` must hold 1 to 256 materials and every index must name one of them
-    /// ([`ShapeError::InvalidValue`]). The shape holds its own reference to each material.
-    ///
-    /// [`new_height_field`]: Self::new_height_field
-    pub fn new_height_field_with_materials(
-        sample_count: u32,
-        samples: &[f32],
-        settings: &HeightFieldSettings,
-        materials: &[&PhysicsMaterial],
-        material_indices: &[u8],
-    ) -> Result<Self, ShapeError> {
-        validate_height_field(sample_count, samples, settings)?;
-        if !(1..=MAX_HEIGHT_FIELD_MATERIALS).contains(&materials.len()) {
-            return Err(ShapeError::InvalidValue(
-                "material list must hold 1 to 256 materials",
-            ));
-        }
-        let cells = (sample_count as usize - 1).checked_mul(sample_count as usize - 1);
-        if cells != Some(material_indices.len()) {
-            return Err(ShapeError::InvalidValue(
-                "material indices must hold (sample_count - 1)^2 values",
-            ));
-        }
-        if material_indices
-            .iter()
-            .any(|&index| usize::from(index) >= materials.len())
-        {
-            return Err(ShapeError::InvalidValue(
-                "material indices must name a material of the list",
-            ));
-        }
-        let list: Vec<*const JPH_PhysicsMaterial> = materials.iter().map(|m| m.as_ptr()).collect();
-        // SAFETY: `samples` and `settings` were validated above; the index count is
-        // `(sample_count - 1)^2` and the list holds 1 to 256 live materials, which `materials`
-        // keeps alive for the call.
-        unsafe {
-            Self::height_field(
-                sample_count,
-                samples,
-                settings,
-                Some((material_indices, &list)),
-            )
-        }
-    }
-
     /// Sets `material` on convex shape `settings`, which keep their own reference to it.
     ///
     /// # Safety
@@ -249,6 +197,35 @@ impl Shape {
         // SAFETY: the settings are live and convex (contract); the material is live.
         unsafe { JPH_ConvexShapeSettings_SetMaterial(settings.as_ptr(), material.as_ptr()) };
     }
+}
+
+/// Checks a heightfield's material list and cell indices for `sample_count` samples per side
+/// and returns the native list, whose pointers stay valid while `list` borrows the materials.
+pub(crate) fn height_field_materials(
+    sample_count: u32,
+    list: &[&PhysicsMaterial],
+    indices: &[u8],
+) -> Result<Vec<*const JPH_PhysicsMaterial>, ShapeError> {
+    if !(1..=MAX_HEIGHT_FIELD_MATERIALS).contains(&list.len()) {
+        return Err(ShapeError::InvalidValue(
+            "material list must hold 1 to 256 materials",
+        ));
+    }
+    let cells = (sample_count as usize - 1).checked_mul(sample_count as usize - 1);
+    if cells != Some(indices.len()) {
+        return Err(ShapeError::InvalidValue(
+            "material indices must hold (sample_count - 1)^2 values",
+        ));
+    }
+    if indices
+        .iter()
+        .any(|&index| usize::from(index) >= list.len())
+    {
+        return Err(ShapeError::InvalidValue(
+            "material indices must name a material of the list",
+        ));
+    }
+    Ok(list.iter().map(|material| material.as_ptr()).collect())
 }
 
 #[cfg(test)]
@@ -393,14 +370,8 @@ mod tests {
         let indices: Vec<u8> = (0..cells * cells)
             .map(|i| ((i % cells + i / cells) % materials.len()) as u8)
             .collect();
-        Shape::new_height_field_with_materials(
-            n,
-            &samples,
-            &HeightFieldSettings::default(),
-            materials,
-            &indices,
-        )
-        .unwrap()
+        let settings = crate::HeightFieldSettings::default().materials(materials, &indices);
+        Shape::new_height_field(n, &samples, &settings).unwrap()
     }
 
     fn cell_material(shape: &Shape, x: u32, y: u32) -> Option<u64> {

@@ -25,7 +25,7 @@ fn face_count(shape: &Shape) -> u32 {
 }
 
 fn hull_error(points: &[Vec3]) -> Option<ConvexHullError> {
-    match Shape::new_convex_hull(points, 0.05) {
+    match Shape::new_convex_hull_with_convex_radius(points, 0.05) {
         Err(ShapeError::ConvexHull(error)) => Some(error),
         _ => None,
     }
@@ -49,7 +49,7 @@ fn plane(origin: Vec3, rotation: Quat) -> Vec<Vec3> {
 
 #[test]
 fn cube_corners_make_a_six_faced_hull() {
-    let hull = Shape::new_convex_hull(&cube(0.5), 0.05).unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(&cube(0.5), 0.05).unwrap();
     assert_eq!(hull.sub_type(), JPH_ShapeSubType_ConvexHull);
     assert_eq!(point_count(&hull), 8);
     assert_eq!(face_count(&hull), 6);
@@ -63,14 +63,14 @@ fn irregular_tetrahedron_and_duplicate_points_build() {
         Vec3::new(0.2, 0.9, 0.1),
         Vec3::new(0.3, 0.2, 1.7),
     ];
-    let hull = Shape::new_convex_hull(&tetrahedron, 0.0).unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(&tetrahedron, 0.0).unwrap();
     assert_eq!(point_count(&hull), 4);
     assert_eq!(face_count(&hull), 4);
 
     let mut doubled = cube(1.0);
     doubled.extend(cube(1.0));
     doubled.push(Vec3::ZERO);
-    let hull = Shape::new_convex_hull(&doubled, 0.05).unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(&doubled, 0.05).unwrap();
     assert_eq!(point_count(&hull), 8);
 }
 
@@ -122,17 +122,17 @@ fn points_must_be_finite_and_within_the_extent() {
         let mut points = cube(1.0);
         points[3].y = bad;
         assert!(matches!(
-            Shape::new_convex_hull(&points, 0.05),
+            Shape::new_convex_hull_with_convex_radius(&points, 0.05),
             Err(ShapeError::InvalidValue(_))
         ));
     }
     let max = limits::MAX_SHAPE_EXTENT;
-    let hull = Shape::new_convex_hull(&cube(max), 0.05).unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(&cube(max), 0.05).unwrap();
     assert_eq!(point_count(&hull), 8);
     let mut beyond = cube(max);
     beyond[0].x = -max.next_up();
     assert!(matches!(
-        Shape::new_convex_hull(&beyond, 0.05),
+        Shape::new_convex_hull_with_convex_radius(&beyond, 0.05),
         Err(ShapeError::InvalidValue(_))
     ));
 }
@@ -141,7 +141,7 @@ fn points_must_be_finite_and_within_the_extent() {
 fn convex_radius_must_be_finite_and_not_negative() {
     for bad in [-0.01, f32::NAN, f32::INFINITY] {
         assert!(matches!(
-            Shape::new_convex_hull(&cube(1.0), bad),
+            Shape::new_convex_hull_with_convex_radius(&cube(1.0), bad),
             Err(ShapeError::InvalidValue(_))
         ));
     }
@@ -201,7 +201,7 @@ fn slab_rule_counts_coplanar_distances() {
 fn thin_slabs_near_the_origin_build_down_to_a_fraction_of_a_millimetre() {
     // A 2 m plank: 200 coplanar distances are about 0.14 mm.
     let plank = |thickness: f32| cube_with(Vec3::new(1.0, thickness / 2.0, 1.0));
-    assert!(Shape::new_convex_hull(&plank(2.0e-4), 0.0).is_ok());
+    assert!(Shape::new_convex_hull_with_convex_radius(&plank(2.0e-4), 0.0).is_ok());
     assert_eq!(hull_error(&plank(1.0e-4)), Some(ConvexHullError::Coplanar));
 }
 
@@ -215,7 +215,7 @@ fn far_clouds_need_more_thickness() {
             .map(|p| Vec3::new(p.x - 450.0, p.y - 1209.0, p.z - 1308.0))
             .collect()
     };
-    assert!(Shape::new_convex_hull(&plank(0.25), 0.0).is_ok());
+    assert!(Shape::new_convex_hull_with_convex_radius(&plank(0.25), 0.0).is_ok());
     assert_eq!(hull_error(&plank(0.2)), Some(ConvexHullError::Coplanar));
 }
 

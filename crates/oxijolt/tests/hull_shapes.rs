@@ -8,7 +8,7 @@ use oxijolt::*;
 
 #[test]
 fn irregular_rotated_hull_falls_and_rests_on_a_floor() {
-    let hull = Shape::new_convex_hull(&irregular_points(), 0.05).unwrap();
+    let hull = Shape::new_convex_hull_with_convex_radius(&irregular_points(), 0.05).unwrap();
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
     add_floor(&mut world);
     let settings = BodySettings::new_dynamic()
@@ -26,7 +26,9 @@ fn irregular_rotated_hull_falls_and_rests_on_a_floor() {
 
 #[test]
 fn thin_box_hull_is_a_dynamic_body() {
-    let hull = Shape::new_convex_hull(&box_corners(Vec3::new(1.0, 0.005, 1.0)), 0.0).unwrap();
+    let hull =
+        Shape::new_convex_hull_with_convex_radius(&box_corners(Vec3::new(1.0, 0.005, 1.0)), 0.0)
+            .unwrap();
     let mut world = world(Vec3::new(0.0, -9.81, 0.0), 1);
     add_floor(&mut world);
     let id = world
@@ -68,7 +70,7 @@ fn needle(length: f32, thickness: f32) -> Shape {
         .into_iter()
         .map(rotate)
         .collect();
-    Shape::new_convex_hull(&points, 0.0).unwrap()
+    Shape::new_convex_hull_with_convex_radius(&points, 0.0).unwrap()
 }
 
 #[test]
@@ -81,7 +83,7 @@ fn needles_too_thin_for_the_hull_builder_are_degenerate() {
         .map(rotate)
         .collect();
     assert!(matches!(
-        Shape::new_convex_hull(&points, 0.0),
+        Shape::new_convex_hull_with_convex_radius(&points, 0.0),
         Err(ShapeError::ConvexHull(ConvexHullError::Degenerate))
     ));
 }
@@ -102,7 +104,9 @@ fn rotated_needle_hull_is_refused_as_dynamic_and_accepted_as_static() {
 
 /// A static irregular hull at the origin, raised so its top is the highest point at y = 1.6.
 fn static_hull_world() -> (PhysicsWorld, BodyId) {
-    let hull = Shape::new_convex_hull(&box_corners(Vec3::new(1.0, 0.5, 1.0)), 0.05).unwrap();
+    let hull =
+        Shape::new_convex_hull_with_convex_radius(&box_corners(Vec3::new(1.0, 0.5, 1.0)), 0.05)
+            .unwrap();
     let mut world = world(Vec3::ZERO, 1);
     let id = world
         .create_body(
@@ -212,7 +216,7 @@ fn clouds_the_hull_builder_asserts_on_are_refused_or_built_without_asserts() {
     }
     for (name, text) in BUILDER_ASSERT_CLOUDS {
         let points = fixture_points(text);
-        let hull = match Shape::new_convex_hull(&points, 0.0) {
+        let hull = match Shape::new_convex_hull_with_convex_radius(&points, 0.0) {
             Err(ShapeError::Rejected(_)) => continue,
             Ok(hull) => hull,
             Err(error) => panic!("{name}: {error}"),
@@ -232,4 +236,33 @@ fn clouds_the_hull_builder_asserts_on_are_refused_or_built_without_asserts() {
         let hit = world.cast_ray(&ray, &QueryFilter::new()).unwrap();
         assert_eq!(hit.map(|hit| hit.body), Some(id), "{name}");
     }
+}
+
+/// `new_convex_hull` takes Jolt's default convex radius, 0.05 m: a small sphere just off a
+/// corner of the hull overlaps the sharp corner but stays clear of the rounded one, by the same
+/// distance for the default and the explicit radius.
+#[test]
+fn default_hull_radius_equals_explicit() {
+    let corners = box_corners(Vec3::new(0.5, 0.5, 0.5));
+    let shapes = [
+        Shape::new_convex_hull(&corners).unwrap(),
+        Shape::new_convex_hull_with_convex_radius(&corners, 0.05).unwrap(),
+        Shape::new_convex_hull_with_convex_radius(&corners, 0.0).unwrap(),
+    ];
+    let probe = Shape::new_sphere(0.1).unwrap();
+    let depths = shapes.map(|hull| {
+        let mut world = world(Vec3::ZERO, 1);
+        world
+            .create_body(&hull, &BodySettings::new_static())
+            .unwrap();
+        let near_corner = RVec3::new(0.54, 0.54, 0.54);
+        let query =
+            CollideShape::new(&probe, near_corner, Quat::IDENTITY).max_separation_distance(0.1);
+        let hits = world.collide_shape(&query, &QueryFilter::new()).unwrap();
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        hits[0].penetration_depth
+    });
+    let [default, explicit, sharp] = depths;
+    assert_eq!(default.to_bits(), explicit.to_bits());
+    assert!(default < 0.0 && sharp > 0.0, "{depths:?}");
 }

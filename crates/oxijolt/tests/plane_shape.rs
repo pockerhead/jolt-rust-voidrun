@@ -157,7 +157,7 @@ fn planes_are_refused_where_shapes_must_move_or_query() {
     let mut world = world(GRAVITY, 1);
     let plane = ground(10.0);
     assert!(matches!(
-        Shape::scaled(&plane, Vec3::new(2.0, 2.0, 2.0)),
+        Shape::new_scaled(&plane, Vec3::new(2.0, 2.0, 2.0)),
         Err(ShapeError::InvalidValue(_))
     ));
 

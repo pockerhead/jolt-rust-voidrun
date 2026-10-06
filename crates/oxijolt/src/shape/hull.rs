@@ -28,6 +28,13 @@ const MIN_NEEDLE_LEVER: f64 = 0.25;
 const MIN_SLAB_THICKNESS: f64 = 200.0;
 
 impl Shape {
+    /// The convex hull of `points` (shape space, metres) with Jolt's default convex radius,
+    /// 0.05 m; otherwise as
+    /// [`new_convex_hull_with_convex_radius`](Self::new_convex_hull_with_convex_radius).
+    pub fn new_convex_hull(points: &[Vec3]) -> Result<Self, ShapeError> {
+        Self::new_convex_hull_with_convex_radius(points, JPH_DEFAULT_CONVEX_RADIUS as f32)
+    }
+
     /// The convex hull of `points` (shape space, metres) with a convex radius in metres.
     ///
     /// Needs at least 4 points ([`ConvexHullError::TooFewPoints`]), each finite with every component
@@ -56,11 +63,15 @@ impl Shape {
     ///
     /// [docs/limits.md#convex-hulls]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#convex-hulls
     /// [docs/limits.md#clouds-the-hull-builder-asserts-on]: https://github.com/pockerhead/oxijolt/blob/main/docs/limits.md#clouds-the-hull-builder-asserts-on
-    pub fn new_convex_hull(points: &[Vec3], convex_radius: f32) -> Result<Self, ShapeError> {
+    pub fn new_convex_hull_with_convex_radius(
+        points: &[Vec3],
+        convex_radius: f32,
+    ) -> Result<Self, ShapeError> {
         Self::convex_hull(points, convex_radius, None)
     }
 
-    /// [`new_convex_hull`](Self::new_convex_hull) made of `material`; the same rules apply.
+    /// [`new_convex_hull_with_convex_radius`](Self::new_convex_hull_with_convex_radius) made of
+    /// `material`; the same rules apply.
     pub fn new_convex_hull_with_material(
         points: &[Vec3],
         convex_radius: f32,
@@ -117,7 +128,7 @@ impl Shape {
     }
 }
 
-/// The count and magnitude checks of [`Shape::new_convex_hull`].
+/// The count and magnitude checks of [`Shape::new_convex_hull_with_convex_radius`].
 fn validate_hull_points(points: &[Vec3]) -> Result<(), ShapeError> {
     if points.len() < 4 {
         return Err(ShapeError::ConvexHull(ConvexHullError::TooFewPoints));

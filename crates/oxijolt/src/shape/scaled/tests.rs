@@ -27,7 +27,7 @@ fn invalid_settings(result: Result<Shape, ShapeError>) -> bool {
     matches!(result, Err(ShapeError::InvalidValue(_)))
 }
 
-/// Whether `Shape::scaled` refused thin triangles, checked for the default convex extent.
+/// Whether `Shape::new_scaled` refused thin triangles, checked for the default convex extent.
 fn thin_triangles(result: Result<Shape, ShapeError>) -> bool {
     matches!(
         result,
@@ -66,25 +66,25 @@ fn quad_mesh() -> Shape {
 
 #[test]
 fn box_bounds_follow_the_scale() {
-    let scaled = Shape::scaled(&unit_box(), Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    let scaled = Shape::new_scaled(&unit_box(), Vec3::new(1.0, 2.0, 3.0)).unwrap();
     assert_eq!(scaled.sub_type(), JPH_ShapeSubType_Scaled);
     assert_eq!(bounds(&scaled), [[-0.5, -1.0, -1.5], [0.5, 1.0, 1.5]]);
-    let nested = Shape::scaled(&scaled, Vec3::new(2.0, 1.0, 1.0)).unwrap();
+    let nested = Shape::new_scaled(&scaled, Vec3::new(2.0, 1.0, 1.0)).unwrap();
     assert_eq!(bounds(&nested), [[-1.0, -1.0, -1.5], [1.0, 1.0, 1.5]]);
 }
 
 #[test]
 fn jolt_scale_rules_per_shape_kind() {
     let sphere = Shape::new_sphere(0.5).unwrap();
-    assert!(invalid_settings(Shape::scaled(
+    assert!(invalid_settings(Shape::new_scaled(
         &sphere,
         Vec3::new(1.0, 2.0, 1.0)
     )));
-    assert!(Shape::scaled(&sphere, Vec3::new(2.0, 2.0, 2.0)).is_ok());
-    assert!(Shape::scaled(&sphere, Vec3::new(-2.0, 2.0, 2.0)).is_ok());
+    assert!(Shape::new_scaled(&sphere, Vec3::new(2.0, 2.0, 2.0)).is_ok());
+    assert!(Shape::new_scaled(&sphere, Vec3::new(-2.0, 2.0, 2.0)).is_ok());
     let cylinder = Shape::new_cylinder(1.0, 0.5).unwrap();
-    assert!(Shape::scaled(&cylinder, Vec3::new(2.0, 5.0, 2.0)).is_ok());
-    assert!(invalid_settings(Shape::scaled(
+    assert!(Shape::new_scaled(&cylinder, Vec3::new(2.0, 5.0, 2.0)).is_ok());
+    assert!(invalid_settings(Shape::new_scaled(
         &cylinder,
         Vec3::new(2.0, 1.0, 3.0)
     )));
@@ -101,25 +101,25 @@ fn jolt_scale_rules_per_shape_kind() {
         child(&block, Vec3::new(2.0, 0.0, 0.0), turned),
     ])
     .unwrap();
-    assert!(invalid_settings(Shape::scaled(
+    assert!(invalid_settings(Shape::new_scaled(
         &compound,
         Vec3::new(2.0, 1.0, 1.0)
     )));
     // Scaling along the turn's axis keeps the child's axes.
-    assert!(Shape::scaled(&compound, Vec3::new(1.0, 2.0, 1.0)).is_ok());
-    assert!(Shape::scaled(&compound, Vec3::new(2.0, 2.0, 2.0)).is_ok());
+    assert!(Shape::new_scaled(&compound, Vec3::new(1.0, 2.0, 1.0)).is_ok());
+    assert!(Shape::new_scaled(&compound, Vec3::new(2.0, 2.0, 2.0)).is_ok());
 }
 
 #[test]
 fn scale_components_are_checked() {
     let block = unit_box();
-    assert!(Shape::scaled(&block, Vec3::new(1.0e-6, 1.0, 1.0)).is_ok());
-    assert!(invalid_settings(Shape::scaled(
+    assert!(Shape::new_scaled(&block, Vec3::new(1.0e-6, 1.0, 1.0)).is_ok());
+    assert!(invalid_settings(Shape::new_scaled(
         &block,
         Vec3::new(0.99e-6, 1.0, 1.0)
     )));
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        assert!(invalid_dimensions(Shape::scaled(
+        assert!(invalid_dimensions(Shape::new_scaled(
             &block,
             Vec3::new(1.0, bad, 1.0)
         )));
@@ -130,8 +130,8 @@ fn scale_components_are_checked() {
 fn scaled_bounds_and_centre_of_mass_stay_within_the_extent() {
     let max = limits::MAX_SHAPE_EXTENT;
     let block = Shape::new_box(Vec3::new(1.0, 1.0, 1.0)).unwrap();
-    assert!(Shape::scaled(&block, Vec3::new(max, 1.0, 1.0)).is_ok());
-    assert!(invalid_dimensions(Shape::scaled(
+    assert!(Shape::new_scaled(&block, Vec3::new(max, 1.0, 1.0)).is_ok());
+    assert!(invalid_dimensions(Shape::new_scaled(
         &block,
         Vec3::new(max.next_up(), 1.0, 1.0)
     )));
@@ -143,8 +143,8 @@ fn scaled_bounds_and_centre_of_mass_stay_within_the_extent() {
         Quat::IDENTITY,
     )])
     .unwrap();
-    assert!(Shape::scaled(&far, Vec3::new(1.2, 1.2, 1.2)).is_ok());
-    assert!(invalid_dimensions(Shape::scaled(
+    assert!(Shape::new_scaled(&far, Vec3::new(1.2, 1.2, 1.2)).is_ok());
+    assert!(invalid_dimensions(Shape::new_scaled(
         &far,
         Vec3::new(2.0, 2.0, 2.0)
     )));
@@ -152,7 +152,7 @@ fn scaled_bounds_and_centre_of_mass_stay_within_the_extent() {
     // A field of holes has no surface; its bounds are a point, which the scale moves away.
     let holes =
         Shape::new_height_field(3, &[f32::MAX; 9], &HeightFieldSettings::default()).unwrap();
-    assert!(invalid_dimensions(Shape::scaled(
+    assert!(invalid_dimensions(Shape::new_scaled(
         &holes,
         Vec3::new(1.0e30, 1.0, 1.0e30)
     )));
@@ -160,7 +160,7 @@ fn scaled_bounds_and_centre_of_mass_stay_within_the_extent() {
 
 #[test]
 fn scaled_box_has_the_mass_of_the_equivalent_box() {
-    let scaled = Shape::scaled(&unit_box(), Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    let scaled = Shape::new_scaled(&unit_box(), Vec3::new(1.0, 2.0, 3.0)).unwrap();
     let equivalent = Shape::new_box(Vec3::new(0.5, 1.0, 1.5)).unwrap();
     let (a, b) = (
         mass_properties(&scaled, None),
@@ -180,7 +180,7 @@ fn scaled_box_has_the_mass_of_the_equivalent_box() {
 fn materials_survive_scaling() {
     let material = PhysicsMaterial::new(44).unwrap();
     let inner = Shape::new_box_with_material(Vec3::new(0.5, 0.5, 0.5), 0.05, &material).unwrap();
-    let scaled = Shape::scaled(&inner, Vec3::new(2.0, 1.0, 1.0)).unwrap();
+    let scaled = Shape::new_scaled(&inner, Vec3::new(2.0, 1.0, 1.0)).unwrap();
     drop((inner, material));
     let (origin, direction) = (
         Vec3::new(0.0, 2.0, 0.0).to_jph(),
@@ -201,12 +201,12 @@ fn materials_survive_scaling() {
 #[test]
 fn scaled_meshes_stay_kinematic_and_collidable() {
     let mesh = quad_mesh();
-    let doubled = Shape::scaled(&mesh, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let doubled = Shape::new_scaled(&mesh, Vec3::new(2.0, 2.0, 2.0)).unwrap();
     assert!(doubled.static_only_leaves_are_meshes());
-    assert!(Shape::scaled(&mesh, Vec3::new(1.0, -1.0, 1.0)).is_ok());
+    assert!(Shape::new_scaled(&mesh, Vec3::new(1.0, -1.0, 1.0)).is_ok());
     // Twice the area of a 1 m triangle scaled by s is s^2: 1e-4 at s = 0.01, 1e-6 at s = 0.001.
-    assert!(Shape::scaled(&mesh, Vec3::new(0.01, 1.0, 0.01)).is_ok());
-    assert!(thin_triangles(Shape::scaled(
+    assert!(Shape::new_scaled(&mesh, Vec3::new(0.01, 1.0, 0.01)).is_ok());
+    assert!(thin_triangles(Shape::new_scaled(
         &mesh,
         Vec3::new(0.001, 1.0, 0.001)
     )));
@@ -217,15 +217,15 @@ fn scaled_meshes_stay_kinematic_and_collidable() {
     ])
     .unwrap();
     let offset = Shape::new_offset_center_of_mass(&compound, Vec3::new(0.2, 0.0, 0.0)).unwrap();
-    assert!(thin_triangles(Shape::scaled(
+    assert!(thin_triangles(Shape::new_scaled(
         &offset,
         Vec3::new(0.001, 0.001, 0.001)
     )));
-    assert!(Shape::scaled(&offset, Vec3::new(0.5, 0.5, 0.5)).is_ok());
+    assert!(Shape::new_scaled(&offset, Vec3::new(0.5, 0.5, 0.5)).is_ok());
     let field = Shape::new_height_field(3, &[0.0; 9], &HeightFieldSettings::default()).unwrap();
-    let scaled_field = Shape::scaled(&field, Vec3::new(2.0, 1.0, 2.0)).unwrap();
+    let scaled_field = Shape::new_scaled(&field, Vec3::new(2.0, 1.0, 2.0)).unwrap();
     assert!(!scaled_field.static_only_leaves_are_meshes());
-    assert!(thin_triangles(Shape::scaled(
+    assert!(thin_triangles(Shape::new_scaled(
         &field,
         Vec3::new(0.001, 1.0, 0.001)
     )));
@@ -254,7 +254,7 @@ fn quad_at(x: f32) -> Shape {
 /// triangle, moved by `translation` (the leaf's position in the scaled shape's centre of mass
 /// space, by Jolt's rules), is where a ray along its normal hits the scaled shape.
 fn assert_placements_match_jolt(inner: &Shape, scale: Vec3, translation: [f64; 3]) {
-    let scaled = Shape::scaled(inner, scale).unwrap();
+    let scaled = Shape::new_scaled(inner, scale).unwrap();
     let leaves = triangle_leaves(inner, scale).unwrap();
     assert!(!leaves.is_empty());
     for (leaf, placement) in leaves {
@@ -314,7 +314,7 @@ fn placements_match_jolts_centre_of_mass_spaces() {
     assert_placements_match_jolt(&turned, scale, [0.0; 3]);
 
     // A scaled mesh as a turned compound child, inside the scale.
-    let stretched = Shape::scaled(&quad, Vec3::new(2.0, 1.0, 3.0)).unwrap();
+    let stretched = Shape::new_scaled(&quad, Vec3::new(2.0, 1.0, 3.0)).unwrap();
     let nested = Shape::new_compound(&[
         child(&block, Vec3::ZERO, Quat::IDENTITY),
         child(&stretched, p, quarter_turn()),
@@ -334,13 +334,13 @@ fn translations_above_a_mesh_do_not_change_its_check() {
     ];
     let (tiny, _) = Shape::new_mesh(&vertices, &[[0, 2, 1]]).unwrap();
     let away = Shape::new_offset_center_of_mass(&tiny, Vec3::new(-1999.0, 0.0, 0.0)).unwrap();
-    assert!(Shape::scaled(&away, Vec3::new(1.0, 1.0, 1.0)).is_ok());
+    assert!(Shape::new_scaled(&away, Vec3::new(1.0, 1.0, 1.0)).is_ok());
     let compound = Shape::new_compound(&[
         child(&unit_box(), Vec3::ZERO, Quat::IDENTITY),
         child(&tiny, Vec3::new(1999.0, 0.0, 0.0), Quat::IDENTITY),
     ])
     .unwrap();
-    assert!(Shape::scaled(&compound, Vec3::new(1.0, 1.0, 1.0)).is_ok());
+    assert!(Shape::new_scaled(&compound, Vec3::new(1.0, 1.0, 1.0)).is_ok());
 }
 
 #[test]
@@ -361,8 +361,8 @@ fn flattening_follows_the_meshs_own_coordinates() {
     .unwrap();
     let moved = rotated_translated(&far, to_origin, Quat::IDENTITY);
     for shape in [&far, &offset, &cancelled, &in_compound, &moved] {
-        assert!(Shape::scaled(shape, Vec3::new(1.0, 1.0, 0.006)).is_ok());
-        assert!(thin_triangles(Shape::scaled(
+        assert!(Shape::new_scaled(shape, Vec3::new(1.0, 1.0, 0.006)).is_ok());
+        assert!(thin_triangles(Shape::new_scaled(
             shape,
             Vec3::new(1.0, 1.0, 0.001)
         )));
@@ -374,11 +374,11 @@ fn flattening_follows_the_meshs_own_coordinates() {
         child(&far, to_origin, quarter_turn()),
     ])
     .unwrap();
-    assert!(thin_triangles(Shape::scaled(
+    assert!(thin_triangles(Shape::new_scaled(
         &turned,
         Vec3::new(0.001, 1.0, 1.0)
     )));
-    assert!(Shape::scaled(&turned, Vec3::new(1.0, 1.0, 0.001)).is_ok());
+    assert!(Shape::new_scaled(&turned, Vec3::new(1.0, 1.0, 0.001)).is_ok());
 }
 
 #[test]
@@ -396,11 +396,11 @@ fn scaled_meshes_are_checked_for_the_extent_they_were_built_for() {
         Shape::new_mesh_with_settings(&sliver(2.0e-5), &[[0, 1, 2]], &small).unwrap();
     assert!(dropped.is_empty());
     for scale in [1.0, 2.0] {
-        assert!(Shape::scaled(&mesh, Vec3::new(scale, scale, scale)).is_ok());
+        assert!(Shape::new_scaled(&mesh, Vec3::new(scale, scale, scale)).is_ok());
     }
     let shrunk = Vec3::new(0.2, 0.2, 0.2);
     assert_eq!(
-        Shape::scaled(&mesh, shrunk).err(),
+        Shape::new_scaled(&mesh, shrunk).err(),
         Some(ShapeError::ThinTriangles(ThinTrianglesError {
             scale: shrunk,
             max_convex_extent: 1.0
@@ -413,10 +413,10 @@ fn scaled_meshes_are_checked_for_the_extent_they_were_built_for() {
         Shape::new_mesh_with_settings(&sliver(2.5e-3), &[[0, 1, 2]], &large).unwrap();
     assert!(dropped.is_empty());
     let (thinned, _) = Shape::new_mesh(&sliver(1.25e-3), &[[0, 1, 2]]).unwrap();
-    assert!(Shape::scaled(&thinned, Vec3::new(1.0, 1.0, 1.0)).is_ok());
+    assert!(Shape::new_scaled(&thinned, Vec3::new(1.0, 1.0, 1.0)).is_ok());
     let halved = Vec3::new(0.5, 1.0, 1.0);
     assert_eq!(
-        Shape::scaled(&mesh, halved).err(),
+        Shape::new_scaled(&mesh, halved).err(),
         Some(ShapeError::ThinTriangles(ThinTrianglesError {
             scale: halved,
             max_convex_extent: 4000.0
@@ -428,9 +428,9 @@ fn scaled_meshes_are_checked_for_the_extent_they_were_built_for() {
         child(&mesh, Vec3::new(3.0, 0.0, 0.0), Quat::IDENTITY),
     ])
     .unwrap();
-    assert!(Shape::scaled(&compound, Vec3::new(2.0, 2.0, 2.0)).is_ok());
+    assert!(Shape::new_scaled(&compound, Vec3::new(2.0, 2.0, 2.0)).is_ok());
     assert!(matches!(
-        Shape::scaled(&compound, Vec3::new(0.5, 0.5, 0.5)),
+        Shape::new_scaled(&compound, Vec3::new(0.5, 0.5, 0.5)),
         Err(ShapeError::ThinTriangles(ThinTrianglesError {
             max_convex_extent: 4000.0,
             ..

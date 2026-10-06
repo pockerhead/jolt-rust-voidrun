@@ -927,14 +927,8 @@ fn height_field_material_lists_are_validated() {
     let refs: Vec<&PhysicsMaterial> = materials.iter().collect();
     let samples = vec![0.0; 9];
     let field = |list: &[&PhysicsMaterial], indices: &[u8]| {
-        Shape::new_height_field_with_materials(
-            3,
-            &samples,
-            &HeightFieldSettings::default(),
-            list,
-            indices,
-        )
-        .err()
+        let settings = HeightFieldSettings::default().materials(list, indices);
+        Shape::new_height_field(3, &samples, &settings).err()
     };
     let invalid = |error: Option<ShapeError>| matches!(error, Some(ShapeError::InvalidValue(_)));
     assert!(invalid(field(&[], &[0; 4])), "no material");
@@ -945,14 +939,8 @@ fn height_field_material_lists_are_validated() {
     assert!(invalid(field(&refs[..2], &[0, 1, 2, 0])), "index == len");
     assert_eq!(field(&refs[..2], &[0, 1, 1, 0]), None);
     // The rules of `new_height_field` come first.
-    let error = Shape::new_height_field_with_materials(
-        1,
-        &[0.0],
-        &HeightFieldSettings::default(),
-        &refs[..1],
-        &[],
-    )
-    .err();
+    let settings = HeightFieldSettings::default().materials(&refs[..1], &[]);
+    let error = Shape::new_height_field(1, &[0.0], &settings).err();
     assert!(matches!(error, Some(ShapeError::InvalidValue(_))));
 }
 

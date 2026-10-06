@@ -162,14 +162,11 @@ fn build_ground(world: &mut PhysicsWorld, materials: &[PhysicsMaterial; 2]) -> V
     let indices: Vec<u8> = (0..cells)
         .map(|i| ((i % (n - 1) + i / (n - 1)) % 2) as u8)
         .collect();
-    let field = Shape::new_height_field_with_materials(
-        n as u32,
-        &samples,
-        &HeightFieldSettings::default().offset(Vec3::new(12.0, 0.0, -8.0)),
-        &[a, b],
-        &indices,
-    )
-    .unwrap();
+    let materials = [a, b];
+    let settings = HeightFieldSettings::default()
+        .offset(Vec3::new(12.0, 0.0, -8.0))
+        .materials(&materials, &indices);
+    let field = Shape::new_height_field(n as u32, &samples, &settings).unwrap();
     ids.push(world.create_body(&field, &at(0.0, 0.0, 0.0)).unwrap());
 
     let sphere = Shape::new_sphere(1.0).unwrap();

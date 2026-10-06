@@ -206,7 +206,7 @@ impl Arena {
             Shape::new_sphere(0.3).unwrap(),
             Shape::new_box(Vec3::new(0.3, 0.3, 0.3)).unwrap(),
             Shape::new_capsule(0.3, 0.2).unwrap(),
-            Shape::new_convex_hull(
+            Shape::new_convex_hull_with_convex_radius(
                 &[
                     Vec3::new(-0.3, -0.2, -0.3),
                     Vec3::new(0.3, -0.25, -0.2),
@@ -580,7 +580,7 @@ fn hull_family(arena: &mut Arena) {
         let points = cloud(&mut rng, kind);
         let radius = if index % 3 == 0 { 0.0 } else { 0.05 };
         let what = format!("hull {index} ({kind:?}, {} points)", points.len());
-        let result = Shape::new_convex_hull(&points, radius);
+        let result = Shape::new_convex_hull_with_convex_radius(&points, radius);
         if let Some(allowed) = expected_hull_error(kind, &points) {
             assert!(
                 matches!(result, Err(ShapeError::ConvexHull(error)) if allowed.contains(&error)),

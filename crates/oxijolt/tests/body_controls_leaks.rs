@@ -131,7 +131,7 @@ fn body_controls_do_not_leak() {
     ];
     let blocks = block_growth(|| {
         scene.round();
-        std::mem::forget(Shape::new_convex_hull(&tetrahedron, 0.05).unwrap());
+        std::mem::forget(Shape::new_convex_hull_with_convex_radius(&tetrahedron, 0.05).unwrap());
     });
     eprintln!("control: growth per block of {BLOCK_ROUNDS} rounds: {blocks:?}");
     assert!(

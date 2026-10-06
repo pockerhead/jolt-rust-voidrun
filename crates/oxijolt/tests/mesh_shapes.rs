@@ -134,7 +134,8 @@ fn dynamic_shapes_rest_on_a_mesh() {
         (Shape::new_sphere(0.5).unwrap(), Quat::IDENTITY, 0.5),
         (Shape::new_capsule(0.5, 0.3).unwrap(), lying, 0.3),
         (
-            Shape::new_convex_hull(&box_corners(Vec3::new(0.4, 0.4, 0.4)), 0.05).unwrap(),
+            Shape::new_convex_hull_with_convex_radius(&box_corners(Vec3::new(0.4, 0.4, 0.4)), 0.05)
+                .unwrap(),
             Quat::IDENTITY,
             0.4,
         ),
