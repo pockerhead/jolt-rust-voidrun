@@ -11,12 +11,12 @@ const SEGMENTS: u32 = 16;
 /// Rings from the pole to the equator of a sphere or a capsule's end.
 const HALF_RINGS: u32 = 6;
 
-/// A flat-shaded triangle mesh: three positions and one normal per triangle.
+/// A flat-shaded triangle mesh: the corners and the normal of each triangle.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FlatMesh {
-    /// Corner positions, three per triangle.
-    pub positions: Vec<Vec3>,
-    /// Unit normals, one per triangle.
+    /// Corner positions of each triangle.
+    pub triangles: Vec<[Vec3; 3]>,
+    /// The unit normal of each triangle.
     pub normals: Vec<Vec3>,
 }
 
@@ -81,9 +81,8 @@ impl FlatMesh {
             Visual::Scaled(inner, scale) => {
                 let inner = Self::of(inner);
                 let scale = Vec3::from(*scale);
-                let corners: Vec<Vec3> = inner.positions.iter().map(|&p| p * scale).collect();
-                for triangle in corners.chunks_exact(3) {
-                    self.push_triangle([triangle[0], triangle[1], triangle[2]].map(place));
+                for triangle in &inner.triangles {
+                    self.push_triangle(triangle.map(|p| place(p * scale)));
                 }
             }
             Visual::Triangles {
@@ -139,7 +138,7 @@ impl FlatMesh {
         if normal.length_squared() <= 1.0e-14 {
             return;
         }
-        self.positions.extend(corners);
+        self.triangles.push(corners);
         self.normals.push(normal.normalize());
     }
 }
@@ -300,12 +299,9 @@ impl TriangleBatch {
         base: Colour,
         alpha: u8,
     ) {
-        for (corners, normal) in mesh.positions.chunks_exact(3).zip(&mesh.normals) {
+        for (corners, normal) in mesh.triangles.iter().zip(&mesh.normals) {
             let colour = shade(base, rotation * *normal, alpha);
-            self.push(
-                [corners[0], corners[1], corners[2]].map(|p| position + rotation * p),
-                colour,
-            );
+            self.push(corners.map(|p| position + rotation * p), colour);
         }
     }
 
@@ -363,7 +359,7 @@ mod tests {
         for visual in &visuals {
             let mesh = FlatMesh::of(visual);
             assert!(mesh.triangle_count() >= 12, "{visual:?}");
-            for (corners, normal) in mesh.positions.chunks_exact(3).zip(&mesh.normals) {
+            for (corners, normal) in mesh.triangles.iter().zip(&mesh.normals) {
                 let centre = (corners[0] + corners[1] + corners[2]) / 3.0;
                 assert!(centre.dot(*normal) > 0.0, "{visual:?}: {corners:?}");
             }

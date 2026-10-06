@@ -74,8 +74,10 @@ impl Lut {
 
     /// The palette indices of RGBA pixels; alpha is ignored.
     pub fn quantize(&self, rgba: &[u8]) -> Vec<u8> {
-        rgba.chunks_exact(4)
-            .map(|pixel| self.index([pixel[0], pixel[1], pixel[2]]))
+        let (pixels, _) = rgba.as_chunks::<4>();
+        pixels
+            .iter()
+            .map(|&[r, g, b, _]| self.index([r, g, b]))
             .collect()
     }
 }
