@@ -1566,11 +1566,12 @@ fn slider_cone_swing_twist_and_six_dof_targets_are_bounded() {
     for velocity in [speed.next_up(), (-speed).next_down()] {
         assert!(constraint_invalid(slider.set_target_velocity(velocity)));
     }
-    assert!(slider.set_limits(Some((-extent, extent))).is_ok());
+    assert!(slider.set_limits(-extent, extent).is_ok());
     assert!(constraint_invalid(
-        slider.set_limits(Some((-extent, extent.next_up())))
+        slider.set_limits(-extent, extent.next_up())
     ));
-    assert!(slider.set_limits(None).is_ok());
+    slider.remove_limits();
+    assert_eq!(world.constraint(id.unwrap()).unwrap().limits(), None);
 
     let cone = |angle| ConeConstraintSettings::new(RVec3::ZERO, AXIS_X, angle);
     for angle in [0.0, PI] {
@@ -1870,7 +1871,8 @@ fn ratios_at_the_bound_step_finitely() {
                         .create_constraint(
                             bodies[0],
                             bodies[1],
-                            &GearConstraintSettings::new(z, z, ratio).hinges(hinges[0], hinges[1]),
+                            &GearConstraintSettings::new(z, z, ratio)
+                                .constraints(hinges[0], hinges[1]),
                         )
                         .unwrap();
                     world
@@ -2104,7 +2106,7 @@ fn lever_arms_are_bounded_by_the_bodies_size() {
     // mass towards the lighter body, kinematic bodies included. A 1 kg, 1 m cube, dynamic or
     // kinematic, welded to a dynamic 1000 kg, 4 m cube holds the large cube at 1000/1001 of the
     // distance between them, which its ratio bounds.
-    let weld = FixedConstraintSettings::default().auto_detect_point();
+    let weld = FixedConstraintSettings::default().auto_detect_point(true);
     let reach = cube_lever(2.0, bound) * 1.001;
     for light_settings in [BodySettings::new_dynamic(), BodySettings::new_kinematic()] {
         for (distance, accepted) in [(reach * 0.999, true), (reach * 1.001, false)] {

@@ -158,7 +158,7 @@ impl GearConstraintSettings {
     /// axis has the gear's axis direction in that body. They cannot be removed while the gear
     /// exists.
     #[must_use]
-    pub fn hinges(
+    pub fn constraints(
         mut self,
         hinge1: ConstraintId<HingeConstraint>,
         hinge2: ConstraintId<HingeConstraint>,

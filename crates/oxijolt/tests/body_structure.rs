@@ -395,7 +395,7 @@ fn a_static_body_that_may_move_joins_a_fixed_constraint_with_an_automatic_point(
         .create_constraint(
             post,
             cube,
-            &FixedConstraintSettings::default().auto_detect_point(),
+            &FixedConstraintSettings::default().auto_detect_point(true),
         )
         .unwrap();
     step(&mut world, 30);

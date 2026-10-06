@@ -804,7 +804,7 @@ fn run_constraints(worker_threads: u32) -> Digest {
         .create_constraint(
             discs[0],
             discs[1],
-            &GearConstraintSettings::new(z, z, 2.0).hinges(hinges[0], hinges[1]),
+            &GearConstraintSettings::new(z, z, 2.0).constraints(hinges[0], hinges[1]),
         )
         .unwrap();
     let mut motor = world.constraint_mut(hinges[0]).unwrap();

@@ -84,7 +84,7 @@ Configuration Jolt does not save stays as it is when a state is restored. A call
 during a run and rolls back must set it back and replay those calls, as Jolt's rollback
 documentation asks for body friction. These setters change such configuration:
 - hinge: `set_motor_settings`, `set_limits`, `set_limits_spring`, `set_max_friction_torque`;
-- slider: `set_motor_settings`, `set_limits`, `set_limits_spring`, `set_max_friction_force`;
+- slider: `set_motor_settings`, `set_limits`, `remove_limits`, `set_limits_spring`, `set_max_friction_force`;
 - distance: `set_distance`, `set_limits_spring`;
 - pulley: `set_length`;
 - cone: `set_half_cone_angle`;

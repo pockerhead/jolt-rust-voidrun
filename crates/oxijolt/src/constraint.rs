@@ -758,9 +758,10 @@ impl SixDofConstraintAxis {
 }
 
 /// How one axis of a six-degree-of-freedom constraint may move.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum SixDofAxis {
     /// Moves freely (Jolt `MakeFreeAxis`). The default.
+    #[default]
     Free,
     /// Does not move (Jolt `MakeFixedAxis`).
     Fixed,
