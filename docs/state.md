@@ -54,10 +54,85 @@ call also changes the world's structure, so no state saved before it restores, a
 request sets the flag again before the next simulating step after a restore of a state saved after
 it.
 
-`save_state_of(&bodies)` saves only the listed bodies; global state, contacts, constraints,
-characters and the pending invalidations are saved whole. Restoring it leaves every other body as it is (except that a character's
-inner body moves to the restored character's pose), so a replay from it is exact only when those
-bodies did not change since the save, for example static bodies the caller never moved.
+`save_state_of` saves only some bodies ([Choosing the bodies](#choosing-the-bodies)).
+
+## Reusing a buffer
+
+`save_state` returns a new `WorldState` each time. For rollback, where a game saves every tick,
+allocate the states once and save into them with `save_state_into`, which overwrites a state in
+place and reuses its memory. Once a buffer has held a save of the same size, a save into it
+allocates nothing on the Rust heap; the tests count allocations over 1000 saves of a scene with
+stacks, a car and a character. Jolt's recorder still allocates its own stream on the C++ heap for
+each save.
+
+`WorldState::new()` (or `Default`) is an empty state of no world: restoring it fails with
+`StateError::WrongWorld`, so a ring can be allocated before the world exists. A buffer belongs to
+the world that saved into it last.
+
+```rust
+use oxijolt::*;
+
+/// Ticks a late input can reach back.
+const WINDOW: usize = 8;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    let ball_shape = Shape::new_sphere(0.5)?;
+    let ball = world.create_body(
+        &ball_shape,
+        &BodySettings::new_dynamic().position(RVec3::new(0.0, 10.0, 0.0)),
+    )?;
+
+    let mut ring = vec![WorldState::new(); WINDOW];
+    for tick in 0..60 {
+        world.save_state_into(BodySelection::All, &mut ring[tick % WINDOW])?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
+    }
+    let at_tick_60 = world.body(ball)?.position();
+
+    // An input for tick 55 arrives late: go back to the start of tick 55 and run it again.
+    world.restore_state(&ring[55 % WINDOW])?;
+    for tick in 55..60 {
+        world.save_state_into(BodySelection::All, &mut ring[tick % WINDOW])?;
+        assert!(world.step(1.0 / 60.0)?.is_complete());
+    }
+    assert_eq!(world.body(ball)?.position(), at_tick_60);
+    Ok(())
+}
+```
+
+## Choosing the bodies
+
+`save_state_of` and `save_state_into` take a `BodySelection`:
+- `All` saves every body.
+- `Movable` saves every body that is not static, asleep or awake: dynamic, kinematic and soft
+  bodies, ragdoll parts and characters' inner bodies. Leaving the static bodies out saves 33 bytes
+  each (45 in double precision, see [Size](#size)). A static body the caller moves after the save
+  keeps its new pose when the state is restored.
+- `Only(&ids)` saves the listed bodies, in any order, duplicates allowed. An id of another world or
+  a removed body fails with `StateError::Body` before anything is saved.
+
+Global state, contacts, constraints, characters and the pending invalidations are saved whole
+whatever the selection. Restoring a state with `restore_state` leaves every body the state does
+not hold as it is (except that a character's inner body moves to the restored character's pose),
+so a replay from it is exact only when those bodies did not change since the save, for example
+static bodies the caller never moved.
+
+## Restoring some bodies
+
+`restore_state_of(&state, selection)` restores global state, contacts, constraints, characters
+and the pending invalidations from the state whole, and of the bodies only the selected ones;
+every other body keeps its current state bit for bit, awake or asleep. A character's inner body
+always counts as selected, because restoring the character moves it. A selected body the state
+does not hold keeps its current state too. `BodySelection::All` is `restore_state`.
+
+The same calls give the same result with 1 and 4 workers (the tests compare 120 ticks after such
+a restore in two processes), but the world is not one that never left the state: the restored
+contacts were made at the saved poses, also between a restored body and one that stays where it
+is now.
+
+It fails like `restore_state`, and with `StateError::Body` for an id of another world or a
+removed body; the world is unchanged then.
 
 ## Which world it restores into
 
@@ -171,6 +246,13 @@ supported.
 inner body and a ragdoll, runs on, restores and replays every tick bit for bit, with 1 and 4
 workers, in one process and across two. Further tests cover a detour with different inputs before
 the restore, saved and unsaved configuration, structural changes, selected bodies and soft bodies.
+`tests/state_buffers.rs` rolls a ring of eight reused buffers back over a mispredicted detour
+(other inputs, a woken sleeper, a teleport, other gravity) and replays bit for bit with 1 and 4
+workers, checks movable states and every refusal, and restores selected bodies, comparing 120
+ticks after a filtered restore with 1 and 4 workers in two processes.
+`tests/state_buffer_allocations.rs` counts Rust allocations of `save_state_into`,
+`tests/state_sizes.rs` the bytes of each object, and `tests/state_buffer_leaks.rs` (Windows)
+gates the process's private bytes over saves and filtered restores.
 `tests/body_controls_state.rs` replays every momentary body control (impulses, kinematic moves,
 activation, deactivation, box activation) after a detour with 1 and 4 workers, and checks that the
 creation-only body configuration survives restores and that shape and motion type changes refuse

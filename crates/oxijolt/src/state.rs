@@ -221,10 +221,10 @@ impl PhysicsWorld {
     /// selected, because restoring the character moves it. A selected body that `state` does not
     /// hold (see [`save_state_of`](Self::save_state_of)) keeps its current state too.
     ///
-    /// Calls that are the same give the same result for any number of worker threads, but the
-    /// world is not one that never left `state`: the restored contacts were made at the saved
-    /// poses, also for bodies that now stay where they are. [`BodySelection::All`] is
-    /// [`restore_state`](Self::restore_state).
+    /// The same calls give the same result with 1 and 4 worker threads (the tests compare two
+    /// processes), but the world is not one that never left `state`: the restored contacts were
+    /// made at the saved poses, also for bodies that now stay where they are.
+    /// [`BodySelection::All`] is [`restore_state`](Self::restore_state).
     ///
     /// Fails like `restore_state`, and with [`StateError::Body`] for an id of another world or a
     /// removed body; the world is unchanged then.

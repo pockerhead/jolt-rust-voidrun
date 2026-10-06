@@ -4,6 +4,17 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- `PhysicsWorld::save_state_into(bodies, &mut state)`: saves into an existing `WorldState` and
+  reuses its memory, so a rollback ring allocates nothing on the Rust heap per save;
+  `WorldState::new` (and `Default`) is an empty state of no world, and `WorldState::data_size`
+  the length of Jolt's stream ([state guide](docs/state.md#size) lists what each object adds).
+- `BodySelection` (`All`, `Movable`, `Only`) for `save_state_of`, `save_state_into` and the new
+  `PhysicsWorld::restore_state_of`, which restores only the selected bodies and leaves every
+  other body in its current state.
+- Changed: `save_state_of` takes a `BodySelection` instead of `&[BodyId]` and returns
+  `StateError`; a foreign or removed id is `StateError::Body` (was `BodyError`). Migration:
+  `save_state_of(&ids)` becomes `save_state_of(BodySelection::Only(&ids))`.
+
 ## 0.7.0 — 2026-10-06
 
 - `CharacterSettings::humanoid(height, radius)`: settings that own a capsule `height` tall standing
