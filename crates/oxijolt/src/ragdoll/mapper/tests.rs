@@ -278,6 +278,63 @@ fn rotations_at_the_edge_of_the_tolerance_are_normalised() {
 }
 
 #[test]
+fn a_long_twisting_chain_maps() {
+    // A ragdoll root and tip one metre apart along +Z over 128 animation links, each turned 45
+    // degrees about +Z: the chain ends one metre up, so its start turns by nothing.
+    const LINKS: usize = 128;
+    let ragdoll = Skeleton::new(&[joint("root", None), joint("tip", Some(0))]).unwrap();
+    let names: Vec<String> = (1..LINKS).map(|i| format!("link_{i}")).collect();
+    let mut joints = vec![joint("root", None)];
+    joints.extend(
+        names
+            .iter()
+            .zip(0..)
+            .map(|(name, parent)| joint(name, Some(parent))),
+    );
+    joints.push(joint("tip", Some(LINKS as u32 - 1)));
+    let animation = Skeleton::new(&joints).unwrap();
+    let step = 1.0 / LINKS as f32;
+    let up = |height: f32, rotation: Quat| JointTransform {
+        translation: Vec3::new(0.0, 0.0, height),
+        rotation,
+    };
+    let ragdoll_pose = SkeletonPose {
+        root_offset: RVec3::ZERO,
+        joints: vec![up(0.0, Quat::IDENTITY), up(1.0, Quat::IDENTITY)],
+    };
+    let animation_neutral = SkeletonPose {
+        root_offset: RVec3::ZERO,
+        joints: (0..=LINKS)
+            .map(|i| up(i as f32 * step, Quat::IDENTITY))
+            .collect(),
+    };
+    let mapper = mapper_with(
+        (&ragdoll, &ragdoll_pose),
+        (&animation, &animation_neutral),
+        TranslationLocks::None,
+    )
+    .unwrap();
+
+    let half = std::f32::consts::FRAC_PI_8;
+    let twist = Quat::from_xyzw(0.0, 0.0, half.sin(), half.cos());
+    let mut local = vec![up(0.0, Quat::IDENTITY)];
+    local.extend((0..LINKS).map(|_| up(step, twist)));
+    let mapped = mapper.map(&ragdoll_pose, &local).unwrap();
+    let mut rotation = Quat::IDENTITY;
+    for (i, transform) in mapped.joints.iter().enumerate() {
+        let t = transform.translation;
+        assert!(t.x.abs() <= 1e-5 && t.y.abs() <= 1e-5, "joint {i}: {t:?}");
+        assert!((t.z - i as f32 * step).abs() <= 1e-5, "joint {i}: {t:?}");
+        // The tip follows its ragdoll joint, which is not turned.
+        let expected = if i == LINKS { Quat::IDENTITY } else { rotation };
+        let q = transform.rotation;
+        let dot = q.x * expected.x + q.y * expected.y + q.z * expected.z + q.w * expected.w;
+        assert!(dot.abs() >= 1.0 - 1e-6, "joint {i}: {q:?} vs {expected:?}");
+        rotation = rotation.product(twist).normalized();
+    }
+}
+
+#[test]
 fn a_mapper_is_send_and_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<SkeletonMapper>();

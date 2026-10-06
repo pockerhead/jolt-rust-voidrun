@@ -620,16 +620,16 @@ fn degenerate_chains_are_refused() {
     );
     assert!(cos(sub(end.translation, pelvis.translation), desired) > 1.0 - 1e-6);
 
-    // Model coordinates 4 km from the root offset round to millimetres: a 1 cm chain is
+    // Model coordinates 4 km from the root offset round to millimetres: a 6 mm chain is
     // refused there, a 50 cm one is not.
     let mut far = bind_pose();
     far.root_offset = RVec3::new(-4000.0, 0.0, 0.0);
     for joint in &mut far.joints {
         joint.translation.x += 4000.0;
     }
-    assert_eq!(map(&far, &head_chain(&rig, 0.005)), refused);
+    assert_eq!(map(&far, &head_chain(&rig, 0.003)), refused);
     assert_eq!(map(&far, &head_chain(&rig, 0.25)), Ok(()));
-    assert_eq!(map(&bind_pose(), &head_chain(&rig, 0.005)), Ok(()));
+    assert_eq!(map(&bind_pose(), &head_chain(&rig, 0.003)), Ok(()));
 }
 
 /// `rig` with every position on a multiple of 2^-10 m.

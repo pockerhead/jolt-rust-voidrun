@@ -568,7 +568,9 @@ pub enum RagdollError {
     HierarchyMismatch(u32),
     /// The skeleton mapper cannot turn the animation chain that ends at this ragdoll joint: one
     /// of its directions is shorter than
-    /// [`limits::MIN_MAPPED_CHAIN_LENGTH`](crate::limits::MIN_MAPPED_CHAIN_LENGTH).
+    /// [`limits::MIN_MAPPED_CHAIN_LENGTH`](crate::limits::MIN_MAPPED_CHAIN_LENGTH), the animation
+    /// one after an allowance for rounding that grows with the chain's distance from the pose's
+    /// root offset and with its number of links.
     DegenerateChain(u32),
 }
 

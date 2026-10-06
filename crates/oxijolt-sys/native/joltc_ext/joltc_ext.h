@@ -451,9 +451,10 @@ JPH_CAPI bool JPH_SkeletonMapper_LockTranslations2(JPH_SkeletonMapper* mapper, c
    finite with that bottom row, each skeleton 2 joint is mapped at most once, every input matrix is
    finite with that bottom row, and every chain is usable: its desired direction (between the skeleton
    1 joints) is exactly zero or at least 1 mm long, its actual direction (along the skeleton 2 chain)
-   is at least 1 mm long after an allowance for rounding, their lengths' product is at most 4e18 and
-   the absolute values of the chain's products stay below 1e18. The derivation is in docs/limits.md
-   of the oxijolt repository, section "Skeleton mapper chains". */
+   is at least 1 mm long after an allowance for rounding, both are at most 1e18 long (the actual one
+   with its allowance), their lengths' product is at most 4e18, and a norm bound on the chain's
+   products stays below 1e30. The derivation is in docs/limits.md of the oxijolt repository, section
+   "Skeleton mapper chains". */
 JPH_CAPI bool JPH_SkeletonMapper_Map2(const JPH_SkeletonMapper* mapper, const JPH_Mat4* pose1ModelSpace, uint32_t count1, const JPH_Mat4* pose2LocalSpace, uint32_t count2, JPH_Mat4* outPose2ModelSpace, int* outDegenerateJoint1);
 /* Pose 2 (model space) to pose 1 (model space) through the direct mappings; a skeleton 1 joint
    without a mapping comes back as identity. false unless the mapper has a mapping, every mapping is

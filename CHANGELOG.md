@@ -14,7 +14,7 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - joltc extension: `JPH_SkeletonMapper_Initialize2`, `_LockAllTranslations2`, `_LockTranslations2`,
   `_Map2` and `_MapReverse2`, which copy matrix arrays through aligned storage (joltc's own five
   cast 4-aligned arrays to 16-aligned `Mat44` and stay unbound) and refuse inputs that would make
-  Jolt assert or read out of bounds. `JOLTC_EXT_REVISION` is 19: a `JOLTC_LIB_DIR` prefix built
+  Jolt assert or read out of bounds. `JOLTC_EXT_REVISION` is 20: a `JOLTC_LIB_DIR` prefix built
   before this change is refused until the next release's archives.
 - Compound edits at run time ([guide](docs/bodies.md#compound-edits)): `MutableCompound` adds,
   removes, moves and replaces compound children, checks every edit before Jolt sees it, and

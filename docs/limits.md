@@ -1076,19 +1076,34 @@ the ragdoll joint at the chain's end (`RagdollError::DegenerateChain`). Notation
 - **Desired** is one `f32` subtraction of two ragdoll pose translations in the guard as in `Map`,
   so the guard sees Jolt's value. It must be exactly zero, component by component (Jolt then gets
   `len = 0` and `w = 0` and returns the identity), or at least `F` long.
-- **Actual** is a product of `k + 2` matrices (the ragdoll joint, its mapping and the `k` local
-  transforms after the chain start), which the guard computes again. The compiler may order and
-  fuse the 4-term inner products of the two copies differently, so the guard bounds Jolt's value
-  instead of replaying it. For any order, with or without fused multiply-adds, each computed
-  product is within `γ_{4(k+1)} S_k` of the exact one, entry by entry, where `S_k` is the same
-  product of absolute-value matrices (Higham, *Accuracy and Stability of Numerical Algorithms*,
-  2nd ed., §3.5). A component of the two copies' `actual` differs by at most
-  `2 γ_{4(k+1)} (S_k + S_0)` in the translation column plus `2u (|T_k| + |T_0|)` for the final
-  subtraction; the allowance `Δ` is the length of that vector times 1.001, computed in `f64`. The
-  guard requires `|actual| − Δ >= F`, so Jolt's `actual` is at least `F` long. `Δ` grows with the
-  chain's distance from the pose's root offset: micrometres for a humanoid around its root offset,
-  about a centimetre at 4 km, where `degenerate_chains_are_refused` sees a 1 cm chain refused and a
-  50 cm one accepted.
+- **Actual** is the difference of two translations the guard computes again: of the chain start
+  `S = A J` (the ragdoll joint's pose and its mapping) and of `S L_1 ... L_k` (the `k` local
+  transforms after the chain start). Each `Mat44` product is a set of 4-term inner products, which
+  the compiler may order and fuse differently in the two copies, so the guard bounds Jolt's value
+  instead of replaying it. For any order, with or without fused multiply-adds, a computed product
+  `fl(X Y)` is within `γ_4 |X| |Y|` of `X Y`, entry by entry (Higham, *Accuracy and Stability of
+  Numerical Algorithms*, 2nd ed., §3.1). Bounding products of absolute values along the chain
+  would grow without limit for rotations (by about `√2` per link that turns 45°: 9e18 after 128
+  links), so the guard carries norms instead. With every matrix written as `[R t; 0 1]`, it keeps
+  in `f64` the bounds `ρ >= ‖R‖₂` and `θ >= |t|` of the exact product and `r >= ‖R̂ − R‖_F` and
+  `d >= |t̂ − t|` of any computed copy `[R̂ t̂; 0 1]`. A step by a local transform with
+  `q >= ‖R_L‖₂` (the root of the largest absolute row sum of `R_Lᵀ R_L`), `f = ‖R_L‖_F` and
+  `n = |t_L|` gives, with `φ = √3 ρ + r >= ‖R̂‖_F`,
+  `ρ' = ρ q`, `θ' = θ + ρ n`, `r' = r q + γ_4 φ f` and `d' = d + r n + γ_4 (φ n + θ + d)`:
+  the old error carried through `L` plus the new product's error, whose Frobenius norm is at
+  most `γ_4 ‖R̂‖_F ‖R_L‖_F` for the rotation and `γ_4 (‖R̂‖_F |t_L| + |t̂|)` for the translation.
+  The start has `ρ = q_A q_J`, `θ = q_A n_J + n_A`, `r = γ_4 f_A f_J` and
+  `d = γ_4 (f_A n_J + n_A)`. A rotation has `q` within a few `u` of 1, so the bounds grow with
+  the number of links and not with how the chain turns. Each step also adds
+  `2^-121 (1 + φ + f + n)` to `r` and `d`, which covers results and inputs below `FLT_MIN`
+  flushed to zero. Either copy's `actual` is then within
+  `δ = d_k + d_0 + u (θ_k + d_k + θ_0 + d_0) + 2^-121` of the exact difference, the `u` term for
+  the final subtraction. The allowance is `Δ = 2δ × 1.001`; the factor also covers the `f64`
+  evaluation of the bounds, whose relative error stays below 1e-5 for any chain a skeleton can
+  hold (fewer than 2^31 joints). The guard requires `|actual| − Δ >= F`, so Jolt's `actual` is at least `F` long. `Δ`
+  grows with the chain's distance from the pose's root offset and its number of links: about
+  0.1 mm for 128 links around the root offset, about 9 mm for two links at 4 km, where
+  `degenerate_chains_are_refused` sees a 6 mm chain refused and a 50 cm one accepted.
 - **Why 1 mm.** With both lengths at least `F`, `len = sqrt(|a|² |b|²) >= F² (1 − 4u) > 2^-21`. If
   `|a · b| < len / 2`, then `w > len / 2`. Otherwise `len` and `−a · b` are within a factor 2 of
   each other and both above `2^-22`, so their sum is exact (Sterbenz) and, unless zero, a multiple
@@ -1099,25 +1114,34 @@ the ragdoll joint at the chain's end (`RagdollError::DegenerateChain`). Notation
   0.69 mm) works; 1 mm is the round value above it and leaves room for terms flushed to zero below
   `2^-126`. An exactly zero `actual` would be safe too; the guard refuses it with every other short
   one.
-- **Upper bounds.** The guard also requires `(|actual| + Δ) |desired| <= 4e18`,
-  `|desired| <= 1e18` and every entry of every absolute-value product at most `1e18`, so the
-  squared lengths, their product (at most 1.6e37) and the squared quaternion (at most 8e37) stay
-  below `f32::MAX` (3.4e38) and no product of the chain overflows. The safe API's inputs stay far
-  below them: local translation components within `MAX_POSITION` over at most 1023 links give
-  `|actual| <= 1.8e10` m and model translations within `2 MAX_POSITION` give
-  `|desired| <= 6.9e7` m with the `double-precision` feature (product 1.2e18), about 2.5e11 with
-  `f32` positions.
+- **Upper bounds.** The guard also requires `|actual| + Δ <= 1e18` and `|desired| <= 1e18`, so
+  each squared length stays below 1e36 (`f32::MAX` is 3.4e38), and
+  `(|actual| + Δ) |desired| <= 4e18`, so the product of the squared lengths (at most 1.6e37) and
+  the squared quaternion (at most 8e37) stay below `f32::MAX`. The length bound matters on its own
+  when `desired` is exactly zero: Jolt still squares `actual`, and an infinite square times zero
+  is NaN. Separately from these direction bounds, the sum of absolute terms of every entry the
+  chain's products compute, `φ f` and `φ n + θ + d` per step (`f_A f_J` and `f_A n_J + n_A` at
+  the start), must be at most 1e30, which keeps every `f32` product and partial sum of either copy
+  finite. The safe API's inputs stay far below all of these: local translation components within
+  `MAX_POSITION` over at most 1023 links give `|actual| <= 1.8e10` m and model translations within
+  `2 MAX_POSITION` give `|desired| <= 6.9e7` m with the `double-precision` feature (product
+  1.2e18), about 2.5e11 with `f32` positions, and rotations keep the norm bounds near those
+  lengths.
 - **Rotations.** Every rotation the mapper passes to Jolt is normalised first: Rust's unit check
   sums the squares left to right and Jolt's `Vec4::LengthSq` pairwise, so a quaternion can pass one
   tolerance and fail the other (the unit tests use one at 1.0000099 and 1.00001).
 
 An `f32` replay of the guard against four evaluation orders of Jolt's product (left to right,
-pairwise, and fused in both directions), for 1 to 1023 links and chain starts up to 2e7 m from the
-root offset, found the largest difference at 2.2 % of the allowance and a unit quaternion for every
-accepted chain; it was run once outside the test suite and is not kept in the repository. With the
-floor removed from the C function, the raw test's 1e-30 m direction came out of `Map` as NaN
-rotations. Jolt is built with `/fp:fast` on MSVC, and there `Mat44::sRotation`'s `IsNormalized`
-assert did not fire for the NaN quaternion, so an asserts build does not catch it either.
+pairwise, and fused in both directions), for 1 to 1023 links with links turning up to 180°, chain
+starts up to 2e7 m from the root offset, and 128- and 1023-link chains turning 45° per link about
+their axis (with links along it and beside it), found the largest difference at 2.1 % of the
+allowance and a unit quaternion for every accepted chain; the turning chains near the root offset
+are accepted. The replay fails with the allowance removed, and refuses the turning chains when the
+spectral bound `q` is replaced by the Frobenius norm. It was run outside the test suite and is not
+kept in the repository. With the floor removed from the C function, the raw test's 1e-30 m
+direction came out of `Map` as NaN rotations. Jolt is built with `/fp:fast` on MSVC, and there
+`Mat44::sRotation`'s `IsNormalized` assert did not fire for the NaN quaternion, so an asserts build
+does not catch it either.
 
 ## Six-DOF translation limits
 

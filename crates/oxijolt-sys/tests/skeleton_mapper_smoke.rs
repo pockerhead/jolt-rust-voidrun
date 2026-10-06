@@ -723,6 +723,113 @@ fn map2_refuses_degenerate_chains_and_writes_nothing() {
     fixture.assert_map_refused(&pose1(), &chain_local([0.0; 3]), mid);
 }
 
+/// A ragdoll `root -> tip` one metre along +Z over an animation chain of `links` links of equal
+/// length between the two, all unrotated in the neutral poses.
+fn straight_chain(links: usize) -> (Skeleton, Skeleton, Vec<M>, Mapper) {
+    let ragdoll = Skeleton::new(&[("root", -1), ("tip", 0)]);
+    let names: Vec<String> = (1..links).map(|i| format!("link_{i}")).collect();
+    let mut joints = vec![("root", -1)];
+    joints.extend(
+        names
+            .iter()
+            .zip(0..)
+            .map(|(name, parent)| (name.as_str(), parent)),
+    );
+    joints.push(("tip", links as i32 - 1));
+    let animation = Skeleton::new(&joints);
+    let neutral1 = vec![translation([0.0; 3]), translation([0.0, 0.0, 1.0])];
+    let neutral2: Vec<M> = (0..=links)
+        .map(|i| translation([0.0, 0.0, i as f64 / links as f64]))
+        .collect();
+    let mapper = Mapper::new();
+    let count2 = links as u32 + 1;
+    assert!(mapper.initialize(
+        &ragdoll,
+        &jph(&neutral1),
+        2,
+        &animation,
+        &jph(&neutral2),
+        count2
+    ));
+    (ragdoll, animation, neutral1, mapper)
+}
+
+#[test]
+fn map2_accepts_a_long_twisting_chain() {
+    // Every link turns 45 degrees about the chain's own axis: the chain still ends one metre up,
+    // so Jolt turns its start by nothing. Rotations multiplied along the chain stay rotations.
+    const LINKS: usize = 128;
+    let (_ragdoll, _animation, pose1, mapper) = straight_chain(LINKS);
+    let twist = quat_about([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_4);
+    let mut local = vec![translation([0.0; 3])];
+    local.extend((0..LINKS).map(|_| rigid(twist, [0.0, 0.0, 1.0 / LINKS as f64])));
+    let mut out = Matrices::zeroed(LINKS + 1);
+    let result = mapper.map(&jph(&pose1), 2, &jph(&local), LINKS as u32 + 1, &mut out);
+    assert_eq!(result, (true, -1));
+
+    let out: Vec<M> = out.to_vec().iter().map(from_jph).collect();
+    let mut expected = pose1[0];
+    assert_close(&out[0], &expected, 1e-6);
+    for joint in 1..LINKS {
+        expected = mul(&expected, &local[joint]);
+        assert_close(&out[joint], &expected, 1e-4);
+    }
+    assert_close(&out[LINKS], &pose1[1], 1e-6);
+}
+
+#[test]
+fn map2_bounds_long_actual_directions_against_a_zero_desired_one() {
+    // A two-link chain of `length` metres along +Z, with the ragdoll's root and tip together.
+    let (_ragdoll, _animation, _pose1, mapper) = straight_chain(2);
+    let together = [translation([0.0; 3]), translation([0.0; 3])];
+    let map = |pose1: &[M], length: f64| {
+        let local = [
+            translation([0.0; 3]),
+            translation([0.0, 0.0, length / 2.0]),
+            translation([0.0, 0.0, length / 2.0]),
+        ];
+        let mut out = Matrices::filled(3, 7.0);
+        let before = out.bits();
+        let result = mapper.map(&jph(pose1), 2, &jph(&local), 3, &mut out);
+        if !result.0 {
+            assert_eq!(out.bits(), before, "a refused map wrote its output");
+        }
+        result
+    };
+    // Jolt squares the actual length alone when the desired one is zero: 1e20 m would square
+    // to infinity, which then multiplies zero. The guard keeps the length within 1e18 m.
+    assert_eq!(map(&together, 1.0e20), (false, 1));
+    assert_eq!(map(&together, 2.0e18), (false, 1));
+    assert_eq!(map(&together, 5.0e17), (true, -1));
+    // With a desired direction, the product of the lengths is bounded as well, and the desired
+    // length on its own (2e18 m beside a 1 cm chain squares to 4e36, 1e20 m to infinity).
+    let apart = |length: f64| [translation([0.0; 3]), translation([0.0, 0.0, length])];
+    assert_eq!(map(&apart(1.0), 5.0e17), (true, -1));
+    assert_eq!(map(&apart(10.0), 5.0e17), (false, 1));
+    assert_eq!(map(&apart(1.0e17), 0.01), (true, -1));
+    assert_eq!(map(&apart(2.0e18), 0.01), (false, 1));
+}
+
+#[test]
+fn map2_bounds_the_magnitudes_of_a_chains_products() {
+    // Links that scale by 1e10 instead of turning, the first one metre long. Jolt's values stay
+    // finite for three of them (1e30), but their sums of absolute terms (3e30) pass the bound,
+    // which keeps a factor of 3e8 below f32::MAX.
+    let scaling = |length: f64| {
+        let mut m = translation([0.0, 0.0, length]);
+        (0..3).for_each(|i| m[i][i] = 1.0e10);
+        m
+    };
+    for (links, expected) in [(2, (true, -1)), (3, (false, 1))] {
+        let (_ragdoll, _animation, pose1, mapper) = straight_chain(links);
+        let mut local = vec![translation([0.0; 3]), scaling(1.0)];
+        local.extend((1..links).map(|_| scaling(0.0)));
+        let mut out = Matrices::zeroed(links + 1);
+        let result = mapper.map(&jph(&pose1), 2, &jph(&local), links as u32 + 1, &mut out);
+        assert_eq!(result, expected, "{links} links");
+    }
+}
+
 #[test]
 fn map2_refuses_a_joint_mapped_twice() {
     // Two ragdoll joints named "mid" both map to animation joint 3.
