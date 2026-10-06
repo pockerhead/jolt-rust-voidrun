@@ -74,43 +74,16 @@ oxijolt = "1"
 
 ## Roadmap
 
-The full list of what works today, with links to the guides, is in
-[docs/features.md](docs/features.md).
+Everything planned for 1.0 is done; what works today, with links to the guides, is in
+[docs/features.md](docs/features.md). Next:
 
-- [x] Rigid bodies: box, sphere, cylinder, capsule, heightfield and compound shapes, materials
-- [x] Scene queries: ray casts, shape casts, collide-shape, with filters
-- [x] Character controller (`CharacterVirtual`)
-- [x] Wheeled vehicles
-- [x] Ragdolls
-- [x] Twelve kinds of constraints with motors, springs and limits
-- [x] Soft bodies
-- [x] Contact, activation and soft body contact events; contact listener
-- [x] Saving and restoring world state
-- [x] Floating origin and optional `f64` positions
-- [x] Jolt's jobs on your own thread pool
-- [x] Debug wireframes as line data
-- [x] Same results for any worker thread count
-- [x] Builds without LLVM; Windows and Linux in CI; prebuilt libraries in releases
-- [x] `glam` (feature `glam032`) and `mint` conversions
-- [x] One-call pose readout, a crate-wide error type, a prelude
-- [x] Convex hull, triangle mesh, scaled and tapered shapes
-- [x] Body controls: impulses, kinematic moves, activation, sensors, user data, changing shape
-      and motion type
-- [x] Locked axes (allowed degrees of freedom) at body creation
-- [x] First release on crates.io and docs.rs
-- [x] Tracked vehicles and motorcycles
-- [x] Character contact callbacks, contact validation and collision groups
-- [x] Mutable compounds, buoyancy, point queries, plane shape, collision response estimate, skeleton mapper
-- [x] Playground: an example with a window that shows every feature, with a GIF of every scene
-- [x] Presets for a humanoid character, a car and a motorcycle, wheel poses for drawing, and the
-      list of every body of a world
 - [ ] Comparison with Rapier and Avian
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
-- [x] Rollback helpers: reusable state buffer, filtered restore
-- [x] Real meshes from open sources tested in CI, and shape cooking (save and load built shapes)
-- [x] API review and freeze for 1.0
 - [ ] Same results across operating systems, checked in CI
+- [ ] Prebuilt native libraries downloaded by the build script
+- [ ] Constraint force readout and breakable constraints
+- [ ] Playground: debris that breaks again when it hits the ground
 
 ## Status
 
