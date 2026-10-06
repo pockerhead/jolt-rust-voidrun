@@ -2,13 +2,14 @@
 //! mutable compound of 48 bricks. Hard hits of cannonballs, and clicks, knock bricks out: the hit children are decoded from the contacts and removed from the compound,
 //! and each brick falls on as a body. What is left splits into pieces of bricks that touch face
 //! to face; the largest stays in the wall's body, every other piece becomes a body of its own,
-//! and physics decides whether a piece stands, topples or falls.
+//! and physics decides whether a piece stands, topples or falls. A piece that lands hard on the
+//! ground or on another piece breaks where they touch, as if a cannonball had hit it there.
 
 use std::collections::VecDeque;
 
 use oxijolt::{
     Activation, BodyId, BodySettings, CompoundChild, ContactEvent, EventSettings, MotionQuality,
-    MutableCompound, PhysicsWorld, Quat, QueryFilter, RayCast, SubShapeId, Vec3,
+    MutableCompound, PhysicsWorld, Quat, QueryFilter, RVec3, RayCast, SubShapeId, Vec3,
 };
 
 use crate::camera::CameraHint;
@@ -30,6 +31,13 @@ const BRICK_MASS: f32 = 72.0;
 const WALL_AT: [f32; 3] = [0.0, 0.0, 0.0];
 /// Impulse in N·s from which a cannonball's hit knocks bricks out.
 const BREAKING_IMPULSE: f32 = 150.0;
+/// The impact speed in m/s from which a piece that lands on the ground or meets another piece
+/// breaks where they touch. A piece resting on the ground meets it at `g · dt` (0.16 m/s) when
+/// its contacts are new, as after each republication.
+const IMPACT_BREAKING_SPEED: f32 = 0.75;
+/// The most impacts that break pieces in one step, and in all since the scene was built.
+const MAX_IMPACT_BREAKS_PER_STEP: usize = 1;
+const MAX_IMPACT_BREAKS: u32 = 12;
 /// How far around a brick that is hit hard the bricks come loose with it, metres.
 const BLAST_RADIUS: f32 = 0.55;
 /// Speed of a brick knocked out, m/s.
@@ -95,6 +103,7 @@ impl Motion {
 pub struct Destruction {
     world: PhysicsWorld,
     layers: Layers,
+    ground: BodyId,
     visuals: Visuals,
     tracked: Tracked,
     brick: Shaped,
@@ -106,6 +115,8 @@ pub struct Destruction {
     balls: VecDeque<BodyId>,
     debris: VecDeque<BodyId>,
     publications: u32,
+    /// Impacts that broke pieces, cannonballs not counted.
+    impact_breaks: u32,
     milestones: Milestones,
 }
 
@@ -119,7 +130,7 @@ impl Destruction {
         let mut visuals = Visuals::new(generation);
         let mut tracked = Tracked::default();
         let ground = BodySettings::new_static().object_layer(layers.ground);
-        tracked.spawn(
+        let ground = tracked.spawn(
             &mut world,
             &Shaped::plane(40.0)?,
             &ground,
@@ -135,6 +146,7 @@ impl Destruction {
         let mut scene = Self {
             world,
             layers,
+            ground,
             visuals,
             tracked,
             brick,
@@ -145,6 +157,7 @@ impl Destruction {
             balls: VecDeque::new(),
             debris: VecDeque::new(),
             publications: 0,
+            impact_breaks: 0,
             milestones: Milestones::new(MILESTONES),
         };
         let standing = Motion {
@@ -243,10 +256,14 @@ impl Destruction {
         Some(child.user_data)
     }
 
-    /// The bricks hit hard enough by a cannonball in the step's new contacts, decoded against
-    /// each piece's current shape, with their neighbours, and the velocity they fly off with.
-    fn hit_bricks(&self, contacts: &[ContactEvent]) -> Vec<(u32, Vec3)> {
+    /// The bricks the step's new contacts knock out, decoded against each piece's current
+    /// shape, with the velocity they fly off with: those around a brick that a cannonball hit
+    /// hard, and those around where the pieces of a hard impact touch (see
+    /// [`impact_speed`](Self::impact_speed)), for at most [`MAX_IMPACT_BREAKS_PER_STEP`]
+    /// impacts in the order of the events while fewer than [`MAX_IMPACT_BREAKS`] broke pieces.
+    fn hit_bricks(&mut self, contacts: &[ContactEvent]) -> Result<Vec<(u32, Vec3)>> {
         let mut hits = Vec::new();
+        let mut impacts = 0;
         for event in contacts {
             let ContactEvent::Added {
                 manifold,
@@ -257,34 +274,117 @@ impl Destruction {
                 continue;
             };
             let impulse: f32 = estimate.contact_impulses.iter().sum();
-            if impulse < BREAKING_IMPULSE {
-                continue;
-            }
             let pair = manifold.pair;
-            let (piece, sub_shape, other) = if self.piece_of_body(pair.body1).is_some() {
-                (pair.body1, pair.sub_shape1, pair.body2)
-            } else if self.piece_of_body(pair.body2).is_some() {
-                (pair.body2, pair.sub_shape2, pair.body1)
-            } else {
+            for (piece, sub_shape, ball) in [
+                (pair.body1, pair.sub_shape1, pair.body2),
+                (pair.body2, pair.sub_shape2, pair.body1),
+            ] {
+                if impulse >= BREAKING_IMPULSE && self.balls.contains(&ball) {
+                    if let Some(brick) = self.brick_of(piece, sub_shape) {
+                        hits.extend(self.blasted_away_from(brick, ball));
+                    }
+                }
+            }
+            let Some(speed) = self.impact_speed(pair.body1, pair.body2, impulse) else {
                 continue;
             };
-            if !self.balls.contains(&other) {
+            if speed < IMPACT_BREAKING_SPEED
+                || impacts >= MAX_IMPACT_BREAKS_PER_STEP
+                || self.impact_breaks >= MAX_IMPACT_BREAKS
+            {
                 continue;
             }
-            // The bricks fly away from what hit them; it may already bounce back.
-            let from = self.tracked.pose(other).map(|(p, _)| position(p));
-            for brick in self
-                .brick_of(piece, sub_shape)
-                .map(|brick| self.neighbours(brick))
-                .unwrap_or_default()
-            {
+            impacts += 1;
+            self.impact_breaks += 1;
+            for (piece, on1) in [(pair.body1, true), (pair.body2, false)] {
+                let points = manifold.points.iter().map(|point| {
+                    if on1 {
+                        point.point_on1
+                    } else {
+                        point.point_on2
+                    }
+                });
+                if let Some(brick) = self.brick_nearest(piece, points)? {
+                    hits.extend(self.shaken_loose(piece, brick)?);
+                }
+            }
+        }
+        Ok(hits)
+    }
+
+    /// The speed in m/s at which `body1` and `body2` met in a new contact with `impulse`, when
+    /// one is a piece and the other a piece or the ground: the impulse over their reduced mass,
+    /// which leaves out how the bodies turn. Loose bricks and cannonballs make no impacts.
+    fn impact_speed(&self, body1: BodyId, body2: BodyId, impulse: f32) -> Option<f32> {
+        let inverse_mass = |body: BodyId| {
+            if body == self.ground {
+                Some(0.0)
+            } else {
+                self.piece_of_body(body)
+                    .map(|piece| 1.0 / piece_mass(piece))
+            }
+        };
+        let inverse = inverse_mass(body1)? + inverse_mass(body2)?;
+        (inverse > 0.0).then_some(impulse * inverse)
+    }
+
+    /// `brick` and its neighbours, flying away from `ball`, which hit it; the ball may already
+    /// bounce back.
+    fn blasted_away_from(&self, brick: u32, ball: BodyId) -> Vec<(u32, Vec3)> {
+        let from = self.tracked.pose(ball).map(|(p, _)| position(p));
+        self.neighbours(brick)
+            .into_iter()
+            .map(|brick| {
                 let centre = self.brick_centre(brick);
                 let away =
                     from.map_or(glam::Vec3::ZERO, |from| (centre - from).normalize_or_zero());
-                hits.push((brick, vec3(away * KNOCK_SPEED)));
-            }
+                (brick, vec3(away * KNOCK_SPEED))
+            })
+            .collect()
+    }
+
+    /// The brick of `piece` whose centre is nearest to the middle of `points`, points of the
+    /// piece in world space. A contact of a piece with one body that touches it with several
+    /// bricks is one manifold, named after only one of them.
+    fn brick_nearest(
+        &self,
+        piece: BodyId,
+        points: impl Iterator<Item = RVec3>,
+    ) -> Result<Option<u32>> {
+        let Some(bricks) = self.piece_of_body(piece).map(|piece| &piece.bricks) else {
+            return Ok(None);
+        };
+        let motion = Motion::of(&self.world, piece)?;
+        let (sum, count) = points.fold((glam::Vec3::ZERO, 0), |(sum, count), point| {
+            (sum + position(point), count + 1)
+        });
+        if count == 0 {
+            return Ok(None);
         }
-        hits
+        let middle = motion.rotation.inverse() * (sum / count as f32 - motion.position);
+        Ok(bricks
+            .iter()
+            .min_by(|(_, a), (_, b)| {
+                let a = glam::Vec3::from(*a).distance_squared(middle);
+                a.total_cmp(&glam::Vec3::from(*b).distance_squared(middle))
+            })
+            .map(|&(id, _)| id))
+    }
+
+    /// `brick` of `piece` and its neighbours, moving on as those points of the piece move.
+    fn shaken_loose(&self, piece: BodyId, brick: u32) -> Result<Vec<(u32, Vec3)>> {
+        let motion = Motion::of(&self.world, piece)?;
+        let centre = self
+            .piece_of_body(piece)
+            .map_or(motion.position, |piece| motion.at(centroid(&piece.bricks)));
+        Ok(self
+            .neighbours(brick)
+            .into_iter()
+            .filter_map(|brick| {
+                let (_, at) = self.piece_of_brick(brick)?;
+                Some((brick, vec3(motion.velocity_at(motion.at(at), centre))))
+            })
+            .collect())
     }
 
     /// The world position of `brick`'s centre.
@@ -398,7 +498,7 @@ impl Destruction {
         }
         let piece = &self.pieces[index];
         let shape = piece.editor.to_shape()?;
-        let mass = BRICK_MASS * piece.bricks.len() as f32;
+        let mass = piece_mass(piece);
         let visual = piece_visual(&self.brick.visual, &piece.bricks);
         self.world
             .body_mut(body)?
@@ -551,6 +651,11 @@ fn touching_groups(bricks: &[Brick]) -> Vec<Vec<u32>> {
     groups
 }
 
+/// The mass of `piece`, kg.
+fn piece_mass(piece: &Piece) -> f32 {
+    BRICK_MASS * piece.bricks.len() as f32
+}
+
 /// A piece's description: one brick at each position.
 fn piece_visual(brick: &Visual, bricks: &[Brick]) -> Visual {
     Visual::Compound(
@@ -580,7 +685,7 @@ impl Scene for Destruction {
         let events = self.world.take_events();
         self.tracked.sync(&self.world, &events);
         // Decode the hits against the shapes the step collided with, before any edit.
-        let hits = self.hit_bricks(&events.contacts);
+        let hits = self.hit_bricks(&events.contacts)?;
         self.knock_out(hits)?;
         self.clear_fallen()
     }
@@ -588,11 +693,12 @@ impl Scene for Destruction {
     fn draw(&self, out: &mut DrawList) -> Result<()> {
         self.tracked.draw(out);
         out.hud.push(format!(
-            "wall: {} bricks, published {} times; {} pieces, {} loose bricks",
+            "wall: {} bricks, published {} times; {} pieces, {} loose bricks; {} impact breaks",
             self.brick_count(),
             self.publications,
             self.pieces.len(),
-            self.debris.len()
+            self.debris.len(),
+            self.impact_breaks
         ));
         Ok(())
     }
@@ -608,6 +714,7 @@ impl Scene for Destruction {
             }
         }
         digest.u32(self.publications);
+        digest.u32(self.impact_breaks);
         Ok(())
     }
 
@@ -630,6 +737,11 @@ impl Scene for Destruction {
     /// Close on the wall, from the side the cannonballs come from.
     fn record_camera(&self, _tick: u32) -> CameraHint {
         CameraHint::new([0.0, 0.7, 0.0], 0.4, 0.15, 4.2)
+    }
+
+    /// Long enough to see the arch the clicks leave topple and break where it lands.
+    fn record_ticks(&self) -> u32 {
+        360
     }
 
     fn script(&self, tick: u32) -> Input {
@@ -668,196 +780,4 @@ impl Scene for Destruction {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn scene() -> Destruction {
-        Destruction::new(
-            &SceneConfig {
-                worker_threads: Some(1),
-                ..SceneConfig::default()
-            },
-            1,
-        )
-        .unwrap()
-    }
-
-    /// Pushes knocked-out bricks out of the way, behind the wall.
-    const OUT: Vec3 = Vec3::new(0.0, 0.0, -KNOCK_SPEED);
-
-    fn run(scene: &mut Destruction, ticks: u32) {
-        for _ in 0..ticks {
-            scene.update(&Input::default()).unwrap();
-        }
-    }
-
-    /// The angle in radians by which `body` is turned from where it started.
-    fn tilt(scene: &Destruction, body: BodyId) -> f32 {
-        glam_quat(scene.world.body(body).unwrap().rotation()).angle_between(glam::Quat::IDENTITY)
-    }
-
-    #[test]
-    fn the_wall_stands_on_the_ground() {
-        let mut scene = scene();
-        let wall = scene.pieces[0].body;
-        run(&mut scene, 120);
-        assert!(tilt(&scene, wall) < 0.01, "{}", tilt(&scene, wall));
-        let y = position(scene.world.body(wall).unwrap().position()).y;
-        assert!(y.abs() < 0.03, "{y}");
-    }
-
-    #[test]
-    fn duplicate_hits_remove_one_brick() {
-        let mut scene = scene();
-        scene.knock_out(vec![(5, OUT), (5, OUT), (5, OUT)]).unwrap();
-        assert_eq!(scene.brick_count(), 47);
-        assert_eq!((scene.pieces.len(), scene.debris.len()), (1, 1));
-        assert!(scene.piece_of_brick(5).is_none());
-        // A brick that is gone already changes nothing.
-        scene.knock_out(vec![(5, OUT)]).unwrap();
-        assert_eq!((scene.brick_count(), scene.debris.len()), (47, 1));
-    }
-
-    #[test]
-    fn destroying_every_brick_removes_the_wall() {
-        let mut scene = scene();
-        let bodies = scene.world.body_count();
-        let every: Vec<(u32, Vec3)> = (0..48).map(|brick| (brick, Vec3::ZERO)).collect();
-        scene.knock_out(every).unwrap();
-        assert!(scene.pieces.is_empty());
-        assert_eq!(scene.debris.len(), 48);
-        assert_eq!(scene.world.body_count(), bodies - 1 + 48);
-        run(&mut scene, 30);
-    }
-
-    /// Without its bottom row but the rightmost brick, the wall stands on one brick at its
-    /// right end, its centre of mass far beside that support, and falls over to the left until
-    /// its open end lies on the ground.
-    #[test]
-    fn a_wall_on_one_brick_falls_over() {
-        let mut scene = scene();
-        let wall = scene.pieces[0].body;
-        let bottom: Vec<(u32, Vec3)> = (0..WALL[0] - 1).map(|brick| (brick, OUT)).collect();
-        scene.knock_out(bottom).unwrap();
-        assert_eq!(scene.pieces.len(), 1, "the wall stays one piece");
-        assert_eq!(scene.pieces[0].body, wall);
-        // The bottom left corner of brick 8, now the left end of the lowest row.
-        let (_, [x, y, _]) = scene.piece_of_brick(8).unwrap();
-        let open_end = [x - BRICK[0], y - BRICK[1], 0.0];
-        run(&mut scene, 150);
-        let motion = Motion::of(&scene.world, wall).unwrap();
-        assert!(motion.at(open_end).y < 0.03, "{}", motion.at(open_end));
-        assert!(tilt(&scene, wall) > 0.05, "{}", tilt(&scene, wall));
-    }
-
-    /// Bricks cut out around the top right corner leave it a piece of its own, which falls as
-    /// one body onto the row below the cut while the wall stands.
-    #[test]
-    fn a_cut_loose_corner_falls_as_one_body() {
-        let mut scene = scene();
-        let wall = scene.pieces[0].body;
-        let cut: Vec<(u32, Vec3)> = CORNER_CUT.map(|brick| (brick, OUT)).to_vec();
-        scene.knock_out(cut).unwrap();
-        assert_eq!(scene.pieces.len(), 2);
-        let corner = scene.pieces[1].body;
-        let ids: Vec<u32> = scene.pieces[1].bricks.iter().map(|&(id, _)| id).collect();
-        assert_eq!(ids, [38, 39, 46, 47]);
-        assert_eq!(scene.pieces[0].bricks.len(), 48 - 5 - 4);
-        let start = position(scene.world.body(corner).unwrap().position());
-        run(&mut scene, 60);
-        let now = position(scene.world.body(corner).unwrap().position());
-        assert!(start.y - now.y > 0.2, "{start} {now}");
-        assert_eq!(scene.pieces[1].bricks.len(), 4);
-        assert!(tilt(&scene, wall) < 0.05, "{}", tilt(&scene, wall));
-    }
-
-    #[test]
-    fn groups_follow_face_contact_in_the_laid_wall() {
-        let scene = scene();
-        let bricks = &scene.pieces[0].bricks;
-        assert_eq!(touching_groups(bricks), vec![(0..48).collect::<Vec<u32>>()]);
-        // Brick 8 (row 1, column 0) is shifted right, so it touches bricks 0 and 1 below it
-        // but not brick 2.
-        let at = |id: u32| bricks.iter().find(|&&(b, _)| b == id).unwrap().1;
-        assert!(touch(at(8), at(0)) && touch(at(8), at(1)) && !touch(at(8), at(2)));
-        assert!(touch(at(0), at(1)) && !touch(at(0), at(2)));
-        let split: Vec<Brick> = bricks
-            .iter()
-            .copied()
-            .filter(|&(id, _)| !CORNER_CUT.contains(&id))
-            .collect();
-        let groups = touching_groups(&split);
-        assert_eq!(groups.len(), 2);
-        assert_eq!(groups[1], [38, 39, 46, 47]);
-    }
-
-    /// The digest of `ticks` scripted ticks of `session`.
-    fn scripted(session: &mut crate::session::Session, ticks: u32) -> u64 {
-        let mut digest = Digest::default();
-        let mut list = DrawList::default();
-        for _ in 0..ticks {
-            session.tick_scripted().unwrap();
-            session.write_state(&mut digest).unwrap();
-            session.draw(&mut list).unwrap();
-            digest.draw_list(&list);
-        }
-        digest.finish()
-    }
-
-    #[test]
-    fn reset_after_complete_destruction_rebuilds_the_wall() {
-        use crate::scene::SceneKind;
-        use crate::session::Session;
-        let config = SceneConfig {
-            worker_threads: Some(1),
-            ..SceneConfig::default()
-        };
-        let fresh_bodies = scene().world.body_count();
-        let mut fresh = Session::new(SceneKind::Destruction, config.clone()).unwrap();
-        let first = scripted(&mut fresh, 60);
-        let mut session = Session::new(SceneKind::Destruction, config).unwrap();
-        // Click every brick from the front, top row first, so that what is left stands on a
-        // full bottom row until the last brick goes.
-        let mut bricks = scene().pieces.remove(0).bricks;
-        bricks.sort_by_key(|&(id, _)| std::cmp::Reverse(id / WALL[0]));
-        let hud = |session: &mut Session| {
-            let mut list = DrawList::default();
-            session.draw(&mut list).unwrap();
-            list.hud[0].clone()
-        };
-        for &(brick, _) in &bricks {
-            let input = Input {
-                edges: Edges {
-                    pick: Some(click_at(brick)),
-                    ..Edges::default()
-                },
-                ..Input::default()
-            };
-            session.tick(input).unwrap();
-        }
-        assert!(
-            hud(&mut session).starts_with("wall: 0 bricks"),
-            "{}",
-            hud(&mut session)
-        );
-        assert!(session.scene().world().body_count() > fresh_bodies);
-
-        session.reset().unwrap();
-        assert_eq!(session.scene().world().body_count(), fresh_bodies);
-        assert!(hud(&mut session).starts_with("wall: 48 bricks, published 0 times"));
-        assert_eq!(scripted(&mut session, 60), first);
-    }
-
-    #[test]
-    fn a_hit_decodes_to_the_brick_at_its_child() {
-        let scene = scene();
-        let ray = RayCast::new(
-            rvec([0.0, 2.0 * BRICK[1] * 2.5, 2.0]),
-            Vec3::new(0.0, 0.0, -4.0),
-        );
-        let picked = scene.picked_brick(ray).unwrap().unwrap();
-        let (_, at) = scene.piece_of_brick(picked).unwrap();
-        assert!((at[1] - 2.0 * BRICK[1] * 2.5).abs() <= BRICK[1]);
-        assert!(at[0].abs() <= 2.0 * BRICK[0]);
-    }
-}
+mod tests;

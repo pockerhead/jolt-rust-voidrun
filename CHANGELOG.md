@@ -4,6 +4,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Playground: in `destruction`, a wall piece that lands hard on the ground or on another piece
+  breaks where they touch, from the contact's collision estimate.
+
 ## 1.0.0 — 2026-10-06
 
 - The public API follows one set of rules, written down in

@@ -182,15 +182,20 @@ and `Shape::new_plane`.
 ![Cannonballs and clicks knock bricks out of a wall, which breaks into pieces](media/destruction.gif)
 
 *Two cannonballs knock holes in the wall and a click knocks out one more brick; five more clicks
-cut it into three pieces: the top right corner drops onto the stub below it, and the arch that is
-left topples.*
+cut it into three pieces: the top right corner drops onto the stub below it, and both break where
+they meet; the arch that is left topples and breaks where it lands.*
 
 A wall of 48 bricks stands on the ground as one dynamic body. It loses the bricks that cannonballs
 or clicks hit, and each brick falls on as a body. What is left splits into pieces of bricks that
 touch face to face: the largest stays in the wall's body, every other piece becomes a body of its
-own, and a piece that lost its support topples or falls. It uses `MutableCompound`, `to_shape`,
-`BodyMut::set_shape` with a mass, `compound_sub_shape`, `CollisionEstimate` and `cast_ray` with
-`compound_child`.
+own, and a piece that lost its support topples or falls. A piece that lands on the ground or on
+another piece at 0.75 m/s or more breaks where they touch, as at a cannonball's hit; the speed is
+the impulse of the new contact's `CollisionEstimate` over the reduced mass of the two, and at most
+one such impact per step, and twelve in all, breaks pieces. A piece that tips over an edge that
+stays on the ground lands inside the contact it already has, since Jolt merges a body pair's
+contacts that share a normal into one manifold, so such a landing breaks nothing. It uses
+`MutableCompound`, `to_shape`, `BodyMut::set_shape` with a mass, `compound_sub_shape`,
+`CollisionEstimate` with the contact points, and `cast_ray` with `compound_child`.
 
 | Keys | Action |
 |---|---|
