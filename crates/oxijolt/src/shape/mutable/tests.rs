@@ -13,7 +13,7 @@ use crate::{
 /// the centre of mass) and user data.
 fn fingerprint(shape: &Shape) -> Vec<u64> {
     let ptr = shape.as_ptr();
-    let mut bits = vec![u64::from(shape.sub_type() as u32)];
+    let mut bits = vec![shape.sub_type() as u64];
     let mut push = |values: &[f32]| bits.extend(values.iter().map(|v| u64::from(v.to_bits())));
     let center = shape.center_of_mass();
     push(&[center.x, center.y, center.z]);
