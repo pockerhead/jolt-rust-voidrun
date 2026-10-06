@@ -30,7 +30,7 @@ pub fn parse_obj(text: &str) -> Result<TriangleMesh, Error> {
             }
             Some("f") => {
                 let corners = words
-                    .map(|word| corner(word, mesh.vertices.len()).map_err(&error))
+                    .map(|word| corner(word, mesh.vertices.len()).map_err(error))
                     .collect::<Result<Vec<u32>, Error>>()?;
                 if corners.len() < 3 {
                     return Err(error("a face needs at least three corners".into()));
