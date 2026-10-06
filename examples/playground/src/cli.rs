@@ -15,7 +15,7 @@ pub enum Mode {
         frames: u32,
         threads: Option<u32>,
     },
-    /// Record scenes' clips into GIFs and PNG stills.
+    /// Record scenes' clips into GIFs.
     Record {
         scenes: Vec<SceneKind>,
         out: PathBuf,
@@ -36,7 +36,7 @@ usage:
   playground --headless --scene <name|all> [--frames N] [--threads N]
                                                    run scenes without a window
   playground --record <name|all> [--out DIR] [--frames N]
-                                                   record GIFs and PNG stills
+                                                   record GIFs
   playground --help
 
 scenes: ";

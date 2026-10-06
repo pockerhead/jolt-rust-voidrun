@@ -362,6 +362,21 @@ impl Scene for Ragdolls {
         CameraHint::new([0.5, 0.8, 0.0], 0.45, 0.4, 9.0)
     }
 
+    /// The puppet and its mapped skeleton close up, waving and then falling on its motors;
+    /// then the field where a new ragdoll drops and settles.
+    fn record_camera(&self, tick: u32) -> CameraHint {
+        if tick < 260 {
+            CameraHint::new(
+                [PUPPET[0] + 0.8, PUPPET[1] - 0.2, PUPPET[2]],
+                0.0,
+                0.15,
+                3.4,
+            )
+        } else {
+            CameraHint::new([-1.0, 0.4, 2.0], 0.4, 0.45, 6.0)
+        }
+    }
+
     fn record_ticks(&self) -> u32 {
         420
     }

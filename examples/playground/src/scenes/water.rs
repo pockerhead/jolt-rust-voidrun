@@ -255,6 +255,20 @@ impl Scene for Water {
         CameraHint::new([0.0, -0.3, 0.0], 0.3, 0.55, 13.0)
     }
 
+    /// Low over the crates of different buoyancy, then beside the raft as the current takes
+    /// it.
+    fn record_camera(&self, tick: u32) -> CameraHint {
+        if tick < 120 {
+            CameraHint::new([0.0, -0.3, -1.5], 0.0, 0.25, 4.5)
+        } else {
+            let x = self
+                .tracked
+                .pose(self.raft)
+                .map_or(RAFT_X, |(p, _)| position_f32(p)[0]);
+            CameraHint::new([x + 1.0, 0.0, 0.6], 0.25, 0.35, 6.0)
+        }
+    }
+
     fn record_ticks(&self) -> u32 {
         360
     }

@@ -350,8 +350,14 @@ impl Scene for Pile {
         CameraHint::new([0.0, 1.0, 0.0], 0.6, 0.55, 14.0)
     }
 
-    fn record_camera(&self, _tick: u32) -> CameraHint {
-        CameraHint::new([0.0, 1.2, 0.0], 0.6, 0.6, 10.5)
+    /// The whole drop first, then closer to the bin for the balls, the sleep and the next
+    /// layer.
+    fn record_camera(&self, tick: u32) -> CameraHint {
+        if tick < 70 {
+            CameraHint::new([0.6, 3.8, 0.0], 0.6, 0.35, 14.0)
+        } else {
+            CameraHint::new([0.6, 1.8, 0.0], 0.6, 0.5, 10.0)
+        }
     }
 
     fn script(&self, tick: u32) -> Input {

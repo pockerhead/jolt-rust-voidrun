@@ -419,16 +419,31 @@ impl Scene for SoftBodies {
         CameraHint::new([0.0, 1.3, 0.0], 0.25, 0.4, 10.0)
     }
 
+    /// The soft cube landing and hit by a ball, the balloon hit by another, then the cloth
+    /// letting go.
+    fn record_camera(&self, tick: u32) -> CameraHint {
+        match tick {
+            0..110 => CameraHint::new([CUBE[0], 0.6, CUBE[2]], 0.3, 0.25, 3.4),
+            110..200 => CameraHint::new([BALLOON[0] - 0.4, 0.8, BALLOON[2]], 0.2, 0.25, 4.5),
+            _ => CameraHint::new([0.0, 1.3, 0.0], 0.25, 0.35, 6.5),
+        }
+    }
+
     fn record_ticks(&self) -> u32 {
         360
     }
 
     fn script(&self, tick: u32) -> Input {
         let mut input = Input::default();
-        input.held.aim =
-            Some(CameraHint::new([3.6, 0.8, 0.5], 0.25, 0.25, 9.0).ray([0.0, 0.0], 16.0 / 9.0));
+        // The first ball at the cube, the second at the balloon.
+        let thrower = if tick < 100 {
+            CameraHint::new([CUBE[0], 0.4, CUBE[2]], 0.3, 0.25, 6.0)
+        } else {
+            CameraHint::new([3.6, 0.8, 0.5], 0.25, 0.25, 9.0)
+        };
+        input.held.aim = Some(thrower.ray([0.0, 0.0], 16.0 / 9.0));
         input.edges = Edges {
-            fire: tick == 150,
+            fire: matches!(tick, 50 | 150),
             action: tick == 220,
             ..Edges::default()
         };

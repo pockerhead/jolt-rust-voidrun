@@ -175,12 +175,15 @@ impl Scene for Constraints {
         CameraHint::new([0.5, 1.8, 0.0], 0.0, 0.3, 17.0)
     }
 
-    /// A fixed shot of each group in turn: the mechanisms, the hanging things, the joints.
+    /// A close shot of each mechanism in turn: the windmill and the elevator, the gears and
+    /// the rack, the cart on its path, the hanging things, the joints.
     fn record_camera(&self, tick: u32) -> CameraHint {
         match tick {
-            0..120 => CameraHint::new([-7.5, 1.6, 1.0], 0.15, 0.3, 9.0),
-            120..240 => CameraHint::new([2.5, 2.2, 0.0], -0.1, 0.3, 8.5),
-            _ => CameraHint::new([10.5, 2.4, -1.0], 0.2, 0.3, 8.0),
+            0..70 => CameraHint::new([-9.6, 2.0, 0.0], 0.1, 0.15, 6.0),
+            70..150 => CameraHint::new([-5.2, 1.0, 1.0], 0.0, 0.2, 3.8),
+            150..210 => CameraHint::new([-8.0, 0.5, 4.0], 0.0, 0.6, 4.5),
+            210..285 => CameraHint::new([2.5, 2.6, 0.0], -0.1, 0.25, 8.0),
+            _ => CameraHint::new([10.5, 3.6, -2.0], 0.0, 0.1, 4.5),
         }
     }
 

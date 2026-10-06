@@ -228,8 +228,13 @@ impl Scene for Character {
         CameraHint::new([target[0], target[1] + 1.0, target[2]], 0.5, 0.45, 9.0)
     }
 
+    /// Alongside the walker as it goes along the course.
     fn record_camera(&self, _tick: u32) -> CameraHint {
-        CameraHint::new([1.0, 0.9, 0.0], 0.0, 0.26, 14.0)
+        let x = self
+            .world
+            .character(self.walker.id())
+            .map_or(START[0], |character| position_f32(character.position())[0]);
+        CameraHint::new([x + 0.5, 1.0, 0.0], 0.35, 0.22, 6.5)
     }
 
     fn record_ticks(&self) -> u32 {

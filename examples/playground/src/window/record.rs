@@ -1,6 +1,5 @@
 //! Recording a scene's clip: its script at the fixed step, every second tick rendered from the
-//! scene's fixed record camera into a render target, read back, reduced and written as a GIF,
-//! and a PNG still from the middle of the clip.
+//! scene's fixed record camera into a render target, read back, reduced and written as a GIF.
 
 use std::fs::{self, File};
 use std::io::BufWriter;
@@ -8,11 +7,11 @@ use std::path::{Path, PathBuf};
 
 use macroquad::prelude::{
     clear_background, draw_text, draw_texture_ex, next_frame, render_target_ex, screen_width,
-    Color, DrawTextureParams, Image, RenderTarget, RenderTargetParams, Vec2,
+    Color, DrawTextureParams, RenderTarget, RenderTargetParams, Vec2,
 };
 
 use playground::capture::{
-    downsample_2x, flip_rows, thumbnail, GifWriter, Lut, MAX_GIF_BYTES, MAX_TOTAL_BYTES,
+    downsample_2x, flip_rows, GifWriter, Lut, GIF_SIZE, MAX_GIF_BYTES, MAX_TOTAL_BYTES,
 };
 use playground::draw::DrawList;
 use playground::scene::{Result, SceneConfig, SceneKind};
@@ -20,10 +19,10 @@ use playground::session::Session;
 
 use super::render::{Renderer, View, BACKGROUND};
 
-/// Size of the render target; the GIF is half of it.
-const TARGET: [u32; 2] = [720, 406];
-/// Width of the PNG still.
-const STILL_WIDTH: usize = 240;
+/// Size of the render target, twice the GIF's.
+const TARGET: [u32; 2] = [2 * GIF_SIZE[0] as u32, 2 * GIF_SIZE[1] as u32];
+/// Width of lines in the render target, pixels.
+const LINE_PIXELS: f32 = 3.0;
 
 /// Records `scenes` into `out` and checks the media limits; returns the process exit code.
 pub async fn record_all(scenes: Vec<SceneKind>, out: PathBuf, frames: Option<u32>) -> i32 {
@@ -82,11 +81,10 @@ async fn record(
     let gif_path = out.join(format!("{}.gif", kind.name()));
     let mut gif = GifWriter::new(
         BufWriter::new(File::create(&gif_path)?),
-        (width / 2) as u16,
-        (height / 2) as u16,
+        GIF_SIZE[0],
+        GIF_SIZE[1],
     )?;
     let mut list = DrawList::default();
-    let mut still = None;
     for tick in 0..ticks {
         session.tick_scripted()?;
         if tick % 2 == 0 {
@@ -98,13 +96,11 @@ async fn record(
             target: Some(target.clone()),
             aspect: Some(TARGET[0] as f32 / TARGET[1] as f32),
             clear: true,
+            line_pixels: Some((LINE_PIXELS, TARGET[1] as f32)),
         };
         renderer.draw_world(&list, session.scene().visuals(), &view);
         let image = target.texture.get_texture_data();
         let top_down = flip_rows(&image.bytes, width, height);
-        if still.is_none() && tick >= ticks / 2 {
-            still = Some(top_down.clone());
-        }
         gif.push(lut.quantize(&downsample_2x(&top_down, width, height)))?;
         show_progress(kind, tick, ticks, target);
         next_frame().await;
@@ -113,17 +109,6 @@ async fn record(
     let missing = session.missing_milestones();
     if !missing.is_empty() {
         return Err(format!("{} did not show: {}", kind.name(), missing.join(", ")).into());
-    }
-    if let Some(still) = still {
-        let (small, small_height) = thumbnail(&still, width, height, STILL_WIDTH);
-        // `export_png` expects OpenGL's row order, bottom row first.
-        let image = Image {
-            bytes: flip_rows(&small, STILL_WIDTH, small_height),
-            width: STILL_WIDTH as u16,
-            height: small_height as u16,
-        };
-        let png_path = out.join(format!("{}.png", kind.name()));
-        image.export_png(&png_path.to_string_lossy());
     }
     Ok(fs::metadata(&gif_path)?.len())
 }

@@ -52,6 +52,25 @@ pub struct Solid {
     pub colour: Colour,
 }
 
+impl Solid {
+    /// `visual` at `offset` in the frame of a pose (`position`, `rotation` as `[x, y, z, w]`),
+    /// turned with it: a marker that shows how a wheel or a gear turns.
+    pub fn attached(
+        visual: VisualKey,
+        (position, rotation): ([f32; 3], [f32; 4]),
+        offset: [f32; 3],
+        colour: Colour,
+    ) -> Self {
+        let turn = glam::Quat::from_array(rotation);
+        Self {
+            visual,
+            position: (glam::Vec3::from(position) + turn * glam::Vec3::from(offset)).to_array(),
+            rotation,
+            colour,
+        }
+    }
+}
+
 /// A line segment in world space.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Line {

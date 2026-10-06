@@ -323,6 +323,19 @@ impl TriangleBatch {
         }
     }
 
+    /// Adds the line from `from` to `to` as a flat band `width` metres wide that faces `eye`;
+    /// nothing for a line of no length or one seen end on.
+    pub fn push_line(&mut self, from: Vec3, to: Vec3, eye: Vec3, width: f32, colour: [u8; 4]) {
+        let side = (to - from).cross(eye - (from + to) / 2.0);
+        if side.length_squared() <= 1.0e-14 {
+            return;
+        }
+        let half = side.normalize() * (width / 2.0);
+        let corners = [from - half, from + half, to + half, to - half];
+        self.push([corners[0], corners[1], corners[2]], colour);
+        self.push([corners[0], corners[2], corners[3]], colour);
+    }
+
     /// Total number of triangles.
     pub fn triangle_count(&self) -> usize {
         self.calls().map(|call| call.len() / 3).sum()
@@ -334,6 +347,41 @@ mod tests {
     use super::*;
     use crate::visual::Shaped;
     use oxijolt::HeightFieldSettings;
+
+    #[test]
+    fn a_line_band_faces_the_eye_with_its_width() {
+        let mut batch = TriangleBatch::default();
+        let (from, to, eye) = (
+            Vec3::ZERO,
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 5.0),
+        );
+        batch.push_line(from, to, eye, 0.1, [255; 4]);
+        assert_eq!(batch.triangle_count(), 2);
+        let corners: Vec<Vec3> = batch
+            .calls()
+            .flatten()
+            .map(|vertex| Vec3::from(vertex.position))
+            .collect();
+        for corner in &corners {
+            assert!(
+                corner.z.abs() < 1e-6,
+                "the band lies across the view: {corner}"
+            );
+            assert!(
+                (corner.y.abs() - 0.05).abs() < 1e-6,
+                "half the width off the line"
+            );
+        }
+        batch.push_line(Vec3::ZERO, Vec3::ZERO, eye, 0.1, [255; 4]);
+        let along_the_view = Vec3::new(0.0, 0.0, 5.0);
+        batch.push_line(Vec3::ZERO, Vec3::Z, along_the_view, 0.1, [255; 4]);
+        assert_eq!(
+            batch.triangle_count(),
+            2,
+            "no band for a point or an end-on line"
+        );
+    }
 
     #[test]
     fn closed_meshes_face_outward() {

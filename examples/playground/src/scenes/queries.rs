@@ -16,10 +16,12 @@ use crate::math::{about_axis, glam, position, position_f32, rvec, vec3};
 use crate::scene::{new_world, step, Milestones, Result, Scene, SceneConfig};
 use crate::terrain;
 use crate::tracked::Tracked;
-use crate::visual::{Shaped, VisualKey, Visuals};
+use crate::visual::{Shaped, Visual, VisualKey, Visuals};
 
 /// Radius of the cast and overlap spheres, metres.
 const PROBE_RADIUS: f32 = 0.3;
+/// The tick at which the script shows the collider wireframe.
+const WIREFRAME_TICK: u32 = 250;
 
 const MILESTONES: &[&str] = &[
     "ray hit",
@@ -60,6 +62,8 @@ pub struct Queries {
     terrain: BodyId,
     probe: Shaped,
     probe_visual: VisualKey,
+    /// A post drawn at the world's origin, which a rebase moves.
+    origin_post: VisualKey,
     crates: Vec<BodyId>,
     picked: Option<BodyId>,
     saved: Option<WorldState>,
@@ -132,6 +136,9 @@ impl Queries {
         }
         let probe = Shaped::sphere(PROBE_RADIUS)?;
         let probe_visual = visuals.add(probe.visual.clone());
+        let origin_post = visuals.add(Visual::Box {
+            half_extent: [0.06, 1.5, 0.06],
+        });
         Ok(Self {
             world,
             visuals,
@@ -139,6 +146,7 @@ impl Queries {
             terrain,
             probe,
             probe_visual,
+            origin_post,
             crates,
             picked: None,
             saved: None,
@@ -315,6 +323,15 @@ impl Scene for Queries {
                 colour
             }
         });
+        // The world's origin: a post with its x axis in red and its z axis in blue.
+        out.solids.push(Solid {
+            visual: self.origin_post,
+            position: [0.0, 1.0, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            colour: colours::HIGHLIGHT,
+        });
+        out.line([0.0, 0.0, 0.0], [1.5, 0.0, 0.0], colours::HIGHLIGHT);
+        out.line([0.0, 0.0, 0.0], [0.0, 0.0, 1.5], colours::BODY_ALT);
         if let Some((_, point, normal)) = self.found.hit {
             out.cross(point, 0.3, colours::QUERY);
             let tip = (glam::Vec3::from(point) + glam::Vec3::from(normal)).to_array();
@@ -388,6 +405,17 @@ impl Scene for Queries {
         CameraHint::new([x, y + 1.0, z], 0.3, 0.5, 13.0)
     }
 
+    /// Closer than the camera the cursor's ray comes from, following the origin like it; the
+    /// last second shows the collider wireframe from further out.
+    fn record_camera(&self, tick: u32) -> CameraHint {
+        let [x, y, z] = self.origin;
+        if tick < WIREFRAME_TICK {
+            CameraHint::new([x, y + 0.6, z + 1.0], 0.3, 0.45, 8.5)
+        } else {
+            self.camera()
+        }
+    }
+
     fn script(&self, tick: u32) -> Input {
         // The cursor sweeps across the town and back, from the default camera.
         let sweep = (tick as f32 / 300.0 * std::f32::consts::TAU).sin();
@@ -402,14 +430,15 @@ impl Scene for Queries {
         let mut input = Input::default();
         input.held.aim = Some(aim);
         input.edges = Edges {
-            wireframe: tick == 5,
+            wireframe: tick == WIREFRAME_TICK,
             pick: (tick == 40)
                 .then(|| crate_ray(&self.world, self.crates[3]))
                 .flatten(),
             save: tick == 60,
             restore: matches!(tick, 90 | 200),
             toggle: tick == 110,
-            rebase: tick == 150,
+            // With the cursor far to the left, so the origin moves visibly.
+            rebase: tick == 230,
             ..Edges::default()
         };
         input

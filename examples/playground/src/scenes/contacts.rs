@@ -422,12 +422,17 @@ impl Scene for Contacts {
         CameraHint::new([0.0, 1.0, 0.0], 0.0, 0.55, 15.0)
     }
 
-    /// The back row of stations, then the front row.
+    /// One station at a time: the box shot up through the one-way platform, the chain and the
+    /// material tiles, then after the second drop the sensor, the conveyor and the ice, and the
+    /// trampoline.
     fn record_camera(&self, tick: u32) -> CameraHint {
-        if tick < 150 {
-            CameraHint::new([0.0, 1.2, -3.0], 0.0, 0.45, 11.0)
-        } else {
-            CameraHint::new([-1.0, 1.4, 3.0], 0.0, 0.4, 10.0)
+        let at = |index: usize, y: f32| [STATIONS[index][0], y, STATIONS[index][1]];
+        match tick {
+            0..75 => CameraHint::new(at(0, 2.4), 0.0, 0.3, 5.5),
+            75..150 => CameraHint::new([0.5, 1.2, 3.0], 0.0, 0.3, 6.0),
+            150..200 => CameraHint::new(at(4, 1.0), 0.2, 0.3, 4.5),
+            200..250 => CameraHint::new([0.0, 0.6, -3.0], 0.0, 0.35, 5.5),
+            _ => CameraHint::new(at(3, 1.4), 0.0, 0.15, 5.0),
         }
     }
 

@@ -30,6 +30,9 @@ pub struct View {
     pub aspect: Option<f32>,
     /// Whether to clear to [`BACKGROUND`] first.
     pub clear: bool,
+    /// Lines as bands this many pixels wide at the target's `height` in pixels, `(pixels,
+    /// height)`; one-pixel lines when `None`.
+    pub line_pixels: Option<(f32, f32)>,
 }
 
 /// Turns draw lists into macroquad draw calls, keeping the meshes of the scene's descriptions
@@ -83,6 +86,18 @@ impl Renderer {
             batch.push_surface(&surface.vertices, &surface.triangles, surface.colour, alpha);
         }
 
+        if let Some((pixels, height)) = view.line_pixels {
+            let eye = camera.eye();
+            // Metres per pixel grow with the distance from the eye.
+            let per_metre = pixels * 2.0 * (camera.fov_y / 2.0).tan() / height;
+            for line in &list.lines {
+                let (from, to) = (glam::Vec3::from(line.from), glam::Vec3::from(line.to));
+                let width = per_metre * eye.distance((from + to) / 2.0);
+                let [r, g, b] = line.colour.map(|c| (c * 255.0).round() as u8);
+                self.opaque.push_line(from, to, eye, width, [r, g, b, 255]);
+            }
+        }
+
         let Self {
             opaque,
             translucent,
@@ -91,8 +106,10 @@ impl Renderer {
             ..
         } = self;
         submit(opaque, calls, indices);
-        for line in &list.lines {
-            draw_line_3d(to_mq(line.from), to_mq(line.to), colour(line.colour, 255));
+        if view.line_pixels.is_none() {
+            for line in &list.lines {
+                draw_line_3d(to_mq(line.from), to_mq(line.to), colour(line.colour, 255));
+            }
         }
         submit(translucent, calls, indices);
         set_default_camera();

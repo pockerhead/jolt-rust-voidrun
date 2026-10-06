@@ -248,6 +248,7 @@ impl App {
             target: None,
             aspect: None,
             clear: true,
+            line_pixels: None,
         };
         self.renderer
             .draw_world(&self.list, self.session.scene().visuals(), &view);

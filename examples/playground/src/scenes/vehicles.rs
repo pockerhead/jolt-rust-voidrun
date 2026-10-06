@@ -56,6 +56,9 @@ fn ground_height(x: f32, z: f32) -> f32 {
 struct Chassis {
     body: BodyId,
     wheel: VisualKey,
+    /// A spoke from the hub toward the rim, so that the wheel's turning shows, and where it
+    /// sits in the wheel's frame.
+    spoke: (VisualKey, [f32; 3]),
 }
 
 /// The vehicles scene.
@@ -144,25 +147,24 @@ impl Vehicles {
         );
         let bike = world.create_motorcycle(bike_body, &bike_settings)?;
 
-        let wheel = |visuals: &mut Visuals, width: f32, radius: f32| {
-            visuals.add(Visual::Cylinder {
+        // The wheel model's axle is its Y axis and its up is X, as the binding reports it.
+        let wheels = |visuals: &mut Visuals, body: BodyId, width: f32, radius: f32| Chassis {
+            body,
+            wheel: visuals.add(Visual::Cylinder {
                 half_height: width / 2.0,
                 radius,
-            })
+            }),
+            spoke: (
+                visuals.add(Visual::Box {
+                    half_extent: [0.4 * radius, width / 2.0 + 0.015, 0.12 * radius],
+                }),
+                [0.5 * radius, 0.0, 0.0],
+            ),
         };
         let chassis = [
-            Chassis {
-                body: car_body,
-                wheel: wheel(&mut visuals, 0.2, 0.35),
-            },
-            Chassis {
-                body: tank_body,
-                wheel: wheel(&mut visuals, 0.1, 0.3),
-            },
-            Chassis {
-                body: bike_body,
-                wheel: wheel(&mut visuals, 0.05, 0.31),
-            },
+            wheels(&mut visuals, car_body, 0.2, 0.35),
+            wheels(&mut visuals, tank_body, 0.1, 0.3),
+            wheels(&mut visuals, bike_body, 0.05, 0.31),
         ];
         let (x, z, _) = STARTS[0];
         let walker = Walker::new(&mut world, rvec([x, ground_height(x, z), z]), 1.8, 0.3)?;
@@ -271,18 +273,22 @@ impl Vehicles {
     fn draw_wheels<K: VehicleKind>(
         &self,
         id: VehicleId<K>,
-        wheel: VisualKey,
+        chassis: &Chassis,
         out: &mut DrawList,
     ) -> Result<()> {
         let vehicle = self.world.vehicle(id)?;
         for index in 0..vehicle.wheel_count() {
             if let Some((centre, rotation)) = vehicle.wheel_world_transform(index) {
+                let pose = (position_f32(centre), rotation.into());
                 out.solids.push(Solid {
-                    visual: wheel,
-                    position: position_f32(centre),
-                    rotation: rotation.into(),
+                    visual: chassis.wheel,
+                    position: pose.0,
+                    rotation: pose.1,
                     colour: [0.2, 0.2, 0.2],
                 });
+                let (spoke, at) = chassis.spoke;
+                out.solids
+                    .push(Solid::attached(spoke, pose, at, [1.0, 1.0, 1.0]));
             }
         }
         Ok(())
@@ -337,9 +343,9 @@ impl Scene for Vehicles {
                 colour
             }
         });
-        self.draw_wheels(self.car, self.chassis[0].wheel, out)?;
-        self.draw_wheels(self.tank, self.chassis[1].wheel, out)?;
-        self.draw_wheels(self.bike, self.chassis[2].wheel, out)?;
+        self.draw_wheels(self.car, &self.chassis[0], out)?;
+        self.draw_wheels(self.tank, &self.chassis[1], out)?;
+        self.draw_wheels(self.bike, &self.chassis[2], out)?;
         let character = self.world.character(self.walker.id())?;
         let (position, rotation) = self.walker.capsule_pose(&character);
         let colour = if self.driven == 0 {
@@ -402,17 +408,31 @@ impl Scene for Vehicles {
         CameraHint::new([target[0], target[1] + 1.0, target[2]], 0.6, 0.4, distance)
     }
 
-    /// A fixed shot of each part of the script: the walker, the car's run, the tank, the
-    /// motorcycle's ride.
+    /// Close beside what the script drives: the walker, the car, the tank, and the motorcycle
+    /// from behind, where its lean shows.
     fn record_camera(&self, tick: u32) -> CameraHint {
+        let at = |body: BodyId| {
+            self.tracked
+                .pose(body)
+                .map_or([0.0; 3], |(p, _)| position_f32(p))
+        };
         if tick < SWITCHES[0] {
-            CameraHint::new([-3.0, 1.0, 9.0], 0.3, 0.35, 8.0)
+            let walker = self
+                .world
+                .character(self.walker.id())
+                .map_or([0.0; 3], |character| position_f32(character.position()));
+            CameraHint::new([walker[0], walker[1] + 1.0, walker[2]], 0.5, 0.25, 5.0)
         } else if tick < SWITCHES[1] {
-            CameraHint::new([-6.0, 0.5, -6.0], 0.0, 0.4, 20.0)
+            let [x, y, z] = at(self.chassis[0].body);
+            CameraHint::new([x, y + 0.2, z], 0.45, 0.25, 6.0)
         } else if tick < SWITCHES[2] {
-            CameraHint::new([9.0, 0.5, 8.0], 0.6, 0.5, 14.0)
+            let [x, y, z] = at(self.chassis[1].body);
+            CameraHint::new([x, y + 0.5, z], 0.6, 0.45, 10.0)
         } else {
-            CameraHint::new([-5.0, 0.5, 0.0], 0.0, 0.5, 17.0)
+            let bike = self.chassis[2].body;
+            let [x, y, z] = at(bike);
+            let behind = heading(&self.world, bike) + std::f32::consts::PI - 0.5;
+            CameraHint::new([x, y + 0.3, z], behind, 0.2, 4.5)
         }
     }
 
@@ -432,6 +452,10 @@ impl Scene for Vehicles {
             input.held.walk = [1.0, 0.0];
         } else if tick < SWITCHES[1] - 30 {
             input.held.throttle = 0.35;
+            // A gentle right turn in the middle of the run, so the front wheels steer.
+            if (200..290).contains(&tick) {
+                input.held.steer = 0.3;
+            }
         } else if tick < SWITCHES[1] {
             input.held.hand_brake = true;
         } else if tick < SWITCHES[2] {

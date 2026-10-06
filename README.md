@@ -20,27 +20,8 @@ bindings to the [joltc] C wrapper. Everything runs headless and is tested withou
 ## Playground
 
 Ten small scenes in a window show what the binding does: a character, vehicles, a pile of bodies,
-ragdolls, constraints, soft bodies, buoyancy, destruction, contact control and queries. Click a
-picture for its clip.
-
-<table>
-  <tr>
-    <td align="center"><a href="docs/media/character.gif"><img src="docs/media/character.png" width="180" alt="Character on terrain"></a><br>1 Character on terrain</td>
-    <td align="center"><a href="docs/media/vehicles.gif"><img src="docs/media/vehicles.png" width="180" alt="Car, tank and motorcycle"></a><br>2 Car, tank and motorcycle</td>
-    <td align="center"><a href="docs/media/pile.gif"><img src="docs/media/pile.png" width="180" alt="Body pile and impacts"></a><br>3 Body pile and impacts</td>
-    <td align="center"><a href="docs/media/ragdolls.gif"><img src="docs/media/ragdolls.png" width="180" alt="Ragdolls and a mapped puppet"></a><br>4 Ragdolls and a mapped puppet</td>
-    <td align="center"><a href="docs/media/constraints.gif"><img src="docs/media/constraints.png" width="180" alt="Constraints and motors"></a><br>5 Constraints and motors</td>
-  </tr>
-  <tr>
-    <td align="center"><a href="docs/media/soft-bodies.gif"><img src="docs/media/soft-bodies.png" width="180" alt="Cloth, balloon and soft cube"></a><br>6 Cloth, balloon and soft cube</td>
-    <td align="center"><a href="docs/media/water.gif"><img src="docs/media/water.png" width="180" alt="Buoyancy and water"></a><br>7 Buoyancy and water</td>
-    <td align="center"><a href="docs/media/destruction.gif"><img src="docs/media/destruction.png" width="180" alt="Breakable wall"></a><br>8 Breakable wall</td>
-    <td align="center"><a href="docs/media/contacts.gif"><img src="docs/media/contacts.png" width="180" alt="Contact control and sensors"></a><br>9 Contact control and sensors</td>
-    <td align="center"><a href="docs/media/queries.gif"><img src="docs/media/queries.png" width="180" alt="Queries, state and origin"></a><br>0 Queries, state and origin</td>
-  </tr>
-</table>
-
-In a clone of the repository:
+ragdolls, constraints, soft bodies, buoyancy, destruction, contact control and queries. In a clone
+of the repository with Rust, CMake and a C++ toolchain:
 
 ```sh
 git clone --recursive https://github.com/pockerhead/oxijolt
@@ -48,105 +29,8 @@ cd oxijolt
 cargo run -p playground --release
 ```
 
-It needs Rust (stable), CMake 3.20 or newer and a C++ toolchain: MSVC on Windows, where the window
-needs nothing else. On Linux, install `pkg-config libx11-dev libxi-dev libgl1-mesa-dev` first; CI
-builds the window on Windows only. The first build compiles Jolt and takes several minutes.
-
-To skip compiling Jolt on Windows, download
-`oxijolt-sys-<version>-x86_64-pc-windows-msvc-debug-renderer.tar.gz` from the
-[releases](https://github.com/pockerhead/oxijolt/releases), unpack it, and point `JOLTC_LIB_DIR` at
-the unpacked directory in the shell that builds the playground (other builds refuse a prefix with
-the debug renderer; it needs MSVC 19.44 or newer, see
-[building](docs/building.md#release-archives)):
-
-```powershell
-$env:JOLTC_LIB_DIR = "C:\path\to\oxijolt-sys-<version>-x86_64-pc-windows-msvc-debug-renderer"
-cargo run -p playground --release
-```
-
-Keys in every scene: 1 to 9 and 0 choose a scene, R resets it, P pauses, N runs one tick while
-paused, G shows the collider wireframe, H hides the help, right drag and the wheel move the camera,
-Esc quits. Each scene adds its own:
-
-**1 Character on terrain** (`character`)
-
-| Keys | Action |
-|---|---|
-| W A S D | walk, relative to the camera |
-| Shift | sprint |
-| Space | jump |
-
-**2 Car, tank and motorcycle** (`vehicles`)
-
-| Keys | Action |
-|---|---|
-| Tab | switch: walker, car, tank, motorcycle |
-| W S | throttle; against the motion it brakes first |
-| A D | steer; the tank turns on the spot when standing |
-| Space | hand brake, or jump when walking |
-
-**3 Body pile and impacts** (`pile`)
-
-| Keys | Action |
-|---|---|
-| Space | drop another layer |
-| F | fire a heavy ball at the cursor |
-
-**4 Ragdolls and a mapped puppet** (`ragdolls`)
-
-| Keys | Action |
-|---|---|
-| Space | drop another ragdoll |
-| M | puppet: motors and falling, or back to kinematic |
-
-**5 Constraints and motors** (`constraints`)
-
-| Keys | Action |
-|---|---|
-| Up, Down | windmill motor faster or slower |
-| E | elevator up or down |
-
-**6 Cloth, balloon and soft cube** (`soft-bodies`)
-
-| Keys | Action |
-|---|---|
-| E | release the cloth's pins |
-| F | throw a ball at the cursor |
-
-**7 Buoyancy and water** (`water`)
-
-| Keys | Action |
-|---|---|
-| C | current on or off |
-| Space | drop another crate |
-
-**8 Breakable wall** (`destruction`)
-
-| Keys | Action |
-|---|---|
-| F | fire a cannonball at the cursor |
-| left click | knock out the brick under the cursor |
-
-**9 Contact control and sensors** (`contacts`)
-
-| Keys | Action |
-|---|---|
-| Space | drop a box over every station |
-| E | swing the chain |
-
-**0 Queries, state and origin** (`queries`)
-
-| Keys | Action |
-|---|---|
-| mouse | ray, sphere cast, overlap and point test under the cursor |
-| left click | push the body under the cursor |
-| T | the last clicked crate: kinematic or dynamic |
-| K, L | save the world, restore it |
-| B | move the origin to the point under the cursor |
-
-The clips are made by the playground itself and can be regenerated after any change with
-`cargo run -p playground --release -- --record all`. [docs/playground.md](docs/playground.md) has
-what each scene uses, the headless mode and how recording works.
+[docs/playground.md](docs/playground.md) has a clip of every scene, the keys, the Linux packages,
+a faster first build with a prebuilt Jolt, and the headless and record modes.
 
 ## Example
 
@@ -217,8 +101,9 @@ The full list of what works today, with links to the guides, is in
 - [x] Tracked vehicles and motorcycles
 - [x] Character contact callbacks, contact validation and collision groups
 - [x] Mutable compounds, buoyancy, point queries, plane shape, collision response estimate, skeleton mapper
-- [x] Playground: an example with a window that shows every feature, and GIFs for this README
-- [x] Presets for a humanoid character, a car and a motorcycle, and wheel poses for drawing
+- [x] Playground: an example with a window that shows every feature, with a GIF of every scene
+- [x] Presets for a humanoid character, a car and a motorcycle, wheel poses for drawing, and the
+      list of every body of a world
 - [ ] Comparison with Rapier and Avian
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases

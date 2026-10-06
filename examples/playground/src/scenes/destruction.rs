@@ -406,6 +406,11 @@ impl Scene for Destruction {
         CameraHint::new([0.0, 0.8, 0.0], 0.5, 0.25, 6.5)
     }
 
+    /// Close on the wall, from the side the cannonballs come from.
+    fn record_camera(&self, _tick: u32) -> CameraHint {
+        CameraHint::new([0.0, 0.7, 0.0], 0.4, 0.15, 4.2)
+    }
+
     fn script(&self, tick: u32) -> Input {
         let mut input = Input::default();
         let shooter = |x: f32, y: f32| {

@@ -21,8 +21,9 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   `PhysicsSystem::GetBodies`), soft bodies, ragdoll parts and characters' inner bodies included.
 - Playground (`examples/playground`, [guide](docs/playground.md)): ten scenes in a window that show
   the binding's features, a headless mode that runs every scene's script and prints a digest
-  (compared with 1 and 4 worker threads in CI), and a record mode that makes the README's GIFs and
-  stills in `docs/media`. The playground is a workspace member outside the default members.
+  (compared with 1 and 4 worker threads in CI), and a record mode that makes the GIFs of the
+  playground guide in `docs/media`. The playground is a workspace member outside the default
+  members.
 
 ## 0.6.0 — 2026-10-06
 

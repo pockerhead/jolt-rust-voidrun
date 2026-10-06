@@ -11,11 +11,11 @@ use oxijolt::{
 
 use super::Parts;
 use crate::digest::Digest;
-use crate::draw::{colours, DrawList};
+use crate::draw::{colours, Colour, DrawList, Solid};
 use crate::input::Input;
 use crate::math::{about_axis, glam, position_f32, rvec};
 use crate::scene::{Milestones, Result, DT};
-use crate::visual::Shaped;
+use crate::visual::{Shaped, Visual, VisualKey};
 
 const X: Vec3 = Vec3::new(1.0, 0.0, 0.0);
 const Y: Vec3 = Vec3::new(0.0, 1.0, 0.0);
@@ -40,6 +40,10 @@ pub struct Mechanisms {
     cart_body: BodyId,
     cart_travel: f32,
     cart_last: [f32; 3],
+    /// A spoke on each gear and the pinion and a tip on one blade, so that their turning
+    /// shows: the body, the marker's description, where it sits in the body's frame, and its
+    /// colour.
+    markers: Vec<(BodyId, VisualKey, [f32; 3], Colour)>,
 }
 
 impl Mechanisms {
@@ -193,6 +197,18 @@ impl Mechanisms {
             motor.set_motor_state(MotorState::Velocity);
         }
 
+        let mut markers = Vec::new();
+        for (body, radius) in [(gear1, 0.4), (gear2, 0.8), (pinion, 0.3)] {
+            let spoke = parts.visuals.add(Visual::Box {
+                half_extent: [0.4 * radius, 0.065, 0.12 * radius],
+            });
+            markers.push((body, spoke, [0.5 * radius, 0.0, 0.0], [0.2, 0.2, 0.2]));
+        }
+        let tip = parts.visuals.add(Visual::Box {
+            half_extent: [0.15, 0.15, 0.06],
+        });
+        markers.push((windmill_body, tip, [1.25, 0.0, 0.0], colours::HIGHLIGHT));
+
         Ok(Self {
             windmill,
             windmill_body,
@@ -206,6 +222,7 @@ impl Mechanisms {
             cart_body,
             cart_travel: 0.0,
             cart_last: cart_at,
+            markers,
         })
     }
 
@@ -259,8 +276,13 @@ impl Mechanisms {
         Ok(())
     }
 
-    /// The HUD lines of the motors.
+    /// The markers at the poses of their bodies, and the HUD lines of the motors.
     pub fn draw(&self, world: &PhysicsWorld, out: &mut DrawList) -> Result<()> {
+        for &(body, marker, at, colour) in &self.markers {
+            let reading = world.body(body)?;
+            let pose = (position_f32(reading.position()), reading.rotation().into());
+            out.solids.push(Solid::attached(marker, pose, at, colour));
+        }
         let windmill = world.body(self.windmill_body)?.angular_velocity().z;
         out.hud.push(format!(
             "windmill: target {:.1} rad/s, turning {windmill:.1} rad/s (arrows change it)",

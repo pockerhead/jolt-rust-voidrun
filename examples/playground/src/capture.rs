@@ -1,5 +1,5 @@
-//! Turning rendered frames into small looping GIFs and PNG stills: a fixed palette, row flips,
-//! downsampling, and frames that store only the rectangle that changed.
+//! Turning rendered frames into small looping GIFs: a fixed palette, row flips, downsampling,
+//! and frames that store only the rectangle that changed.
 //!
 //! Everything here works on top-down RGBA rows; OpenGL reads render targets bottom row first,
 //! so the recorder flips them once on the way in.
@@ -7,6 +7,9 @@
 use std::io::Write;
 
 use gif::{DisposalMethod, Encoder, Frame, Repeat};
+
+/// Width and height of a scene's GIF, pixels.
+pub const GIF_SIZE: [u16; 2] = [560, 315];
 
 /// The most bytes one scene's GIF may have.
 pub const MAX_GIF_BYTES: u64 = 1_500_000;
@@ -119,41 +122,6 @@ pub fn downsample_2x(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
         }
     }
     out
-}
-
-/// The image scaled to `target_width` pixels wide with its aspect kept, each pixel the mean of
-/// the source pixels whose centres fall in it.
-pub fn thumbnail(
-    rgba: &[u8],
-    width: usize,
-    height: usize,
-    target_width: usize,
-) -> (Vec<u8>, usize) {
-    let target_height = (height * target_width + width / 2) / width;
-    let mut out = Vec::with_capacity(4 * target_width * target_height);
-    for ty in 0..target_height {
-        let (y0, y1) = (
-            ty * height / target_height,
-            ((ty + 1) * height / target_height).max(ty * height / target_height + 1),
-        );
-        for tx in 0..target_width {
-            let (x0, x1) = (
-                tx * width / target_width,
-                ((tx + 1) * width / target_width).max(tx * width / target_width + 1),
-            );
-            let mut sum = [0u32; 4];
-            for y in y0..y1 {
-                for x in x0..x1 {
-                    for (channel, total) in sum.iter_mut().enumerate() {
-                        *total += u32::from(rgba[4 * (y * width + x) + channel]);
-                    }
-                }
-            }
-            let count = ((y1 - y0) * (x1 - x0)) as u32;
-            out.extend(sum.map(|total| ((total + count / 2) / count) as u8));
-        }
-    }
-    (out, target_height)
 }
 
 /// A rectangle of pixels.
@@ -345,8 +313,6 @@ mod tests {
         assert_eq!(&flipped[..8], &image[8..]);
         assert_eq!(flip_rows(&flipped, 2, 2), image);
         assert_eq!(downsample_2x(&image, 2, 2), vec![128, 128, 128, 255]);
-        let (small, height) = thumbnail(&image, 2, 2, 1);
-        assert_eq!((small, height), (vec![128, 128, 128, 255], 1));
     }
 
     /// Decodes a GIF into its full frames of palette indices, compositing each frame's
