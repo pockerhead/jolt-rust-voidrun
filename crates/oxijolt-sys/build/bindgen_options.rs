@@ -9,7 +9,8 @@ use bindgen::{EnumVariation, Formatter, RustEdition, RustTarget};
 ///
 /// They `reinterpret_cast` a `JPH_Mat4*` (4-aligned) to a `JPH::Mat44*`
 /// (16-aligned), which is undefined behaviour for most caller-provided arrays.
-/// They stay unbound: ragdoll poses go through per-body transforms instead.
+/// They stay unbound: ragdoll poses go through per-body transforms instead, and the skeleton
+/// mapper uses the aligned `JPH_SkeletonMapper_*2` entry points of `joltc_ext`.
 pub const EXCLUDED_FUNCTIONS: &[&str] = &[
     "JPH_RagdollSettings_DisableParentChildCollisions",
     "JPH_Ragdoll_SetPose2",

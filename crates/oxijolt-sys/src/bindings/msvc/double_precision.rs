@@ -11567,3 +11567,51 @@ unsafe extern "C" {
         index: u32,
     ) -> JPH_BodyID;
 }
+unsafe extern "C" {
+    pub fn JPH_SkeletonMapper_Initialize2(
+        mapper: *mut JPH_SkeletonMapper,
+        skeleton1: *const JPH_Skeleton,
+        neutralPose1: *const JPH_Mat4,
+        count1: u32,
+        skeleton2: *const JPH_Skeleton,
+        neutralPose2: *const JPH_Mat4,
+        count2: u32,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn JPH_SkeletonMapper_LockAllTranslations2(
+        mapper: *mut JPH_SkeletonMapper,
+        skeleton2: *const JPH_Skeleton,
+        neutralPose2: *const JPH_Mat4,
+        count2: u32,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn JPH_SkeletonMapper_LockTranslations2(
+        mapper: *mut JPH_SkeletonMapper,
+        skeleton2: *const JPH_Skeleton,
+        lockedTranslations: *const bool,
+        neutralPose2: *const JPH_Mat4,
+        count2: u32,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn JPH_SkeletonMapper_Map2(
+        mapper: *const JPH_SkeletonMapper,
+        pose1ModelSpace: *const JPH_Mat4,
+        count1: u32,
+        pose2LocalSpace: *const JPH_Mat4,
+        count2: u32,
+        outPose2ModelSpace: *mut JPH_Mat4,
+        outDegenerateJoint1: *mut ::std::os::raw::c_int,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn JPH_SkeletonMapper_MapReverse2(
+        mapper: *const JPH_SkeletonMapper,
+        pose2ModelSpace: *const JPH_Mat4,
+        count2: u32,
+        outPose1ModelSpace: *mut JPH_Mat4,
+        count1: u32,
+    ) -> bool;
+}
