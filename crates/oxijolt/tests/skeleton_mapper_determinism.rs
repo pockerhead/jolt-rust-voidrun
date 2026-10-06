@@ -86,7 +86,8 @@ impl Scene {
     }
 
     /// One tick: gravity, motors toward the reverse-mapped animation, a step, and the record of
-    /// every body and both mapped poses.
+    /// every body (the state section) and both mapped poses (the shape section, kept apart so
+    /// that the control can tell what the simulation did from what the mapper returned).
     fn tick(&mut self, tick: usize, changed: bool, digest: &mut Digest) {
         let local = self.animation_local(tick, changed);
         let animation = self.rig.local_to_model(&local, RVec3::ZERO);
@@ -108,8 +109,8 @@ impl Scene {
             .mapper
             .map(&self.world.ragdoll(self.ragdoll).unwrap().pose(), &local)
             .unwrap();
-        record_pose(&target, &mut record.state);
-        record_pose(&shown, &mut record.state);
+        record_pose(&target, &mut record.shape);
+        record_pose(&shown, &mut record.shape);
     }
 
     fn floor_contact(&self) -> bool {
@@ -193,9 +194,16 @@ fn skeleton_mapper_match_across_processes() {
 
 #[test]
 fn a_changed_mapped_input_changes_the_digest() {
-    let divergence = first_divergence(&run(1, false), &run(1, true));
-    match divergence {
+    let (unchanged, changed) = (run(1, false), run(1, true));
+    match first_divergence(&unchanged, &changed) {
         Some(Divergence::Tick { tick, .. }) => assert_eq!(tick, CHANGE_TICK),
         other => panic!("the changed animation left the digest {other:?}"),
     }
+    // The bodies change in the same tick: the motors follow the changed mapped pose.
+    let first_body_change = unchanged
+        .ticks
+        .iter()
+        .zip(&changed.ticks)
+        .position(|(a, b)| a.state != b.state);
+    assert_eq!(first_body_change, Some(CHANGE_TICK));
 }
