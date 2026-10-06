@@ -107,7 +107,7 @@ The full list of what works today, with links to the guides, is in
 - [ ] Comparison with Rapier and Avian
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
-- [ ] Rollback helpers: reusable state buffer, filtered restore
+- [x] Rollback helpers: reusable state buffer, filtered restore
 - [ ] Real meshes from open sources tested in CI, and shape cooking (save and load built shapes)
 - [ ] API review and freeze for 1.0
 - [ ] Same results across operating systems, checked in CI

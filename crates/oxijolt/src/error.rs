@@ -686,9 +686,8 @@ impl fmt::Display for SoftBodyError {
 
 impl std::error::Error for SoftBodyError {}
 
-/// Why [`PhysicsWorld::restore_state`](crate::PhysicsWorld::restore_state) refused or failed.
-/// On [`WrongWorld`](Self::WrongWorld) and [`WorldChanged`](Self::WorldChanged) the world is
-/// unchanged.
+/// Why saving or restoring a [`WorldState`](crate::WorldState) refused or failed. On every error
+/// but [`RestoreFailed`](Self::RestoreFailed) the world and the state are unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StateError {
@@ -706,6 +705,9 @@ pub enum StateError {
     /// Jolt or a character could not read the state. A state the world accepted should never
     /// cause it; if it does, the world may be partly restored and should be discarded.
     RestoreFailed,
+    /// A [`BodySelection::Only`](crate::BodySelection::Only) names a body of another world
+    /// ([`BodyError::WrongWorld`]) or a removed body ([`BodyError::NotFound`]).
+    Body(BodyError),
 }
 
 impl fmt::Display for StateError {
@@ -716,11 +718,19 @@ impl fmt::Display for StateError {
                 f.write_str("the world's objects have changed since the state was saved")
             }
             Self::RestoreFailed => f.write_str("the state could not be restored"),
+            Self::Body(error) => write!(f, "invalid body in the selection: {error}"),
         }
     }
 }
 
-impl std::error::Error for StateError {}
+impl std::error::Error for StateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Body(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 /// Any error of this crate: one variant per area, wrapping that area's error.
 ///

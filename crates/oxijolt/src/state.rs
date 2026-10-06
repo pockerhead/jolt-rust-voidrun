@@ -1,17 +1,22 @@
 //! Saving and restoring a world's simulation state, for rollback and replay (Jolt
 //! `PhysicsSystem::SaveState` and `RestoreState`, plus every character's own state).
 
+mod record;
+mod selection;
+
 use std::fmt;
 use std::mem::MaybeUninit;
 
 use oxijolt_sys::*;
 
-use crate::owned::Owned;
-use crate::world::WorldTag;
-use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
+pub use selection::BodySelection;
 
-/// A world's simulation state at one moment, from [`PhysicsWorld::save_state`] or
-/// [`PhysicsWorld::save_state_of`], to go back to with [`PhysicsWorld::restore_state`].
+use crate::world::WorldTag;
+use crate::{CharacterState, PhysicsWorld, StateError};
+
+/// A world's simulation state at one moment, from [`PhysicsWorld::save_state`],
+/// [`PhysicsWorld::save_state_of`] or [`PhysicsWorld::save_state_into`], to go back to with
+/// [`PhysicsWorld::restore_state`].
 ///
 /// It holds Jolt's saved state of the physics system (bodies with their poses, velocities,
 /// forces and sleep data, soft body vertices, the contact cache, each constraint's own state,
@@ -39,10 +44,14 @@ use crate::{BodyError, BodyId, CharacterState, PhysicsWorld, StateError};
 /// without a defined value (a wheel's contact data before its first contact). Compare what a
 /// world reports instead.
 ///
+/// For rollback, allocate the states once ([`WorldState::new`]) and save into them with
+/// [`PhysicsWorld::save_state_into`], which reuses their memory.
+///
 /// [docs/state.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/state.md
 #[derive(Clone)]
 pub struct WorldState {
-    world: WorldTag,
+    /// The world that saved it; `None` for a state no world saved ([`WorldState::new`]).
+    world: Option<WorldTag>,
     epoch: u64,
     body_count: u32,
     constraint_count: u32,
@@ -52,6 +61,41 @@ pub struct WorldState {
     characters: Vec<CharacterState>,
     /// Raw ids of the bodies with a pending contact-cache invalidation, in ascending order.
     cache_invalidations: Vec<u32>,
+    /// The raw ids of the last save's selected bodies, kept to reuse its memory.
+    selection: Vec<u32>,
+}
+
+impl WorldState {
+    /// A state that no world saved, holding no memory yet: a buffer for
+    /// [`PhysicsWorld::save_state_into`]. Restoring it fails with [`StateError::WrongWorld`].
+    pub fn new() -> Self {
+        Self {
+            world: None,
+            epoch: 0,
+            body_count: 0,
+            constraint_count: 0,
+            character_ids: Vec::new(),
+            jolt: Vec::new(),
+            characters: Vec::new(),
+            cache_invalidations: Vec::new(),
+            selection: Vec::new(),
+        }
+    }
+
+    /// The size in bytes of Jolt's saved stream, which makes up most of a state; 0 for
+    /// [`WorldState::new`]. [docs/state.md] lists what each body, contact and constraint adds.
+    ///
+    /// [docs/state.md]: https://github.com/pockerhead/oxijolt/blob/main/docs/state.md#size
+    pub fn data_size(&self) -> usize {
+        self.jolt.len()
+    }
+}
+
+impl Default for WorldState {
+    /// The same as [`WorldState::new`].
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl fmt::Debug for WorldState {
@@ -63,6 +107,7 @@ impl fmt::Debug for WorldState {
             .field("characters", &self.character_ids.len())
             .field("jolt_bytes", &self.jolt.len())
             .field("cache_invalidations", &self.cache_invalidations.len())
+            .field("saved", &self.world.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -94,24 +139,62 @@ impl PhysicsWorld {
     /// # }
     /// ```
     pub fn save_state(&self) -> WorldState {
-        self.state_with(self.record(None))
+        let mut state = WorldState::new();
+        self.record_into(None, &mut state.jolt);
+        self.save_world_parts_into(&mut state);
+        state
     }
 
-    /// Saves the simulation state with only the bodies in `bodies` (any order, duplicates
-    /// allowed, no body for an empty slice); global state, contacts, constraints and characters
-    /// are saved whole.
+    /// Saves the simulation state with only the bodies `bodies` selects; global state, contacts,
+    /// constraints and characters are saved whole.
     ///
     /// Restoring it leaves every other body in its current state, except that a character's
     /// inner body moves to the restored character's pose, so a replay from it is exact
     /// only when those bodies did not change since the save, for example static bodies the caller
-    /// never moved. Fails with [`BodyError::WrongWorld`] for an id of another world and
-    /// [`BodyError::NotFound`] for a removed body, before anything is saved.
-    pub fn save_state_of(&self, bodies: &[BodyId]) -> Result<WorldState, BodyError> {
-        for &id in bodies {
-            self.check(id)?;
-        }
-        let raw: Vec<u32> = bodies.iter().map(|id| id.to_raw()).collect();
-        Ok(self.state_with(self.record(Some(&raw))))
+    /// never moved. Fails with [`StateError::Body`] for an id of another world or a removed body,
+    /// before anything is saved.
+    pub fn save_state_of(&self, bodies: BodySelection<'_>) -> Result<WorldState, StateError> {
+        let mut state = WorldState::new();
+        self.save_state_into(bodies, &mut state)?;
+        Ok(state)
+    }
+
+    /// Saves what [`save_state_of`](Self::save_state_of) saves into `state`, reusing the memory
+    /// `state` holds.
+    ///
+    /// `state` may be new ([`WorldState::new`]), of another world or of this one; it is
+    /// overwritten and then belongs to this world. Once `state` has held a save of at least this
+    /// size, the call allocates nothing on the Rust heap; Jolt's recorder still allocates its own
+    /// stream for each save. On an error `state` is unchanged.
+    ///
+    /// ```
+    /// use oxijolt::*;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    /// let ball_shape = Shape::new_sphere(0.5)?;
+    /// world.create_body(&ball_shape, &BodySettings::new_dynamic())?;
+    ///
+    /// // One buffer per tick of the rollback window, allocated before the game runs.
+    /// let mut ring = vec![WorldState::new(); 8];
+    /// for tick in 0..60 {
+    ///     world.save_state_into(BodySelection::All, &mut ring[tick % 8])?;
+    ///     assert!(world.step(1.0 / 60.0)?.is_complete());
+    /// }
+    /// // Back to the start of tick 55.
+    /// world.restore_state(&ring[55 % 8])?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn save_state_into(
+        &self,
+        bodies: BodySelection<'_>,
+        state: &mut WorldState,
+    ) -> Result<(), StateError> {
+        let listed = self.select_bodies(bodies, &mut state.selection)?;
+        self.record_into(listed, &mut state.jolt);
+        self.save_world_parts_into(state);
+        Ok(())
     }
 
     /// Returns the world to `state`. See [`WorldState`] for what this restores and what it
@@ -127,7 +210,75 @@ impl PhysicsWorld {
     /// not saved left aside; the tests check this with 1 and 4 worker threads, in one process
     /// and across two.
     pub fn restore_state(&mut self, state: &WorldState) -> Result<(), StateError> {
-        if state.world != self.tag {
+        self.check_restorable(state)?;
+        self.restore_checked(state)
+    }
+
+    /// Returns the world to `state` for the bodies `bodies` selects; every other body keeps its
+    /// current state bit for bit. Global state, contacts, constraints, characters and pending
+    /// contact-cache invalidations come from `state` whole, as in
+    /// [`restore_state`](Self::restore_state). A character's inner body always counts as
+    /// selected, because restoring the character moves it. A selected body that `state` does not
+    /// hold (see [`save_state_of`](Self::save_state_of)) keeps its current state too.
+    ///
+    /// The same calls give the same result with 1 and 4 worker threads (the tests compare two
+    /// processes), but the world is not one that never left `state`: the restored contacts were
+    /// made at the saved poses, also for bodies that now stay where they are.
+    /// [`BodySelection::All`] is [`restore_state`](Self::restore_state).
+    ///
+    /// Fails like `restore_state`, and with [`StateError::Body`] for an id of another world or a
+    /// removed body; the world is unchanged then.
+    ///
+    /// ```
+    /// use oxijolt::*;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    /// let ball_shape = Shape::new_sphere(0.5)?;
+    /// let settings = BodySettings::new_dynamic().position(RVec3::new(0.0, 2.0, 0.0));
+    /// let ball = world.create_body(&ball_shape, &settings)?;
+    /// let other = world.create_body(&ball_shape, &settings.position(RVec3::new(3.0, 2.0, 0.0)))?;
+    ///
+    /// let saved = world.save_state();
+    /// assert!(world.step(1.0 / 60.0)?.is_complete());
+    /// let other_now = world.body(other)?.position();
+    ///
+    /// world.restore_state_of(&saved, BodySelection::Only(&[ball]))?;
+    /// assert_eq!(world.body(ball)?.position(), RVec3::new(0.0, 2.0, 0.0));
+    /// assert_eq!(world.body(other)?.position(), other_now);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn restore_state_of(
+        &mut self,
+        state: &WorldState,
+        bodies: BodySelection<'_>,
+    ) -> Result<(), StateError> {
+        self.check_restorable(state)?;
+        let mut selection = Vec::new();
+        let Some(selected) = self.select_bodies(bodies, &mut selection)? else {
+            return self.restore_checked(state);
+        };
+        let mut kept = Vec::new();
+        self.unselected_body_ids_into(selected, &mut kept);
+        let mut current = Vec::new();
+        self.record_bodies_into(&kept, &mut current);
+
+        self.restore_checked(state)?;
+        // SAFETY: `current` was recorded above from this world, and `restore_checked` adds and
+        // removes nothing.
+        let restored = unsafe { self.restore_jolt(&current) };
+        debug_assert!(restored, "the unselected bodies failed to restore");
+        if restored {
+            Ok(())
+        } else {
+            Err(StateError::RestoreFailed)
+        }
+    }
+
+    /// `Ok` if `state` restores into this world now: saved by it at the current structure.
+    fn check_restorable(&self, state: &WorldState) -> Result<(), StateError> {
+        if state.world != Some(self.tag) {
             return Err(StateError::WrongWorld);
         }
         let same_characters = self.characters.keys().eq(state.character_ids.iter());
@@ -138,7 +289,11 @@ impl PhysicsWorld {
         {
             return Err(StateError::WorldChanged);
         }
+        Ok(())
+    }
 
+    /// Restores `state`, which [`check_restorable`](Self::check_restorable) accepted.
+    fn restore_checked(&mut self, state: &WorldState) -> Result<(), StateError> {
         // The characters go first, so that the system restore has the last word on their inner
         // bodies: restoring a character moves its inner body to the character's pose, which
         // resets that body's sleep timer. Inner bodies are kinematic and Jolt runs no sleep test
@@ -156,7 +311,10 @@ impl PhysicsWorld {
             self.retain_contact_materials(id);
         }
 
-        let restored = self.restore_jolt(&state.jolt);
+        // SAFETY: `state` was saved by this world (`record_into`, the only writer of a
+        // `WorldState`'s stream) at the current structure epoch, which `check_restorable`
+        // checked.
+        let restored = unsafe { self.restore_jolt(&state.jolt) };
         debug_assert!(restored, "a saved world state failed to restore");
         if restored {
             self.pending_cache_invalidations = state.cache_invalidations.iter().copied().collect();
@@ -172,84 +330,28 @@ impl PhysicsWorld {
         unsafe { JPH_PhysicsSystem_GetNumConstraints(self.system.as_ptr()) }
     }
 
-    /// A state of this world now, around Jolt's saved stream `jolt`.
-    fn state_with(&self, jolt: Vec<MaybeUninit<u8>>) -> WorldState {
-        let characters = self
-            .character_ids()
-            .map(|id| {
-                self.character(id)
-                    .unwrap_or_else(|_| unreachable!("listed by the world"))
-                    .save_state()
-            })
-            .collect();
-        WorldState {
-            world: self.tag,
-            epoch: self.structure_epoch,
-            body_count: self.body_count(),
-            constraint_count: self.jolt_constraint_count(),
-            character_ids: self.characters.keys().copied().collect(),
-            jolt,
-            characters,
-            cache_invalidations: self.pending_cache_invalidations.iter().copied().collect(),
+    /// Writes everything of a state of this world now but Jolt's stream into `state`, reusing
+    /// its memory.
+    fn save_world_parts_into(&self, state: &mut WorldState) {
+        state.world = Some(self.tag);
+        state.epoch = self.structure_epoch;
+        state.body_count = self.body_count();
+        state.constraint_count = self.jolt_constraint_count();
+        state.character_ids.clear();
+        state.character_ids.extend(self.characters.keys());
+        state.characters.truncate(self.characters.len());
+        for (index, id) in self.character_ids().enumerate() {
+            let character = self
+                .character(id)
+                .unwrap_or_else(|_| unreachable!("listed by the world"));
+            match state.characters.get_mut(index) {
+                Some(saved) => character.save_state_into(saved),
+                None => state.characters.push(character.save_state()),
+            }
         }
-    }
-
-    /// Jolt's saved stream of every part of the system's state, with only the bodies whose raw
-    /// ids are in `bodies`, or with every body for `None`.
-    fn record(&self, bodies: Option<&[u32]>) -> Vec<MaybeUninit<u8>> {
-        // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
-        let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
-            .unwrap_or_else(|| unreachable!("`new` does not return null"));
-        let (ids, count) = match bodies {
-            // A world holds at most 2^23 bodies, and every id was checked to be one of them, but
-            // duplicates may make the list longer.
-            Some(ids) => (
-                ids.as_ptr(),
-                u32::try_from(ids.len()).expect("more than u32::MAX body ids"),
-            ),
-            None => (std::ptr::null(), 0),
-        };
-        // SAFETY: the system is live and no step runs: `step` needs `&mut self`. `SaveState` is
-        // const in Jolt and takes the body and constraint locks itself (see `Sync for
-        // PhysicsWorld`). The recorder is live and used by this thread only. `ids` is null or
-        // readable for `count` ids, which the extension copies; for an empty selection it is
-        // dangling with `count` 0, and the extension then does not touch it.
-        let size = unsafe {
-            JPH_PhysicsSystem_SaveState(
-                self.system.as_ptr(),
-                recorder.as_ptr(),
-                JPH_StateRecorderState_All,
-                ids,
-                count,
-            );
-            JPH_StateRecorder_GetDataSize(recorder.as_ptr())
-        };
-        let mut jolt = vec![MaybeUninit::uninit(); size];
-        // SAFETY: `jolt` holds exactly `size` writable bytes, which joltc copies at most with
-        // `memcpy`. The copied bytes may lack a defined value, which `MaybeUninit` allows; Rust
-        // never reads them.
-        unsafe { JPH_StateRecorder_CopyData(recorder.as_ptr(), jolt.as_mut_ptr().cast(), size) };
-        jolt
-    }
-
-    /// Restores Jolt's saved stream `jolt`; whether Jolt read it without failing.
-    fn restore_jolt(&mut self, jolt: &[MaybeUninit<u8>]) -> bool {
-        // SAFETY: Jolt is initialised (the world exists). The handle takes over the recorder.
-        let recorder = unsafe { Owned::from_raw(JPH_StateRecorder_Create()) }
-            .unwrap_or_else(|| unreachable!("`new` does not return null"));
-        // SAFETY: the recorder is live and used by this thread only, and `jolt` is readable for
-        // its length; the recorder copies it byte for byte, bytes without a defined value
-        // included, and Jolt uses those only for a wheel with a contact. The bytes are a
-        // complete stream that `SaveState` of this world wrote at the current structure epoch (`restore_state` checked both, and `WorldState` has no
-        // other constructor), so the bodies and constraints it names exist, in the same
-        // constraint order, and `RestoreState` reads exactly what was written. The world is
-        // borrowed mutably, so no step, query or body access runs meanwhile; this thread holds
-        // no body lock.
-        unsafe {
-            JPH_StateRecorder_WriteBytes(recorder.as_ptr(), jolt.as_ptr().cast(), jolt.len());
-            JPH_StateRecorder_Rewind(recorder.as_ptr());
-            let restored = JPH_PhysicsSystem_RestoreState(self.system.as_ptr(), recorder.as_ptr());
-            restored && !JPH_StateRecorder_IsFailed(recorder.as_ptr())
-        }
+        state.cache_invalidations.clear();
+        state
+            .cache_invalidations
+            .extend(&self.pending_cache_invalidations);
     }
 }

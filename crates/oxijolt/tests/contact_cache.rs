@@ -269,7 +269,10 @@ fn a_partial_state_saves_and_restores_the_requests() {
     let mut scene = resting_cube(4, false);
     scene.switch.set_reject(true);
     invalidate(&mut scene.world, scene.cube);
-    let saved = scene.world.save_state_of(&[scene.cube]).unwrap();
+    let saved = scene
+        .world
+        .save_state_of(BodySelection::Only(&[scene.cube]))
+        .unwrap();
     assert_eq!(pending_in(&saved), "1");
     let first = trace(&mut scene, 30);
     assert!(first[29].y < 0.0);

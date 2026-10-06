@@ -774,7 +774,10 @@ fn a_selected_bodies_state_replays_when_the_rest_is_static() {
         MotionType::Static
     );
     let moving: Vec<BodyId> = scene.all_bodies()[1..].to_vec();
-    let partial = scene.world.save_state_of(&moving).unwrap();
+    let partial = scene
+        .world
+        .save_state_of(BodySelection::Only(&moving))
+        .unwrap();
 
     let first = scene.recorded_run(AFTER_SAVE);
     scene.world.restore_state(&partial).unwrap();
@@ -800,7 +803,10 @@ fn assert_left_out_body_keeps_its_state(selection: impl FnOnce(&[BodyId]) -> Vec
         .into_iter()
         .filter(|&id| id != left_out)
         .collect();
-    let partial = scene.world.save_state_of(&selection(&selected)).unwrap();
+    let partial = scene
+        .world
+        .save_state_of(BodySelection::Only(&selection(&selected)))
+        .unwrap();
     let saved: Vec<Vec<u8>> = selected
         .iter()
         .map(|&id| body_bits(&scene.world, id))
@@ -836,7 +842,7 @@ fn a_selection_in_any_order_with_duplicates_saves_those_bodies() {
 fn an_empty_selection_saves_no_body() {
     let mut scene = Scene::new(1);
     scene.run(BEFORE_SAVE);
-    let empty = scene.world.save_state_of(&[]).unwrap();
+    let empty = scene.world.save_state_of(BodySelection::Only(&[])).unwrap();
     scene.run(20);
     // The character's inner body is left out: the restored character moves it to its pose.
     let inner = scene
@@ -868,15 +874,24 @@ fn a_selection_with_an_unknown_body_is_refused() {
     assert_eq!(
         scene
             .world
-            .save_state_of(&[scene.bodies[1], removed])
+            .save_state_of(BodySelection::Only(&[scene.bodies[1], removed]))
             .unwrap_err(),
-        BodyError::NotFound(removed)
+        StateError::Body(BodyError::NotFound(removed))
     );
     let other = Scene::new(1);
     let foreign = other.bodies[1];
     assert_eq!(
-        scene.world.save_state_of(&[foreign]).unwrap_err(),
-        BodyError::WrongWorld(foreign)
+        scene
+            .world
+            .save_state_of(BodySelection::Only(&[foreign]))
+            .unwrap_err(),
+        StateError::Body(BodyError::WrongWorld(foreign))
+    );
+    let error = StateError::Body(BodyError::NotFound(removed));
+    let source = std::error::Error::source(&error).expect("the body error is the source");
+    assert_eq!(
+        source.downcast_ref::<BodyError>(),
+        Some(&BodyError::NotFound(removed))
     );
 }
 

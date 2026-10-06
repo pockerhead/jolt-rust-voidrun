@@ -25,7 +25,7 @@ const MAX_GROWTH: usize = 4 * 1024 * 1024;
 /// One round: a full save, a save of one body and a restore of each.
 fn state_round(world: &mut PhysicsWorld, cube: BodyId) {
     let full = world.save_state();
-    let partial = world.save_state_of(&[cube]).unwrap();
+    let partial = world.save_state_of(BodySelection::Only(&[cube])).unwrap();
     world.restore_state(&partial).unwrap();
     world.restore_state(&full).unwrap();
 }
