@@ -40,10 +40,13 @@
 //!   data and locked axes ([body controls guide]).
 //! - Scene queries on `&PhysicsWorld`: [`PhysicsWorld::cast_ray`], [`PhysicsWorld::cast_shape`]
 //!   and [`PhysicsWorld::collide_shape`], filtered by [`QueryFilter`].
-//! - Virtual characters: [`PhysicsWorld::create_character`].
+//! - Virtual characters: [`PhysicsWorld::create_character`], with a standing humanoid from
+//!   [`CharacterSettings::humanoid`].
 //! - Wheeled and tracked vehicles and motorcycles on a chassis body:
 //!   [`PhysicsWorld::create_vehicle`], [`PhysicsWorld::create_tracked_vehicle`] and
-//!   [`PhysicsWorld::create_motorcycle`].
+//!   [`PhysicsWorld::create_motorcycle`], with ready settings from [`VehicleSettings::car`] and
+//!   [`MotorcycleSettings::bike`] and wheel poses for drawing from
+//!   [`VehicleRef::wheel_world_transform`].
 //! - Ragdolls: [`PhysicsWorld::create_ragdoll`].
 //! - Constraints of twelve kinds between two bodies: [`PhysicsWorld::create_constraint`]
 //!   ([constraints guide]).

@@ -99,6 +99,41 @@ impl PhysicsWorld {
         self.check(id).is_ok()
     }
 
+    /// Every body in the world in ascending id order ([`BodyId::to_raw`]), including soft
+    /// bodies, ragdoll parts and characters' inner bodies (Jolt `PhysicsSystem::GetBodies`).
+    ///
+    /// It borrows the world mutably although it changes nothing: joltc copies as many ids as it
+    /// is asked for, so the body count must not change between counting and copying.
+    ///
+    /// ```
+    /// use oxijolt::*;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    /// let shape = Shape::new_sphere(0.5)?;
+    /// let a = world.create_body(&shape, &BodySettings::new_dynamic())?;
+    /// let b = world.create_body(&shape, &BodySettings::new_static())?;
+    /// assert_eq!(world.body_ids(), [a, b]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn body_ids(&mut self) -> Vec<BodyId> {
+        let count = self.body_count();
+        let mut raw = vec![INVALID_BODY_ID; count as usize];
+        if count > 0 {
+            // SAFETY: the system is live and `raw` holds `count` ids. joltc writes `count` ids
+            // without clamping them to the bodies it lists (joltc.cpp:5759-5772), so `count`
+            // must be at most that number: it is `GetNumBodies`, which Jolt's list matches
+            // (`BodyManager::GetBodyIDs` asserts it), and the world is borrowed mutably, so no
+            // body is added or removed meanwhile.
+            unsafe { JPH_PhysicsSystem_GetBodies(self.system.as_ptr(), raw.as_mut_ptr(), count) };
+        }
+        raw.sort_unstable();
+        raw.into_iter()
+            .map(|raw| BodyId::new(raw, self.tag))
+            .collect()
+    }
+
     /// Read access to a body.
     pub fn body(&self, id: BodyId) -> Result<BodyRef<'_>, BodyError> {
         self.check(id)?;

@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "xtask"]
+members = ["crates/*", "xtask", "examples/playground"]
+# The playground (a window and a second native build with the debug renderer) is built only when
+# asked for: `-p playground` or `--workspace`.
+default-members = ["crates/oxijolt", "crates/oxijolt-sys", "xtask"]

@@ -10,7 +10,8 @@ what is planned next.
   (`MutableCompound`); physics materials with user data;
   forces, sleeping, continuous collision; impulses, kinematic moves, waking and sleeping on demand,
   sensors, per-body user data, locked axes (allowed degrees of freedom), shape and motion type
-  changes, contact-cache invalidation, and buoyancy and drag in a fluid ([guide](bodies.md)).
+  changes, contact-cache invalidation, buoyancy and drag in a fluid, and the list of every body
+  of a world (`PhysicsWorld::body_ids`) ([guide](bodies.md)).
 - Collision groups: tables of sub groups that say which pairs collide, given to rigid and soft
   bodies at creation, for ragdolls, chains and vehicles that ignore their driver
   ([guide](bodies.md#collision-groups)).
@@ -19,10 +20,13 @@ what is planned next.
 - A character controller (Jolt's `CharacterVirtual`) with stair walking, floor sticking and an up
   direction that can change every update, for walking on a planet, and a character contact
   listener for moving platforms, ignored contacts, push settings and added, persisted and removed
-  contacts ([guide](events.md#character-contacts-charactercontactlistener)).
+  contacts ([guide](events.md#character-contacts-charactercontactlistener)); a humanoid preset,
+  `CharacterSettings::humanoid(height, radius)`.
 - Wheeled vehicles with suspension, engine, automatic transmission, differentials and anti-roll
   bars; tracked vehicles (tanks) with two tracks; motorcycles with a lean controller
-  ([guide](vehicles.md)).
+  ([guide](vehicles.md)); presets for a car and a motorcycle (`VehicleSettings::car`,
+  `MotorcycleSettings::bike`), and each wheel's pose in world space for drawing
+  (`VehicleRef::wheel_world_transform`).
 - Ragdolls from a skeleton, posed, motor-driven or kinematic, with settle detection, and a skeleton
   mapper to and from a detailed animation skeleton ([guide](guide.md#ragdolls)).
 - Twelve kinds of constraints with motors, springs and limits: fixed, point, distance, hinge,
@@ -43,6 +47,9 @@ what is planned next.
   (`PhysicsWorld::active_body_poses`).
 - `oxijolt::prelude` for the common types, and `oxijolt::error::{Error, Result}` that wraps the
   error of every area.
+
+The [playground](playground.md) shows them in ten small scenes with a window, and runs the same
+scenes headless.
 
 The raw layer, `oxijolt-sys`, has the joltc functions for all of them.
 [coverage.md](coverage.md) lists every bound feature with the tests that check it, and

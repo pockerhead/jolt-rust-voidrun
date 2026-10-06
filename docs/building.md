@@ -18,7 +18,7 @@ From crates.io; the `oxijolt-sys` package carries the joltc and Jolt sources:
 
 ```toml
 [dependencies]
-oxijolt = "0.6"
+oxijolt = "0.7"
 ```
 
 Or from the repository, for changes not released yet; Cargo checks out the submodules with it:
@@ -35,7 +35,14 @@ git submodule update --init
 cargo build                         # builds joltc + Jolt through CMake (always Release)
 cargo test --workspace              # everything, headless
 cargo run -p oxijolt --example hello_world
+cargo run -p playground --release   # the playground window
 ```
+
+`cargo build` and `cargo test` leave the playground (`examples/playground`) out. `--workspace`
+includes it, and its default features turn on the window and `debug-renderer` for the whole build:
+a second native build, and a `JOLTC_LIB_DIR` prefix without the debug renderer is refused. Use
+`--workspace --exclude playground` for the library alone, as CI does, and
+`cargo test -p playground --no-default-features` for the playground's scenes without a window.
 
 Checkouts made before the crate rename run `git submodule sync && git submodule update --init` once.
 
@@ -95,8 +102,9 @@ through such a prefix.
 
 ## Release archives
 
-No version has been released yet. Each tagged release will carry prebuilt prefixes on its GitHub
-release page, one archive per target and feature subset, with a `.sha256` file each:
+Each tagged release carries prebuilt prefixes on its
+[GitHub release page](https://github.com/pockerhead/oxijolt/releases), one archive per target and
+feature subset, with a `.sha256` file each:
 
 - targets `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`, each with the eight subsets of
   `double-precision`, `cross-platform-deterministic` and `debug-renderer`; `asserts` and other

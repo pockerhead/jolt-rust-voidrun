@@ -5,6 +5,21 @@ Rigid bodies are created from a `Shape` and `BodySettings` and changed through `
 impulses, buoyancy, kinematic moves, waking and sleeping, sensors, user data, locked axes, and
 changing a body's shape or motion type. Every call checks its input first; a refused call changes nothing.
 
+## Creating bodies
+
+`PhysicsWorld::create_body(&shape, &settings)` takes a `Shape` and `BodySettings`. The shape can be
+made in the same expression, `world.create_body(&Shape::new_sphere(0.5)?, &settings)?`, and dropped
+right after, since the body holds its own reference. A `Shape` kept apart lets many bodies, worlds,
+ragdoll parts and compounds share one Jolt shape: the playground's pile of 400 bodies uses nine
+shapes, and its loose bricks and cannonballs one shape each. The binding has no call that creates a
+body and its shape together. In the playground every body is created next to the playground's own
+description of its shape for drawing, so such a call would remove no line there, and it would hide
+the sharing.
+
+`PhysicsWorld::body_ids()` lists every body of the world in ascending id order, soft bodies,
+ragdoll parts and characters' inner bodies included, for example to fold the whole world into a
+digest that compares runs.
+
 ## Impulses and forces
 
 A force (`add_force`) acts over the next step and is cleared after it. An impulse changes the

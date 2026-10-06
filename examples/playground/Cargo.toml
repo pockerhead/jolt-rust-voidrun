@@ -1,0 +1,22 @@
+[package]
+name = "playground"
+description = "Interactive scenes that show what oxijolt does, with headless and GIF record modes"
+version = "0.0.0"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+publish = false
+
+[features]
+default = ["window", "debug-renderer"]
+# The window and the recorder (macroquad).
+window = ["dep:macroquad"]
+# The wireframe toggle: collider lines from `PhysicsWorld::debug_lines`.
+debug-renderer = ["oxijolt/debug-renderer"]
+# Jolt's debug assertions; a failed assertion aborts the process.
+asserts = ["oxijolt/asserts"]
+
+[dependencies]
+oxijolt = { path = "../../crates/oxijolt", features = ["glam"] }
+glam = "0.32"
+gif = "0.14"
+macroquad = { version = "0.4.16", default-features = false, optional = true }

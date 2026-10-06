@@ -4,6 +4,27 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+## 0.7.0 — 2026-10-06
+
+- `CharacterSettings::humanoid(height, radius)`: settings that own a capsule `height` tall standing
+  on the character position, with Jolt's defaults for the rest; their clones share the capsule.
+- `VehicleSettings::car(front_left_wheel, wheel_radius, tester)`: a front-wheel-drive car of four
+  mirrored wheels with steering, hand brake, anti-roll bars and Jolt's default engine and
+  transmission, validated by `create_vehicle` like any settings.
+- `MotorcycleSettings::bike(front_wheel, wheel_radius, tester)`: the motorcycle of Jolt's
+  `MotorcycleTest` sample (raked front suspension, rear drive, six gears), validated by
+  `create_motorcycle`.
+- `VehicleRef::wheel_world_transform(index)`: a wheel's centre and rotation in world space (Jolt's
+  `GetWheelWorldTransform`) for a wheel model whose axle is its local Y, so a renderer can draw
+  wheels from what the binding reports.
+- `PhysicsWorld::body_ids()`: every body of the world in ascending id order (Jolt's
+  `PhysicsSystem::GetBodies`), soft bodies, ragdoll parts and characters' inner bodies included.
+- Playground (`examples/playground`, [guide](docs/playground.md)): ten scenes in a window that show
+  the binding's features, a headless mode that runs every scene's script and prints a digest
+  (compared with 1 and 4 worker threads in CI), and a record mode that makes the GIFs of the
+  playground guide in `docs/media`. The playground is a workspace member outside the default
+  members.
+
 ## 0.6.0 — 2026-10-06
 
 - Skeleton mapper ([guide](docs/guide.md#ragdolls)): `SkeletonMapper` (Jolt's `SkeletonMapper`)

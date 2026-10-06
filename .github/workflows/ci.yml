@@ -69,7 +69,7 @@ jobs:
       - name: Build native library
         if: steps.native.outputs.cache-hit != 'true'
         run: |
-          cargo build --workspace $FEATURE_ARGS
+          cargo build --workspace --exclude playground $FEATURE_ARGS
           shopt -s nullglob
           dirs=(target/debug/build/oxijolt-sys-*/out/joltc)
           [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
@@ -99,11 +99,12 @@ jobs:
           expected=no; [ "${{ matrix.features }}" = debug-renderer ] && expected=yes
           [ "$joltc" = "$expected" ] && [ "$jolt" = "$expected" ] || { echo "debug renderer joltc=$joltc jolt=$jolt expected=$expected"; exit 1; }
 
-      - run: cargo build --workspace --all-targets $FEATURE_ARGS
-      - run: cargo test --workspace $FEATURE_ARGS
+      # The playground has a job of its own below.
+      - run: cargo build --workspace --exclude playground --all-targets $FEATURE_ARGS
+      - run: cargo test --workspace --exclude playground $FEATURE_ARGS
       - run: cargo run -p oxijolt --example hello_world $FEATURE_ARGS
-      - run: cargo clippy --workspace --all-targets $FEATURE_ARGS -- -D warnings
-      - run: cargo doc --workspace --no-deps $FEATURE_ARGS
+      - run: cargo clippy --workspace --exclude playground --all-targets $FEATURE_ARGS -- -D warnings
+      - run: cargo doc --workspace --exclude playground --no-deps $FEATURE_ARGS
       # The build-time generator still works against the same native library.
       - name: Generate the bindings at build time
         if: matrix.features == '' || matrix.features == 'double-precision' || matrix.features == 'debug-renderer'
@@ -119,10 +120,89 @@ jobs:
           cargo clippy -p oxijolt --lib $FEATURE_ARGS --features oxijolt/glam -- -D warnings
           cargo clippy -p oxijolt --lib $FEATURE_ARGS --features oxijolt/mint -- -D warnings
           interop="--features oxijolt/glam,oxijolt/mint"
-          cargo clippy --workspace --all-targets $FEATURE_ARGS $interop -- -D warnings
+          cargo clippy --workspace --exclude playground --all-targets $FEATURE_ARGS $interop -- -D warnings
           cargo test -p oxijolt --lib $FEATURE_ARGS $interop interop
           cargo test -p oxijolt --doc $FEATURE_ARGS $interop
           cargo doc -p oxijolt --no-deps $FEATURE_ARGS $interop
+
+  # The playground's scenes without a window: its tests, every scene's script with 1 and 4
+  # worker threads (which must print the same digests), and clippy. Its native library is the
+  # test job's of the same features, so the two jobs share the cache entries.
+  playground:
+    name: playground ${{ matrix.os }} (${{ matrix.features || 'default' }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        features: ["", "debug-renderer", "asserts"]
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      NATIVE_MANIFEST: oxijolt-sys-manifest.txt
+      FEATURE_ARGS: ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: playground-${{ matrix.os }}-${{ matrix.features || 'default' }}
+
+      - name: Check pinned commits
+        id: pins
+        run: |
+          joltc=$(git rev-parse HEAD:crates/oxijolt-sys/vendor/joltc)
+          jolt=$(git rev-parse HEAD:crates/oxijolt-sys/vendor/JoltPhysics)
+          grep -q "\"$joltc\"" crates/oxijolt-sys/build.rs || { echo "build.rs JOLTC_COMMIT differs from the gitlink $joltc"; exit 1; }
+          grep -q "\"$jolt\"" crates/oxijolt-sys/build.rs || { echo "build.rs JOLT_COMMIT differs from the gitlink $jolt"; exit 1; }
+          echo "joltc=$joltc" >> "$GITHUB_OUTPUT"
+          echo "jolt=$jolt" >> "$GITHUB_OUTPUT"
+
+      - name: Restore native library
+        id: native
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/joltc-prefix
+          key: joltc-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.joltc }}-${{ steps.pins.outputs.jolt }}-${{ matrix.features || 'default' }}-${{ hashFiles('crates/oxijolt-sys/native/**', 'crates/oxijolt-sys/build.rs', 'crates/oxijolt-sys/build/**') }}
+
+      # Built in a target directory of its own, so the cached one cannot add a second prefix.
+      - name: Build native library
+        if: steps.native.outputs.cache-hit != 'true'
+        run: |
+          CARGO_TARGET_DIR="$RUNNER_TEMP/native" cargo build -p playground --no-default-features $FEATURE_ARGS
+          shopt -s nullglob
+          dirs=("$RUNNER_TEMP"/native/debug/build/oxijolt-sys-*/out/joltc)
+          [ ${#dirs[@]} -eq 1 ] || { echo "expected exactly one native prefix, found ${#dirs[@]}"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/joltc-prefix"
+          cp -r "${dirs[0]}/lib" "${dirs[0]}/include" "${dirs[0]}/$NATIVE_MANIFEST" "$RUNNER_TEMP/joltc-prefix/"
+
+      - name: Use the native library
+        run: echo "JOLTC_LIB_DIR=$RUNNER_TEMP/joltc-prefix" >> "$GITHUB_ENV"
+
+      - run: cargo test --locked -p playground --no-default-features $FEATURE_ARGS
+      # The default length covers every scene's whole script, so both runs check every milestone.
+      - name: Every scene headless with 1 and 4 worker threads
+        run: |
+          run="cargo run --locked -p playground --no-default-features $FEATURE_ARGS --"
+          $run --headless --scene all --threads 1 > "$RUNNER_TEMP/one.txt"
+          $run --headless --scene all --threads 4 > "$RUNNER_TEMP/four.txt"
+          cat "$RUNNER_TEMP/one.txt"
+          diff "$RUNNER_TEMP/one.txt" "$RUNNER_TEMP/four.txt"
+      - run: cargo clippy --locked -p playground --all-targets --no-default-features $FEATURE_ARGS -- -D warnings
+      # The window with the default features (window and debug renderer), compiled only: the
+      # runners have no GPU. Linux would need the X11 and GL development packages.
+      - name: Window build
+        if: runner.os == 'Windows' && matrix.features == 'debug-renderer'
+        run: cargo clippy --locked -p playground --all-targets -- -D warnings
 
   # The committed bindings must equal the generator's output with the pinned LLVM 18.
   bindings:

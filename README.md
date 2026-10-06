@@ -17,6 +17,21 @@ rigid bodies, a character controller, wheeled and tracked vehicles and motorcycl
 bodies, constraints and contact events, built for deterministic simulation. Underneath are raw
 bindings to the [joltc] C wrapper. Everything runs headless and is tested without a window.
 
+## Playground
+
+Ten small scenes in a window show what the binding does: a character, vehicles, a pile of bodies,
+ragdolls, constraints, soft bodies, buoyancy, destruction, contact control and queries. In a clone
+of the repository with Rust, CMake and a C++ toolchain:
+
+```sh
+git clone --recursive https://github.com/pockerhead/oxijolt
+cd oxijolt
+cargo run -p playground --release
+```
+
+[docs/playground.md](docs/playground.md) has a clip of every scene, the keys, the Linux packages,
+a faster first build with a prebuilt Jolt, and the headless and record modes.
+
 ## Example
 
 ```rust
@@ -54,7 +69,7 @@ With Bevy, `use oxijolt::prelude::*` next to `bevy::prelude::*`; see `oxijolt::p
 
 ```toml
 [dependencies]
-oxijolt = "0.6"
+oxijolt = "0.7"
 ```
 
 ## Roadmap
@@ -86,7 +101,9 @@ The full list of what works today, with links to the guides, is in
 - [x] Tracked vehicles and motorcycles
 - [x] Character contact callbacks, contact validation and collision groups
 - [x] Mutable compounds, buoyancy, point queries, plane shape, collision response estimate, skeleton mapper
-- [ ] Playground: an example with a window that shows every feature, and GIFs for this README
+- [x] Playground: an example with a window that shows every feature, with a GIF of every scene
+- [x] Presets for a humanoid character, a car and a motorcycle, wheel poses for drawing, and the
+      list of every body of a world
 - [ ] Comparison with Rapier and Avian
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
@@ -97,7 +114,7 @@ The full list of what works today, with links to the guides, is in
 
 ## Status
 
-- Version 0.6.0 on [crates.io](https://crates.io/crates/oxijolt). The API changes between versions.
+- Version 0.7.0 on [crates.io](https://crates.io/crates/oxijolt). The API changes between versions.
 - CI builds and tests Windows (MSVC) and Linux (GCC) on x86_64, each in five configurations:
   default, `cross-platform-deterministic`, `double-precision`, `debug-renderer` and `asserts`.
   The bindings are committed for 64-bit Windows, Linux, macOS and Android targets; only the two
@@ -148,6 +165,7 @@ API is not complete yet; the [roadmap](#roadmap) says what is missing.
   against a game's budgets.
 - [Character study](docs/character-study.md): which character laws CharacterVirtual's settings
   carry, and at what cost.
+- [Playground](docs/playground.md): ten scenes with a window, headless runs and recorded clips.
 - API docs: `cargo doc -p oxijolt --open`. Example: `cargo run -p oxijolt --example hello_world`.
 - [CHANGELOG](CHANGELOG.md).
 

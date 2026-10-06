@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::ptr::null;
+use std::sync::Arc;
 
 use oxijolt_sys::*;
 
@@ -9,7 +10,7 @@ use super::{InnerBody, INNER_BODY_INERTIA_RULE, INVALID_ID};
 use crate::body::{has_finite_inverse, mass_properties};
 use crate::limits;
 use crate::math::{is_finite_non_negative, is_finite_positive};
-use crate::{CharacterError, Shape, Vec3};
+use crate::{CharacterError, Shape, ShapeError, Vec3};
 
 /// How to create a character, for [`PhysicsWorld::create_character`]. Build it with
 /// [`new`](Self::new) and the setters.
@@ -21,7 +22,7 @@ use crate::{CharacterError, Shape, Vec3};
 /// [`PhysicsWorld::create_character`]: crate::PhysicsWorld::create_character
 #[derive(Clone)]
 pub struct CharacterSettings<'a> {
-    shape: &'a Shape,
+    shape: CharacterShape<'a>,
     up: Vec3,
     supporting_volume_normal: Vec3,
     supporting_volume_constant: f32,
@@ -58,6 +59,23 @@ impl fmt::Debug for CharacterSettings<'_> {
     }
 }
 
+/// The shape of a character's settings: borrowed from the caller, or owned by the settings and
+/// shared by their clones.
+#[derive(Clone)]
+enum CharacterShape<'a> {
+    Borrowed(&'a Shape),
+    Owned(Arc<Shape>),
+}
+
+impl CharacterShape<'_> {
+    fn get(&self) -> &Shape {
+        match self {
+            Self::Borrowed(shape) => shape,
+            Self::Owned(shape) => shape,
+        }
+    }
+}
+
 /// Jolt's `DegreesToRadians(50.0f)`, the default maximum slope angle.
 const DEFAULT_MAX_SLOPE_ANGLE: f32 = 50.0 * (std::f32::consts::PI / 180.0);
 
@@ -70,6 +88,10 @@ impl<'a> CharacterSettings<'a> {
     ///
     /// [`PhysicsWorld::create_character`]: crate::PhysicsWorld::create_character
     pub fn new(shape: &'a Shape) -> Self {
+        Self::with_shape(CharacterShape::Borrowed(shape))
+    }
+
+    fn with_shape(shape: CharacterShape<'a>) -> Self {
         Self {
             shape,
             up: Vec3::new(0.0, 1.0, 0.0),
@@ -321,7 +343,7 @@ impl<'a> CharacterSettings<'a> {
             return invalid(RECOVERY_SPEED_RULE);
         }
         // SAFETY: the shape is live for the call; the getter only reads it.
-        if unsafe { JPH_Shape_GetType(self.shape.as_ptr()) } != JPH_ShapeType_Convex {
+        if unsafe { JPH_Shape_GetType(self.shape.get().as_ptr()) } != JPH_ShapeType_Convex {
             return invalid("the character shape must be convex");
         }
         if let Some(inner) = &self.inner_body {
@@ -350,7 +372,7 @@ impl<'a> CharacterSettings<'a> {
                 },
                 maxSlopeAngle: self.max_slope_angle,
                 enhancedInternalEdgeRemoval: self.enhanced_internal_edge_removal,
-                shape: self.shape.as_ptr(),
+                shape: self.shape.get().as_ptr(),
             },
             ID: id,
             mass: self.mass,
@@ -374,6 +396,57 @@ impl<'a> CharacterSettings<'a> {
             innerBodyIDOverride: INVALID_ID,
             innerBodyLayer: self.inner_body.map_or(0, |inner| inner.object_layer.get()),
         }
+    }
+}
+
+impl CharacterSettings<'static> {
+    /// A standing humanoid: a capsule `height` metres tall of `radius` whose bottom is at the
+    /// character position, with Jolt's defaults for everything else. The settings own the
+    /// capsule, and their clones share it.
+    ///
+    /// The capsule sits on the position through a [`shape_offset`](Self::shape_offset) of
+    /// `(0, height / 2, 0)`, in the character's local space, so it follows the character's
+    /// rotation. Jolt keeps the [`character_padding`](Self::character_padding) (0.02 m by
+    /// default) between the shape and the ground, so a character on flat ground has its position
+    /// that far above the ground.
+    ///
+    /// # Errors
+    /// [`ShapeError::InvalidDimensions`] when `radius` is not finite and positive, when `height`
+    /// is not finite and more than twice `radius`, or when the capsule is larger than
+    /// [`Shape::new_capsule`] accepts.
+    ///
+    /// # Example
+    /// ```
+    /// use oxijolt::*;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    /// let floor = Shape::new_box(Vec3::new(10.0, 0.5, 10.0))?;
+    /// let below = BodySettings::new_static().position(RVec3::new(0.0, -0.5, 0.0));
+    /// world.create_body(&floor, &below)?;
+    ///
+    /// let settings = CharacterSettings::humanoid(1.8, 0.3)?;
+    /// let id = world.create_character(&settings, RVec3::ZERO, Quat::IDENTITY)?;
+    /// // A new character reports `InAir` until its contacts are first found.
+    /// world.refresh_character_contacts(id, &QueryFilter::new())?;
+    /// assert_eq!(world.character(id)?.ground_state(), GroundState::OnGround);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn humanoid(height: f32, radius: f32) -> Result<Self, ShapeError> {
+        if !(radius.is_finite() && radius > 0.0) {
+            return Err(ShapeError::InvalidDimensions(
+                "humanoid radius must be finite and positive",
+            ));
+        }
+        if !(height.is_finite() && height > 2.0 * radius) {
+            return Err(ShapeError::InvalidDimensions(
+                "humanoid height must be finite and more than twice its radius",
+            ));
+        }
+        let capsule = Shape::new_capsule(height / 2.0 - radius, radius)?;
+        let foot_offset = Vec3::new(0.0, height / 2.0, 0.0);
+        Ok(Self::with_shape(CharacterShape::Owned(Arc::new(capsule))).shape_offset(foot_offset))
     }
 }
 
