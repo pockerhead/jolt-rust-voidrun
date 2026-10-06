@@ -1,8 +1,11 @@
 use super::*;
 use crate::body::mass_properties;
 use crate::limits::MAX_SHAPE_EXTENT;
+use crate::shape::compound::walk_count;
 use crate::shape::compound::{CHILD_POSITION_RULE, CHILD_ROTATION_RULE};
-use crate::shape::tests::{height_field_at_32_bits, nested_pairs, unit_box};
+use crate::shape::tests::{
+    height_field_13_bits, height_field_at_32_bits, nested_pairs, shared_pairs, unit_box,
+};
 use crate::{
     Activation, BodySettings, CompoundSubShape, HeightFieldSettings, PhysicsWorld, SubShapeId,
     WorldSettings,
@@ -269,6 +272,52 @@ fn sub_shape_ids_are_checked_before_every_edit() {
     editor.to_shape().unwrap();
     assert_eq!(editor.add_shape(&at(&cube, 300.0)).map(|_| ()), refused);
     assert_eq!(editor.sub_shape_count(), 1);
+}
+
+#[test]
+fn refused_edits_walk_a_shared_child_once() {
+    let refused = Err(ShapeError::InvalidSettings(SUB_SHAPE_ID_RULE));
+    let cube = unit_box();
+    let at = |shape| CompoundChild {
+        shape,
+        position: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+        user_data: 0,
+    };
+    // 13 bits of heightfield under 19 shared levels: 32 bits, 20 distinct shapes.
+    let graph = shared_pairs(height_field_13_bits(), 19);
+    let mut pair = MutableCompound::from_children(&[at(&cube), at(&cube)]).unwrap();
+
+    walk_count::take();
+    assert_eq!(pair.add_shape(&at(&graph)).map(|_| ()), refused);
+    assert_eq!(walk_count::take(), (20, 1));
+    assert_eq!(
+        pair.modify_shape(0, Vec3::ZERO, Quat::IDENTITY, Some(&graph)),
+        refused
+    );
+    assert_eq!(walk_count::take(), (20, 1));
+    assert_eq!(
+        MutableCompound::from_children(&[at(&graph), at(&graph), at(&graph)]).map(|_| ()),
+        refused
+    );
+    assert_eq!(walk_count::take(), (20, 1));
+    assert_eq!(holder_children(&pair), [cube.as_ptr(), cube.as_ptr()]);
+}
+
+#[test]
+fn an_empty_holder_has_jolts_width() {
+    let editor = MutableCompound::new().unwrap();
+    let holder = editor.holder.as_ptr();
+    // SAFETY: the holder is live while `editor` is; the memo starts empty and the getter only
+    // reads the holder.
+    let (walked, jolts) = unsafe {
+        (
+            sub_shape_ids(holder, &mut BTreeMap::new()),
+            JPH_Shape_GetSubShapeIDBitsRecursive(holder),
+        )
+    };
+    assert_eq!(walked.width, jolts);
+    assert_eq!(walked.zero_width_at, None);
 }
 
 #[test]

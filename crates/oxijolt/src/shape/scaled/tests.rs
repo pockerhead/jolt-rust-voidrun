@@ -2,6 +2,7 @@ use super::*;
 use crate::body::mass_properties;
 use crate::material::shape_material;
 use crate::shape::geometry::{cross, length, sub};
+use crate::shape::tests::rotated_translated;
 use crate::{CompoundChild, HeightFieldSettings, MeshSettings, PhysicsMaterial, Quat, SubShapeId};
 
 fn unit_box() -> Shape {
@@ -247,20 +248,6 @@ fn quad_at(x: f32) -> Shape {
     Shape::new_mesh(&vertices, &[[0, 1, 2], [0, 2, 3]])
         .unwrap()
         .0
-}
-
-/// Jolt's rotated-translated shape of `shape`, which the safe API only makes inside compounds.
-fn rotated_translated(shape: &Shape, position: Vec3, rotation: Quat) -> Shape {
-    let (position, rotation) = (position.to_jph(), rotation.to_jph());
-    // SAFETY: Jolt is initialised (`shape` exists); the arguments are live locals and a live
-    // shape, of which the decorator takes its own reference. The returned shape holds one
-    // reference, which `Shape` takes over.
-    unsafe {
-        Shape::from_raw(
-            JPH_RotatedTranslatedShape_Create(&position, &rotation, shape.as_ptr()).cast(),
-        )
-    }
-    .unwrap()
 }
 
 /// Checks the placements of the meshes in `inner` scaled by `scale` against Jolt: each placed
