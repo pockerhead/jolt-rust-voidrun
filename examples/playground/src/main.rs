@@ -6,6 +6,9 @@ use playground::cli::{self, Mode};
 use playground::headless;
 use playground::scene::SceneConfig;
 
+#[cfg(feature = "window")]
+mod window;
+
 fn main() -> ExitCode {
     let mode = match cli::parse(std::env::args().skip(1)) {
         Ok(mode) => mode,
@@ -38,6 +41,9 @@ fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
+        #[cfg(feature = "window")]
+        Mode::Interactive { .. } | Mode::Record { .. } => window::run(mode),
+        #[cfg(not(feature = "window"))]
         Mode::Interactive { .. } | Mode::Record { .. } => {
             eprintln!("built without the window feature; use --headless");
             ExitCode::from(2)

@@ -197,6 +197,11 @@ jobs:
           cat "$RUNNER_TEMP/one.txt"
           diff "$RUNNER_TEMP/one.txt" "$RUNNER_TEMP/four.txt"
       - run: cargo clippy --locked -p playground --all-targets --no-default-features $FEATURE_ARGS -- -D warnings
+      # The window with the default features (window and debug renderer), compiled only: the
+      # runners have no GPU. Linux would need the X11 and GL development packages.
+      - name: Window build
+        if: runner.os == 'Windows' && matrix.features == 'debug-renderer'
+        run: cargo clippy --locked -p playground --all-targets -- -D warnings
 
   # The committed bindings must equal the generator's output with the pinned LLVM 18.
   bindings:

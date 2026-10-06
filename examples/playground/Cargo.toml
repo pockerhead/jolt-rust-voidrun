@@ -7,7 +7,9 @@ edition = "2021"
 publish = false
 
 [features]
-default = ["debug-renderer"]
+default = ["window", "debug-renderer"]
+# The window and the recorder (macroquad).
+window = ["dep:macroquad"]
 # The wireframe toggle: collider lines from `PhysicsWorld::debug_lines`.
 debug-renderer = ["oxijolt/debug-renderer"]
 # Jolt's debug assertions; a failed assertion aborts the process.
@@ -17,3 +19,4 @@ asserts = ["oxijolt/asserts"]
 oxijolt = { path = "../../crates/oxijolt", features = ["glam"] }
 glam = "0.32"
 gif = "0.14"
+macroquad = { version = "0.4.16", default-features = false, optional = true }
