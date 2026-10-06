@@ -54,6 +54,8 @@ pub struct Pile {
     kinds: Vec<Kind>,
     ball: Kind,
     pile: Vec<BodyId>,
+    /// Crates resting beside the bin, which fall asleep early whatever the pile does.
+    crates: Vec<BodyId>,
     balls: VecDeque<BodyId>,
     asleep: BTreeSet<BodyId>,
     flashes: BTreeMap<BodyId, u32>,
@@ -117,6 +119,7 @@ impl Pile {
             kinds,
             ball,
             pile: Vec::new(),
+            crates: Vec::new(),
             balls: VecDeque::new(),
             asleep: BTreeSet::new(),
             flashes: BTreeMap::new(),
@@ -126,6 +129,7 @@ impl Pile {
         for layer in 0..FIRST_LAYERS {
             scene.drop_layer(0.8 + layer as f32 * 0.85)?;
         }
+        scene.add_crates()?;
         Ok(scene)
     }
 
@@ -155,6 +159,25 @@ impl Pile {
                 kind.colour,
             )?;
             self.pile.push(body);
+        }
+        Ok(())
+    }
+
+    /// Three crates on the floor beside the bin.
+    fn add_crates(&mut self) -> Result<()> {
+        let crate_kind = &self.kinds[0];
+        for z in [-1.2, 0.0, 1.2] {
+            let settings = BodySettings::new_dynamic()
+                .position(rvec([BIN[0] + 1.6, 0.21, z]))
+                .object_layer(self.layers.moving);
+            let body = self.tracked.spawn_keyed(
+                &mut self.world,
+                &crate_kind.shaped.shape,
+                crate_kind.visual,
+                &settings,
+                crate_kind.colour,
+            )?;
+            self.crates.push(body);
         }
         Ok(())
     }
@@ -191,7 +214,7 @@ impl Pile {
 
     /// Whether `body` is one of the pile's bodies or balls, not the bin.
     fn is_dynamic(&self, body: BodyId) -> bool {
-        self.pile.contains(&body) || self.balls.contains(&body)
+        self.pile.contains(&body) || self.crates.contains(&body) || self.balls.contains(&body)
     }
 
     fn remove(&mut self, body: BodyId) -> Result<()> {
