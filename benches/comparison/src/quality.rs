@@ -47,8 +47,8 @@ pub fn first_difference(a: &[u64], b: &[u64]) -> Option<usize> {
 /// impacts are bounded at the last tick or averaged over ticks 61-600, and their maxima are
 /// reported without a bound. A run outside one is reported as "below bound" next to its time.
 pub mod bounds {
-    /// Stacks: the highest dynamic body keeps at least this fraction of its height at tick 60,
-    /// when the drop of the first second is over.
+    /// Stacks: the highest dynamic body keeps at least this fraction of its height at tick 300
+    /// ([`REFERENCE_TICK`](super::REFERENCE_TICK)), when the drops are over.
     pub const MIN_HEIGHT_RATIO: f32 = 0.95;
     /// Stacks and piles: deepest penetration of a body into the ground at the last tick, metres.
     pub const MAX_GROUND_PENETRATION: f32 = 0.05;
@@ -70,12 +70,17 @@ pub mod bounds {
 /// The first tick of the warm window, after the drop and the first impacts.
 const WARM_FROM: usize = 61;
 
+/// The tick a stack's height is compared with at the end: five seconds in, when the pyramid's
+/// layers, which start 0.55 m apart, have settled onto each other (they still sink after tick
+/// 60 in every engine).
+pub const REFERENCE_TICK: usize = 300;
+
 /// The quality of one validation run. Measures that do not apply to the scene are `None`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Quality {
     /// The first tick with a non-finite position, rotation or velocity.
     pub non_finite_tick: Option<usize>,
-    /// Highest dynamic body above the ground at the last tick over the same at tick 60 (stacks).
+    /// Highest dynamic body above the ground at the last tick over the same at tick 300 (stacks).
     pub height_ratio: Option<f32>,
     /// Deepest a body's lowest point is below the ground's top at the last tick.
     pub ground_penetration: Option<f32>,
@@ -217,7 +222,7 @@ pub struct QualityTracker<'a> {
     spec: &'a SceneSpec,
     class: SceneClass,
     ground_top: Option<f32>,
-    /// Highest dynamic body above the ground at the start, then at tick 60.
+    /// Highest dynamic body above the ground at the start, then at [`REFERENCE_TICK`].
     reference_height: Option<f32>,
     quality: Quality,
     joint_errors: JointErrors,
@@ -313,7 +318,7 @@ impl<'a> QualityTracker<'a> {
             SceneClass::Balls => self.observe_balls(states),
             SceneClass::Joints => self.observe_joints(states),
         }
-        if self.class == SceneClass::Stack && self.tick == WARM_FROM - 1 {
+        if self.class == SceneClass::Stack && self.tick == REFERENCE_TICK {
             let top = highest_dynamic(self.spec, states.iter().map(|s| s.position[1]));
             if let (Some(top), Some(ground)) = (top, self.ground_top) {
                 self.reference_height = Some(top - ground);
