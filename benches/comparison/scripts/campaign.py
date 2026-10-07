@@ -45,8 +45,8 @@ def _proc_stat():
 
 
 def _own_jiffies():
-    """CPU time of the comparison processes, which are this campaign's runs."""
-    total = 0
+    """CPU time of each comparison process (this campaign's runs), by pid."""
+    own = {}
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
@@ -58,12 +58,16 @@ def _own_jiffies():
         name = stat[stat.index("(") + 1:stat.rindex(")")]
         if name.startswith("comparison"):
             fields = stat[stat.rindex(")") + 2:].split()
-            total += int(fields[11]) + int(fields[12])
-    return total
+            own[pid] = int(fields[11]) + int(fields[12])
+    return own
 
 
 def load_now():
-    """Percent of the machine other processes used over 5 s, and a note on what ran."""
+    """Percent of the machine other processes used over 5 s, and a note on what ran.
+
+    On Linux a window in which one of the comparison processes started or ended is measured
+    again (up to three times), because the CPU time of a process that ended is gone from /proc
+    and would count as foreign load."""
     if os.name == "nt":
         out = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                               os.path.join(HERE, "load.ps1")], capture_output=True, text=True).stdout.strip()
@@ -72,13 +76,17 @@ def load_now():
             return float(pct.replace(",", ".")), top
         except ValueError:
             return 100.0, out
-    total0, idle0 = _proc_stat()
-    own0 = _own_jiffies()
-    time.sleep(5)
-    total1, idle1 = _proc_stat()
-    own1 = _own_jiffies()
+    for _ in range(3):
+        total0, idle0 = _proc_stat()
+        own0 = _own_jiffies()
+        time.sleep(5)
+        total1, idle1 = _proc_stat()
+        own1 = _own_jiffies()
+        if own0.keys() == own1.keys():
+            break
     elapsed = max(1, total1 - total0)
-    busy = (elapsed - (idle1 - idle0)) - (own1 - own0)
+    own = sum(own1[p] - own0[p] for p in own1 if p in own0)
+    busy = (elapsed - (idle1 - idle0)) - own
     return max(0.0, 100.0 * busy / elapsed), "host /proc/stat"
 
 
