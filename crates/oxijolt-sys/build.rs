@@ -304,6 +304,14 @@ fn build_with_cmake(cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
         config.define(option, on_off(enabled));
     }
 
+    if !matches!(cfg.target_os.as_str(), "macos" | "ios") {
+        // joltc caches `CMAKE_OSX_ARCHITECTURES=x86_64;arm64` on every platform, and Jolt reads an
+        // `arm64` there as an ARM build: GCC and Clang would then compile Jolt without its x86
+        // instruction-set flags (`-mavx2 -mfma ...`) and its `JPH_USE_*` definitions. An empty
+        // cache entry keeps joltc's default out.
+        config.define("CMAKE_OSX_ARCHITECTURES", "");
+    }
+
     if cfg.target_env == "msvc" {
         // Jolt and joltc strip `/EHsc` from their own scopes while C++
         // exceptions are off; the layout checks in the wrapper scope need it.

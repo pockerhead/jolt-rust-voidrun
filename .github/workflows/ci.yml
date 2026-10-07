@@ -99,6 +99,22 @@ jobs:
           expected=no; [ "${{ matrix.features }}" = debug-renderer ] && expected=yes
           [ "$joltc" = "$expected" ] && [ "$jolt" = "$expected" ] || { echo "debug renderer joltc=$joltc jolt=$jolt expected=$expected"; exit 1; }
 
+      # Jolt compiled with its x86-64 instruction-set flags (AVX2, and FMA unless the build is
+      # cross-platform deterministic). A Jolt built for plain x86-64 has almost no ymm registers.
+      - name: Jolt compiled for AVX2
+        if: runner.os == 'Linux'
+        run: |
+          objdump -d "$JOLTC_LIB_DIR"/lib/libJolt.a > "$RUNNER_TEMP/jolt.asm"
+          ymm=$(grep -c ymm "$RUNNER_TEMP/jolt.asm" || true)
+          fma=$(grep -c vfmadd "$RUNNER_TEMP/jolt.asm" || true)
+          echo "ymm=$ymm vfmadd=$fma"
+          [ "$ymm" -gt 1000 ] || { echo "Jolt was compiled without AVX2"; exit 1; }
+          if [ "${{ matrix.features }}" = cross-platform-deterministic ]; then
+            [ "$fma" -eq 0 ] || { echo "a cross-platform deterministic Jolt uses FMA"; exit 1; }
+          else
+            [ "$fma" -gt 0 ] || { echo "Jolt was compiled without FMA"; exit 1; }
+          fi
+
       # The playground has a job of its own below.
       - run: cargo build --workspace --exclude playground --all-targets $FEATURE_ARGS
       - run: cargo test --workspace --exclude playground $FEATURE_ARGS
