@@ -291,7 +291,7 @@ fn determinism_row(out: &Path, group: &[(&Case, &str)]) -> (String, bool) {
     let threads: Vec<String> = group.iter().map(|(c, _)| c.threads.to_string()).collect();
     let verdict = if !(moved && changes) {
         "not moving"
-    } else if difference.is_some() || group.len() < 2 {
+    } else if difference.is_some() {
         "differs"
     } else {
         "identical"
@@ -387,7 +387,8 @@ pub fn all(options: &Options) -> Result<String, String> {
                 .or_default()
                 .push((case, row.as_str()));
         }
-        for group in groups.values() {
+        // A group run at one thread count has nothing to compare.
+        for group in groups.values().filter(|group| group.len() > 1) {
             let (row, pass) = determinism_row(&matrix.out, group);
             append(
                 &matrix.out.join("determinism.tsv"),
