@@ -13,7 +13,7 @@ physical cores (`lscpu -e`); on Windows nothing is pinned. Load: on Linux from /
 host's CPUs as the container sees them) minus the CPU time of this campaign's own processes; on
 Windows from `load.ps1`.
 
-usage: campaign.py RESULTS PLAN [--repeat N] [--bins DIR] [--threads 1,4,8,16]
+usage: campaign.py RESULTS PLAN [--repeat N] [--bins DIR] [--threads 1,4,8,16] [--scenes a,b]
   PLAN: validate | sweep-validate | main | extras | split | sweep
 """
 import argparse
@@ -121,11 +121,11 @@ def rotated(items, repeat):
     return items[k:] + items[:k]
 
 
-def cases(plan, repeat, threads):
+def cases(plan, repeat, threads, scenes=SCENES):
     """(mode, scene, profile, variant, threads, iterations) of a plan."""
     out = []
     if plan == "validate":
-        for scene in SCENES:
+        for scene in scenes:
             for profile in ["matched", "defaults"]:
                 for v in ["jolt", "jolt-4", "rapier-par", "avian-par"]:
                     out.append(("validate", scene, profile, v, ",".join(threads), None))
@@ -134,12 +134,12 @@ def cases(plan, repeat, threads):
             for v in ["jolt", "rapier-par", "avian-par"]:
                 out.append(("validate", scene, "matched", v, "4", "2,4,8"))
     elif plan == "main":
-        for scene in SCENES:
+        for scene in scenes:
             for v in rotated(["jolt", "jolt-4", "rapier-par", "avian-par"], repeat):
                 for t in threads:
                     out.append(("time", scene, "matched", v, t, None))
     elif plan == "extras":
-        for scene in SCENES:
+        for scene in scenes:
             for t in ["1", "4"]:
                 out.append(("time", scene, "matched", "rapier-simd8", t, None))
             for v in rotated(["rapier-serial", "avian-serial"], repeat):
@@ -148,7 +148,7 @@ def cases(plan, repeat, threads):
                 for t in ["1", "4"]:
                     out.append(("time", scene, "defaults", v, t, None))
     elif plan == "split":
-        for scene in SCENES:
+        for scene in scenes:
             for t in ["1", "4"]:
                 out.append(("split", scene, "matched", "avian-par", t, None))
     elif plan == "sweep":
@@ -251,6 +251,7 @@ def main():
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--bins", default=None)
     parser.add_argument("--threads", default="1,4,8,16")
+    parser.add_argument("--scenes", default=",".join(SCENES))
     a = parser.parse_args()
     root = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=HERE, capture_output=True,
                           text=True).stdout.strip()
@@ -265,7 +266,7 @@ def main():
             logf.flush()
 
         log(f"plan {a.plan} repeat {a.repeat}; pinned CPUs {cpus}")
-        for case in cases(a.plan, a.repeat, a.threads.split(",")):
+        for case in cases(a.plan, a.repeat, a.threads.split(","), a.scenes.split(",")):
             run_case(a.results, bins, case, a.repeat, cpus, log)
         subprocess.run([os.path.join(bins, "comparison-jolt" + EXE), "summarize", a.results])
         log(f"plan {a.plan} repeat {a.repeat} done")
