@@ -7,6 +7,16 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 - Playground: in `destruction`, a wall piece that lands hard on the ground or on another piece
   breaks at the contact point that hit hardest, also when it tips over an edge it stands on.
 
+## 1.0.1 — 2026-10-07
+
+### Fixed
+
+- Linux and other non-MSVC, non-Apple builds compile Jolt with its x86-64 instruction-set flags
+  (`-mavx2 -mfma` and the rest, and Jolt's matching `JPH_USE_*` definitions): joltc caches
+  `CMAKE_OSX_ARCHITECTURES=x86_64;arm64` on every platform, which Jolt read as an ARM build, so
+  GCC and Clang built it for plain x86-64. The native library now needs a CPU with AVX2 and FMA
+  on those platforms too, as it already did with MSVC; CI checks the instructions on Linux.
+
 ## 1.0.0 — 2026-10-06
 
 - The public API follows one set of rules, written down in
