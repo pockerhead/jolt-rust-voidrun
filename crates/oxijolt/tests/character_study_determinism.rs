@@ -115,8 +115,8 @@ fn tilt_accounting_counts_flipped_and_divergent_cases() {
 /// (over the cases whose scene can be tilted). Jolt is equivariant under a change of frame only
 /// up to `f32` rounding, so paths are compared, once mapped back, within 1 mm on walkable ground
 /// and 1 cm sliding down steep faces, whatever the verdicts; at most one case in twenty may leave
-/// that band and at most [`MAX_FLIPPED_VERDICTS`] verdicts may flip. Divergent cases and flipped
-/// verdicts are printed.
+/// that band and at most [`MAX_FLIPPED_VERDICTS`] verdicts may flip; the cells are compared over
+/// the cases whose verdicts did not flip. Divergent cases and flipped verdicts are printed.
 #[test]
 fn the_study_rows_give_the_same_cells_in_a_tilted_frame() {
     for config in [Config::spec_d2(), Config::recommended()] {
@@ -129,7 +129,8 @@ fn the_study_rows_give_the_same_cells_in_a_tilted_frame() {
     }
 }
 
-/// Plays `config` on laws 1, 2 and 4 in both frames, asserts equal cells and counts the cases.
+/// Plays `config` on laws 1, 2 and 4 in both frames, asserts equal cells over the cases with the
+/// same verdict in both, and counts the cases.
 fn tilted_comparison(config: &Config) -> Tilt {
     let mut scenes = Scenes::default();
     let frame = Frame::tilted();
@@ -176,6 +177,11 @@ fn tilted_comparison(config: &Config) -> Tilt {
                 );
             }
             tilt.record(same_verdict, apart, tolerance);
+            // A flipped verdict is counted against its own limit; the cells compare the cases
+            // both frames agree on, so one borderline case cannot move a cell's witness.
+            if !same_verdict {
+                continue;
+            }
             flat_results.push(matrix::CaseOutcomes {
                 id: case.id.clone(),
                 outcomes: vec![verdict],
