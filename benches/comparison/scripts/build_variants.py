@@ -37,12 +37,13 @@ def native_flags(target_dir):
     """The C++ compile flags of Jolt and joltc as CMake generated them (Makefile builds), when
     this build compiled them."""
     found = []
-    pattern = os.path.join(target_dir, "release", "build", "oxijolt-sys-*", "out", "build", "**", "flags.make")
+    pattern = os.path.join(target_dir, "release", "build", "oxijolt-sys-*", "out", "**", "flags.make")
     for path in sorted(glob.glob(pattern, recursive=True)):
         target = os.path.basename(os.path.dirname(path))
-        for line in open(path, encoding="utf-8", errors="replace"):
-            if line.startswith(("CXX_FLAGS", "CXX_DEFINES")):
-                found.append(f"native {target}: {line.strip()}")
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith(("CXX_FLAGS", "CXX_DEFINES")):
+                    found.append(f"native {target}: {line.strip()}")
     return found or ["native flags: not built here (prebuilt prefix or another generator)"]
 
 
