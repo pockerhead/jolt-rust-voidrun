@@ -8,7 +8,7 @@ after, and run again (up to 5 attempts, the last one kept either way) when a sam
 sweep-validate) do not wait: their results do not depend on time.
 
 Each case is one `comparison all` call into a scratch directory, merged into the results when
-kept. On Linux a case with N threads is pinned with `taskset` to N logical CPUs on N different
+kept; a case already in the results is skipped, so an interrupted plan can be started again. On Linux a case with N threads is pinned with `taskset` to N logical CPUs on N different
 physical cores (`lscpu -e`); on Windows nothing is pinned. Load: on Linux from /proc/stat (the
 host's CPUs as the container sees them) minus the CPU time of this campaign's own processes; on
 Windows from `load.ps1`.
@@ -198,8 +198,27 @@ LOAD_HEADER = ("start\tmode\tscene\tprofile\tvariant\tthreads\titerations\trepea
                "load_before_pct\tload_during_mean_pct\tload_during_max_pct\tsamples\texit\toutcome\tpinned_cpus\n")
 
 
+def run_id(case, repeat):
+    """The run id `comparison all` gives the case's first thread count."""
+    mode, scene, profile, variant, threads, iters = case
+    rid = f"{mode}-r{repeat}-{variant}-{scene}-{profile}-t{threads.split(',')[0]}"
+    return rid + (f"-i{iters.split(',')[0]}" if iters else "")
+
+
+def done_cases(out):
+    """Run ids already merged into the results, so an interrupted plan can resume."""
+    path = os.path.join(out, "cases.tsv")
+    if not os.path.exists(path):
+        return set()
+    with open(path, encoding="utf-8") as f:
+        return {line.split("\t")[1] for line in f.read().splitlines()[1:] if "\t" in line}
+
+
 def run_case(out, bins, case, repeat, cpus, log):
     mode, scene, profile, variant, threads, iters = case
+    if run_id(case, repeat) in done_cases(out):
+        log(f"skip {run_id(case, repeat)}: already in the results")
+        return
     exes = ",".join(f"{v}={os.path.join(bins, 'comparison-' + b + EXE)}" for v, b in VARIANT_BUILDS.items())
     args = ["all", "--mode", mode, "--scenes", scene, "--profiles", profile, "--variants", variant,
             "--threads", threads, "--repeat", "1", "--first-repeat", str(repeat), "--exe", exes]
