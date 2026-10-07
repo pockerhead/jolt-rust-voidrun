@@ -283,11 +283,13 @@ fn determinism_row(out: &Path, group: &[(&Case, &str)]) -> (String, bool) {
         .filter_map(|d| first_difference(&digests[0], d))
         .min();
     // Columns of the quality row (after the 7 key columns): peak_speed is 13, digest_changes 15.
+    let index = |name: &str| QUALITY_HEADER.split('\t').position(|n| n == name).unwrap();
+    let (speed, changed) = (index("peak_speed"), index("digest_changes"));
     let column = |row: &str, i: usize| row.split('\t').nth(7 + i).unwrap_or("").to_owned();
     let moved = group
         .iter()
-        .all(|(_, row)| column(row, 13).parse::<f32>().is_ok_and(|v| v > 0.1));
-    let changes = group.iter().all(|(_, row)| column(row, 15) == "true");
+        .all(|(_, row)| column(row, speed).parse::<f32>().is_ok_and(|v| v > 0.1));
+    let changes = group.iter().all(|(_, row)| column(row, changed) == "true");
     let threads: Vec<String> = group.iter().map(|(c, _)| c.threads.to_string()).collect();
     let verdict = if !(moved && changes) {
         "not moving"
@@ -440,9 +442,11 @@ mod tests {
 
     /// A quality row whose peak speed and digest-change columns say the scene moved.
     fn moving_row() -> String {
-        let mut columns = vec!["x"; 7 + 18];
-        columns[7 + 13] = "1.0";
-        columns[7 + 15] = "true";
+        let names: Vec<&str> = QUALITY_HEADER.split('\t').collect();
+        let index = |name| 7 + names.iter().position(|&n| n == name).unwrap();
+        let mut columns = vec!["x"; 7 + names.len()];
+        columns[index("peak_speed")] = "1.0";
+        columns[index("digest_changes")] = "true";
         columns.join("\t")
     }
 

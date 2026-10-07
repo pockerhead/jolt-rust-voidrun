@@ -259,7 +259,7 @@ pub fn validate_with(
 }
 
 /// Column names of a quality row after the key columns.
-pub const QUALITY_HEADER: &str = "non_finite_tick\theight_ratio\tground_penetration\tfallen\tfinal_speed_p50\tfinal_speed_p99\tball_overlap\tanchor_max\tanchor_p99\tangle_max\tangle_p99\tlimit_max\tlimit_p99\tpeak_speed\tawake_at_end\tdigest_changes\tfinal_digest\tviolations";
+pub const QUALITY_HEADER: &str = "non_finite_tick\theight_ratio\tground_penetration\tground_penetration_max\tfallen\tfinal_speed_p50\tfinal_speed_p99\tball_overlap\tball_overlap_max\tanchor_max\tanchor_p99\tangle_max\tangle_p99\tlimit_max\tlimit_p99\tpeak_speed\tawake_at_end\tdigest_changes\tfinal_digest\tviolations";
 
 fn opt<T: std::fmt::Display>(value: Option<T>) -> String {
     value.map_or("n/a".to_owned(), |v| v.to_string())
@@ -275,14 +275,16 @@ pub fn quality_columns(validation: &Validation) -> String {
     let violations = q.violations();
     let digest_changes = validation.digests.first() != validation.digests.last();
     format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{:016x}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{:016x}\t{}",
         opt(q.non_finite_tick),
         opt_f(q.height_ratio),
         opt_f(q.ground_penetration),
+        opt_f(q.ground_penetration_max),
         opt(q.fallen),
         opt_f(q.final_speed_p50),
         opt_f(q.final_speed_p99),
         opt_f(q.ball_overlap),
+        opt_f(q.ball_overlap_max),
         opt_f(q.anchor_max),
         opt_f(q.anchor_p99),
         opt_f(q.angle_max),

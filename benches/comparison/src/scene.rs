@@ -189,6 +189,8 @@ impl SceneSpec {
 pub enum SceneClass {
     /// Bodies resting on a ground, piled up.
     Stack,
+    /// Bodies dropped into a heap on a ground, not stacked: no height or final-speed bound.
+    Pile,
     /// Balls on a fixed layer, no ground.
     Balls,
     /// Bodies hanging from joints.
@@ -277,12 +279,10 @@ impl Scene {
     pub fn class(self) -> SceneClass {
         match self {
             Self::Balls => SceneClass::Balls,
-            Self::Boxes
-            | Self::Capsules
-            | Self::Pyramid
-            | Self::ManyPyramids
-            | Self::Keva
-            | Self::FixtureStack => SceneClass::Stack,
+            Self::Capsules => SceneClass::Pile,
+            Self::Boxes | Self::Pyramid | Self::ManyPyramids | Self::Keva | Self::FixtureStack => {
+                SceneClass::Stack
+            }
             _ => SceneClass::Joints,
         }
     }

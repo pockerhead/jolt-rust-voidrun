@@ -1,4 +1,4 @@
-run_id	variant	scene	profile	threads	iterations	steps	non_finite_tick	height_ratio	ground_penetration	fallen	final_speed_p50	final_speed_p99	ball_overlap	anchor_max	anchor_p99	angle_max	angle_p99	limit_max	limit_p99	peak_speed	awake_at_end	digest_changes	final_digest	violations
-validate-r1-jolt-boxes-matched-t1	jolt	boxes	matched	1	default	600	n/a	0.999000	0.010000	0	0.000100	0.002000	n/a	n/a	n/a	n/a	n/a	n/a	n/a	3.500000	1000	true	00000000000000aa	none
-validate-r1-rapier-par-boxes-matched-t1	rapier-par	boxes	matched	1	default	600	n/a	0.900000	0.010000	0	0.000100	0.200000	n/a	n/a	n/a	n/a	n/a	n/a	n/a	3.500000	1000	true	00000000000000bb	height_ratio,final_speed_p99
-validate-r1-jolt-boxes-matched-t4-i2	jolt	boxes	matched	4	2	600	n/a	0.980000	0.020000	0	0.000100	0.050000	n/a	n/a	n/a	n/a	n/a	n/a	n/a	3.500000	1000	true	00000000000000cc	none
+run_id	variant	scene	profile	threads	iterations	steps	non_finite_tick	height_ratio	ground_penetration	ground_penetration_max	fallen	final_speed_p50	final_speed_p99	ball_overlap	ball_overlap_max	anchor_max	anchor_p99	angle_max	angle_p99	limit_max	limit_p99	peak_speed	awake_at_end	digest_changes	final_digest	violations
+validate-r1-jolt-boxes-matched-t1	jolt	boxes	matched	1	default	600	n/a	0.999000	0.010000	0.300000	0	0.000100	0.002000	n/a	n/a	n/a	n/a	n/a	n/a	n/a	n/a	3.500000	1000	true	00000000000000aa	none
+validate-r1-rapier-par-boxes-matched-t1	rapier-par	boxes	matched	1	default	600	n/a	0.900000	0.010000	0.300000	0	0.000100	0.200000	n/a	n/a	n/a	n/a	n/a	n/a	n/a	n/a	3.500000	1000	true	00000000000000bb	height_ratio,final_speed_p99
+validate-r1-jolt-boxes-matched-t4-i2	jolt	boxes	matched	4	2	600	n/a	0.980000	0.020000	0.300000	0	0.000100	0.050000	n/a	n/a	n/a	n/a	n/a	n/a	n/a	n/a	3.500000	1000	true	00000000000000cc	none

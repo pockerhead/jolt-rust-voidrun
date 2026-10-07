@@ -93,3 +93,39 @@ fn digest_streams_report_the_first_differing_tick() {
     assert_eq!(first_difference(&[1, 2, 3], &[1, 9, 3]), Some(2));
     assert_eq!(first_difference(&[1, 2], &[1, 2, 3]), Some(3));
 }
+
+#[test]
+fn an_impact_overlap_that_settles_is_reported_but_not_a_violation() {
+    let ball = Shape::Ball { radius: 1.0 };
+    let spec = SceneSpec {
+        name: "two balls",
+        source: "test",
+        bodies: vec![
+            BodySpec::fixed(ball, [0.0, 0.0, 0.0]),
+            BodySpec::dynamic(ball, [3.0, 0.0, 0.0]),
+        ],
+        joints: Vec::new(),
+    };
+    let mut tracker = QualityTracker::new(&spec, SceneClass::Balls);
+    tracker.observe(&[resting([0.0; 3]), resting([1.7, 0.0, 0.0])]);
+    tracker.observe(&[resting([0.0; 3]), resting([2.0, 0.0, 0.0])]);
+    let quality = tracker.finish(1);
+    assert!((quality.ball_overlap_max.unwrap() - 0.3).abs() < 1e-5);
+    assert!(quality.ball_overlap.unwrap().abs() < 1e-6);
+    assert!(quality.violations().is_empty());
+}
+
+#[test]
+fn joint_errors_are_bounded_as_their_warm_average() {
+    let spec = slider();
+    let mut tracker = QualityTracker::new(&spec, SceneClass::Joints);
+    // Pulled 0.5 m sideways for the first second, then back on the axis for the second.
+    for tick in 1..=120 {
+        let y = if tick <= 60 { 0.5 } else { 0.0 };
+        tracker.observe(&[resting([0.0; 3]), resting([1.0, y, 0.0])]);
+    }
+    let quality = tracker.finish(1);
+    assert!((quality.anchor_max.unwrap() - 0.5).abs() < 1e-6);
+    assert_eq!(quality.anchor_p99, Some(0.0));
+    assert!(quality.violations().is_empty());
+}

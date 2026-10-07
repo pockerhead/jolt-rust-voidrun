@@ -34,11 +34,11 @@ os=windows arch=x86_64 cpu=Example CPU logical_threads=16 avx2=true fma=true
 
 ## Quality
 
-| variant | scene | profile | threads | iterations | height_ratio | ground_penetration | fallen | final_speed_p99 | ball_overlap | anchor_p99 | angle_p99 | limit_p99 | awake_at_end | violations |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| jolt | boxes | matched | 1 | default | 0.999000 | 0.010000 | 0 | 0.002000 | n/a | n/a | n/a | n/a | 1000 | none |
-| rapier-par | boxes | matched | 1 | default | 0.900000 | 0.010000 | 0 | 0.200000 | n/a | n/a | n/a | n/a | 1000 | height_ratio,final_speed_p99 |
-| jolt | boxes | matched | 4 | 2 | 0.980000 | 0.020000 | 0 | 0.050000 | n/a | n/a | n/a | n/a | 1000 | none |
+| variant | scene | profile | threads | iterations | height_ratio | ground_penetration | ground_penetration_max | fallen | final_speed_p99 | ball_overlap | ball_overlap_max | anchor_p99 | angle_p99 | limit_p99 | awake_at_end | violations |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| jolt | boxes | matched | 1 | default | 0.999000 | 0.010000 | 0.300000 | 0 | 0.002000 | n/a | n/a | n/a | n/a | n/a | 1000 | none |
+| rapier-par | boxes | matched | 1 | default | 0.900000 | 0.010000 | 0.300000 | 0 | 0.200000 | n/a | n/a | n/a | n/a | n/a | 1000 | height_ratio,final_speed_p99 |
+| jolt | boxes | matched | 4 | 2 | 0.980000 | 0.020000 | 0.300000 | 0 | 0.050000 | n/a | n/a | n/a | n/a | n/a | 1000 | none |
 
 ## Determinism across thread counts
 
