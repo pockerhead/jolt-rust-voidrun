@@ -1,0 +1,17 @@
+commit e529a183947b4d653c88981a274b94760f7d0e1a
+rustc 1.99.0 (b940084d7 2026-09-28)
+RUSTFLAGS=-C target-cpu=x86-64-v3
+JOLTC_LIB_DIR=(unset: Jolt and joltc built from source by CMake)
+platform Linux-6.8.0-138-generic-x86_64-with-glibc2.39
+jolt: --features jolt
+rapier-par: --features rapier,parallel
+rapier-serial: --features rapier
+rapier-simd8: --features rapier,parallel,simd8
+avian-par: --features avian,parallel
+avian-serial: --features avian
+native joltc_layout_checks.dir: CXX_DEFINES = -DJPH_OBJECT_LAYER_BITS=32 -DJPH_OBJECT_STREAM -DJPH_USE_AVX -DJPH_USE_AVX2 -DJPH_USE_F16C -DJPH_USE_FMADD -DJPH_USE_LZCNT -DJPH_USE_SSE4_1 -DJPH_USE_SSE4_2 -DJPH_USE_TZCNT -DNDEBUG
+native joltc_layout_checks.dir: CXX_FLAGS =  -ffunction-sections -fdata-sections -fPIC -m64 -w -O3 -DNDEBUG -std=gnu++17 -mavx2 -mbmi -mpopcnt -mlzcnt -mf16c -mfma -mfpmath=sse -pthread
+native Jolt.dir: CXX_DEFINES = -DJPH_OBJECT_LAYER_BITS=32 -DJPH_OBJECT_STREAM -DJPH_USE_AVX -DJPH_USE_AVX2 -DJPH_USE_F16C -DJPH_USE_FMADD -DJPH_USE_LZCNT -DJPH_USE_SSE4_1 -DJPH_USE_SSE4_2 -DJPH_USE_TZCNT -DNDEBUG
+native Jolt.dir: CXX_FLAGS =  -ffunction-sections -fdata-sections -fPIC -m64 -w -fno-rtti -fno-exceptions -Wno-stringop-overflow -Wno-psabi -ffp-contract=fast -O3 -std=c++17 -fPIC -fvisibility=hidden -mavx2 -mbmi -mpopcnt -mlzcnt -mf16c -mfma -mfpmath=sse -pthread
+native joltc.dir: CXX_DEFINES = -DJPH_OBJECT_LAYER_BITS=32 -DJPH_OBJECT_STREAM -DJPH_USE_AVX -DJPH_USE_AVX2 -DJPH_USE_F16C -DJPH_USE_FMADD -DJPH_USE_LZCNT -DJPH_USE_SSE4_1 -DJPH_USE_SSE4_2 -DJPH_USE_TZCNT -DNDEBUG
+native joltc.dir: CXX_FLAGS =  -ffunction-sections -fdata-sections -fPIC -m64 -w -fno-rtti -fno-exceptions -Wno-stringop-overflow -ffp-contract=off -O3 -std=c++17 -fPIC -fvisibility=hidden -mavx2 -mbmi -mpopcnt -mlzcnt -mf16c -mfma -mfpmath=sse -pthread

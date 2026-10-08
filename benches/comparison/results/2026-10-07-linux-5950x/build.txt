@@ -1,0 +1,5 @@
+build	jobs	wall_s	exe_bytes	stripped_bytes	load_before_pct
+jolt, C++ built	16	18.4	2535552	1944848	0.1
+jolt, prebuilt library	16	3.8	2535552	1944848	0.1
+rapier	16	19.6	3429664	2802952	0.1
+avian	16	42.4	37064560	20897272	0.2
