@@ -139,8 +139,9 @@ Rapier's step is faster on scenes of many contacts, 1.9 to 2.2 times on a box st
 1.85 times on a 43 000-box pyramid. oxijolt is faster on joints from four threads, up to 2.1
 times, except a ball-joint net where its step gets slower at 8 and 16 threads. Avian is the slowest on
 nearly every scene. oxijolt uses the least memory, under 55 % of Rapier's. All three gave the
-same results at every thread count. Rapier kept the most scenes within the quality bounds;
-oxijolt lets some capsules through the ground and its plank towers collapse. oxijolt brings
+same results at every thread count. oxijolt and Rapier each kept 7 of 10 scenes within the
+quality bounds (with each engine's defaults Rapier 8, oxijolt 7); oxijolt lets some capsules
+through the ground and its plank towers collapse. oxijolt brings
 Jolt's character controller, wheeled and tracked vehicles and ragdolls; it needs a C++ toolchain
 (or a prebuilt library) and has no WASM target.
 

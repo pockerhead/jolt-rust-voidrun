@@ -1,4 +1,7 @@
 /target
 
+# Python bytecode of the comparison scripts
+__pycache__/
+
 # Editor settings
 .vscode/

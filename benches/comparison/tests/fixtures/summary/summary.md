@@ -12,7 +12,7 @@ os=windows arch=x86_64 cpu=Example CPU logical_threads=16 avx2=true fma=true
 
 ### boxes, matched
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 4 | 1 | 8.005 | 8.004 | 8.009 | 8.009 | 8.009 | 8.005–8.005 | 24.000 | 24.000 | 26.000 | 4.00 | 100 | not validated |
 | jolt | 1 | 2 | 4.104 | 4.009 | 4.208 | 4.209 | 4.209 | 4.005–4.205 | 12.300 | 12.300 | 14.300 | 1.00 | 100 | within bounds |

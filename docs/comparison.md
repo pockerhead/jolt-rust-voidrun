@@ -30,7 +30,8 @@ Ten of Rapier's stress scenes on a 16-core Linux machine, matched settings, warm
 - **Avian** (its whole Bevy update) is the slowest of the three on every scene and thread count
   but two: on `keva` it is faster than oxijolt at one thread and level with Rapier at 8 and 16,
   and on `joint_fixed` at one thread it is level with oxijolt and ahead of Rapier.
-- **Quality**: Rapier kept the most scenes within the bounds. oxijolt lets 12 of 3008 capsules
+- **Quality**: oxijolt and Rapier each kept 7 of the 10 scenes within the bounds (Avian 4); with
+  each engine's defaults Rapier kept 8, oxijolt 7 and Avian 5. oxijolt lets 12 of 3008 capsules
   through the ground, its `keva` towers collapse (Avian's too), and on `joint_revolute`, which no
   engine keeps within the bounds, its joint error is 4.5 times Rapier's. On `pyramid` oxijolt is
   the only engine within the bounds: Rapier's and Avian's deepest boxes end 47 and 33 cm in the
@@ -38,7 +39,7 @@ Ten of Rapier's stress scenes on a 16-core Linux machine, matched settings, warm
 - **Fewer solver steps**: with 4 velocity steps instead of Jolt's 10 (`jolt-4`), oxijolt is
   within 8 % of Rapier on `pyramid` from four threads and closer on `boxes` (Rapier 1.2 to 1.65
   times faster), but leaves the bounds on five scenes where 10 steps stay within them.
-- **Memory**: oxijolt's peak resident set is the smallest, 36 to 52 % of Rapier's at four threads.
+- **Memory**: oxijolt's peak resident set is the smallest, 36 to 54 % of Rapier's at four threads.
 - **Determinism**: every engine gave the same results at 1, 4, 8 and 16 threads, tick by tick,
   on every scene in both profiles.
 - **Defaults** (each engine as shipped, sleeping on): Rapier is 5 times faster than oxijolt on
@@ -84,7 +85,7 @@ jobs, from the results' `build.txt`:
 | Rapier | 19.6 s | 3.43 MB | 2.80 MB |
 | Avian, with the Bevy it needs | 42.4 s | 37.06 MB | 20.90 MB |
 
-MB here is 10^6 bytes.
+MB in this table is 10^6 bytes; the peak memory columns of the results are in MiB (2^20 bytes).
 
 ## Method
 
@@ -232,7 +233,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **balls**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 9.139 | 9.414 | 9.490 | 9.736 | 10.145 | 9.130–9.153 | 4.259 | 9.610 | 72.864 | 1.00 | 40 | within bounds |
 | avian-par | 4 | 3 | 4.278 | 4.293 | 4.524 | 5.801 | 6.657 | 4.270–4.290 | 2.531 | 7.803 | 71.344 | 2.53 | 43 | within bounds |
@@ -257,7 +258,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **boxes**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 11.396 | 11.308 | 12.700 | 12.786 | 12.894 | 11.380–11.423 | 13.245 | 10.523 | 18.476 | 1.00 | 30 | below bound: final_speed_p99 |
 | avian-par | 4 | 3 | 6.409 | 6.421 | 7.001 | 7.493 | 7.977 | 6.387–6.442 | 7.009 | 7.348 | 15.400 | 2.51 | 32 | below bound: final_speed_p99 |
@@ -282,7 +283,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **capsules**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 10.119 | 11.281 | 13.436 | 13.538 | 13.678 | 10.072–10.176 | 3.079 | 7.167 | 28.648 | 1.00 | 35 | within bounds |
 | avian-par | 4 | 3 | 5.507 | 5.787 | 7.334 | 9.079 | 10.140 | 5.496–5.517 | 1.660 | 5.644 | 27.217 | 2.39 | 37 | within bounds |
@@ -307,7 +308,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **pyramid**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 589.059 | 600.149 | 615.133 | 621.292 | 683.607 | 588.179–589.521 | 103.394 | 47.844 | 889.391 | 1.00 | 285 | below bound: ground_penetration, final_speed_p99 |
 | avian-par | 4 | 3 | 231.822 | 235.022 | 252.520 | 257.242 | 308.585 | 230.385–232.831 | 43.800 | 36.086 | 888.149 | 2.78 | 329 | below bound: ground_penetration, final_speed_p99 |
@@ -332,7 +333,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **many_pyramids**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 69.058 | 68.825 | 70.214 | 74.065 | 87.059 | 68.665–69.551 | 65.710 | 35.330 | 104.644 | 1.00 | 65 | within bounds |
 | avian-par | 4 | 3 | 27.086 | 26.928 | 30.439 | 30.742 | 33.326 | 26.801–27.424 | 23.709 | 21.504 | 92.458 | 2.90 | 70 | within bounds |
@@ -357,7 +358,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **keva**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 506.118 | 587.790 | 676.791 | 686.943 | 742.031 | 504.161–509.328 | 643.068 | 314.315 | 1029.065 | 1.00 | 434 | below bound: height_ratio, ground_penetration, fallen, final_speed_p99 |
 | avian-par | 4 | 3 | 195.277 | 219.053 | 246.462 | 250.315 | 277.198 | 194.847–195.670 | 248.468 | 152.132 | 856.561 | 2.64 | 503 | below bound: height_ratio, ground_penetration, fallen, final_speed_p99 |
@@ -382,7 +383,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **joint_ball**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 21.046 | 13.354 | 50.248 | 64.374 | 69.131 | 20.952–21.102 | 11.470 | 17.915 | 125.846 | 1.00 | 80 | below bound: anchor_p99 |
 | avian-par | 4 | 3 | 15.209 | 10.691 | 32.674 | 41.187 | 47.278 | 15.126–15.285 | 9.330 | 14.633 | 123.471 | 1.62 | 87 | below bound: anchor_p99 |
@@ -407,7 +408,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **joint_fixed**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 15.449 | 15.399 | 16.069 | 16.299 | 16.732 | 15.440–15.457 | 15.673 | 23.057 | 144.579 | 1.00 | 53 | within bounds |
 | avian-par | 4 | 3 | 13.843 | 13.842 | 14.247 | 14.589 | 14.952 | 13.819–13.883 | 13.842 | 20.212 | 145.355 | 1.23 | 54 | within bounds |
@@ -432,7 +433,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **joint_prismatic**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 50.235 | 54.261 | 55.854 | 56.442 | 59.967 | 50.167–50.339 | 18.233 | 29.162 | 241.615 | 1.00 | 80 | below bound: anchor_p99, angle_p99, limit_p99 |
 | avian-par | 4 | 3 | 31.798 | 33.486 | 35.384 | 35.949 | 36.661 | 31.707–31.924 | 14.568 | 25.149 | 242.423 | 1.82 | 91 | below bound: anchor_p99, angle_p99, limit_p99 |
@@ -457,7 +458,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **joint_revolute**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 13.470 | 13.338 | 14.704 | 15.343 | 15.655 | 13.424–13.540 | 9.191 | 12.415 | 81.736 | 1.00 | 43 | below bound: anchor_p99, angle_p99 |
 | avian-par | 4 | 3 | 9.844 | 9.775 | 10.595 | 10.893 | 11.087 | 9.823–9.861 | 7.275 | 10.401 | 80.674 | 1.58 | 45 | below bound: anchor_p99, angle_p99 |
@@ -488,7 +489,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **balls**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 6.140 | 6.527 | 11.754 | 11.875 | 13.205 | 6.129–6.155 | 4.831 | 9.945 | 69.931 | 1.00 | 47 | within bounds |
 | avian-par | 4 | 3 | 3.560 | 3.962 | 5.666 | 6.418 | 7.920 | 3.548–3.578 | 3.023 | 8.051 | 69.226 | 2.31 | 49 | within bounds |
@@ -499,7 +500,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **boxes**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 14.904 | 15.079 | 15.853 | 16.815 | 17.958 | 14.862–14.951 | 16.229 | 10.684 | 18.103 | 1.00 | 30 | within bounds |
 | avian-par | 4 | 3 | 8.291 | 8.319 | 8.941 | 9.989 | 10.857 | 8.272–8.305 | 8.905 | 7.468 | 15.271 | 2.54 | 33 | within bounds |
@@ -510,7 +511,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **capsules**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 13.127 | 15.456 | 16.983 | 17.306 | 17.719 | 13.114–13.133 | 3.416 | 7.223 | 27.508 | 1.00 | 34 | within bounds |
 | avian-par | 4 | 3 | 7.395 | 8.038 | 9.594 | 10.357 | 11.841 | 7.364–7.430 | 1.952 | 5.795 | 26.208 | 2.42 | 37 | within bounds |
@@ -521,7 +522,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **pyramid**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 751.793 | 766.411 | 801.873 | 818.228 | 859.866 | 750.839–753.386 | 127.599 | 50.647 | 867.627 | 1.00 | 282 | below bound: final_speed_p99 |
 | avian-par | 4 | 3 | 291.128 | 290.706 | 328.329 | 333.217 | 394.826 | 290.490–292.379 | 53.253 | 38.680 | 861.652 | 2.80 | 330 | below bound: final_speed_p99 |
@@ -532,7 +533,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **many_pyramids**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 76.845 | 76.138 | 82.302 | 87.081 | 91.297 | 76.710–76.954 | 81.588 | 35.556 | 100.902 | 1.00 | 65 | within bounds |
 | avian-par | 4 | 3 | 28.669 | 28.114 | 32.232 | 32.938 | 35.030 | 28.556–28.845 | 29.509 | 20.549 | 86.778 | 3.10 | 70 | within bounds |
@@ -543,7 +544,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **keva**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 718.809 | 784.663 | 919.021 | 941.957 | 1019.130 | 718.075–719.940 | 842.786 | 322.174 | 1015.143 | 1.00 | 428 | below bound: height_ratio, ground_penetration, fallen, final_speed_p99 |
 | avian-par | 4 | 3 | 272.581 | 282.627 | 371.613 | 386.609 | 460.744 | 271.662–273.474 | 318.026 | 154.663 | 863.631 | 2.68 | 496 | below bound: height_ratio, ground_penetration, fallen, final_speed_p99 |
@@ -554,7 +555,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **joint_ball**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 17.941 | 18.071 | 19.618 | 19.729 | 20.672 | 17.901–17.967 | 14.684 | 19.657 | 123.598 | 1.00 | 55 | below bound: anchor_p99 |
 | avian-par | 4 | 3 | 14.174 | 14.144 | 15.109 | 15.326 | 16.079 | 14.153–14.191 | 12.272 | 15.525 | 117.706 | 1.42 | 55 | below bound: anchor_p99 |
@@ -565,7 +566,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **joint_fixed**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 20.269 | 20.246 | 20.785 | 21.108 | 21.730 | 20.221–20.315 | 20.520 | 27.577 | 145.599 | 1.00 | 51 | within bounds |
 | avian-par | 4 | 3 | 18.759 | 18.726 | 19.457 | 20.445 | 25.634 | 18.657–18.817 | 18.710 | 24.167 | 140.753 | 1.19 | 52 | within bounds |
@@ -576,7 +577,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **joint_prismatic**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 58.168 | 58.903 | 73.049 | 74.370 | 77.913 | 58.146–58.193 | 23.836 | 33.593 | 239.173 | 1.00 | 77 | below bound: anchor_p99, angle_p99, limit_p99 |
 | avian-par | 4 | 3 | 37.092 | 37.461 | 44.039 | 45.113 | 46.438 | 37.074–37.106 | 19.467 | 29.715 | 239.951 | 1.83 | 88 | below bound: anchor_p99, angle_p99, limit_p99 |
@@ -587,7 +588,7 @@ same variant, scene, profile and thread count. Times are milliseconds per tick.
 
 **joint_revolute**
 
-| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
+| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 1 | 3 | 65.498 | 64.936 | 70.929 | 78.138 | 80.724 | 65.414–65.568 | 19.538 | 13.566 | 80.010 | 1.00 | 63 | below bound: anchor_p99, angle_p99 |
 | avian-par | 4 | 3 | 38.553 | 38.204 | 42.187 | 45.392 | 65.563 | 38.349–38.701 | 14.112 | 11.906 | 79.154 | 1.98 | 73 | below bound: anchor_p99, angle_p99 |

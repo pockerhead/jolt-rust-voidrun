@@ -128,7 +128,7 @@ fn timing_section(dir: &Path, runs: &[Row], quality: &BTreeMap<String, Row>, out
     for ((profile, scene), variants) in group_runs(runs, "time") {
         writeln!(out, "### {scene}, {profile}\n").unwrap();
         out.push_str(
-            "| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |\n",
+            "| variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MiB | quality |\n",
         );
         out.push_str("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
         for ((variant, threads, _), repeats) in variants {
