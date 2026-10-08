@@ -9,17 +9,22 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
   determinism across thread counts and features, with the harness (`benches/comparison`, not
   published), its scripts and the raw results of a 16-core Linux machine. Where oxijolt loses is
   stated there.
-- Linux and other non-MSVC, non-Apple builds compile Jolt with its x86-64 instruction-set flags
-  again (`-mavx2 -mfma` and the rest, and Jolt's matching `JPH_USE_*` definitions): joltc caches
-  `CMAKE_OSX_ARCHITECTURES=x86_64;arm64` on every platform, which Jolt read as an ARM build, so
-  GCC and Clang built it for plain x86-64. The native library now needs a CPU with AVX2 and FMA
-  on those platforms too, as it already did with MSVC; CI checks the instructions on Linux.
 - `WorldSettings::velocity_steps` and `position_steps`: the solver's velocity and position
   iterations per step, set when the world is created (Jolt's defaults 10 and 2; velocity
   `2..=255`, position `0..=255`, [limits](docs/limits.md#solver-step-counts)), read back with
   `PhysicsWorld::velocity_steps` and `position_steps`.
 - Playground: in `destruction`, a wall piece that lands hard on the ground or on another piece
   breaks at the contact point that hit hardest, also when it tips over an edge it stands on.
+
+## 1.0.1 — 2026-10-07
+
+### Fixed
+
+- Linux and other non-MSVC, non-Apple builds compile Jolt with its x86-64 instruction-set flags
+  (`-mavx2 -mfma` and the rest, and Jolt's matching `JPH_USE_*` definitions): joltc caches
+  `CMAKE_OSX_ARCHITECTURES=x86_64;arm64` on every platform, which Jolt read as an ARM build, so
+  GCC and Clang built it for plain x86-64. The native library now needs a CPU with AVX2 and FMA
+  on those platforms too, as it already did with MSVC; CI checks the instructions on Linux.
 
 ## 1.0.0 — 2026-10-06
 

@@ -88,7 +88,7 @@ Everything planned for 1.0 is done; what works today, with links to the guides, 
 
 ## Status
 
-- Version 1.0.0 on [crates.io](https://crates.io/crates/oxijolt). The API follows semantic
+- Version 1.0.1 on [crates.io](https://crates.io/crates/oxijolt). The API follows semantic
   versioning from 1.0: a breaking change waits for the next major version.
 - CI builds and tests Windows (MSVC) and Linux (GCC) on x86_64, each in five configurations:
   default, `cross-platform-deterministic`, `double-precision`, `debug-renderer` and `asserts`.
