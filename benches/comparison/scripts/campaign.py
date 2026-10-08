@@ -8,7 +8,13 @@ after, and run again (up to 5 attempts, the last one kept either way) when a sam
 sweep-validate) do not wait: their results do not depend on time.
 
 Each case is one `comparison all` call into a scratch directory, merged into the results when
-kept; a case already in the results is skipped, so an interrupted plan can be started again. On Linux a case with N threads is pinned with `taskset` to N logical CPUs on N different
+kept. A case is complete when every run it asked for (each thread and iteration count) has a row
+or a failure row in the results and, for a validation case of jolt or jolt-4 with more than one
+measured thread count, a determinism row; a complete case is skipped, so an interrupted plan can
+be started again. A failed run in a complete case is a result and is kept. The campaign exits
+with status 1 when a required determinism gate (jolt, jolt-4) did not hold, when a case left runs
+without an outcome (it is not merged and runs again next time) or when the summary failed. The
+sweep plans run `many_pyramids` and `joint_revolute` only, those of them `--scenes` names. On Linux a case with N threads is pinned with `taskset` to N logical CPUs on N different
 physical cores (`lscpu -e`); on Windows nothing is pinned. Load: on Linux from /proc/stat (the
 host's CPUs as the container sees them) minus the CPU time of this campaign's own processes; on
 Windows from `load.ps1`.
@@ -27,6 +33,8 @@ import time
 
 SCENES = ["balls", "boxes", "capsules", "pyramid", "many_pyramids", "keva",
           "joint_ball", "joint_fixed", "joint_prismatic", "joint_revolute"]
+SWEEP_SCENES = ["many_pyramids", "joint_revolute"]
+REQUIRED_IDENTICAL = ["jolt", "jolt-4"]
 VARIANT_BUILDS = {"jolt": "jolt", "jolt-4": "jolt", "rapier-par": "rapier-par",
                   "rapier-serial": "rapier-serial", "rapier-simd8": "rapier-simd8",
                   "avian-par": "avian-par", "avian-serial": "avian-serial"}
@@ -138,7 +146,7 @@ def cases(plan, repeat, threads, scenes=SCENES):
                 for v in ["jolt", "jolt-4", "rapier-par", "avian-par"]:
                     out.append(("validate", scene, profile, v, ",".join(threads), None))
     elif plan == "sweep-validate":
-        for scene in ["many_pyramids", "joint_revolute"]:
+        for scene in [s for s in SWEEP_SCENES if s in scenes]:
             for v in ["jolt", "rapier-par", "avian-par"]:
                 out.append(("validate", scene, "matched", v, "4", "2,4,8"))
     elif plan == "main":
@@ -160,13 +168,20 @@ def cases(plan, repeat, threads, scenes=SCENES):
             for t in ["1", "4"]:
                 out.append(("split", scene, "matched", "avian-par", t, None))
     elif plan == "sweep":
-        for scene in ["many_pyramids", "joint_revolute"]:
+        for scene in [s for s in SWEEP_SCENES if s in scenes]:
             for i in ["2", "4", "8"]:
                 for v in rotated(["jolt", "rapier-par", "avian-par"], repeat):
                     out.append(("sweep", scene, "matched", v, "4", i))
     else:
         raise SystemExit(f"unknown plan {plan}")
     return out
+
+
+def check_scenes(scenes):
+    unknown = [s for s in scenes if s not in SCENES]
+    if unknown:
+        raise SystemExit(f"unknown scenes {','.join(unknown)}")
+    return scenes
 
 
 # Merging ------------------------------------------------------------------------------------
@@ -198,34 +213,77 @@ LOAD_HEADER = ("start\tmode\tscene\tprofile\tvariant\tthreads\titerations\trepea
                "load_before_pct\tload_during_mean_pct\tload_during_max_pct\tsamples\texit\toutcome\tpinned_cpus\n")
 
 
-def run_id(case, repeat):
-    """The run id `comparison all` gives the case's first thread count."""
+def run_ids(case, repeat):
+    """The run ids `comparison all` gives the case, by iteration count, then thread count."""
     mode, scene, profile, variant, threads, iters = case
-    rid = f"{mode}-r{repeat}-{variant}-{scene}-{profile}-t{threads.split(',')[0]}"
-    return rid + (f"-i{iters.split(',')[0]}" if iters else "")
+    out = []
+    for i in (iters.split(",") if iters else [None]):
+        for t in threads.split(","):
+            rid = f"{mode}-r{repeat}-{variant}-{scene}-{profile}-t{t}"
+            out.append((i, rid + (f"-i{i}" if i else "")))
+    return out
 
 
-def done_cases(out):
-    """Run ids already merged into the results, so an interrupted plan can resume."""
-    path = os.path.join(out, "cases.tsv")
+def read_rows(path):
+    """The rows of a TSV file as dicts; empty when the file does not exist."""
     if not os.path.exists(path):
-        return set()
+        return []
     with open(path, encoding="utf-8") as f:
-        return {line.split("\t")[1] for line in f.read().splitlines()[1:] if "\t" in line}
+        lines = f.read().splitlines()
+    if not lines:
+        return []
+    names = lines[0].split("\t")
+    return [dict(zip(names, line.split("\t"))) for line in lines[1:] if line]
+
+
+def case_status(out, case, repeat):
+    """`missing` when a run of the case has no outcome in `out`, or its gate was not computed;
+    `gate-failed` when a required determinism gate of the case did not hold; else `ok`."""
+    mode, scene, profile, variant, threads, iters = case
+    ids = run_ids(case, repeat)
+    rows = {r["run_id"] for name in ["runs.tsv", "quality.tsv"]
+            for r in read_rows(os.path.join(out, name))}
+    failed = {r["run_id"] for r in read_rows(os.path.join(out, "failures.tsv"))}
+    if not all(rid in rows or rid in failed for _, rid in ids):
+        return "missing"
+    if mode != "validate" or variant not in REQUIRED_IDENTICAL:
+        return "ok"
+    gates = read_rows(os.path.join(out, "determinism.tsv"))
+    status = "ok"
+    for i in (iters.split(",") if iters else [None]):
+        measured = [rid for j, rid in ids if j == i and rid in rows]
+        if len(measured) < 2:
+            continue
+        key = (variant, scene, profile, i or "default")
+        verdicts = [g["verdict"] for g in gates
+                    if (g["variant"], g["scene"], g["profile"], g["iterations"]) == key]
+        if not verdicts:
+            return "missing"
+        if any(v != "identical" for v in verdicts):
+            status = "gate-failed"
+    return status
+
+
+def runner(bins):
+    """The command that starts `comparison`."""
+    return [os.path.join(bins, "comparison-jolt" + EXE)]
 
 
 def run_case(out, bins, case, repeat, cpus, log):
+    """Runs one case unless it is complete; True when it is complete and its gates hold."""
     mode, scene, profile, variant, threads, iters = case
-    if run_id(case, repeat) in done_cases(out):
-        log(f"skip {run_id(case, repeat)}: already in the results")
-        return
+    name = run_ids(case, repeat)[0][1]
+    status = case_status(out, case, repeat)
+    if status != "missing":
+        log(f"skip {name}: already in the results ({status})")
+        return status == "ok"
     exes = ",".join(f"{v}={os.path.join(bins, 'comparison-' + b + EXE)}" for v, b in VARIANT_BUILDS.items())
     args = ["all", "--mode", mode, "--scenes", scene, "--profiles", profile, "--variants", variant,
             "--threads", threads, "--repeat", "1", "--first-repeat", str(repeat), "--exe", exes]
     if iters:
         args += ["--iterations", iters]
     if mode == "validate":
-        args += ["--require-identical", "jolt"]
+        args += ["--require-identical", ",".join(REQUIRED_IDENTICAL)]
     timed = mode != "validate"
     # A validation case runs every thread count in one call, pinned to the largest.
     widest = max(int(t) for t in threads.split(","))
@@ -244,7 +302,7 @@ def run_case(out, bins, case, repeat, cpus, log):
         t0 = time.time()
         if timed:
             sampler.start()
-        proc = subprocess.run(prefix + [os.path.join(bins, "comparison-jolt" + EXE)] + args + ["--out", tmp],
+        proc = subprocess.run(prefix + runner(bins) + args + ["--out", tmp],
                               capture_output=True, text=True)
         done.set()
         if timed:
@@ -254,10 +312,12 @@ def run_case(out, bins, case, repeat, cpus, log):
         worst = max(samples) if samples else 0.0
         mean = sum(samples) / len(samples) if samples else 0.0
         keep = not timed or worst <= LIMIT or attempt == 5
+        outcome = {"missing": "incomplete", "ok": "kept", "gate-failed": "kept, gate failed"}[
+            case_status(tmp, case, repeat)] if keep else "rerun"
         line = (f"{datetime.datetime.fromtimestamp(t0).isoformat(timespec='seconds')}\t{mode}\t{scene}\t"
                 f"{profile}\t{variant}\t{threads}\t{iters or 'default'}\t{repeat}\t{attempt}\t{wall:.1f}\t"
                 f"{before:.1f}\t{mean:.1f}\t{worst:.1f}\t{len(samples)}\t{proc.returncode}\t"
-                f"{'kept' if keep else 'rerun'}\t{','.join(prefix[2:3]) or 'none'}")
+                f"{outcome}\t{','.join(prefix[2:3]) or 'none'}")
         path = os.path.join(out, "load.tsv")
         if not os.path.exists(path):
             with open(path, "w", encoding="utf-8", newline="\n") as f:
@@ -265,13 +325,19 @@ def run_case(out, bins, case, repeat, cpus, log):
         with open(path, "a", encoding="utf-8", newline="\n") as f:
             f.write(line + "\n")
         log(line)
+        if outcome == "incomplete":
+            # A run without an outcome is a broken harness, not a result: not merged.
+            tail = (proc.stderr or "").strip().splitlines()[-1:] or ["no message"]
+            log(f"{name}: runs without an outcome, not merged: {tail[0]}")
+            shutil.rmtree(tmp, ignore_errors=True)
+            return False
         if keep:
             merge(tmp, out)
             shutil.rmtree(tmp, ignore_errors=True)
-            return
+            return outcome == "kept"
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("results")
     parser.add_argument("plan")
@@ -279,10 +345,13 @@ def main():
     parser.add_argument("--bins", default=None)
     parser.add_argument("--threads", default="1,4,8,16")
     parser.add_argument("--scenes", default=",".join(SCENES))
-    a = parser.parse_args()
-    root = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=HERE, capture_output=True,
-                          text=True).stdout.strip()
-    bins = a.bins or os.path.join(root, "target", "comparison-bins")
+    a = parser.parse_args(argv)
+    scenes = check_scenes(a.scenes.split(","))
+    bins = a.bins
+    if bins is None:
+        root = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=HERE, capture_output=True,
+                              text=True).stdout.strip()
+        bins = os.path.join(root, "target", "comparison-bins")
     os.makedirs(a.results, exist_ok=True)
     cpus = physical_cpus()
     with open(os.path.join(a.results, "campaign.log"), "a", encoding="utf-8") as logf:
@@ -293,11 +362,17 @@ def main():
             logf.flush()
 
         log(f"plan {a.plan} repeat {a.repeat}; pinned CPUs {cpus}")
-        for case in cases(a.plan, a.repeat, a.threads.split(","), a.scenes.split(",")):
-            run_case(a.results, bins, case, a.repeat, cpus, log)
-        subprocess.run([os.path.join(bins, "comparison-jolt" + EXE), "summarize", a.results])
-        log(f"plan {a.plan} repeat {a.repeat} done")
+        failed = [case for case in cases(a.plan, a.repeat, a.threads.split(","), scenes)
+                  if not run_case(a.results, bins, case, a.repeat, cpus, log)]
+        summary = subprocess.run(runner(bins) + ["summarize", a.results]).returncode
+        for case in failed:
+            log(f"failed: {run_ids(case, a.repeat)[0][1]}")
+        if summary != 0:
+            log(f"summarize failed with exit {summary}")
+        ok = not failed and summary == 0
+        log(f"plan {a.plan} repeat {a.repeat} {'done' if ok else 'failed'}")
+        return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

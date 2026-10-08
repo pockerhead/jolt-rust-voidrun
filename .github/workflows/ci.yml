@@ -222,8 +222,9 @@ jobs:
 
   # The engine comparison (benches/comparison): clippy and tests with every engine, a short
   # validation matrix of moving scenes with 1 and 4 threads (Jolt's digests must be identical),
-  # and each engine's hello binary built and run alone. The full benchmark runs by hand
-  # (docs/comparison.md). Its native library is the test job's default one.
+  # each engine's hello binary built and run alone, and the campaign script's tests against a fake
+  # harness. The full benchmark runs by hand (docs/comparison.md). Its native library is the test
+  # job's default one.
   comparison:
     name: comparison ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -297,6 +298,11 @@ jobs:
           for engine in jolt rapier avian; do
             cargo run --locked -p comparison --no-default-features --features $engine --bin hello-$engine
           done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Campaign script tests
+        run: python -m unittest discover -s benches/comparison/scripts -v
 
   # The real-mesh checks on every model of assets/models/models.tsv, the large downloaded ones
   # included (scripts/fetch_models.py, cached by the table's hash), with and without Jolt's
