@@ -67,8 +67,8 @@ def main():
     with open(a.doc, encoding="utf-8") as f:
         doc = f.read().replace("\r\n", "\n")
     for name, body in parts.items():
-        pattern = re.compile(rf"(<!-- generated:{name} -->\n).*?(\n<!-- /generated:{name} -->)", re.S)
-        doc, count = pattern.subn(lambda m: m.group(1) + "\n" + body + "\n" + m.group(2), doc)
+        pattern = re.compile(rf"(<!-- generated:{name} -->\n)(?:.*?\n)?(<!-- /generated:{name} -->)", re.S)
+        doc, count = pattern.subn(lambda m: m.group(1) + "\n" + body + "\n\n" + m.group(2), doc)
         if count != 1:
             raise SystemExit(f"marker generated:{name} not found once in {a.doc}")
     with open(a.doc, "w", encoding="utf-8", newline="\n") as f:
