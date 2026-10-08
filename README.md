@@ -77,7 +77,8 @@ oxijolt = "1"
 Everything planned for 1.0 is done; what works today, with links to the guides, is in
 [docs/features.md](docs/features.md). Next:
 
-- [ ] Comparison with Rapier and Avian
+- [x] Comparison with Rapier and Avian
+- [x] Solver step counts per world
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
 - [ ] Same results across operating systems, checked in CI
@@ -130,6 +131,20 @@ results match bit for bit with 1 and 4 worker threads and on a caller job system
 values get a typed error before they reach Jolt. It builds without LLVM. Its shape and rigid-body
 API is not complete yet; the [roadmap](#roadmap) says what is missing.
 
+## Compared with Rapier and Avian
+
+On ten of Rapier's own stress scenes, on a 16-core Linux machine at 1 to 16 threads with matched
+settings ([comparison](docs/comparison.md), raw results and scripts in the repository):
+Rapier's step is faster on scenes of many contacts, 1.9 to 2.2 times on a box stack and 1.3 to
+1.85 times on a 43 000-box pyramid. oxijolt is faster on joints from four threads, up to 2.1
+times, except a ball-joint net where its step gets slower at 8 and 16 threads. Avian is the slowest on
+nearly every scene. oxijolt uses the least memory, under 55 % of Rapier's. All three gave the
+same results at every thread count. oxijolt and Rapier each kept 7 of 10 scenes within the
+quality bounds (with each engine's defaults Rapier 8, oxijolt 7); oxijolt lets some capsules
+through the ground and its plank towers collapse. oxijolt brings
+Jolt's character controller, wheeled and tracked vehicles and ragdolls; it needs a C++ toolchain
+(or a prebuilt library) and has no WASM target.
+
 ## Documentation
 
 - [Guide](docs/guide.md): a game scene with terrain, queries, a floating origin, a character, a
@@ -138,6 +153,8 @@ API is not complete yet; the [roadmap](#roadmap) says what is missing.
   [events](docs/events.md), [save and restore](docs/state.md), [job systems](docs/job-system.md),
   [determinism](docs/determinism.md), [shape cooking](docs/shape-cooking.md),
   [building](docs/building.md).
+- [Comparison with Rapier and Avian](docs/comparison.md): speed, quality and features on Rapier's
+  stress scenes.
 - [Limits](docs/limits.md) and [coverage](docs/coverage.md); [benchmarks](docs/benchmarks.md)
   against a game's budgets; [real meshes](docs/real-meshes.md) from open sources.
 - [Character study](docs/character-study.md): which character laws CharacterVirtual's settings

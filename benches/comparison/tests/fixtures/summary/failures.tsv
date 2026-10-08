@@ -1,0 +1,2 @@
+mode	run_id	variant	scene	profile	threads	reason
+time	time-r1-avian-par-boxes-matched-t8	avian-par	boxes	matched	8	exit code: 1: error: tick 3: the physics clock advanced 0ns instead of one step

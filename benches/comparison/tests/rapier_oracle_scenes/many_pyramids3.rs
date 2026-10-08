@@ -1,0 +1,77 @@
+// Rapier's `examples3d/stress_tests/many_pyramids3.rs` at v0.36.0
+// (https://github.com/dimforge/rapier/blob/v0.36.0/examples3d/stress_tests/many_pyramids3.rs).
+// Copyright Dimforge and contributors, Apache-2.0. Changed: the testbed lines are removed
+// and `run` returns the world it built as `build`; the world-building code is verbatim.
+#![allow(clippy::all, unused_mut, unused_variables)]
+
+use rapier3d::prelude::*;
+
+fn create_pyramid(
+    bodies: &mut RigidBodySet,
+    colliders: &mut ColliderSet,
+    offset: Vec3,
+    stack_height: usize,
+    rad: f32,
+) {
+    let shift = rad * 2.0;
+
+    for i in 0usize..stack_height {
+        for j in i..stack_height {
+            let fj = j as f32;
+            let fi = i as f32;
+            let x = (fi * shift / 2.0) + (fj - fi) * shift;
+            let y = fi * shift;
+
+            // Build the rigid body.
+            let rigid_body = RigidBodyBuilder::dynamic().translation(Vec3::new(x, y, 0.0) + offset);
+            let handle = bodies.insert(rigid_body);
+            let collider = ColliderBuilder::cuboid(rad, rad, rad);
+            colliders.insert_with_parent(collider, handle, bodies);
+        }
+    }
+}
+
+pub fn build() -> PhysicsWorld {
+    /*
+     * World
+     */
+    let mut world = PhysicsWorld::new();
+
+    let rad = 0.5;
+    let pyramid_count = 40;
+    let spacing = 4.0;
+
+    /*
+     * Ground
+     */
+    let ground_size = 50.0;
+    let ground_height = 0.1;
+
+    let rigid_body = RigidBodyBuilder::fixed().translation(Vec3::new(0.0, -ground_height, 0.0));
+    let collider = ColliderBuilder::cuboid(
+        ground_size,
+        ground_height,
+        pyramid_count as f32 * spacing / 2.0 + ground_size,
+    );
+    let _ = world.insert(rigid_body, collider);
+
+    /*
+     * Create the cubes
+     */
+    for pyramid_index in 0..pyramid_count {
+        let bottomy = rad;
+        create_pyramid(
+            &mut world.bodies,
+            &mut world.colliders,
+            Vec3::new(
+                0.0,
+                bottomy,
+                (pyramid_index as f32 - pyramid_count as f32 / 2.0) * spacing,
+            ),
+            20,
+            rad,
+        );
+    }
+
+    world
+}

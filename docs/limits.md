@@ -358,6 +358,28 @@ written; mutable compound bounds are written per block of four. None was found, 
 zero-filling allocator is installed; `tests/shape_binary_state.rs` checks that two processes save
 equal bytes and that a restored shape saves the bytes it came from.
 
+## Solver step counts
+
+`WorldSettings::velocity_steps` is between `WorldSettings::MIN_VELOCITY_STEPS` (2) and
+`WorldSettings::MAX_SOLVER_STEPS` (255), `position_steps` between 0 and 255.
+
+- At least 2 velocity steps: Jolt applies friction with the normal impulse of the previous velocity
+  iteration, so with one iteration friction does nothing (`PhysicsSettings.h:83`).
+- At most 255 of either: Jolt keeps step counts in 8 bits. The island builder stores each island's
+  position step count as `uint8` (`IslandBuilder.cpp:385`), the step statistics cast both counts to
+  `uint8` (`PhysicsSystem.cpp:1545-1546`), and the per-body overrides assert `< 256`
+  (`Body/MotionProperties.h:192,196`). A larger count would wrap.
+- 0 position steps is Jolt's own way to turn the position pass off.
+
+The counts are written once, in `PhysicsWorld::new`, through joltc's
+`JPH_PhysicsSystem_SetPhysicsSettings`. joltc copies every field of its `JPH_PhysicsSettings` both
+ways; the one Jolt field it lacks, `mInternalEdgeRemovalVertexToleranceSq`, is set to Jolt's default,
+which oxijolt never changes. `solver_steps_leave_every_other_physics_setting_at_jolts_default` checks
+that every other field still holds Jolt's default after the write. The bounds are checked
+by `step_counts_outside_jolts_range_are_refused` and `step_counts_read_back_from_jolt`; a five-cube
+stack at 2 velocity and 0 position steps stays finite and above the floor for 60 steps
+(`a_stack_without_position_steps_stays_finite`).
+
 ## Accelerations
 
 `MAX_ACCELERATION` is `MAX_LINEAR_VELOCITY / PhysicsWorld::MIN_DELTA_TIME`, about 5e8 m/s². A larger

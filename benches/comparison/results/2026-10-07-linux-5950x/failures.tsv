@@ -1,0 +1,5 @@
+mode	run_id	variant	scene	profile	threads	reason
+validate	validate-r1-jolt-joint_revolute-matched-t4-i2	jolt	joint_revolute	matched	4	exit status: 1: error: tick 339: the step dropped contacts: StepReport { manifold_cache_full: false, body_pair_cache_full: true, contact_constraints_full: false, rejected_contact_settings: 0 }
+sweep	sweep-r1-jolt-joint_revolute-matched-t4-i2	jolt	joint_revolute	matched	4	exit status: 1: error: tick 339: the step dropped contacts: StepReport { manifold_cache_full: false, body_pair_cache_full: true, contact_constraints_full: false, rejected_contact_settings: 0 }
+sweep	sweep-r2-jolt-joint_revolute-matched-t4-i2	jolt	joint_revolute	matched	4	exit status: 1: error: tick 339: the step dropped contacts: StepReport { manifold_cache_full: false, body_pair_cache_full: true, contact_constraints_full: false, rejected_contact_settings: 0 }
+sweep	sweep-r3-jolt-joint_revolute-matched-t4-i2	jolt	joint_revolute	matched	4	exit status: 1: error: tick 339: the step dropped contacts: StepReport { manifold_cache_full: false, body_pair_cache_full: true, contact_constraints_full: false, rejected_contact_settings: 0 }

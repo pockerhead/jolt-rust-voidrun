@@ -1,0 +1,2 @@
+variant	scene	profile	iterations	threads	ticks	first_differing_tick	moved	digest_changes	verdict
+jolt	boxes	matched	default	1/4/8	600	none	true	true	identical

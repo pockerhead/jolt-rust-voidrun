@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "xtask", "examples/playground"]
-# The playground (a window and a second native build with the debug renderer) is built only when
-# asked for: `-p playground` or `--workspace`.
+members = ["crates/*", "xtask", "examples/playground", "benches/comparison"]
+# The playground (a window and a second native build with the debug renderer) and the engine
+# comparison (Rapier, Avian and Bevy as dependencies) are built only when asked for: `-p playground`,
+# `-p comparison` or `--workspace`.
 default-members = ["crates/oxijolt", "crates/oxijolt-sys", "xtask"]

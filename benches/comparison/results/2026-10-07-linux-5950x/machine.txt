@@ -1,0 +1,8 @@
+os=linux arch=x86_64 cpu=AMD Ryzen 9 5950X 16-Core Processor logical_threads=16 avx2=true fma=true
+exe avian-par=target/comparison-bins-2/comparison-avian-par
+exe avian-serial=target/comparison-bins-2/comparison-avian-serial
+exe jolt=target/comparison-bins-2/comparison-jolt
+exe jolt-4=target/comparison-bins-2/comparison-jolt
+exe rapier-par=target/comparison-bins-2/comparison-rapier-par
+exe rapier-serial=target/comparison-bins-2/comparison-rapier-serial
+exe rapier-simd8=target/comparison-bins-2/comparison-rapier-simd8

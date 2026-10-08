@@ -1,0 +1,6 @@
+mode	run_id	variant	scene	profile	threads	iterations	steps	build_ns	cpu_ns	wall_ns	busy_cores	peak_resident	peak_commit	baseline_resident	baseline_commit
+split	split-r1-avian-par-boxes-matched-t4	avian-par	boxes	matched	4	default	600	2000000	0	0	1.000	104857600	0	4194304	0
+split	split-r2-avian-par-boxes-matched-t4	avian-par	boxes	matched	4	default	600	2000000	0	0	1.000	104857600	0	4194304	0
+split	split-r3-avian-par-boxes-matched-t4	avian-par	boxes	matched	4	default	600	2000000	0	0	1.000	104857600	0	4194304	0
+time	time-r1-jolt-boxes-matched-t1	jolt	boxes	matched	1	default	600	2000000	0	0	1.000	104857600	0	4194304	0
+time	time-r2-jolt-boxes-matched-t1	jolt	boxes	matched	1	default	600	2000000	0	0	1.000	104857600	0	4194304	0
