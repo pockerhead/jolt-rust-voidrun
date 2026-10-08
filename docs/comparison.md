@@ -639,35 +639,36 @@ height against tick 60, before the reference moved to tick 300 (results'
 
 ### Avian's physics schedule inside the update
 
-Split runs with Avian's total step timer: the update as in the tables above, the time of Avian's
-physics schedule inside it, and the rest (Bevy's schedule, time and transform propagation, Avian's
-systems outside its physics schedule). The last column is the plain timing run's update; the
-difference to the first is the timer's own cost.
+Split runs with Avian's total step timer, their three repeats pooled like the rows above: the
+update as in the tables above, the time of Avian's physics schedule inside it, and the rest
+(Bevy's schedule, time and transform propagation, Avian's systems outside its physics schedule).
+The last column is the plain timing run's update. The first column minus the last is the timer's
+own cost plus the variation between runs; it is negative in four rows, down to -1.6 ms on `keva`.
 
 <!-- generated:split -->
 
 | scene | profile | threads | update mean ms | physics schedule mean ms | rest of the update mean ms | timing-run update mean ms |
 |---|---|---|---|---|---|---|
-| balls | matched | 1 | 9.144 | 8.067 | 1.077 | 9.139 |
-| balls | matched | 4 | 4.279 | 3.658 | 0.620 | 4.278 |
-| boxes | matched | 1 | 11.421 | 11.041 | 0.380 | 11.396 |
-| boxes | matched | 4 | 6.450 | 6.208 | 0.242 | 6.409 |
-| capsules | matched | 1 | 10.111 | 9.399 | 0.712 | 10.119 |
-| capsules | matched | 4 | 5.559 | 5.185 | 0.374 | 5.507 |
-| joint_ball | matched | 1 | 21.192 | 19.570 | 1.622 | 21.046 |
-| joint_ball | matched | 4 | 15.165 | 13.943 | 1.221 | 15.209 |
-| joint_fixed | matched | 1 | 15.538 | 13.931 | 1.607 | 15.449 |
-| joint_fixed | matched | 4 | 13.857 | 12.648 | 1.209 | 13.843 |
-| joint_prismatic | matched | 1 | 50.363 | 47.803 | 2.559 | 50.235 |
-| joint_prismatic | matched | 4 | 31.764 | 29.796 | 1.968 | 31.798 |
-| joint_revolute | matched | 1 | 13.452 | 12.182 | 1.270 | 13.470 |
-| joint_revolute | matched | 4 | 9.836 | 8.961 | 0.875 | 9.844 |
-| keva | matched | 1 | 504.050 | 499.754 | 4.296 | 506.118 |
-| keva | matched | 4 | 193.974 | 189.697 | 4.276 | 195.277 |
-| many_pyramids | matched | 1 | 68.946 | 67.745 | 1.201 | 69.058 |
-| many_pyramids | matched | 4 | 27.694 | 26.842 | 0.852 | 27.086 |
-| pyramid | matched | 1 | 590.443 | 585.816 | 4.628 | 589.059 |
-| pyramid | matched | 4 | 233.166 | 229.425 | 3.741 | 231.822 |
+| balls | matched | 1 | 9.186 | 8.109 | 1.076 | 9.139 |
+| balls | matched | 4 | 4.287 | 3.665 | 0.622 | 4.278 |
+| boxes | matched | 1 | 11.416 | 11.052 | 0.364 | 11.396 |
+| boxes | matched | 4 | 6.436 | 6.196 | 0.240 | 6.409 |
+| capsules | matched | 1 | 10.101 | 9.389 | 0.712 | 10.119 |
+| capsules | matched | 4 | 5.528 | 5.155 | 0.373 | 5.507 |
+| joint_ball | matched | 1 | 21.160 | 19.537 | 1.623 | 21.046 |
+| joint_ball | matched | 4 | 15.436 | 14.203 | 1.233 | 15.209 |
+| joint_fixed | matched | 1 | 15.541 | 13.937 | 1.603 | 15.449 |
+| joint_fixed | matched | 4 | 13.869 | 12.657 | 1.212 | 13.843 |
+| joint_prismatic | matched | 1 | 50.676 | 48.123 | 2.552 | 50.235 |
+| joint_prismatic | matched | 4 | 31.889 | 29.930 | 1.960 | 31.798 |
+| joint_revolute | matched | 1 | 13.485 | 12.208 | 1.276 | 13.470 |
+| joint_revolute | matched | 4 | 9.843 | 8.969 | 0.874 | 9.844 |
+| keva | matched | 1 | 504.754 | 500.444 | 4.311 | 506.118 |
+| keva | matched | 4 | 193.663 | 189.483 | 4.180 | 195.277 |
+| many_pyramids | matched | 1 | 69.164 | 67.959 | 1.205 | 69.058 |
+| many_pyramids | matched | 4 | 27.245 | 26.392 | 0.854 | 27.086 |
+| pyramid | matched | 1 | 589.255 | 584.637 | 4.617 | 589.059 |
+| pyramid | matched | 4 | 232.916 | 229.199 | 3.717 | 231.822 |
 
 <!-- /generated:split -->
 

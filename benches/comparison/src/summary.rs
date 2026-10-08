@@ -62,10 +62,12 @@ fn mb(bytes: f64) -> String {
     format!("{:.0}", bytes / (1u64 << 20) as f64)
 }
 
-/// The median of `values`, which must not be empty.
+/// The median of `values`, which must not be empty; the mean of the two middle values when
+/// their count is even.
 fn median(values: &mut [f64]) -> f64 {
     values.sort_by(f64::total_cmp);
-    values[(values.len() - 1) / 2]
+    let n = values.len();
+    (values[(n - 1) / 2] + values[n / 2]) / 2.0
 }
 
 /// The key that joins a timing row to its validation row.
@@ -227,9 +229,13 @@ fn split_section(dir: &Path, runs: &[Row], out: &mut String) {
     let timed = group_runs(runs, "time");
     for ((profile, scene), variants) in groups {
         for ((variant, threads, iterations), repeats) in variants {
-            let run_id = get(repeats[0], "run_id");
-            let updates = WARM.of(&samples(dir, run_id, 1)).to_vec();
-            let physics = WARM.of(&samples(dir, run_id, 2)).to_vec();
+            let pooled = |column| -> Vec<u64> {
+                repeats
+                    .iter()
+                    .flat_map(|r| WARM.of(&samples(dir, get(r, "run_id"), column)).to_vec())
+                    .collect()
+            };
+            let (updates, physics) = (pooled(1), pooled(2));
             let (Some(u), Some(p)) = (Stats::of(&updates), Stats::of(&physics)) else {
                 continue;
             };

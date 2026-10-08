@@ -15,7 +15,7 @@ os=windows arch=x86_64 cpu=Example CPU logical_threads=16 avx2=true fma=true
 | variant | threads | runs | warm mean ms | warm p50 | warm p95 | warm p99 | warm max | run means | cold mean | tick 1 | build + tick 1 | busy cores | peak memory MB | quality |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | avian-par | 4 | 1 | 8.005 | 8.004 | 8.009 | 8.009 | 8.009 | 8.005–8.005 | 24.000 | 24.000 | 26.000 | 4.00 | 100 | not validated |
-| jolt | 1 | 2 | 4.104 | 4.009 | 4.208 | 4.209 | 4.209 | 4.005–4.205 | 12.300 | 12.000 | 14.000 | 1.00 | 100 | within bounds |
+| jolt | 1 | 2 | 4.104 | 4.009 | 4.208 | 4.209 | 4.209 | 4.005–4.205 | 12.300 | 12.300 | 14.300 | 1.00 | 100 | within bounds |
 | rapier-par | 1 | 1 | 3.005 | 3.004 | 3.009 | 3.009 | 3.009 | 3.005–3.005 | 9.000 | 9.000 | 11.000 | 1.00 | 100 | below bound: height_ratio, final_speed_p99 |
 
 ## Solver sweep

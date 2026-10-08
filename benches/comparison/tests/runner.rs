@@ -47,6 +47,44 @@ fn the_summary_of_the_fixture_files_is_the_checked_in_one() {
     );
 }
 
+/// The cells of the summary row of `dir` whose first cells are `start`.
+fn summary_row(dir: &Path, start: &[&str]) -> Vec<String> {
+    let summary = summarize(dir);
+    let rows: Vec<Vec<String>> = summary
+        .lines()
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|c| c.trim().to_owned())
+                .collect()
+        })
+        .filter(|cells: &Vec<String>| {
+            cells.len() > start.len() && cells.iter().zip(start).all(|(c, s)| c == s)
+        })
+        .collect();
+    assert_eq!(rows.len(), 1, "{start:?} in\n{summary}");
+    rows.into_iter().next().unwrap()
+}
+
+#[test]
+fn the_split_table_pools_every_repeat() {
+    // Three split repeats with constant updates of 9, 10 and 14 ms and physics steps of 7, 8
+    // and 9 ms, the same number of warm ticks each.
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repeats");
+    let row = summary_row(&dir, &["boxes", "matched", "4"]);
+    assert_eq!(row[3..], ["11.000", "8.000", "3.000", "n/a"]);
+}
+
+#[test]
+fn startup_medians_of_two_repeats_are_their_mean() {
+    // Two timing repeats with tick 1 at 10 and 14 ms, warm ticks at 4 and 6 ms, built in 2 ms.
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repeats");
+    let row = summary_row(&dir, &["jolt", "1"]);
+    assert_eq!(row[2], "2");
+    assert_eq!(row[3], "5.000");
+    assert_eq!(row[10..12], ["12.000", "14.000"]);
+}
+
 #[test]
 fn a_validation_matrix_writes_every_file_and_passes_jolts_gate() {
     let out = temp_dir("validate");
