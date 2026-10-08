@@ -4,6 +4,11 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- A comparison with Rapier 0.36.0 and Avian 0.7.0 on ten of Rapier's stress scenes
+  ([docs/comparison.md](docs/comparison.md)): speed at 1 to 16 threads, quality bounds,
+  determinism across thread counts and features, with the harness (`benches/comparison`, not
+  published), its scripts and the raw results of a 16-core Linux machine. Where oxijolt loses is
+  stated there.
 - Linux and other non-MSVC, non-Apple builds compile Jolt with its x86-64 instruction-set flags
   again (`-mavx2 -mfma` and the rest, and Jolt's matching `JPH_USE_*` definitions): joltc caches
   `CMAKE_OSX_ARCHITECTURES=x86_64;arm64` on every platform, which Jolt read as an ARM build, so
