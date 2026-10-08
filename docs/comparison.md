@@ -833,7 +833,7 @@ Checked on 2026-10-07 against oxijolt at this commit, rapier3d 0.36.0 (tag `v0.3
 | Language | Rust over C++ (Jolt and joltc) ([lineage](../LINEAGE.md)) | pure Rust ([manifest](https://github.com/dimforge/rapier/blob/v0.36.0/crates/rapier3d/Cargo.toml)) | pure Rust ([manifest](https://github.com/avianphysics/avian/blob/v0.7.0/crates/avian3d/Cargo.toml)) |
 | Build requirements | a C++ toolchain and CMake 3.20, or a prebuilt native library ([building](building.md)) | Rust only ([manifest](https://github.com/dimforge/rapier/blob/v0.36.0/crates/rapier3d/Cargo.toml)) | Rust only ([manifest](https://github.com/avianphysics/avian/blob/v0.7.0/crates/avian3d/Cargo.toml)) |
 | Needs Bevy | no ([manifest](../crates/oxijolt/Cargo.toml)) | no; `bevy_rapier` is separate ([bindings](https://github.com/dimforge/rapier/tree/v0.36.0/bindings/bevy_rapier)) | yes ([manifest](https://github.com/avianphysics/avian/blob/v0.7.0/crates/avian3d/Cargo.toml#L80-L85)) |
-| Minimum Rust | 1.88 ([manifest](../crates/oxijolt/Cargo.toml)) | 1.86 ([manifest](https://github.com/dimforge/rapier/blob/v0.36.0/Cargo.toml#L67)) | not declared; edition 2024 needs 1.85 ([manifest](https://github.com/avianphysics/avian/blob/v0.7.0/crates/avian3d/Cargo.toml#L4)) |
+| Minimum Rust | 1.88 ([manifest](../crates/oxijolt/Cargo.toml)) | 1.86 ([manifest](https://github.com/dimforge/rapier/blob/v0.36.0/Cargo.toml#L67)) | not declared; its Bevy 0.19.1 (the version this comparison's lockfile resolves) needs 1.95 ([Bevy manifest](https://github.com/bevyengine/bevy/blob/v0.19.1/Cargo.toml#L13)) |
 | Licence | MIT or Apache-2.0; Jolt and joltc MIT ([lineage](../LINEAGE.md)) | Apache-2.0 ([manifest](https://github.com/dimforge/rapier/blob/v0.36.0/Cargo.toml#L66)) | MIT or Apache-2.0 ([manifest](https://github.com/avianphysics/avian/blob/v0.7.0/crates/avian3d/Cargo.toml#L5)) |
 
 ## Where oxijolt loses
@@ -869,14 +869,14 @@ Checked on 2026-10-07 against oxijolt at this commit, rapier3d 0.36.0 (tag `v0.3
 
 The owner's numbers from the game VOIDRUN, which replaced Rapier's kinematic character controller
 with oxijolt's `CharacterVirtual` ([the table as given](../benches/comparison/results/owner-voidrun-2026-10-04.md)).
-Release build, on a weak 4-core machine. They are the game's own observations, not runs of this
-repository, and the two sides did not always time the same work:
+The game rows are a release build on a weak 4-core machine. They are the game's own observations,
+not runs of this repository, and the two sides did not always time the same work:
 
 | What | Rapier | Jolt | What each side timed |
 |---|---|---|---|
 | Whole walking system, 60 NPCs in the near band, mean per tick | 3.43 ms | 0.83 ms | the game's walking system with each engine; a system-level observation, not an engine speed |
 | One controller move in the game | 86-156 us | 16-19 us p50 / 28-43 us p99 | Rapier: in the game, statistic and window not recorded; Jolt: in the game, with the game's wrapper. No ratio. |
-| One controller move, the binding alone | n/a | 2.7 us p50 / 6 us p99 | `update_character` with terrain in the binding's own benchmark, on the machine of the runs above ([benchmarks](benchmarks.md)); no Rapier counterpart |
+| One controller move, the binding alone | n/a | 2.7 us p50 / 6 us p99 | `update_character` with terrain in the binding's own benchmark: 30 characters on a flat 3 x 3 chunk scene, on an Intel Core i9-11900K under Windows 11, not the game's machine and not the machine of the runs above ([benchmarks](benchmarks.md)); no Rapier counterpart |
 | Physics world step p50/p99 | 110 / 268 us | 45 / 111 us | the world step; the setups differ in damping and sleeping, and Rapier's item gravity was applied before its timer, Jolt's inside it |
 | Refresh before queries when the world changed, p99 | 3.8 ms | 164 us | Rapier `detect_collisions` (broad and narrow phase) against Jolt `optimize_broad_phase`: different work, no ratio |
 
@@ -890,8 +890,9 @@ A head-to-head of the character controllers on one scene is not part of this com
 
 ## Reproduce
 
-On Linux with a C++ toolchain, CMake 3.20 or newer, Python 3 and Rust 1.88 or newer, from the
-repository root, one cargo process at a time on an otherwise idle machine:
+On Linux with a C++ toolchain, CMake 3.20 or newer, Python 3 and Rust 1.95 or newer (Bevy 0.19.1,
+which Avian pulls in, needs it; oxijolt alone needs 1.88), from the repository root, one cargo
+process at a time on an otherwise idle machine:
 
 ```bash
 python3 benches/comparison/scripts/build_variants.py          # six binaries in target/comparison-bins

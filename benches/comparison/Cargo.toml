@@ -4,6 +4,8 @@ description = "Benchmarks oxijolt against Rapier and Avian on scenes ported from
 version = "0.0.0"
 license = "MIT OR Apache-2.0"
 edition = "2021"
+# Bevy 0.19.1, which Avian pulls in, declares 1.95; oxijolt alone needs 1.88.
+rust-version = "1.95"
 publish = false
 default-run = "comparison"
 
