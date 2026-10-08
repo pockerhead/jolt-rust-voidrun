@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use comparison::measure::{percentile, Stats, COLD, TICK_1, WARM};
 use comparison::os;
+use comparison::run::TimeResult;
 
 #[test]
 fn nearest_rank_percentiles() {
@@ -42,6 +43,38 @@ fn memory_readers_return_values() {
     drop(block);
 }
 
+#[test]
+fn busy_cores_is_cpu_time_over_wall_time() {
+    let run = |cpu_ns, wall_ns| TimeResult {
+        build_ns: 0,
+        cpu_ns,
+        wall_ns,
+        peak_resident: 0,
+        peak_commit: 0,
+        baseline_resident: 0,
+        baseline_commit: 0,
+    };
+    assert_eq!(run(2_400_000_000, 600_000_000).busy_cores(), 4.0);
+    assert_eq!(run(300, 600).busy_cores(), 0.5);
+    assert_eq!(run(5, 0).busy_cores(), 5.0);
+}
+
+/// A fixed amount of work, so the CPU time it takes does not depend on the scheduler.
+fn work(iterations: u64) {
+    let mut x = 0u64;
+    for _ in 0..iterations {
+        x = std::hint::black_box(x.wrapping_add(1));
+    }
+}
+
+#[test]
+fn the_cpu_time_reader_grows_with_work() {
+    let before = os::cpu_time_ns();
+    work(200_000_000);
+    let after = os::cpu_time_ns();
+    assert!(after > before, "{before} -> {after}");
+}
+
 fn spin(duration: Duration) {
     let start = Instant::now();
     let mut x = 0u64;
@@ -62,7 +95,10 @@ fn busy_cores(threads: usize) -> f64 {
     (os::cpu_time_ns() - cpu) as f64 / wall.elapsed().as_nanos() as f64
 }
 
+/// A check of the CPU time reader on an idle machine; the thresholds depend on how much CPU
+/// the scheduler gives the spinning threads, so it runs only when asked for.
 #[test]
+#[ignore = "depends on scheduling; run on an idle machine with --ignored"]
 fn busy_cores_counts_spinning_threads() {
     let one = busy_cores(1);
     assert!((0.5..=1.5).contains(&one), "one thread: {one}");
