@@ -100,7 +100,8 @@ cp "$work/www/good/$name.tar.gz" "$work/www/bad/$name.tar.gz"
 joltc_lib=$(ls "$stage/lib" | grep -i joltc)
 
 # Every cargo child starts from the same environment: nothing of the caller's archive
-# settings leaks in, CMake and the C++ compiler are missing, the local server is not proxied.
+# settings leaks in, CMake and the C++ compiler are missing, the local server is not proxied,
+# and the output has no colour codes for the checks to trip over.
 case_env=()
 cargo_in() {
   local dir=$1
@@ -108,7 +109,7 @@ cargo_in() {
   env -u JOLTC_LIB_DIR -u JOLTC_PREBUILT -u JOLTC_PREBUILT_URL -u CARGO_NET_OFFLINE \
     -u NIX_BUILD_TOP -u RUSTC_LINKER -u DOCS_RS -u RUSTFLAGS -u CARGO_TARGET_DIR \
     CMAKE=oxijolt-no-cmake CXX=oxijolt-no-cxx NO_PROXY=127.0.0.1 no_proxy=127.0.0.1 \
-    CARGO_TARGET_DIR="$(native "$work/$dir")" "${case_env[@]}" cargo "$@"
+    CARGO_TERM_COLOR=never CARGO_TARGET_DIR="$(native "$work/$dir")" "${case_env[@]}" cargo "$@"
 }
 
 (cd "$repo" && env -u CARGO_TARGET_DIR cargo fetch --locked > /dev/null)
