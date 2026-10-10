@@ -266,12 +266,17 @@ pub(crate) struct ConstraintEntry {
 /// the constraint was solved in: N·s for linear parts, N·m·s for angular parts. Divide by that
 /// step's `delta_time` for the mean force (N) or torque (N·m). Each readout is one solver part's
 /// share, not the net force on a body: a weld off the centre of mass reads its torque partly in
-/// the position part's lever arm. For the parts that join two points or two orientations
-/// (position parts, the rotation part of a fixed constraint and a slider) the impulse acts on
-/// body 2 as a world-space vector and on body 1 as its opposite; motors, limits and the
-/// two-component readouts read one value per constraint axis; couplings and pulleys say on each
-/// readout how it maps to their bodies. A constraint whose bodies sleep, or that is disabled,
-/// keeps the values of the last step it was solved in. See
+/// the position part's lever arm. Each impulse acts on body 2 and its opposite on body 1;
+/// couplings and pulleys say on each readout how it maps to their bodies instead. A `Vec3` part
+/// that joins two points or two orientations (the position of a fixed, point, hinge, cone or
+/// swing-twist constraint; the rotation of a fixed or slider constraint, and of a path in
+/// [`ConstrainToPath`](crate::PathRotationConstraint::ConstrainToPath) or `FullyConstrained`
+/// mode; six-DOF while all three axes of that kind are fixed) reads a world-space vector. Every
+/// other readout is one value per solver part along that part's axis: the constraint axes for
+/// motors, friction, the two-component readouts and six-DOF translation, the line between the
+/// points for a distance, and for swing-twist limits an axis Jolt picks each step (see
+/// [`total_lambda_limits`](ConstraintRef::total_lambda_limits)). A constraint whose bodies
+/// sleep, or that is disabled, keeps the values of the last step it was solved in. See
 /// [docs/constraints.md#breakable-constraints].
 ///
 /// [docs/constraints.md#breakable-constraints]: https://github.com/pockerhead/oxijolt/blob/main/docs/constraints.md#breakable-constraints

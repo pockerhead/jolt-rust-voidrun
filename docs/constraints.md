@@ -152,16 +152,29 @@ weld.
 | hinge | `total_lambda_position`; `total_lambda_rotation`; `total_lambda_motor`, `total_lambda_rotation_limits` | N·s; N·m·s; N·m·s | world vector; the two axes perpendicular to the hinge; about the hinge axis | on body 2; body 1 the opposite |
 | slider | `total_lambda_position`; `total_lambda_rotation`; `total_lambda_motor`, `total_lambda_position_limits` | N·s; N·m·s; N·s | the two axes perpendicular to the slider; world vector; along the slider axis | on body 2; body 1 the opposite |
 | cone | `total_lambda_position`, `total_lambda_rotation` | N·s, N·m·s | world vector; one value for the cone | on body 2; body 1 the opposite |
-| swing-twist | `total_lambda_position`; `total_lambda_limits`, `total_lambda_motor` | N·s; N·m·s | world vector; per constraint axis (twist, swing Y, swing Z) | on body 2; body 1 the opposite |
-| six-DOF | `total_lambda_position`, `total_lambda_rotation`; `total_lambda_motor_translation`, `total_lambda_motor_rotation` | N·s, N·m·s | world vectors while the three axes are fixed, otherwise per constraint axis; per constraint axis | on body 2; body 1 the opposite |
+| swing-twist | `total_lambda_position`; `total_lambda_limits`; `total_lambda_motor` | N·s; N·m·s; N·m·s | world vector; the twist, swing Y and swing Z limit parts (below); per constraint axis (twist, swing Y, swing Z) | on body 2; body 1 the opposite |
+| six-DOF | `total_lambda_position`, `total_lambda_rotation`; `total_lambda_motor_translation`, `total_lambda_motor_rotation` | N·s, N·m·s | world vectors while the three axes of that kind are fixed, otherwise per constraint axis for translation and the swing-twist limit parts for rotation; per constraint axis | on body 2; body 1 the opposite |
 | gear | `total_lambda` | N·m·s | about each body's axis | body 1 and body 2 get the same value, not `ratio` times it |
 | rack and pinion | `total_lambda` | N·m·s on the pinion | about the pinion's axis | the rack (body 2) gets `-ratio` times it, in N·s along its axis |
-| pulley | `total_lambda_position` | N·s | along body 1's rope | body 2 gets `ratio` times it along its rope |
+| pulley | `total_lambda_position` | N·s | along body 1's rope, negative while the rope pulls | body 2 gets `ratio` times it along its rope |
 | path | `total_lambda_position`; `total_lambda_position_limits`, `total_lambda_motor`; `total_lambda_rotation_hinge`, `total_lambda_rotation` | N·s; N·s; N·m·s | normal and binormal; along the path; the two axes perpendicular to the free axis, or a world vector | on body 2; body 1 the opposite |
 
 While a hinge, slider, swing-twist, six-DOF or path motor is off, its motor readout holds the
 friction impulse: Jolt drives friction through the motor part. A distance constraint whose range
 leaves it slack reads zero.
+
+A limit only pushes back. Hinge, slider and path limits act along a fixed axis, so their sign
+says which end holds. Swing-twist limits, and six-DOF rotation while not all three rotation axes
+are fixed, act about axes Jolt picks each step:
+- A twist limit, and a swing limit whose other swing axis is locked, turn their axis round at the
+  minimum, so they read zero or less at either end.
+- With both swing axes limited (a cone of swing) Jolt solves one swing limit, about the axis from
+  the nearest allowed swing to the current one, and reads it in the swing Y slot; swing Z reads
+  zero whichever way the joint swings.
+- A locked axis (a zero range) reads either sign about its constraint axis.
+
+For breaking, compare the length of the three limit values with a torque limit, not one
+component.
 
 Jolt's own docs suggest this for breakable constraints (`Constraint::SetEnabled`): after a step,
 compare the impulse with a limit and disable the constraint once it is over. With oxijolt:

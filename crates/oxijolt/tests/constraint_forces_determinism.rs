@@ -5,7 +5,8 @@
 mod common;
 
 use common::constraint_rigs::{
-    all_kinds_rig, anchor, cube, is_enabled, readout_bits, readouts, shifted, HALF,
+    all_kinds_rig, anchor, assert_every_getter_loaded, cube, is_enabled, readout_bits, shifted,
+    HALF,
 };
 use common::determinism::{assert_same, child_request, digest_in_child, finish_child, Digest};
 use common::{record_body, world, DT};
@@ -28,7 +29,7 @@ const LARGE_ISLAND_THRESHOLD: usize = 128;
 const KICK_TICK: usize = 60;
 /// The tick before whose step four welds of the right column are disabled.
 const CUT_TICK: usize = 150;
-/// The tick after whose step every constraint must read a load.
+/// The tick after whose step every readout getter must read a load.
 const LOADED_TICK: usize = 149;
 
 /// The weld graph, its anchor and [`all_kinds_rig`].
@@ -111,13 +112,8 @@ impl Scene {
         );
         assert!(self.world.step(DT).unwrap().is_complete());
         if tick == LOADED_TICK {
-            for &id in &self.constraints {
-                let values = readouts(&self.world, id);
-                assert!(
-                    values.iter().any(|&v| v != 0.0),
-                    "{id:?} carries no load: {values:?}"
-                );
-            }
+            let when = format!("tick {tick}");
+            assert_every_getter_loaded(&self.world, &self.constraints, &when);
         }
     }
 

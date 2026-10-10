@@ -289,12 +289,9 @@ fn distance_and_pulley_read_the_rope_tension() {
         .ratio(ratio);
         let id = world.create_constraint(crate1, crate2, &pulley).unwrap();
         run(&mut world, DT, SETTLE);
+        // The rope pulls: the impulse is negative.
         let tension = world.constraint(id).unwrap().total_lambda_position();
-        assert_close(
-            tension.abs(),
-            weight(2.0, DT),
-            &format!("pulley ratio {ratio}"),
-        );
+        assert_close(tension, -weight(2.0, DT), &format!("pulley ratio {ratio}"));
         for crate_ in [crate1, crate2] {
             let speed = length(world.body(crate_).unwrap().linear_velocity());
             assert!(
@@ -442,6 +439,93 @@ fn swing_twist_limits_and_motors_read_the_couple_they_hold() {
 }
 
 #[test]
+fn two_limited_swing_axes_read_one_limit_in_the_swing_y_part() {
+    // With both swing axes limited Jolt solves a single swing limit, about the axis from the
+    // clamped swing to the current one, in its swing Y part; the swing Z part reads 0. A limit
+    // pushes back only, so it reads -couple whichever way the couple turns the cube. Six-DOF with
+    // free or limited rotation axes reads the same parts.
+    use SixDofConstraintAxis::*;
+    let couple = TORQUE * DT;
+    let swing_twist = SwingTwistConstraintSettings::new(CENTRE, X, Z)
+        .twist_limits(-PI, PI)
+        .half_cone_angles(0.3, 0.3);
+    let limited = SixDofAxis::Limited {
+        min: -0.3,
+        max: 0.3,
+    };
+    let six_dof = [TranslationX, TranslationY, TranslationZ]
+        .into_iter()
+        .fold(SixDofConstraintSettings::new(CENTRE, X, Y), |s, axis| {
+            s.axis(axis, SixDofAxis::Fixed)
+        })
+        .axis(RotationY, limited)
+        .axis(RotationZ, limited);
+    for torque in [Z, along(Z, -1.0), Y, along(Y, -1.0)].map(|t| along(t, TORQUE)) {
+        let what = format!("{torque:?}");
+        let limits = settled(Vec3::ZERO, &swing_twist, torque, |c| {
+            c.total_lambda_limits()
+        });
+        let expected = [0.0, -couple, 0.0];
+        assert_components(&limits, &expected, couple, &format!("swing-twist, {what}"));
+        let rotation = settled(Vec3::ZERO, &six_dof, torque, |c| c.total_lambda_rotation());
+        assert_components(
+            &components(rotation),
+            &expected,
+            couple,
+            &format!("six-DOF, {what}"),
+        );
+    }
+
+    // At its minimum a limit's axis is reversed, so a twist held at either end reads -couple.
+    let twist = SwingTwistConstraintSettings::new(CENTRE, X, Z).twist_limits(-0.3, 0.3);
+    for torque in [TORQUE, -TORQUE] {
+        let limits = settled(Vec3::ZERO, &twist, along(X, torque), |c| {
+            c.total_lambda_limits()
+        });
+        let what = format!("twist under {torque} N·m");
+        assert_components(&limits, &[-couple, 0.0, 0.0], couple, &what);
+    }
+}
+
+#[test]
+fn world_vectors_follow_the_world_and_axis_parts_the_frame() {
+    // The frame turned 0.5 rad about X: n1 = (0, cos, sin) and n2 = X × n1 = (0, -sin, cos). A
+    // weld's position part stays the world vector (0, w, 0); the slider's two position parts and
+    // a six-DOF joint's per-axis translation parts split it over the turned axes.
+    use SixDofConstraintAxis::*;
+    let w = weight(MASS, DT);
+    let (sin, cos) = 0.5f32.sin_cos();
+    let n1 = Vec3::new(0.0, cos, sin);
+    let weld = FixedConstraintSettings::new(at([0.0, HALF, 0.0]), X, n1);
+    let position = settled(GRAVITY, &weld, Vec3::ZERO, |c| c.total_lambda_position());
+    assert_components(&components(position), &[0.0, w, 0.0], w, "weld");
+
+    let slider = SliderConstraintSettings::new(CENTRE, X, n1);
+    let position = settled(GRAVITY, &slider, Vec3::ZERO, |c| c.total_lambda_position());
+    assert_components(&position, &[w * cos, -w * sin], w, "slider");
+
+    let six_dof = [TranslationX, TranslationZ, RotationX, RotationY, RotationZ]
+        .into_iter()
+        .fold(SixDofConstraintSettings::new(CENTRE, X, n1), |s, axis| {
+            s.axis(axis, SixDofAxis::Fixed)
+        })
+        .axis(
+            TranslationY,
+            SixDofAxis::Limited {
+                min: -0.1,
+                max: 0.1,
+            },
+        );
+    let position = settled(GRAVITY, &six_dof, Vec3::ZERO, |c| c.total_lambda_position());
+    assert_components(
+        &components(position),
+        &[0.0, w * cos, -w * sin],
+        w,
+        "six-DOF",
+    );
+}
+
+#[test]
 fn six_dof_reads_per_axis_parts_and_motors() {
     use SixDofConstraintAxis::*;
     let w = weight(MASS, DT);
@@ -567,9 +651,8 @@ fn couplings_read_the_load_they_carry() {
         assert_close(lambda.abs(), couple, &format!("gear ratio {ratio}"));
     }
 
-    // Rack and pinion: the pinion held by its hinge's velocity motor, a force on the rack. The
-    // rack gets -ratio times the readout, so it reads F dt / |ratio|, its sign set by the ratio's.
-    let mut signs = Vec::new();
+    // Rack and pinion: the pinion held by its hinge's velocity motor, a force F along +X on the
+    // rack. The rack gets -ratio times the readout and needs -F dt, so it reads F dt / ratio.
     for ratio in [2.0, -2.0] {
         let mut world = world(Vec3::ZERO, 1);
         let pinion = cube(&mut world, CENTRE, 1.0);
@@ -590,14 +673,8 @@ fn couplings_read_the_load_they_carry() {
         let id = world.create_constraint(pinion, rack, &coupling).unwrap();
         run_loaded(&mut world, DT, SETTLE, rack, along(X, FORCE), Vec3::ZERO);
         let lambda = world.constraint(id).unwrap().total_lambda();
-        assert_close(
-            lambda.abs(),
-            FORCE * DT / 2.0,
-            &format!("rack ratio {ratio}"),
-        );
-        signs.push(lambda.signum());
+        assert_close(lambda, FORCE * DT / ratio, &format!("rack ratio {ratio}"));
     }
-    assert_eq!(signs[0], -signs[1], "the sign follows the ratio");
 }
 
 /// A straight path along X through `CENTRE` at fraction 1, from 1 m before it to 1 m after it,

@@ -554,8 +554,15 @@ impl ConstraintRef<'_, SwingTwistConstraint> {
         Vec3::from_jph(value)
     }
 
-    /// The angular impulses in N·m·s the twist, swing Y and swing Z limits applied in the last
-    /// step.
+    /// The angular impulses in N·m·s the twist, swing Y and swing Z limit parts applied in the
+    /// last step, each about an axis Jolt picks for that step. A limit with a range only pushes
+    /// back and turns its axis round at its minimum, so a twist limit reads zero or less at either
+    /// end; a locked axis reads either sign. With both swing axes limited Jolt solves one swing
+    /// limit, about the axis from the nearest allowed swing to the current one, in the swing Y
+    /// part, and swing Z reads 0. Compare the length of the three with a torque limit, not one
+    /// component (see [docs/constraints.md#breakable-constraints]).
+    ///
+    /// [docs/constraints.md#breakable-constraints]: https://github.com/pockerhead/oxijolt/blob/main/docs/constraints.md#breakable-constraints
     pub fn total_lambda_limits(&self) -> [f32; 3] {
         // SAFETY: as in `swing_motor_state`.
         unsafe {
@@ -770,7 +777,8 @@ impl ConstraintRef<'_, SixDofConstraint> {
 
     /// The angular impulse in N·m·s that held the rotation in the last step: a world-space vector
     /// while all three rotation axes are fixed, otherwise the twist, swing Y and swing Z limit
-    /// impulses.
+    /// parts, about axes Jolt picks each step as for a swing-twist constraint's
+    /// [`total_lambda_limits`](ConstraintRef::total_lambda_limits).
     pub fn total_lambda_rotation(&self) -> Vec3 {
         let mut value = Vec3::ZERO.to_jph();
         // SAFETY: as in `rotation_in_constraint_space`.

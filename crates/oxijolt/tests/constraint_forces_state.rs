@@ -9,13 +9,15 @@ mod common;
 
 use std::collections::BTreeSet;
 
-use common::constraint_rigs::{all_kinds_rig, is_enabled, readout_bits, readouts};
+use common::constraint_rigs::{
+    all_kinds_rig, assert_every_getter_loaded, is_enabled, readout_bits,
+};
 use common::{record_body, world, DT};
 use oxijolt::*;
 
 const GRAVITY: Vec3 = Vec3::new(0.0, -9.81, 0.0);
-/// Ticks before the save.
-const BEFORE_SAVE: usize = 30;
+/// Ticks before the save: twice the ticks after which every readout of the rig carries a load.
+const BEFORE_SAVE: usize = 60;
 /// Ticks recorded after the save and replayed after the restore.
 const REPLAY: usize = 60;
 /// Ticks of the abandoned detour.
@@ -132,13 +134,7 @@ fn readouts_restore_with_the_state_for_every_kind() {
     rig.run(DT, BEFORE_SAVE);
     let saved = rig.world.save_state();
     let at_save = rig.snapshot();
-    for &id in &rig.constraints {
-        let values = readouts(&rig.world, id);
-        assert!(
-            values.iter().any(|&v| v != 0.0),
-            "{id:?} carries no load at the save: {values:?}"
-        );
-    }
+    assert_every_getter_loaded(&rig.world, &rig.constraints, "at the save");
     let recording = rig.run(DT, REPLAY);
 
     rig.world.restore_state(&saved).unwrap();
