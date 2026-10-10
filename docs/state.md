@@ -39,8 +39,9 @@ Jolt's saved state of the physics system (`PhysicsSystem::SaveState`):
 - per body its pose, velocities, accumulated force and torque, sleep test data, whether it may sleep
   and whether it is awake; for a soft body its vertex positions and velocities and its bounds;
 - the contact cache;
-- every constraint's own state: its enabled flag, the solver parts' warm start, motor states and
-  targets, and for path constraints also the motor settings and maximum friction;
+- every constraint's own state: its enabled flag, the solver parts' warm start (what the
+  constraint impulse readouts return), motor states and targets, and for path constraints also
+  the motor settings and maximum friction;
 - for vehicles the driver input and the engine, transmission and wheel state, a tracked vehicle's
   track speeds and a motorcycle's target lean.
 
@@ -55,6 +56,9 @@ request sets the flag again before the next simulating step after a restore of a
 it.
 
 `save_state_of` saves only some bodies ([Choosing the bodies](#choosing-the-bodies)).
+
+A game's own state, such as the bonds it counts as broken or its scripts, is not in a
+`WorldState`; the game saves it next to the state.
 
 ## Reusing a buffer
 

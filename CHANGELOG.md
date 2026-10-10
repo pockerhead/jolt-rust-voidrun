@@ -4,6 +4,12 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Constraint impulse readouts: `ConstraintRef<HingeConstraint>::total_lambda_rotation` and
+  `ConstraintRef<SliderConstraint>::total_lambda_position`, so every constraint impulse readout of
+  the C layer has a safe method. The readouts' docs state their units, that they are the impulse of
+  the last step the constraint was solved in, their frame and how they map to each body; a disabled
+  or sleeping constraint keeps its last values. The constraints guide has a section on breakable
+  constraints ([docs/constraints.md](docs/constraints.md#breakable-constraints)).
 - A comparison with Rapier 0.36.0 and Avian 0.7.0 on ten of Rapier's stress scenes
   ([docs/comparison.md](docs/comparison.md)): speed at 1 to 16 threads, quality bounds,
   determinism across thread counts and features, with the harness (`benches/comparison`, not

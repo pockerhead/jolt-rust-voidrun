@@ -31,7 +31,8 @@ what is planned next.
   mapper to and from a detailed animation skeleton ([guide](guide.md#ragdolls)).
 - Twelve kinds of constraints with motors, springs and limits: fixed, point, distance, hinge,
   slider, cone, swing-twist, six-DOF, gear, rack and pinion, pulley and path
-  ([guide](constraints.md)).
+  ([guide](constraints.md)), with impulse readouts for breakable constraints
+  ([guide](constraints.md#breakable-constraints)).
 - Soft bodies: cloth, pressurised and volume-preserving bodies, with vertex readout and pinning
   ([guide](soft-bodies.md)).
 - Contact, activation and soft body contact events in an order that does not depend on the

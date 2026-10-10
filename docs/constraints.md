@@ -133,14 +133,107 @@ A gear's drift correction uses hinge angles in `[-π, π]`, which is consistent 
 only for an integer ratio; with another ratio Jolt corrects towards a wrong angle once gear 2 has
 wrapped.
 
+## Breakable constraints
+
+Every constraint reads back the impulses its solver parts applied in the last step it was solved
+in, through the `total_lambda*` methods of `ConstraintRef`: N·s for linear parts, N·m·s for
+angular parts. `PhysicsWorld::step` solves one collision step per call, so dividing a readout by
+the step's `delta_time` gives the mean force (N) or torque (N·m) the part applied over that step.
+Each readout is one part's share, not the net force on a body: the position part acts at the
+constraint point, so a weld 0.4 m beside the centre of mass of a hanging cube reads the weight in
+its position part and, in its rotation part, the torque that cancels the weight's moment about the
+weld.
+
+| Kind | Readouts | Unit | Frame | Bodies |
+|---|---|---|---|---|
+| fixed | `total_lambda_position`, `total_lambda_rotation` | N·s, N·m·s | world vectors | on body 2; body 1 gets the opposite |
+| point | `total_lambda_position` | N·s | world vector | on body 2; body 1 the opposite |
+| distance | `total_lambda_position` | N·s | along the line between the points | on body 2; body 1 the opposite |
+| hinge | `total_lambda_position`; `total_lambda_rotation`; `total_lambda_motor`, `total_lambda_rotation_limits` | N·s; N·m·s; N·m·s | world vector; the two axes perpendicular to the hinge; about the hinge axis | on body 2; body 1 the opposite |
+| slider | `total_lambda_position`; `total_lambda_rotation`; `total_lambda_motor`, `total_lambda_position_limits` | N·s; N·m·s; N·s | the two axes perpendicular to the slider; world vector; along the slider axis | on body 2; body 1 the opposite |
+| cone | `total_lambda_position`, `total_lambda_rotation` | N·s, N·m·s | world vector; one value for the cone | on body 2; body 1 the opposite |
+| swing-twist | `total_lambda_position`; `total_lambda_limits`, `total_lambda_motor` | N·s; N·m·s | world vector; per constraint axis (twist, swing Y, swing Z) | on body 2; body 1 the opposite |
+| six-DOF | `total_lambda_position`, `total_lambda_rotation`; `total_lambda_motor_translation`, `total_lambda_motor_rotation` | N·s, N·m·s | world vectors while the three axes are fixed, otherwise per constraint axis; per constraint axis | on body 2; body 1 the opposite |
+| gear | `total_lambda` | N·m·s | about each body's axis | body 1 and body 2 get the same value, not `ratio` times it |
+| rack and pinion | `total_lambda` | N·m·s on the pinion | about the pinion's axis | the rack (body 2) gets `-ratio` times it, in N·s along its axis |
+| pulley | `total_lambda_position` | N·s | along body 1's rope | body 2 gets `ratio` times it along its rope |
+| path | `total_lambda_position`; `total_lambda_position_limits`, `total_lambda_motor`; `total_lambda_rotation_hinge`, `total_lambda_rotation` | N·s; N·s; N·m·s | normal and binormal; along the path; the two axes perpendicular to the free axis, or a world vector | on body 2; body 1 the opposite |
+
+While a hinge, slider, swing-twist, six-DOF or path motor is off, its motor readout holds the
+friction impulse: Jolt drives friction through the motor part. A distance constraint whose range
+leaves it slack reads zero.
+
+Jolt's own docs suggest this for breakable constraints (`Constraint::SetEnabled`): after a step,
+compare the impulse with a limit and disable the constraint once it is over. With oxijolt:
+- After each complete `step`, divide every enabled bond's readouts by `delta_time` and compare the
+  forces and the torques with separate limits.
+- Break with `ConstraintMut::set_enabled(false)`. The enabled flag is part of the saved state, so
+  `restore_state` brings a broken bond back. `remove_constraint` changes the world's structure:
+  no state saved before it restores any more.
+- Skip disabled bonds. A disabled constraint, and one whose bodies sleep, keeps the readouts of the
+  last step it was solved in: for a broken bond that is the step that broke it. With a varying
+  `delta_time`, divide a sleeping bond's readout by the `delta_time` of the step it was solved in.
+- Jolt's velocity solver runs a fixed number of iterations per step
+  (`WorldSettings::velocity_steps`), so in a chain of bonds one step's readouts are where those
+  iterations stopped, not an exact solution. Leave the limits some headroom.
+
+The wheels of a vehicle are not constraints; their impulses are in `WheelState`
+(`suspension_lambda`, `longitudinal_lambda`, `lateral_lambda`, [guide](guide.md#vehicles)).
+
+A weld under a 5 kg cube, pulled down by a growing force, breaks once it holds more than 2 kN:
+
+```rust
+use oxijolt::*;
+
+const DT: f32 = 1.0 / 60.0;
+/// The force the weld may hold, N.
+const MAX_FORCE: f32 = 2000.0;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut world = PhysicsWorld::new(WorldSettings::default())?;
+    let anchor = Shape::new_box(Vec3::new(0.1, 0.1, 0.1))?;
+    let top = RVec3::new(0.0, 10.0, 0.0);
+    let ceiling = world.create_body(&anchor, &BodySettings::new_static().position(top))?;
+    let cube = Shape::new_box(Vec3::new(0.25, 0.25, 0.25))?;
+    let below = RVec3::new(0.0, 9.5, 0.0);
+    let settings = BodySettings::new_dynamic().position(below).mass(5.0);
+    let load = world.create_body(&cube, &settings)?;
+    let at = RVec3::new(0.0, 9.75, 0.0);
+    let x = Vec3::new(1.0, 0.0, 0.0);
+    let weld = FixedConstraintSettings::new(at, x, Vec3::new(0.0, 1.0, 0.0));
+    let weld = world.create_constraint(ceiling, load, &weld)?;
+
+    let mut broke_at = None;
+    for tick in 1..=120 {
+        if broke_at.is_none() {
+            let pull = Vec3::new(0.0, -100.0 * tick as f32, 0.0);
+            world.body_mut(load)?.add_force(pull)?;
+        }
+        assert!(world.step(DT)?.is_complete());
+        let bond = world.constraint(weld)?;
+        let p = bond.total_lambda_position();
+        let force = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt() / DT;
+        if bond.is_enabled() && force > MAX_FORCE {
+            world.constraint_mut(weld)?.set_enabled(false);
+            broke_at = Some(tick);
+        }
+    }
+    // The weld holds 49 N of weight plus 100 N per tick of pull: it breaks at tick 20.
+    assert_eq!(broke_at, Some(20));
+    assert!(world.body(load)?.position().y < 0.0);
+    Ok(())
+}
+```
+
 ## Rebase, state and ids
 
 - Constraint frames are relative to the bodies, so `rebase` needs to change nothing, except for
   pulleys, whose fixed points are world points: a rebase recreates each pulley in the new frame
   ([guide.md](guide.md#floating-origin)).
-- A `WorldState` holds each constraint's enabled flag, warm start, motor states and targets (for a
-  path also its motor settings and friction), but not the rest of its configuration: limits, motor
-  settings, friction, distances, pulley lengths and the cone angle ([state.md](state.md)).
+- A `WorldState` holds each constraint's enabled flag, warm start (the impulses the
+  `total_lambda*` readouts return), motor states and targets (for a path also its motor settings
+  and friction), but not the rest of its configuration: limits, motor settings, friction,
+  distances, pulley lengths and the cone angle ([state.md](state.md)).
 - Each world numbers its constraints from 1 in creation order and never reuses an id. Dropping a
   world removes its constraints first.
 
