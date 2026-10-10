@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# CI builds Jolt from source (once per cache key) and does not download release archives; the
+# prebuilt download has its own step against a local server.
+env:
+  JOLTC_PREBUILT: "off"
+
 jobs:
   test:
     name: ${{ matrix.os }} (${{ matrix.features || 'default' }})
@@ -81,6 +86,16 @@ jobs:
       # is wrong; fix the key rather than falling back to CMake.
       - name: Use the native library
         run: echo "JOLTC_LIB_DIR=$RUNNER_TEMP/joltc-prefix" >> "$GITHUB_ENV"
+
+      # The build script's release-archive path: the native prefix packed as an archive and
+      # served on 127.0.0.1, every fallback in auto and require mode, the cache. The xtask tests
+      # cover the list, the unpacking and curl; Linux also runs them in the bindings job.
+      - name: Prebuilt download
+        if: matrix.features == ''
+        run: bash scripts/check_prebuilt_download.sh "$JOLTC_LIB_DIR"
+      - name: xtask tests
+        if: matrix.features == '' && runner.os == 'Windows'
+        run: cargo test --locked -p xtask
 
       # Without the feature, neither Jolt nor joltc may contain the debug renderer.
       - name: Debug renderer compiled only with its feature

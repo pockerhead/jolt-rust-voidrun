@@ -1,9 +1,17 @@
 name: Release
 
-# Prebuilt native libraries for JOLTC_LIB_DIR: one archive per target and feature subset.
-# A manual run, or a branch push that changes this file, builds and checks the archives as
-# workflow artifacts; pushing a `v<version>` tag also attaches them to the GitHub release of
-# that tag. Path filters do not apply to tag pushes.
+# Releases a `v<version>` tag: prebuilt native archives, their list in the crate, crates.io.
+#   build                  one archive per target and feature subset, from the tagged commit
+#   archive-list           writes their sha256 into crates/oxijolt-sys/prebuilt.txt as one commit
+#                          on top of the tag, then packages both crates and checks that their
+#                          builds take the archives (served locally) without CMake; no write token
+#   github-release         attaches the archives to the tag's GitHub release
+#   record-release-branch  pushes that commit to `release/v<version>`, which a maintainer merges
+#                          into main; nothing here writes main
+#   crates-io              publish.yml from that commit, which first checks the public assets
+# A manual run, or a branch push that changes this file, runs `build` and `archive-list` only and
+# keeps the archives as workflow artifacts. Path filters do not apply to tag pushes. A failed tag
+# run resumes with "Re-run failed jobs", or with the Publish workflow and ref=release/v<version>.
 
 on:
   push:
@@ -15,9 +23,16 @@ on:
 permissions:
   contents: read
 
+# Runs of one tag wait for each other, so the release branch is written by one run at a time.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   NATIVE_MANIFEST: oxijolt-sys-manifest.txt
+  # The archives are built from source; only the package check below takes them.
+  JOLTC_PREBUILT: "off"
 
 jobs:
   version:
@@ -38,8 +53,8 @@ jobs:
           sys=$(jq -r '[.packages[] | select(.links == "joltc" and any(.targets[]; .kind == ["lib"]))]
             | if length == 1 then .[0] | "\(.name) \(.version)" else error("expected one package linking joltc") end' "$RUNNER_TEMP/metadata.json")
           name=${sys% *}
-          version=${sys#* }
-          version=${version%%+*}
+          crate_version=${sys#* }
+          version=${crate_version%%+*}
           safe=$(jq -r --arg sys "$name" '[.packages[] | select(any(.dependencies[]; .name == $sys and .kind == null))]
             | if length == 1 then .[0].name else error("expected one package depending on \($sys)") end' "$RUNNER_TEMP/metadata.json")
           if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
@@ -47,14 +62,38 @@ jobs:
             exit 1
           fi
           echo "$name $version (safe crate $safe)"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "safe=$safe" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "name=$name"
+            echo "safe=$safe"
+            echo "version=$version"
+            echo "crate_version=$crate_version"
+          } >> "$GITHUB_OUTPUT"
+
+      # A tag rebuilds the archives and rewrites the release branch only while crates.io has no
+      # such version. crates.io keeps the build metadata in the version (`1.0.1+jolt-5.6.0`).
+      - name: Not yet on crates.io
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          CRATE: ${{ steps.meta.outputs.name }}
+          CRATE_VERSION: ${{ steps.meta.outputs.crate_version }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' -A "oxijolt-release (github.com/$GITHUB_REPOSITORY)" \
+            "https://crates.io/api/v1/crates/$CRATE/${CRATE_VERSION//+/%2B}") || true
+          case "$status" in
+            404) echo "$CRATE $CRATE_VERSION is not on crates.io yet" ;;
+            200) echo "$CRATE $CRATE_VERSION is already on crates.io: use Re-run failed jobs or the Publish workflow with ref=release/v$VERSION"; exit 1 ;;
+            *) echo "crates.io check failed (HTTP $status)"; exit 1 ;;
+          esac
 
   build:
     name: ${{ matrix.platform.target }} (${{ matrix.features || 'default' }})
     needs: version
     runs-on: ${{ matrix.platform.os }}
+    # Linux builds in an Ubuntu 22.04 container, so the archives need glibc 2.35, not the
+    # runner's 2.39.
+    container: ${{ matrix.platform.container }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -63,7 +102,7 @@ jobs:
           # MSVC links only objects from its own toolset or an older one: Visual Studio 2022 keeps
           # the archives usable with 2022 and 2026.
           - { os: windows-2022, target: x86_64-pc-windows-msvc }
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, container: 'ubuntu:22.04' }
         features:
           - ""
           - double-precision
@@ -82,7 +121,22 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       RUST_TARGET: ${{ matrix.platform.target }}
       FEATURES: ${{ matrix.features }}
+      CONTAINER: ${{ matrix.platform.container }}
     steps:
+      # The bare image: git for the checkout, GCC 12 as every C and C++ compiler (the linker
+      # driver `cc` included) and CMake 3.22.
+      - name: Container packages
+        if: matrix.platform.container
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates curl gcc-12 g++-12 cmake make
+          for tool in cc gcc; do ln -sf /usr/bin/gcc-12 "/usr/local/bin/$tool"; done
+          for tool in c++ g++; do ln -sf /usr/bin/g++-12 "/usr/local/bin/$tool"; done
+          # The workspace belongs to the runner's user, the container runs as root.
+          git config --global --add safe.directory '*'
+
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -101,10 +155,11 @@ jobs:
       - name: Pin the Linux compiler
         if: runner.os == 'Linux'
         run: |
-          gcc-13 --version
+          gcc-12 --version
           ldd --version
-          echo "CC=gcc-13" >> "$GITHUB_ENV"
-          echo "CXX=g++-13" >> "$GITHUB_ENV"
+          cmake --version
+          echo "CC=gcc-12" >> "$GITHUB_ENV"
+          echo "CXX=g++-12" >> "$GITHUB_ENV"
 
       # A fresh target directory without a cache, so exactly one native prefix exists.
       - name: Build the native library
@@ -136,10 +191,18 @@ jobs:
           fma=no
           grep -q '^USE_FMADD:BOOL=ON$' <<< "$cpu" && grep -q '^CROSS_PLATFORM_DETERMINISTIC:BOOL=OFF$' <<< "$cpu" && fma=yes
           compiler=$(sed -nE 's/^set\(CMAKE_CXX_COMPILER_(ID|VERSION) "(.*)"\)$/\2/p' "$PREFIX"/build/CMakeFiles/*/CMakeCXXCompiler.cmake | tr '\n' ' ')
+          # `compiler:` gives the archive list its MSVC toolset and `glibc:` its glibc baseline.
           {
             echo "source: $GITHUB_REPOSITORY@$GITHUB_SHA"
-            echo "runner image: $ImageOS $ImageVersion"
+            if [ -n "$CONTAINER" ]; then
+              echo "runner image: container $CONTAINER"
+            else
+              echo "runner image: $ImageOS $ImageVersion"
+            fi
             echo "compiler: $compiler"
+            if [ "$RUNNER_OS" = Linux ]; then
+              echo "glibc: $(getconf GNU_LIBC_VERSION | cut -d' ' -f2)"
+            fi
             echo "cargo target: $RUST_TARGET"
             echo "features: ${FEATURES:-none}"
             grep -E '^(joltc_commit|jolt_commit|jolt_version|joltc_ext|crt)=' "$PREFIX/$NATIVE_MANIFEST"
@@ -193,17 +256,108 @@ jobs:
           fi
           grep "built for a different configuration" "$log"
 
+      # Uploaded from a path relative to the workspace: inside the container `runner.temp` names
+      # the host's directory, and the artifact then kept the container path and lost the .sha256.
+      - name: Collect the artifact
+        run: |
+          mkdir -p artifact
+          cp "$RUNNER_TEMP/dist/$ARCHIVE.tar.gz" "$RUNNER_TEMP/dist/$ARCHIVE.tar.gz.sha256" artifact/
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARCHIVE }}
-          path: |
-            ${{ runner.temp }}/dist/${{ env.ARCHIVE }}.tar.gz
-            ${{ runner.temp }}/dist/${{ env.ARCHIVE }}.tar.gz.sha256
+          path: artifact/
           if-no-files-found: error
 
-  publish:
-    name: Publish
-    needs: build
+  # The release commit Y: the tagged commit X plus the archive list. This job runs build scripts
+  # (cargo package), so it gets no write token and keeps no credentials; it hands Y on as a git
+  # bundle.
+  archive-list:
+    name: Archive list
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      CRATE: ${{ needs.version.outputs.name }}
+      SAFE_CRATE: ${{ needs.version.outputs.safe }}
+      VERSION: ${{ needs.version.outputs.version }}
+      LIST: crates/${{ needs.version.outputs.name }}/prebuilt.txt
+    outputs:
+      ref: ${{ steps.commit.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/dist
+          pattern: ${{ needs.version.outputs.name }}-*
+          merge-multiple: true
+
+      # The full release set: 2 targets x 8 feature subsets, every archive built from this commit.
+      - name: Write the list
+        run: |
+          cargo run --locked -p xtask -- prebuilt-list --dist "$RUNNER_TEMP/dist" \
+            --url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION" --commit "$GITHUB_SHA"
+          cat "$LIST"
+
+      - name: Commit the list
+        id: commit
+        run: |
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "Record the release archives of $CRATE $VERSION" -- "$LIST"
+          changed=$(git diff --name-only "$GITHUB_SHA" HEAD)
+          [ "$changed" = "$LIST" ] || { echo "the release commit changes more than $LIST:"; echo "$changed"; exit 1; }
+          [ "$(git rev-parse HEAD^)" = "$GITHUB_SHA" ] || { echo "the release commit is not a child of $GITHUB_SHA"; exit 1; }
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git log -1 --stat
+
+      # The crates as they will be published, each built from its package with the build
+      # script's download path: the archives come from a local mirror of the release, CMake and a
+      # C++ compiler are missing, and `require` makes any fallback an error. This also proves that
+      # the packaged native sources have the fingerprint of the list.
+      - name: Packages take the archives
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory "$RUNNER_TEMP/dist" > "$RUNNER_TEMP/server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          curl -s --retry 20 --retry-connrefused --retry-delay 1 -o /dev/null http://127.0.0.1:8765/
+          log="$RUNNER_TEMP/package.log"
+          env -u JOLTC_LIB_DIR JOLTC_PREBUILT=require JOLTC_PREBUILT_URL=http://127.0.0.1:8765 \
+            CMAKE=oxijolt-no-cmake CXX=oxijolt-no-cxx \
+            cargo package --locked -p "$CRATE" -p "$SAFE_CRATE" -vv > "$log" 2>&1 || { tail -80 "$log"; exit 1; }
+          grep "using the prebuilt archive" "$log"
+          used=$(grep -c "using the prebuilt archive" "$log" || true)
+          [ "$used" -ge 2 ] || { echo "expected both verify builds to take the archive, found $used"; exit 1; }
+          grep '"GET ' "$RUNNER_TEMP/server.log"
+
+      - name: Bundle the release commit
+        run: |
+          mkdir -p "$RUNNER_TEMP/archive-list"
+          git bundle create "$RUNNER_TEMP/archive-list/y.bundle" "$GITHUB_SHA..HEAD"
+          cp "$LIST" "$RUNNER_TEMP/archive-list/prebuilt.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-list
+          path: |
+            ${{ runner.temp }}/archive-list/y.bundle
+            ${{ runner.temp }}/archive-list/prebuilt.txt
+          if-no-files-found: error
+
+  github-release:
+    name: GitHub release
+    needs: [version, archive-list]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
@@ -218,6 +372,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: ${{ needs.version.outputs.name }}-*
           merge-multiple: true
 
       - name: Verify the archives
@@ -232,15 +387,18 @@ jobs:
       - name: Write the release notes
         run: |
           cat > notes.md <<'EOF'
-          Prebuilt joltc and Jolt Physics static libraries for `JOLTC_LIB_DIR`, one archive per target and
-          feature subset (`default`, or the enabled features joined by `+`). Unpack an archive and point
-          `JOLTC_LIB_DIR` at its directory; the build script checks its manifest against the crate features
-          and refuses a mismatch. Each `.sha256` file holds the archive's checksum.
+          Prebuilt joltc and Jolt Physics static libraries, one archive per target and feature subset
+          (`default`, or the enabled features joined by `+`). The build script of this version
+          downloads the archive that matches the build and checks it against the sha256 recorded in
+          the crate (`prebuilt.txt`); it builds from source when none matches. `JOLTC_LIB_DIR` still
+          takes an unpacked archive, checked against the crate features. Each `.sha256` file holds the
+          archive's checksum.
 
           - Targets: `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`.
           - Windows: built with Visual Studio 2022 and the dynamic MSVC runtime (`/MD`). Link with that
             MSVC toolset or a newer one (the version is in `PROVENANCE.txt`); not usable with `crt-static`.
-          - Linux: built with GCC 13 on Ubuntu 24.04 (glibc 2.39); needs a compatible libstdc++ at run time.
+          - Linux: built with GCC 12 on Ubuntu 22.04; needs glibc 2.35 or newer and a compatible
+            libstdc++ at run time.
           - Jolt assertions are off.
           - CPU: AVX2, BMI1, LZCNT, POPCNT and F16C; builds without `cross-platform-deterministic` also use FMA.
             `PROVENANCE.txt` in each archive lists the options used.
@@ -255,3 +413,50 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md dist/*.tar.gz dist/*.tar.gz.sha256
           fi
+
+  # Force is safe here: the version job proved the version is not published, runs of one tag are
+  # serialized, and nothing but this run refers to an unpublished release commit.
+  record-release-branch:
+    name: Release branch
+    needs: [version, archive-list, github-release]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_COMMIT: ${{ needs.archive-list.outputs.ref }}
+      LIST: crates/${{ needs.version.outputs.name }}/prebuilt.txt
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: archive-list
+          path: ${{ runner.temp }}/archive-list
+
+      - name: Push release/v${{ needs.version.outputs.version }}
+        run: |
+          bundle="$RUNNER_TEMP/archive-list/y.bundle"
+          git bundle verify "$bundle"
+          git fetch "$bundle" HEAD
+          fetched=$(git rev-parse FETCH_HEAD)
+          [ "$fetched" = "$RELEASE_COMMIT" ] || { echo "the bundle holds $fetched, not $RELEASE_COMMIT"; exit 1; }
+          [ "$(git rev-parse "$RELEASE_COMMIT^")" = "$GITHUB_SHA" ] || { echo "$RELEASE_COMMIT is not a child of $GITHUB_SHA"; exit 1; }
+          changed=$(git diff --name-only "$GITHUB_SHA" "$RELEASE_COMMIT")
+          [ "$changed" = "$LIST" ] || { echo "the release commit changes more than $LIST:"; echo "$changed"; exit 1; }
+          git push --force origin "$RELEASE_COMMIT:refs/heads/release/v$VERSION"
+
+  crates-io:
+    name: crates.io
+    needs: [archive-list, record-release-branch]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/publish.yml
+    with:
+      ref: ${{ needs.archive-list.outputs.ref }}
+    secrets: inherit

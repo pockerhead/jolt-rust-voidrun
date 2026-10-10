@@ -82,7 +82,7 @@ Everything planned for 1.0 is done; what works today, with links to the guides, 
 - [ ] Bevy plugin, in a separate repository
 - [ ] macOS in CI and in releases
 - [ ] Same results across operating systems, checked in CI
-- [ ] Prebuilt native libraries downloaded by the build script
+- [x] Prebuilt native libraries downloaded by the build script
 - [x] Constraint force readout and breakable constraints
 - [x] Playground: debris that breaks again when it hits the ground
 
@@ -96,9 +96,10 @@ Everything planned for 1.0 is done; what works today, with links to the guides, 
   CI targets are tested.
 - Rust 1.88 or newer (checked in CI). The public API follows the rules in
   [docs/api-guidelines.md](docs/api-guidelines.md).
-- Building needs a C++ toolchain and CMake, not LLVM. Jolt and joltc are compiled from pinned
-  submodules; `JOLTC_LIB_DIR` links a prebuilt native library instead
-  ([building](docs/building.md)).
+- Jolt and joltc come prebuilt on x86_64 Windows (MSVC) and Linux (GNU): the build script
+  downloads the release archive and checks it against a sha256 in the crate. Elsewhere, or when
+  no archive fits, they are built from pinned submodules with a C++ toolchain and CMake. No build
+  needs LLVM ([building](docs/building.md)).
 
 ## Guarantees and limits
 
@@ -142,8 +143,8 @@ nearly every scene. oxijolt uses the least memory, under 55 % of Rapier's. All t
 same results at every thread count. oxijolt and Rapier each kept 7 of 10 scenes within the
 quality bounds (with each engine's defaults Rapier 8, oxijolt 7); oxijolt lets some capsules
 through the ground and its plank towers collapse. oxijolt brings
-Jolt's character controller, wheeled and tracked vehicles and ragdolls; it needs a C++ toolchain
-(or a prebuilt library) and has no WASM target.
+Jolt's character controller, wheeled and tracked vehicles and ragdolls; outside x86_64 Windows
+and Linux it needs a C++ toolchain, and it has no WASM target.
 
 ## Documentation
 

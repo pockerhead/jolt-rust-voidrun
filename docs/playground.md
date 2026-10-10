@@ -16,14 +16,21 @@ cargo run -p playground --release
 
 It needs Rust (stable), CMake 3.20 or newer and a C++ toolchain: MSVC on Windows, where the window
 needs nothing else. On Linux, install `pkg-config libx11-dev libxi-dev libgl1-mesa-dev` first; CI
-builds the window on Windows only. The first build compiles Jolt and takes several minutes.
+builds the window on Windows only.
 
-To skip compiling Jolt on Windows, download
+A checkout that carries a release's archive list and that release's native sources downloads its
+`debug-renderer` archive on x86_64 Windows and Linux and compiles no C++
+([building](building.md#prebuilt-native-libraries)): the branch `release/v<version>`, and `main`
+from the merge of that branch until the next change to the native code. The release tag itself
+still carries the previous list. Any other checkout compiles Jolt, which takes several minutes.
+
+To skip that on Windows, download
 `oxijolt-sys-<version>-x86_64-pc-windows-msvc-debug-renderer.tar.gz` from the
 [releases](https://github.com/pockerhead/oxijolt/releases), unpack it, and point `JOLTC_LIB_DIR` at
 the unpacked directory in the shell that builds the playground (other builds refuse a prefix with
-the debug renderer; it needs MSVC 19.44 or newer, see
-[building](building.md#release-archives)):
+the debug renderer; it needs MSVC toolset 14.44 or newer, see
+[building](building.md#release-archives)). The prefix must come from the same joltc and Jolt
+commits and extension revision as the checkout:
 
 ```powershell
 $env:JOLTC_LIB_DIR = "C:\path\to\oxijolt-sys-<version>-x86_64-pc-windows-msvc-debug-renderer"

@@ -14,6 +14,9 @@ features = ["glam032", "mint", "debug-renderer"]
 targets = ["x86_64-unknown-linux-gnu"]
 
 [features]
+default = ["prebuilt"]
+# Downloads the verified prebuilt native libraries instead of building Jolt (`oxijolt-sys/prebuilt`).
+prebuilt = ["oxijolt-sys/prebuilt"]
 # Every feature adds to the API except `double-precision`, which turns `Real` into `f64` in every
 # signature: only the final application enables it, and libraries built on oxijolt forward it.
 double-precision = ["oxijolt-sys/double-precision"]
@@ -35,7 +38,7 @@ glam032 = ["dep:glam"]
 mint = ["dep:mint"]
 
 [dependencies]
-oxijolt-sys = { version = "1.0.1", path = "../oxijolt-sys" }
+oxijolt-sys = { version = "1.0.1", path = "../oxijolt-sys", default-features = false }
 # The glam version Bevy uses; `std` is glam's math backend and adds nothing to the conversions.
 glam = { version = "0.32", optional = true, default-features = false, features = ["std"] }
 mint = { version = "0.5", optional = true, default-features = false }

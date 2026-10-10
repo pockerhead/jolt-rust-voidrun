@@ -57,6 +57,10 @@ what is planned next.
   (`PhysicsWorld::active_body_poses`).
 - `oxijolt::prelude` for the common types, and `oxijolt::error::{Error, Result}` that wraps the
   error of every area.
+- Prebuilt native libraries on x86_64 Windows (MSVC) and Linux (GNU): the build script downloads
+  the release archive that matches the build, checks it against a sha256 packaged in the crate and
+  builds from source when none fits (feature `prebuilt`, on by default;
+  [building](building.md#prebuilt-native-libraries)).
 - One set of API rules for names, constructors, settings, errors and derives
   ([api-guidelines.md](api-guidelines.md)), and Rust 1.88 as the minimum version, checked in CI.
 
