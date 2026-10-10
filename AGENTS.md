@@ -67,6 +67,11 @@ Requirements: a C++ toolchain (MSVC on Windows) and CMake ≥ 3.20. LLVM/libclan
 `cargo xtask bindings` and the `bindgen` feature.
 `JOLTC_LIB_DIR` points at a prebuilt install prefix (`lib/`, `include/joltc.h`, `oxijolt-sys-manifest.txt`)
 and skips CMake; the build script validates it against the target, CRT, features and pinned commits.
+The default feature `prebuilt` downloads a release archive only while the native sources equal a
+release's, so work on the native code builds from source with one warning per build; set
+`JOLTC_PREBUILT=off` to silence it, as CI does. A change to the archive decision, download or
+unpacking runs `bash scripts/check_prebuilt_download.sh <prefix>` (every fallback path, against a
+local server) and `cargo test -p xtask`. The rules are in [docs/building.md](docs/building.md).
 
 ```bash
 cargo build                         # builds the C wrapper + Jolt through CMake (always Release), uses the committed bindings
@@ -102,18 +107,35 @@ signature or layout is a real difference in the inputs and is investigated first
 
 ## Releases
 The owner cuts a release: set the same `version` in both crates' `Cargo.toml`, commit, and push the tag
-`v<version>` (without the `+jolt-…` build metadata). The `Release` workflow then builds the prebuilt native
-prefixes for `JOLTC_LIB_DIR` (x86_64 Windows MSVC and Linux GNU, eight feature subsets each), checks them, and
-attaches the archives and their `.sha256` files to that tag's GitHub release. Pushing the tag again replaces
-assets of the same name. A manual run, or a branch push that changes the workflow, builds and checks the
-archives as workflow artifacts without publishing.
+`v<version>` (without the `+jolt-…` build metadata). The `Release` workflow does the rest:
+1. builds the 16 native archives (x86_64 Windows MSVC and Linux GNU, eight feature subsets each) from the
+   tagged commit;
+2. writes their sha256 into `crates/oxijolt-sys/prebuilt.txt` with `cargo xtask prebuilt-list`, as one commit
+   by github-actions[bot] on top of the tag, and checks without a write token that both packaged crates build
+   from the archives without CMake;
+3. attaches the archives and their `.sha256` files to the tag's GitHub release;
+4. pushes that commit to `release/v<version>`;
+5. publishes from it (see Publishing).
+
+CI never writes `main`. The owner merges `release/v<version>` into `main` by hand, after which git
+dependencies on `main` download the archives. A manual run, or a branch push that changes `release.yml`, runs
+steps 1 and 2 only and keeps the archives as workflow artifacts.
+
+Recovery: "Re-run failed jobs" on the Release run, or `Publish to crates.io` by hand with
+`ref=release/v<version>`. Pushing the tag again works only while the version is not on crates.io: it rebuilds
+the archives, replaces the release assets and rewrites `release/v<version>`; once the version is published, a
+tag run stops at its first job. The repository needs a `CARGO_REGISTRY_TOKEN` secret and a `GITHUB_TOKEN`
+that may push `release/v*`.
 
 ## Publishing
-Publishing to crates.io is the owner's step, like cutting a release: the owner starts the
-`Publish to crates.io` workflow by hand, which runs `cargo publish --workspace` with the repository secret
-`CARGO_REGISTRY_TOKEN` (`oxijolt-sys` first, since `oxijolt` depends on it by version). docs.rs builds the
-documentation without compiling Jolt: under `DOCS_RS` the build script uses the committed bindings only.
-Agents do not publish, tag or create releases.
+The Release workflow publishes through `publish.yml` (`Publish to crates.io`), which also runs by hand with
+`ref=release/v<version>`. It checks that the ref is the tag commit plus `prebuilt.txt` only, that every public
+release asset matches the list, and that both packages build from the real download without CMake; then it
+publishes `oxijolt-sys` and `oxijolt` in that order with `CARGO_REGISTRY_TOKEN`. A crate already on
+crates.io is skipped; a published `oxijolt-sys` with another `prebuilt.txt` fails the run and needs a new
+version. docs.rs builds the documentation without compiling or downloading Jolt: under `DOCS_RS` the build
+script uses the committed bindings only. Agents do not publish, tag, create releases or merge release
+branches.
 
 ## Review checklist (every change)
 - Every new `unsafe` has a `SAFETY` comment; every new C function has a Rust safe wrapper with a test.

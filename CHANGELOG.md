@@ -4,6 +4,25 @@ All notable changes to this fork. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- Prebuilt native libraries: on `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` the build
+  script of `oxijolt-sys` downloads the GitHub release archive of its own version that matches the
+  target, C runtime and features, checks it against the sha256 recorded in the packaged
+  `prebuilt.txt`, and links it without CMake or a C++ compiler. It needs `curl` on the `PATH`.
+  It builds from source with one warning when no archive fits: other targets or features
+  (`asserts`), `crt-static`, native sources that differ from the release, an older MSVC toolset or
+  glibc than the archive's, a linker override or cross build, offline (`CARGO_NET_OFFLINE`),
+  vendored or Nix builds, or a failed download. `JOLTC_PREBUILT=off` skips the archives,
+  `JOLTC_PREBUILT=require` makes a fallback an error, and `JOLTC_PREBUILT_URL` names a mirror.
+  `JOLTC_LIB_DIR` and docs.rs work as before ([docs/building.md](docs/building.md#prebuilt-native-libraries)).
+- The new default feature `prebuilt` of both crates turns the download on; `oxijolt` depends on
+  `oxijolt-sys` with `default-features = false` and forwards it, so `default-features = false` on
+  `oxijolt` builds from source.
+- Release archives for Linux are built with GCC 12 in Ubuntu 22.04 and need glibc 2.35 (was GCC 13,
+  Ubuntu 24.04, glibc 2.39).
+- Releases are driven by the tag: the Release workflow builds the archives, records their list on
+  `release/v<version>`, attaches them to the GitHub release and publishes both crates from that
+  commit ([docs/building.md](docs/building.md#releases)).
+- The build script refuses a native manifest (`JOLTC_LIB_DIR` or an archive) with a repeated key.
 - Constraint impulse readouts: `ConstraintRef<HingeConstraint>::total_lambda_rotation` and
   `ConstraintRef<SliderConstraint>::total_lambda_position`, so every constraint impulse readout of
   the C layer has a safe method. The readouts' docs state their units, that they are the impulse of

@@ -8,16 +8,23 @@ data, a soft body contact listener) and is compiled into the joltc archive. The 
 `oxijolt` crate.
 
 ## Build requirements
+On `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` the build script downloads the native
+libraries of this version's GitHub release with `curl` and checks them against the sha256 in the
+packaged `prebuilt.txt`; it needs only the platform linker. Elsewhere, and whenever no archive fits
+(another feature set, `crt-static`, an older MSVC toolset or glibc, an offline, vendored or Nix
+build, `JOLTC_PREBUILT=off`), it builds them from source, which needs:
 - A C++ toolchain (MSVC on Windows, GCC or Clang elsewhere)
 - CMake 3.20 or newer
 
 The bindings are committed under `src/bindings/` for the registered 64-bit targets
 (`build/targets.rs`), so no libclang is needed. Set `JOLTC_LIB_DIR` to a prebuilt install prefix
-(`lib/`, `include/joltc.h`, `include/joltc_ext.h`, `oxijolt-sys-manifest.txt`) to skip CMake. The
+(`lib/`, `include/joltc.h`, `include/joltc_ext.h`, `oxijolt-sys-manifest.txt`) to skip both. The
 prefix must match the target, C runtime, features and pinned commits; the build script checks
-this.
+this. [Building](https://github.com/pockerhead/oxijolt/blob/main/docs/building.md) has every rule and
+switch.
 
 ## Features
+- `prebuilt` (default): use the verified release archive when one fits, as above.
 - `asserts`: compile Jolt with its debug assertions.
 - `double-precision`: world positions in `f64` (`Real`, `JPH_RVec3`).
 - `cross-platform-deterministic`: build Jolt with its cross-platform deterministic floating point
