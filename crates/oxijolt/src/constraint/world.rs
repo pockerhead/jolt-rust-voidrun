@@ -271,7 +271,8 @@ pub(crate) struct ConstraintEntry {
 /// that joins two points or two orientations (the position of a fixed, point, hinge, cone or
 /// swing-twist constraint; the rotation of a fixed or slider constraint, and of a path in
 /// [`ConstrainToPath`](crate::PathRotationConstraint::ConstrainToPath) or `FullyConstrained`
-/// mode; six-DOF while all three axes of that kind are fixed) reads a world-space vector. Every
+/// mode; six-DOF while all three axes of that kind are fixed, for translation also without a
+/// soft limit spring) reads a world-space vector. Every
 /// other readout is one value per solver part along that part's axis: the constraint axes for
 /// motors, friction, the two-component readouts and six-DOF translation, the line between the
 /// points for a distance, and for swing-twist limits an axis Jolt picks each step (see

@@ -57,7 +57,7 @@ pub fn readouts(world: &PhysicsWorld, id: AnyConstraintId) -> Vec<f32> {
 
 /// The readouts of the constraint `id` getter by getter, each with its name. A six-DOF getter
 /// whose value is a world-space vector while all three of its axes are fixed is named with its
-/// representation.
+/// representation (the rigs give six-DOF no limit springs, which also make translation per-axis).
 pub fn readout_parts(world: &PhysicsWorld, id: AnyConstraintId) -> Vec<(&'static str, Vec<f32>)> {
     fn typed<K: ConstraintKind>(world: &PhysicsWorld, id: AnyConstraintId) -> ConstraintRef<'_, K> {
         world.constraint(id.downcast::<K>().unwrap()).unwrap()

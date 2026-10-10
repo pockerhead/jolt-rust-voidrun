@@ -766,8 +766,9 @@ impl ConstraintRef<'_, SixDofConstraint> {
     }
 
     /// The impulse in N·s that held the translation in the last step: a world-space vector while
-    /// all three translation axes are fixed, otherwise the three translation axis parts
-    /// (limits) in constraint-axis order.
+    /// all three translation axes are fixed and none has a soft limit spring
+    /// ([`limits_spring`](crate::SixDofConstraintSettings::limits_spring)),
+    /// otherwise the three translation axis parts (limits) in constraint-axis order.
     pub fn total_lambda_position(&self) -> Vec3 {
         let mut value = Vec3::ZERO.to_jph();
         // SAFETY: as in `rotation_in_constraint_space`.

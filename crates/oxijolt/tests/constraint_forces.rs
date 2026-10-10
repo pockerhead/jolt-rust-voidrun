@@ -526,6 +526,46 @@ fn world_vectors_follow_the_world_and_axis_parts_the_frame() {
 }
 
 #[test]
+fn a_soft_limit_spring_makes_six_dof_translation_per_axis() {
+    // All six axes fixed in the frame turned 0.5 rad about X of the test above. Rigid, the
+    // translation reads the world vector (0, w, 0); with a soft limit spring on one translation
+    // axis Jolt solves the three axes apart and reads (0, w cos, -w sin), of the same length.
+    use SixDofConstraintAxis::*;
+    let w = weight(MASS, DT);
+    let (sin, cos) = 0.5f32.sin_cos();
+    let n1 = Vec3::new(0.0, cos, sin);
+    let rigid = [
+        TranslationX,
+        TranslationY,
+        TranslationZ,
+        RotationX,
+        RotationY,
+        RotationZ,
+    ]
+    .into_iter()
+    .fold(SixDofConstraintSettings::new(CENTRE, X, n1), |s, axis| {
+        s.axis(axis, SixDofAxis::Fixed)
+    });
+    let soft = rigid.clone().limits_spring(
+        TranslationY,
+        SpringSettings::FrequencyAndDamping {
+            frequency: 20.0,
+            damping: 1.0,
+        },
+    );
+    for (settings, expected, what) in [
+        (rigid, [0.0, w, 0.0], "rigid"),
+        (soft, [0.0, w * cos, -w * sin], "soft"),
+    ] {
+        let position = settled(GRAVITY, &settings, Vec3::ZERO, |c| {
+            c.total_lambda_position()
+        });
+        assert_components(&components(position), &expected, w, what);
+        assert_close(length(position), w, &format!("{what} length"));
+    }
+}
+
+#[test]
 fn six_dof_reads_per_axis_parts_and_motors() {
     use SixDofConstraintAxis::*;
     let w = weight(MASS, DT);
