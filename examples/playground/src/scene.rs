@@ -141,11 +141,13 @@ pub enum SceneKind {
     Meshes,
     /// Any OBJ or glTF model given on the command line, with bodies raining onto it.
     Model,
+    /// A brick wall held by breakable bonds, which breaks when its prop is lowered.
+    Bonds,
 }
 
 impl SceneKind {
     /// Every scene in menu order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Character,
         Self::Vehicles,
         Self::Pile,
@@ -158,6 +160,7 @@ impl SceneKind {
         Self::Queries,
         Self::Meshes,
         Self::Model,
+        Self::Bonds,
     ];
 
     /// The command-line name, the number key and the menu title.
@@ -175,6 +178,7 @@ impl SceneKind {
             Self::Queries => ("queries", '0', "Queries, state and origin"),
             Self::Meshes => ("meshes", '-', "Real models as meshes"),
             Self::Model => ("model", '=', "A model from the command line"),
+            Self::Bonds => ("bonds", '[', "Breakable bonds"),
         }
     }
 
@@ -217,6 +221,7 @@ impl SceneKind {
             Self::Queries => Box::new(scenes::queries::Queries::new(config, generation)?),
             Self::Meshes => Box::new(scenes::meshes::Meshes::new(config, generation)?),
             Self::Model => Box::new(scenes::model::Model::new(config, generation)?),
+            Self::Bonds => Box::new(scenes::bonds::Bonds::new(config, generation)?),
         })
     }
 }

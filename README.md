@@ -19,7 +19,7 @@ bindings to the [joltc] C wrapper. Everything runs headless and is tested withou
 
 ## Playground
 
-Twelve small scenes in a window show what the binding does: a character, vehicles, a pile of
+Thirteen small scenes in a window show what the binding does: a character, vehicles, a pile of
 bodies, ragdolls, constraints, soft bodies, buoyancy, destruction, contact control, queries, real
 meshes and any model file. In a clone of the repository with Rust, CMake and a C++ toolchain:
 
@@ -83,7 +83,7 @@ Everything planned for 1.0 is done; what works today, with links to the guides, 
 - [ ] macOS in CI and in releases
 - [ ] Same results across operating systems, checked in CI
 - [ ] Prebuilt native libraries downloaded by the build script
-- [ ] Constraint force readout and breakable constraints
+- [x] Constraint force readout and breakable constraints
 - [x] Playground: debris that breaks again when it hits the ground
 
 ## Status
@@ -159,7 +159,7 @@ Jolt's character controller, wheeled and tracked vehicles and ragdolls; it needs
   against a game's budgets; [real meshes](docs/real-meshes.md) from open sources.
 - [Character study](docs/character-study.md): which character laws CharacterVirtual's settings
   carry, and at what cost.
-- [Playground](docs/playground.md): twelve scenes with a window, headless runs and recorded clips.
+- [Playground](docs/playground.md): thirteen scenes with a window, headless runs and recorded clips.
 - API docs: `cargo doc -p oxijolt --open`. Example: `cargo run -p oxijolt --example hello_world`.
 - [CHANGELOG](CHANGELOG.md).
 

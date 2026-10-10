@@ -31,7 +31,8 @@ what is planned next.
   mapper to and from a detailed animation skeleton ([guide](guide.md#ragdolls)).
 - Twelve kinds of constraints with motors, springs and limits: fixed, point, distance, hinge,
   slider, cone, swing-twist, six-DOF, gear, rack and pinion, pulley and path
-  ([guide](constraints.md)).
+  ([guide](constraints.md)), with impulse readouts for breakable constraints
+  ([guide](constraints.md#breakable-constraints), [scene](playground.md#-breakable-bonds-bonds)).
 - Soft bodies: cloth, pressurised and volume-preserving bodies, with vertex readout and pinning
   ([guide](soft-bodies.md)).
 - Contact, activation and soft body contact events in an order that does not depend on the
@@ -59,7 +60,7 @@ what is planned next.
 - One set of API rules for names, constructors, settings, errors and derives
   ([api-guidelines.md](api-guidelines.md)), and Rust 1.88 as the minimum version, checked in CI.
 
-The [playground](playground.md) shows them in twelve small scenes with a window, and runs the same
+The [playground](playground.md) shows them in thirteen small scenes with a window, and runs the same
 scenes headless. In its breakable wall, pieces that land hard break again where they hit
 ([scene](playground.md#8-breakable-wall-destruction)).
 

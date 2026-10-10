@@ -1,5 +1,6 @@
 //! The scenes, one module each.
 
+pub mod bonds;
 pub mod character;
 pub mod constraints;
 pub mod contacts;
