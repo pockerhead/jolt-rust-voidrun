@@ -163,6 +163,10 @@ pub fn read_archive(path: &Path, commit: &str) -> anyhow::Result<Archive> {
         }
     };
 
+    let libraries = library_files(&get(&manifest, "target")?, &get(&manifest, "joltc_lib")?);
+    prebuilt_archive::check_entries(&bytes, name, [&libraries[0], &libraries[1]])
+        .map_err(|e| anyhow::anyhow!("{file}: {e}"))?;
+
     let source = get(&provenance, "source")?;
     ensure!(
         source.ends_with(&format!("@{commit}")),
@@ -230,6 +234,19 @@ fn metadata_files(bytes: &[u8], name: &str) -> anyhow::Result<(String, String)> 
         manifest.with_context(|| format!("{manifest_path} missing"))?,
         provenance.with_context(|| format!("{provenance_path} missing"))?,
     ))
+}
+
+/// The file names of the joltc library `joltc_lib` and of Jolt for `target`, as the target's
+/// toolchain spells static libraries.
+pub fn library_files(target: &str, joltc_lib: &str) -> [String; 2] {
+    let file = |lib: &str| {
+        if target.ends_with("-msvc") {
+            format!("{lib}.lib")
+        } else {
+            format!("lib{lib}.a")
+        }
+    };
+    [file(joltc_lib), file("Jolt")]
 }
 
 /// The `key<separator>value` lines of `text`, trimmed. A repeated key is an error; lines
@@ -475,6 +492,26 @@ mod tests {
                 release_archive_with("a", &twice, &provenance_for(&windows, COMMIT), &[]),
                 "duplicate",
             ),
+            (
+                "a file outside the prefix layout",
+                release_archive_with(
+                    "a",
+                    &manifest_for(&windows),
+                    &provenance_for(&windows, COMMIT),
+                    &[("a/lib/extra.dll", b"x")],
+                ),
+                "is not a file of the archive",
+            ),
+            (
+                "a library in another target's spelling",
+                release_archive_with(
+                    "a",
+                    &manifest_for(&windows),
+                    &provenance_for(&windows, COMMIT),
+                    &[("a/lib/libjoltc.a", b"x")],
+                ),
+                "is not a file of the archive",
+            ),
             ("not gzip", b"plain bytes".to_vec(), "tar.gz"),
         ];
         for (case, bytes, expected) in cases {
@@ -532,6 +569,15 @@ mod tests {
         assert_eq!(
             crate_version(fixture.crate_dir.path()).expect("version"),
             "1.2.0"
+        );
+    }
+
+    #[test]
+    fn library_names_follow_the_target_and_precision() {
+        assert_eq!(library_files(WINDOWS, "joltc"), ["joltc.lib", "Jolt.lib"]);
+        assert_eq!(
+            library_files(LINUX, "joltc_double"),
+            ["libjoltc_double.a", "libJolt.a"]
         );
     }
 

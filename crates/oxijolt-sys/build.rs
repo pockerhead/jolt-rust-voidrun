@@ -40,6 +40,10 @@ mod prebuilt;
 #[allow(dead_code)]
 #[path = "build/prebuilt_archive.rs"]
 mod prebuilt_archive;
+#[cfg(feature = "prebuilt")]
+#[allow(dead_code)]
+#[path = "build/prebuilt_curl.rs"]
+mod prebuilt_curl;
 // Shared with the xtask regenerator; each bindings mode uses a part of it.
 #[allow(dead_code)]
 #[path = "build/targets.rs"]
@@ -306,11 +310,17 @@ fn try_prebuilt(cfg: &NativeConfig) -> Result<PathBuf, Unavailable> {
     }
     prebuilt::check_linker(archive, &linker(cfg)?)?;
 
-    let prefix = fetch_archive(&list, archive)?;
+    let out_dir = env::var_os("OUT_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| Unavailable::Refused("OUT_DIR is not set".to_owned()))?;
+    let prefix = fetch_archive(&list, archive, cfg, &out_dir)?;
     if !crate_dir.join("vendor/joltc/include/joltc.h").is_file() {
         return Err(Unavailable::Refused("vendor/joltc is missing".to_owned()));
     }
-    let prefix = use_prebuilt(prefix, cfg).map_err(|e| Unavailable::Refused(format!("{e:#}")))?;
+    let prefix = use_prebuilt(prefix, cfg).map_err(|e| {
+        prebuilt_archive::remove_cached(&out_dir, &archive.name);
+        Unavailable::Refused(format!("{e:#}"))
+    })?;
     println!("using the prebuilt archive {}", archive.name);
     Ok(prefix)
 }
@@ -348,16 +358,29 @@ fn linker(cfg: &NativeConfig) -> Result<prebuilt::Linker, Unavailable> {
     }
 }
 
-/// The unpacked prefix of `archive`, from the cache in `OUT_DIR` or downloaded from the
-/// release and verified against the list.
+/// The unpacked prefix of `archive`: the copy in `OUT_DIR/prebuilt` while it is intact,
+/// otherwise downloaded from the release (or `JOLTC_PREBUILT_URL`) with `curl`, checked against
+/// the list's sha256 and unpacked.
 #[cfg(feature = "prebuilt")]
 fn fetch_archive(
-    _list: &prebuilt::ArchiveList,
-    _archive: &prebuilt::Archive,
+    list: &prebuilt::ArchiveList,
+    archive: &prebuilt::Archive,
+    cfg: &NativeConfig,
+    out_dir: &Path,
 ) -> Result<PathBuf, Unavailable> {
-    Err(Unavailable::Download(
-        "not supported by this build script yet".to_owned(),
-    ))
+    let joltc = cfg.archive_name(cfg.joltc_lib());
+    let jolt = cfg.archive_name("Jolt");
+    let libraries = [joltc.as_str(), jolt.as_str()];
+    if let Some(prefix) = prebuilt_archive::cached(out_dir, archive) {
+        return Ok(prefix);
+    }
+    let list_url = list.url.as_deref().unwrap_or_default();
+    let (base, https_only) =
+        prebuilt_curl::base_url(list_url, env::var("JOLTC_PREBUILT_URL").ok().as_deref())?;
+    let url = prebuilt_curl::archive_url(&base, &archive.name);
+    let limits = prebuilt_curl::Limits::DEFAULT;
+    let bytes = prebuilt_curl::download("curl".as_ref(), &url, https_only, &limits)?;
+    prebuilt_archive::verify_and_unpack(&bytes, archive, libraries, out_dir)
 }
 
 /// Builds the native prefix from the submodules with CMake and returns its path.

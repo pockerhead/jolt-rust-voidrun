@@ -32,6 +32,15 @@ mod prebuilt;
 #[allow(dead_code)]
 #[path = "../../crates/oxijolt-sys/build/prebuilt_archive.rs"]
 mod prebuilt_archive;
+#[cfg(test)]
+mod prebuilt_archive_tests;
+// The download is the build script's; here only its tests run.
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../../crates/oxijolt-sys/build/prebuilt_curl.rs"]
+mod prebuilt_curl;
+#[cfg(test)]
+mod prebuilt_curl_tests;
 mod prebuilt_list;
 #[cfg(test)]
 mod prebuilt_tests;

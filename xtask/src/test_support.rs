@@ -9,6 +9,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 
 use crate::prebuilt::{ArchiveConfig, SOURCE_INPUTS};
+use crate::prebuilt_list::library_files;
 
 /// A directory under the system temp dir, removed on drop.
 pub struct TempDir(PathBuf);
@@ -135,7 +136,7 @@ pub fn provenance_for(config: &ArchiveConfig, commit: &str) -> String {
 }
 
 /// A release archive named `name` for `config`, built from `commit`, with the prefix layout
-/// (libraries, headers, manifest, provenance, licences).
+/// (libraries in the target's spelling, headers, manifest, provenance, licences).
 pub fn release_archive(name: &str, config: &ArchiveConfig, commit: &str) -> Vec<u8> {
     release_archive_with(
         name,
@@ -153,11 +154,18 @@ pub fn release_archive_with(
     extra: &[(&str, &[u8])],
 ) -> Vec<u8> {
     let path = |relative: &str| format!("{name}/{relative}");
+    let value = |key: &str| {
+        manifest
+            .lines()
+            .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+            .unwrap_or_default()
+    };
+    let [joltc, jolt] = library_files(value("target"), value("joltc_lib"));
     let owned: Vec<(String, Vec<u8>)> = vec![
         (path(""), Vec::new()),
         (path("lib/"), Vec::new()),
-        (path("lib/joltc.lib"), b"joltc".to_vec()),
-        (path("lib/Jolt.lib"), b"Jolt".to_vec()),
+        (path(&format!("lib/{joltc}")), b"joltc".to_vec()),
+        (path(&format!("lib/{jolt}")), b"Jolt".to_vec()),
         (path("include/"), Vec::new()),
         (path("include/joltc.h"), b"// joltc.h\n".to_vec()),
         (path("include/joltc_ext.h"), b"// joltc_ext.h\n".to_vec()),
@@ -166,6 +174,31 @@ pub fn release_archive_with(
             manifest.as_bytes().to_vec(),
         ),
         (path("PROVENANCE.txt"), provenance.as_bytes().to_vec()),
+        (
+            path("LICENSE-MIT"),
+            b"MIT
+"
+            .to_vec(),
+        ),
+        (
+            path("LICENSE-APACHE"),
+            b"Apache
+"
+            .to_vec(),
+        ),
+        (path("licenses/"), Vec::new()),
+        (
+            path("licenses/joltc-LICENSE"),
+            b"joltc
+"
+            .to_vec(),
+        ),
+        (
+            path("licenses/JoltPhysics-LICENSE"),
+            b"Jolt
+"
+            .to_vec(),
+        ),
     ];
     let mut entries: Vec<(&str, &[u8])> = owned
         .iter()

@@ -1,1 +1,3 @@
 crates/oxijolt-sys/src/bindings/** linguist-generated=true eol=lf
+# Bash reads its scripts with LF line endings on every platform.
+*.sh text eol=lf
