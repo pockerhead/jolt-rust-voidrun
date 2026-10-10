@@ -1,6 +1,6 @@
 # Playground
 
-`examples/playground` is a program with a window that shows what `oxijolt` does, in twelve small
+`examples/playground` is a program with a window that shows what `oxijolt` does, in thirteen small
 scenes. Each scene owns its own `PhysicsWorld`, built fresh when the scene is chosen or reset. The
 same scenes run without a window, for tests and CI, and record the clips on this page.
 
@@ -36,7 +36,7 @@ These keys work in every scene:
 
 | Keys | Action |
 |---|---|
-| 1 to 9, 0, -, = | choose a scene |
+| 1 to 9, 0, -, =, [ | choose a scene |
 | R | reset the scene |
 | P | pause |
 | N | one tick while paused |
@@ -280,6 +280,31 @@ The HUD shows the file's triangle count and how many the mesh constructor droppe
 | Keys | Action |
 |---|---|
 | Space | drop a burst of bodies |
+
+### [ Breakable bonds (`bonds`)
+
+![A brick wall bonded to a pier cracks there when its prop is lowered, and its free end falls](media/bonds.gif)
+
+*The wall stands on the grey pier and the purple prop; the prop sinks into the ground, the wall
+swings down from the pier, the bonds next to the pier flash red as they break, and the free part
+falls and breaks apart where it lands.*
+
+A wall of 48 bricks, each its own dynamic body, joined by 117 fixed constraints between bricks that
+touch (side by side in a row, and overlapping in neighbouring rows), and 2 anchors of the bottom
+bricks to the pier. After every step the scene reads each bond's impulses, divides them by the step
+time and disables, with `set_enabled(false)`, the bonds whose force passes 20 kN or whose torque
+passes 1.5 kN·m, at most two per step, the most loaded first. The anchors break only by clicks.
+Measured with bonds that never break, the propped wall puts at most 8.0 kN and 0.42 kN·m on a bond
+and the bonds next to the pier reach 98 kN and 7.5 kN·m once the prop is down, so the wall stands
+until the prop goes and then cracks at the pier. Welds are rigid: the wall cracks and falls in
+pieces rather than bending. Each bond is drawn as a short line on the wall's front, green below half
+its limit and yellow above. It uses `FixedConstraintSettings`, `total_lambda_position`,
+`total_lambda_rotation` and `ConstraintMut::set_enabled`, and moves the prop with `move_kinematic`
+([breakable constraints](constraints.md#breakable-constraints)).
+
+| Keys | Action |
+|---|---|
+| left click | break every bond of the brick under the cursor |
 
 What is not shown, because it has nothing to draw: Jolt's jobs on a caller's thread pool, `f64`
 positions, the `glam` and `mint` conversions, the prelude and the error type.

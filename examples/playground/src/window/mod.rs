@@ -27,7 +27,7 @@ const MAX_TICKS_PER_FRAME: u32 = 4;
 
 /// The keys every scene shares, for the help panel.
 const GLOBAL_KEYS: &[(&str, &str)] = &[
-    ("1-9, 0, -, =", "choose a scene"),
+    ("1-9, 0, -, =, [", "choose a scene"),
     ("R", "reset the scene"),
     ("P", "pause"),
     ("N", "one tick while paused"),
@@ -140,8 +140,9 @@ impl App {
             KeyCode::Key0,
             KeyCode::Minus,
             KeyCode::Equal,
+            KeyCode::LeftBracket,
         ];
-        for (key, digit) in digits.into_iter().zip("1234567890-=".chars()) {
+        for (key, digit) in digits.into_iter().zip("1234567890-=[".chars()) {
             if is_key_pressed(key) {
                 if let Some(kind) = SceneKind::ALL.into_iter().find(|kind| kind.key() == digit) {
                     self.rebuild(Some(kind));
