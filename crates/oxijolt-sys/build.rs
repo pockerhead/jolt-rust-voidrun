@@ -1,14 +1,19 @@
 //! Builds joltc and Jolt (or validates a prebuilt copy), links them and
 //! generates the raw bindings over `joltc.h` and the fork's `joltc_ext.h`.
 //!
-//! Two ways to get the native libraries:
-//! - by default, CMake builds `native/` from the `vendor/` submodules into
-//!   `OUT_DIR/joltc`, an install prefix with `lib/`, `include/joltc.h`,
-//!   `include/joltc_ext.h` and a manifest describing everything that affects
-//!   the ABI;
-//! - with `JOLTC_LIB_DIR` set, an already built prefix of that shape is used
-//!   after its manifest, archives and header are validated, and CMake is not
-//!   run at all.
+//! Four ways to get the native libraries, in this order:
+//! - under docs.rs (`DOCS_RS`), only the headers are copied and nothing is linked;
+//! - with `JOLTC_LIB_DIR` set, an already built install prefix (`lib/`,
+//!   `include/joltc.h`, `include/joltc_ext.h` and a manifest describing everything
+//!   that affects the ABI) is used after its manifest, archives and headers are
+//!   validated, and CMake is not run at all;
+//! - with the `prebuilt` feature, the release archive of this version listed in
+//!   `prebuilt.txt` for the target, CRT and features, when the environment, the
+//!   native sources and the toolchain allow it (`build/prebuilt.rs`);
+//! - otherwise CMake builds `native/` from the `vendor/` submodules into
+//!   `OUT_DIR/joltc`, a prefix of the same shape. A reason not to use an archive
+//!   is reported as one warning; `JOLTC_PREBUILT=require` makes it an error and
+//!   `JOLTC_PREBUILT=off` skips the archives.
 //!
 //! The bindings are committed under `src/bindings/`, one file per ABI family
 //! (see `build/targets.rs`) and configuration; the script checks that they were
@@ -27,12 +32,21 @@ use anyhow::{bail, Context};
 mod bindgen_options;
 #[path = "build/cmake_options.rs"]
 mod cmake_options;
+// Shared with the xtask list writer, which uses the parts build.rs does not.
+#[allow(dead_code)]
+#[path = "build/prebuilt.rs"]
+mod prebuilt;
+#[cfg(feature = "prebuilt")]
+#[allow(dead_code)]
+#[path = "build/prebuilt_archive.rs"]
+mod prebuilt_archive;
 // Shared with the xtask regenerator; each bindings mode uses a part of it.
 #[allow(dead_code)]
 #[path = "build/targets.rs"]
 mod targets;
 
 use cmake_options::{AndroidNdk, FeatureSwitches, ANDROID_GENERATOR};
+use prebuilt::{Mode, Unavailable};
 use targets::Family;
 
 /// joltc commit of the `vendor/joltc` submodule. Must match the gitlink; CI checks this.
@@ -178,6 +192,15 @@ fn cmake_path(path: &Path) -> String {
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-env-changed=JOLTC_LIB_DIR");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
+    for var in [
+        "JOLTC_PREBUILT",
+        "JOLTC_PREBUILT_URL",
+        "CARGO_NET_OFFLINE",
+        "NIX_BUILD_TOP",
+        "RUSTC_LINKER",
+    ] {
+        println!("cargo:rerun-if-env-changed={var}");
+    }
     println!("cargo:rerun-if-changed=build.rs");
 
     let cfg = NativeConfig::from_env()?;
@@ -186,7 +209,7 @@ fn main() -> anyhow::Result<()> {
     } else {
         let prefix = match env::var_os("JOLTC_LIB_DIR") {
             Some(dir) => use_prebuilt(PathBuf::from(dir), &cfg)?,
-            None => build_with_cmake(&cfg)?,
+            None => native_prefix(&cfg)?,
         };
         link(&prefix, &cfg);
         prefix
@@ -220,6 +243,123 @@ fn headers_only_prefix() -> anyhow::Result<PathBuf> {
     Ok(prefix)
 }
 
+/// The native prefix outside docs.rs without `JOLTC_LIB_DIR`: a release archive when one can
+/// be used, otherwise the CMake build, as `JOLTC_PREBUILT` says.
+fn native_prefix(cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
+    let mode =
+        Mode::parse(env::var("JOLTC_PREBUILT").ok().as_deref()).map_err(anyhow::Error::msg)?;
+    if mode == Mode::Off {
+        return build_with_cmake(cfg);
+    }
+    match try_prebuilt(cfg) {
+        Ok(prefix) => Ok(prefix),
+        Err(reason) if mode == Mode::Require => bail!("JOLTC_PREBUILT=require: {reason}"),
+        // Without the feature the user chose the source build.
+        Err(Unavailable::FeatureOff) => build_with_cmake(cfg),
+        Err(reason) => {
+            println!("cargo:warning=building joltc from source: {reason}");
+            build_with_cmake(cfg)
+        }
+    }
+}
+
+#[cfg(not(feature = "prebuilt"))]
+fn try_prebuilt(_cfg: &NativeConfig) -> Result<PathBuf, Unavailable> {
+    Err(Unavailable::FeatureOff)
+}
+
+/// The prefix of the release archive for this build, or why there is none.
+#[cfg(feature = "prebuilt")]
+fn try_prebuilt(cfg: &NativeConfig) -> Result<PathBuf, Unavailable> {
+    let crate_dir = manifest_dir().map_err(|e| Unavailable::Refused(format!("{e:#}")))?;
+    // Printed before any early return, so that a later change of the list or the sources
+    // reruns the decision.
+    println!("cargo:rerun-if-changed={}", prebuilt::LIST_FILE);
+    for input in prebuilt::SOURCE_INPUTS {
+        println!("cargo:rerun-if-changed={input}");
+    }
+
+    let var = |name: &str| env::var(name).ok();
+    if let Some(reason) = prebuilt::skip_reason(var, &crate_dir) {
+        return Err(reason);
+    }
+    let text = fs::read_to_string(crate_dir.join(prebuilt::LIST_FILE))
+        .map_err(|e| Unavailable::List(e.to_string()))?;
+    let list = prebuilt::parse(&text).map_err(Unavailable::List)?;
+
+    let crt_static = var("CARGO_CFG_TARGET_FEATURE")
+        .unwrap_or_default()
+        .split(',')
+        .any(|f| f == "crt-static");
+    if crt_static {
+        return Err(Unavailable::CrtStatic);
+    }
+    let crate_version = var("CARGO_PKG_VERSION").unwrap_or_default();
+    let archive = prebuilt::select(&list, &crate_version, &archive_config(cfg))?;
+    if list.sources != Some(prebuilt_archive::sources_fingerprint(&crate_dir)?) {
+        return Err(Unavailable::SourcesDiffer);
+    }
+
+    // From here the outcome depends on tools found through the environment.
+    for name in ["PATH", "VCToolsVersion", "VCINSTALLDIR"] {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
+    prebuilt::check_linker(archive, &linker(cfg)?)?;
+
+    let prefix = fetch_archive(&list, archive)?;
+    if !crate_dir.join("vendor/joltc/include/joltc.h").is_file() {
+        return Err(Unavailable::Refused("vendor/joltc is missing".to_owned()));
+    }
+    let prefix = use_prebuilt(prefix, cfg).map_err(|e| Unavailable::Refused(format!("{e:#}")))?;
+    println!("using the prebuilt archive {}", archive.name);
+    Ok(prefix)
+}
+
+/// The archive configuration this build needs, in the manifest's spelling.
+#[cfg(feature = "prebuilt")]
+fn archive_config(cfg: &NativeConfig) -> prebuilt::ArchiveConfig {
+    prebuilt::ArchiveConfig {
+        target: cfg.target.clone(),
+        crt: cfg.crt.to_owned(),
+        double_precision: cfg.double_precision,
+        cross_platform_deterministic: cfg.cross_platform_deterministic,
+        debug_renderer: cfg.debug_renderer,
+        asserts: cfg.asserts,
+    }
+}
+
+/// What will link an archive for this target. Only MSVC and native Linux GNU builds have
+/// archives.
+#[cfg(feature = "prebuilt")]
+fn linker(cfg: &NativeConfig) -> Result<prebuilt::Linker, Unavailable> {
+    let var = |name: &str| env::var(name).ok();
+    if cfg.target_env == "msvc" {
+        let found =
+            prebuilt::effective_msvc_linker(var, || prebuilt_archive::find_link_exe(&cfg.target));
+        Ok(prebuilt::Linker::Msvc(found))
+    } else if cfg.target_os == "linux" && cfg.target_env == "gnu" {
+        Ok(prebuilt::Linker::Gnu {
+            cross: var("HOST") != var("TARGET"),
+            overridden: prebuilt::gnu_linker_overridden(var),
+            glibc: prebuilt_archive::host_glibc(),
+        })
+    } else {
+        Err(Unavailable::NoArchive)
+    }
+}
+
+/// The unpacked prefix of `archive`, from the cache in `OUT_DIR` or downloaded from the
+/// release and verified against the list.
+#[cfg(feature = "prebuilt")]
+fn fetch_archive(
+    _list: &prebuilt::ArchiveList,
+    _archive: &prebuilt::Archive,
+) -> Result<PathBuf, Unavailable> {
+    Err(Unavailable::Download(
+        "not supported by this build script yet".to_owned(),
+    ))
+}
+
 /// Builds the native prefix from the submodules with CMake and returns its path.
 fn build_with_cmake(cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
     let crate_dir = manifest_dir()?;
@@ -228,14 +368,7 @@ fn build_with_cmake(cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
 
     // Printing any rerun rule replaces Cargo's scan of the whole package, so
     // Rust-only edits do not rerun CMake. Jolt's Assets are left out on purpose.
-    for input in [
-        "native",
-        "vendor/joltc/CMakeLists.txt",
-        "vendor/joltc/include",
-        "vendor/joltc/src",
-        "vendor/JoltPhysics/Build",
-        "vendor/JoltPhysics/Jolt",
-    ] {
+    for input in prebuilt::SOURCE_INPUTS {
         println!("cargo:rerun-if-changed={input}");
     }
 
@@ -396,7 +529,13 @@ fn check_manifest(path: &Path, cfg: &NativeConfig) -> anyhow::Result<()> {
         let (key, value) = line
             .split_once('=')
             .with_context(|| format!("{}: malformed line {line:?}", path.display()))?;
-        found.insert(key.trim().to_owned(), value.trim().to_owned());
+        let key = key.trim();
+        if found
+            .insert(key.to_owned(), value.trim().to_owned())
+            .is_some()
+        {
+            bail!("{}: duplicate key `{key}`", path.display());
+        }
     }
 
     let expected = manifest_entries(cfg);

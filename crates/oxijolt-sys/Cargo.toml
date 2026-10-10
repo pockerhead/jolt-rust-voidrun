@@ -28,7 +28,11 @@ features = ["debug-renderer"]
 targets = ["x86_64-unknown-linux-gnu"]
 
 [features]
-default = []
+default = ["prebuilt"]
+
+# Downloads the release archive of this exact version with the system `curl`, verified against
+# `prebuilt.txt`, instead of building Jolt; falls back to the source build. See docs/building.md.
+prebuilt = ["dep:sha2", "dep:flate2", "dep:tar", "dep:cc"]
 
 # Builds Jolt with its assertions (`USE_ASSERTS`).
 asserts = []
@@ -58,3 +62,9 @@ bindgen = ["dep:bindgen"]
 bindgen = { version = "0.73", optional = true }
 cmake = "0.1.58"
 anyhow = "1"
+sha2 = { version = "0.10", optional = true }
+flate2 = { version = "1.1", optional = true }
+# 0.4.45 and older carry the `unpack_in` advisory GHSA-j4xf-2g29-59ph.
+tar = { version = "0.4.46", optional = true, default-features = false }
+# Only `windows_registry::find_tool`, to read the MSVC toolset; it compiles nothing here.
+cc = { version = "1.4", optional = true }

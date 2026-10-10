@@ -9,3 +9,8 @@ publish = false
 # Pinned: the committed bindings are this version's output.
 bindgen = "=0.73.2"
 anyhow = "1"
+# The archive list writer shares build/prebuilt*.rs with the oxijolt-sys build script.
+sha2 = "0.10"
+flate2 = "1.1"
+tar = { version = "0.4.46", default-features = false }
+cc = "1.4"

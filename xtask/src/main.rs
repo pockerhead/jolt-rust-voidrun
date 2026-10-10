@@ -4,6 +4,10 @@
 //! ABI family and configuration, and their fingerprint record. `cargo xtask bindings --check`
 //! regenerates them in memory and fails when the committed files differ, writing the fresh set
 //! to `--out <dir>` (default `target/xtask-bindings`).
+//!
+//! `cargo xtask prebuilt-list` writes `crates/oxijolt-sys/prebuilt.txt`, the list of release
+//! archives the build script downloads, from a directory of built archives;
+//! `cargo xtask prebuilt-list --check` checks archives against a list (see [`prebuilt_list`]).
 
 use std::env;
 use std::fs;
@@ -21,16 +25,33 @@ mod targets;
 #[cfg(test)]
 #[path = "../../crates/oxijolt-sys/build/cmake_options.rs"]
 mod cmake_options;
+// The build script's archive list and archive checks; the list writer uses a part of them.
+#[allow(dead_code)]
+#[path = "../../crates/oxijolt-sys/build/prebuilt.rs"]
+mod prebuilt;
+#[allow(dead_code)]
+#[path = "../../crates/oxijolt-sys/build/prebuilt_archive.rs"]
+mod prebuilt_archive;
+mod prebuilt_list;
+#[cfg(test)]
+mod prebuilt_tests;
+#[cfg(test)]
+mod test_support;
 
 /// The bindgen version in `Cargo.toml`, recorded as provenance.
 const BINDGEN_VERSION: &str = "0.73.2";
 
-const USAGE: &str = "usage: cargo xtask bindings [--check] [--out <dir>]";
+const USAGE: &str = concat!(
+    "usage: cargo xtask bindings [--check] [--out <dir>]\n",
+    "       cargo xtask prebuilt-list --dist <dir> --url <base> --commit <sha> [--out <file>] [--allow-partial]\n",
+    "       cargo xtask prebuilt-list --check <list> --dist <dir>",
+);
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.split_first() {
         Some((task, rest)) if task == "bindings" => bindings(rest),
+        Some((task, rest)) if task == "prebuilt-list" => prebuilt_list::run(rest, USAGE),
         _ => bail!(USAGE),
     }
 }
