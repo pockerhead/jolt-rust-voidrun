@@ -100,7 +100,7 @@ fn a_good_archive_unpacks_with_its_marker_and_times() {
     assert!(lines.any(|line| line == joltc_line), "{marker}");
     assert!(!out.path().join(format!("prebuilt/.tmp-{NAME}")).exists());
 
-    assert_eq!(cached(out.path(), &archive), Some(prefix));
+    assert_eq!(cached(out.path(), &archive, LIBRARIES), Some(prefix));
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn a_changed_cached_file_is_found_and_the_cache_removed() {
     let (bytes, archive) = good();
     let prefix = unpack(&bytes, &archive, LIBRARIES, out.path()).expect("unpack");
     fs::write(prefix.join("lib/Jolt.lib"), b"Jolu").expect("flip");
-    assert_eq!(cached(out.path(), &archive), None);
+    assert_eq!(cached(out.path(), &archive, LIBRARIES), None);
     assert!(!prefix.exists());
     assert!(!out.path().join(format!("prebuilt/{NAME}.files")).exists());
 }
@@ -139,7 +139,7 @@ fn a_cache_of_another_archive_hash_is_not_used() {
     let (bytes, mut archive) = good();
     let prefix = unpack(&bytes, &archive, LIBRARIES, out.path()).expect("unpack");
     archive.sha256[0] ^= 1;
-    assert_eq!(cached(out.path(), &archive), None);
+    assert_eq!(cached(out.path(), &archive, LIBRARIES), None);
     assert!(!prefix.exists());
 }
 
@@ -149,8 +149,108 @@ fn a_cache_without_its_marker_is_not_used() {
     let (bytes, archive) = good();
     let prefix = unpack(&bytes, &archive, LIBRARIES, out.path()).expect("unpack");
     fs::remove_file(out.path().join(format!("prebuilt/{NAME}.files"))).expect("remove");
-    assert_eq!(cached(out.path(), &archive), None);
+    assert_eq!(cached(out.path(), &archive, LIBRARIES), None);
     assert!(!prefix.exists());
+}
+
+/// Unpacks the good archive, rewrites its marker with `edit` and changes `lib/Jolt.lib`: the
+/// cache must not be used.
+fn assert_marker_edit_is_refused(label: &str, edit: impl Fn(&str) -> String) {
+    let out = TempDir::new(label);
+    let (bytes, archive) = good();
+    let prefix = unpack(&bytes, &archive, LIBRARIES, out.path()).expect("unpack");
+    let marker = out.path().join(format!("prebuilt/{NAME}.files"));
+    let record = fs::read_to_string(&marker).expect("marker");
+    fs::write(&marker, edit(&record)).expect("edit marker");
+    fs::write(prefix.join("lib/Jolt.lib"), b"Jolu").expect("flip");
+    assert_eq!(cached(out.path(), &archive, LIBRARIES), None, "{label}");
+    assert!(!prefix.exists(), "{label}");
+}
+
+/// The marker without the record of `relative`.
+fn without(record: &str, relative: &str) -> String {
+    record
+        .lines()
+        .filter(|line| !line.ends_with(&format!(" {relative}")))
+        .map(|line| {
+            format!(
+                "{line}
+"
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_marker_that_misses_a_native_file_is_not_used() {
+    assert_marker_edit_is_refused("cache-truncated", |record| {
+        record
+            .lines()
+            .take(2)
+            .map(|line| {
+                format!(
+                    "{line}
+"
+                )
+            })
+            .collect()
+    });
+    assert_marker_edit_is_refused("cache-no-jolt", |record| without(record, "lib/Jolt.lib"));
+    for relative in [
+        "lib/joltc.lib",
+        "include/joltc.h",
+        "include/joltc_ext.h",
+        "oxijolt-sys-manifest.txt",
+    ] {
+        let out = TempDir::new("cache-missing-record");
+        let (bytes, archive) = good();
+        let prefix = unpack(&bytes, &archive, LIBRARIES, out.path()).expect("unpack");
+        let marker = out.path().join(format!("prebuilt/{NAME}.files"));
+        let record = fs::read_to_string(&marker).expect("marker");
+        fs::write(&marker, without(&record, relative)).expect("edit marker");
+        assert_eq!(cached(out.path(), &archive, LIBRARIES), None, "{relative}");
+        assert!(!prefix.exists(), "{relative}");
+    }
+}
+
+#[test]
+fn a_marker_that_records_a_file_twice_is_not_used() {
+    let out = TempDir::new("cache-duplicate-intact");
+    let (bytes, archive) = good();
+    let prefix = unpack(&bytes, &archive, LIBRARIES, out.path()).expect("unpack");
+    let marker = out.path().join(format!("prebuilt/{NAME}.files"));
+    let record = fs::read_to_string(&marker).expect("marker");
+    let first_file = record.lines().nth(1).expect("a file record");
+    fs::write(
+        &marker,
+        format!(
+            "{record}{first_file}
+"
+        ),
+    )
+    .expect("edit marker");
+    assert_eq!(cached(out.path(), &archive, LIBRARIES), None);
+    assert!(!prefix.exists());
+}
+
+#[test]
+fn the_marker_is_written_whole() {
+    let out = TempDir::new("cache-atomic");
+    let (bytes, archive) = good();
+    unpack(&bytes, &archive, LIBRARIES, out.path()).expect("unpack");
+    let cache = out.path().join("prebuilt");
+    let mut names: Vec<String> = fs::read_dir(&cache)
+        .expect("cache")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .into_string()
+                .expect("utf-8")
+        })
+        .collect();
+    names.sort();
+    assert_eq!(names, [NAME.to_owned(), format!("{NAME}.files")]);
 }
 
 #[test]

@@ -371,7 +371,7 @@ fn fetch_archive(
     let joltc = cfg.archive_name(cfg.joltc_lib());
     let jolt = cfg.archive_name("Jolt");
     let libraries = [joltc.as_str(), jolt.as_str()];
-    if let Some(prefix) = prebuilt_archive::cached(out_dir, archive) {
+    if let Some(prefix) = prebuilt_archive::cached(out_dir, archive, libraries) {
         return Ok(prefix);
     }
     let list_url = list.url.as_deref().unwrap_or_default();
@@ -517,9 +517,6 @@ fn use_prebuilt(dir: PathBuf, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
         .into_iter()
         .chain(&archives)
         .collect();
-    for input in &inputs {
-        println!("cargo:rerun-if-changed={}", input.display());
-    }
     // A configuration mismatch explains a missing archive (for example
     // joltc_double without double precision), so it is reported first.
     if manifest.is_file() {
@@ -540,6 +537,11 @@ fn use_prebuilt(dir: PathBuf, cfg: &NativeConfig) -> anyhow::Result<PathBuf> {
 
     check_header(&header)?;
     check_ext_header(&ext_header)?;
+    // Only a usable prefix is watched: a refused archive prefix is deleted before the source
+    // build, and a missing watched file would rerun the build script on every build.
+    for input in &inputs {
+        println!("cargo:rerun-if-changed={}", input.display());
+    }
     Ok(dir)
 }
 

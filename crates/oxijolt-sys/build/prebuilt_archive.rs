@@ -3,6 +3,7 @@
 //!
 //! Shared by `build.rs` (feature `prebuilt`) and the `xtask` list writer through `#[path]`.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -207,8 +208,8 @@ fn cache_dir(out_dir: &Path) -> PathBuf {
     out_dir.join("prebuilt")
 }
 
-/// The record of an unpacked archive, written last: the archive's sha256 and the sha256 of
-/// each file.
+/// The record of an unpacked archive, written last and renamed into place whole: the archive's
+/// sha256 and the sha256 of each file.
 fn marker_path(out_dir: &Path, name: &str) -> PathBuf {
     cache_dir(out_dir).join(format!("{name}.files"))
 }
@@ -253,7 +254,9 @@ pub fn unpack(
     for (hash, relative) in written {
         record += &format!("{} {relative}\n", hex(&hash));
     }
-    fs::write(&marker, record).map_err(|e| io_error("cannot write", &marker, e))?;
+    let partial = marker.with_extension("files.tmp");
+    fs::write(&partial, record).map_err(|e| io_error("cannot write", &partial, e))?;
+    fs::rename(&partial, &marker).map_err(|e| io_error("cannot move", &partial, e))?;
     Ok(prefix)
 }
 
@@ -325,12 +328,13 @@ impl io::Write for HashingWriter<'_> {
 }
 
 /// The prefix of `archive` unpacked earlier into `out_dir`, when its marker names this
-/// archive's sha256 and every recorded file still has its recorded sha256. Otherwise the
-/// cached prefix and its marker are removed and the result is `None`, so a damaged or edited
-/// cache is fetched again.
-pub fn cached(out_dir: &Path, archive: &Archive) -> Option<PathBuf> {
+/// archive's sha256, records each file once, records the two `libraries`, the headers and the
+/// manifest, and every recorded file still has its recorded sha256. Otherwise the cached prefix
+/// and its marker are removed and the result is `None`, so a damaged or edited cache is fetched
+/// again.
+pub fn cached(out_dir: &Path, archive: &Archive, libraries: [&str; 2]) -> Option<PathBuf> {
     let prefix = cache_dir(out_dir).join(&archive.name);
-    if cache_is_intact(out_dir, archive, &prefix) {
+    if cache_is_intact(out_dir, archive, libraries, &prefix) {
         Some(prefix)
     } else {
         remove_cached(out_dir, &archive.name);
@@ -338,7 +342,7 @@ pub fn cached(out_dir: &Path, archive: &Archive) -> Option<PathBuf> {
     }
 }
 
-fn cache_is_intact(out_dir: &Path, archive: &Archive, prefix: &Path) -> bool {
+fn cache_is_intact(out_dir: &Path, archive: &Archive, libraries: [&str; 2], prefix: &Path) -> bool {
     let Ok(record) = fs::read_to_string(marker_path(out_dir, &archive.name)) else {
         return false;
     };
@@ -346,23 +350,36 @@ fn cache_is_intact(out_dir: &Path, archive: &Archive, prefix: &Path) -> bool {
     if lines.next() != Some(&format!("archive {}", hex(&archive.sha256))) {
         return false;
     }
-    let mut files = 0;
+    let mut recorded = BTreeSet::new();
     for line in lines {
         let Some((hash, relative)) = line.split_once(' ') else {
             return false;
         };
-        if relative
+        let unsafe_path = relative
             .split('/')
-            .any(|part| part.is_empty() || part == "..")
-        {
+            .any(|part| part.is_empty() || part == "..");
+        if unsafe_path || !recorded.insert(relative) {
             return false;
         }
         match fs::read(prefix.join(relative)) {
-            Ok(bytes) if hex(&sha256(&bytes)) == hash => files += 1,
+            Ok(bytes) if hex(&sha256(&bytes)) == hash => {}
             _ => return false,
         }
     }
-    files > 0
+    native_files(libraries)
+        .iter()
+        .all(|file| recorded.contains(file.as_str()))
+}
+
+/// The files of a prefix the build links or reads, relative to the prefix.
+fn native_files(libraries: [&str; 2]) -> [String; 5] {
+    [
+        format!("lib/{}", libraries[0]),
+        format!("lib/{}", libraries[1]),
+        "include/joltc.h".to_owned(),
+        "include/joltc_ext.h".to_owned(),
+        "oxijolt-sys-manifest.txt".to_owned(),
+    ]
 }
 
 /// Removes the unpacked prefix of the archive `name` and its marker, the marker first.

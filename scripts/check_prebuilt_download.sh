@@ -10,6 +10,7 @@
 # take or refuse the archive: each fallback in auto mode (a warning, then the source build)
 # and in require mode (an error), the precedence of docs.rs and JOLTC_LIB_DIR, the download
 # itself, the cache in OUT_DIR and its integrity check. The server log counts the requests.
+# Every list the cases use is written here, so the committed list may hold any release's.
 #
 # Every cargo run has CMAKE and CXX pointing at programs that do not exist, so a source build
 # fails as soon as it starts CMake, and a success proves that the download path needs neither.
@@ -51,7 +52,7 @@ cleanup() {
 }
 
 rm -rf "$work/www" "$work/stage" "$work"/*.log
-mkdir -p "$work/www/good" "$work/www/bad" "$work/stage" "$work/empty-bin"
+mkdir -p "$work/www/good" "$work/www/bad" "$work/www/refused" "$work/stage" "$work/empty-bin"
 cp "$list" "$work/prebuilt.txt.orig"
 trap cleanup EXIT
 
@@ -98,6 +99,14 @@ cp "$work/www/good/$name.tar.gz" "$work/www/bad/$name.tar.gz"
 "$python" -c 'import sys; p = sys.argv[1]; b = bytearray(open(p, "rb").read()); b[-1] ^= 1; open(p, "wb").write(b)' \
   "$(native "$work/www/bad/$name.tar.gz")"
 joltc_lib=$(ls "$stage/lib" | grep -i joltc)
+# The same archive with a manifest of another configuration: it passes the checksum of its own
+# list (below) and is refused as a prefix.
+refused_stage="$work/stage/refused/$name"
+rm -rf "$work/stage/refused"
+mkdir -p "$work/stage/refused"
+cp -R "$stage" "$refused_stage"
+sed -i 's/^double_precision=OFF/double_precision=ON/' "$refused_stage/oxijolt-sys-manifest.txt"
+(cd "$work/stage/refused" && tar -czf "../../www/refused/$name.tar.gz" "$name")
 
 # Every cargo child starts from the same environment: nothing of the caller's archive
 # settings leaks in, CMake and the C++ compiler are missing, the local server is not proxied,
@@ -117,13 +126,18 @@ cargo_in() {
   cargo run -q --locked -p xtask -- prebuilt-list --allow-partial --dist "$(native "$work/www/good")" \
   --url http://127.0.0.1:1 --commit "$head")
 cp "$list" "$work/good.txt"
+printf 'format=1\n' > "$work/placeholder.txt"
+refused_sha=$(sha256sum "$work/www/refused/$name.tar.gz" | cut -d ' ' -f 1)
+sed "s/^\(archive=[^ ]* sha256=\)[0-9a-f]*/\1$refused_sha/" "$work/good.txt" > "$work/refused.txt"
 
 use_list() {
   cp "$1" "$list"
   touch "$list"
 }
 
-# check NAME DIR EXPECT(ok|fail) REQUESTS(n|+) [has:TEXT | lacks:TEXT | reran | fresh]... -- CARGO ARGS
+# check NAME DIR EXPECT(ok|fail) REQUESTS(n|+) [has:TEXT | lacks:TEXT | unwatched:TEXT | reran | fresh]...
+#   -- CARGO ARGS
+# `unwatched:TEXT`: no rerun-if-changed line of the build script (needs -vv) contains TEXT.
 # REQUESTS is the exact number of new requests, `+` for at least one, `*` for any.
 failures=0
 check() {
@@ -150,6 +164,8 @@ check() {
     case "$c" in
       has:*) grep -qF -- "${c#has:}" "$log" || problems+=("missing '${c#has:}'") ;;
       lacks:*) ! grep -qF -- "${c#lacks:}" "$log" || problems+=("unexpected '${c#lacks:}'") ;;
+      unwatched:*) ! grep -F 'rerun-if-changed=' "$log" | grep -qF -- "${c#unwatched:}" ||
+        problems+=("a rerun rule names '${c#unwatched:}'") ;;
       reran) grep -qE "$rerun_pattern" "$log" || problems+=("the build script did not run") ;;
       fresh) ! grep -qE "$rerun_pattern" "$log" || problems+=("the build script ran again") ;;
     esac
@@ -194,7 +210,7 @@ rm -f "$checksum_file"
 case_env=(JOLTC_PREBUILT_URL="$good_url" NIX_BUILD_TOP=/build)
 fallback nix "inside a Nix build (NIX_BUILD_TOP)" 0 t_no
 case_env=(JOLTC_PREBUILT_URL="$good_url")
-use_list "$work/prebuilt.txt.orig"
+use_list "$work/placeholder.txt"
 fallback placeholder "the archive list has no archives" 0 t_no
 printf 'format=2\n' > "$work/malformed.txt"
 use_list "$work/malformed.txt"
@@ -232,6 +248,14 @@ case_env=(JOLTC_PREBUILT_URL="$url/missing")
 fallback http-404 "download failed: curl exit 22" 1 t_no
 case_env=(JOLTC_PREBUILT_URL="ftp://x")
 fallback bad-url "download failed: invalid JOLTC_PREBUILT_URL" 0 t_no
+# A refused prefix is deleted, and the source build that follows must not watch its files: a
+# missing watched file would rerun the build script, and the download, on every build.
+use_list "$work/refused.txt"
+case_env=(JOLTC_PREBUILT_URL="$url/refused")
+fallback prefix-refused "the archive was refused" 1 t_refused -vv
+check prefix-refused-unwatched t_refused fail 1 "has:$source_build: the archive was refused" \
+  "has:$cmake_started" "unwatched:$name" -- check --locked -p oxijolt-sys -vv
+use_list "$work/good.txt"
 
 # No archive is looked at without the feature (at either crate), with `off`, under docs.rs or
 # with JOLTC_LIB_DIR; the successes come last so that they cannot hide a refusal above.
