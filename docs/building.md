@@ -156,7 +156,7 @@ The warning (or the `require` error) ends with one of these reasons:
 | Reason | What to do |
 |---|---|
 | offline build, vendored sources, inside a Nix build | nothing: the source build is intended; use `JOLTC_LIB_DIR` for a prebuilt prefix |
-| the archive list has no archives | a git checkout between releases, or an unreleased version: build from source or set `JOLTC_PREBUILT=off` |
+| the archive list has no archives | a git checkout from before the first release with archives: build from source or set `JOLTC_PREBUILT=off` |
 | the archive list is for version X, the crate is Y | the version was bumped after the list was recorded: as above |
 | the native sources differ from the released ones | a checkout with native changes: as above |
 | native sources missing or not regular files | `git submodule update --init` |

@@ -256,7 +256,7 @@ pub fn select<'a>(
 pub fn write(list: &ArchiveList) -> String {
     let mut text = String::from(
         "# Release archives of oxijolt-sys. The Release workflow writes this file with\n\
-         # `cargo xtask prebuilt-list`; between releases it lists none.\n\
+         # `cargo xtask prebuilt-list`; a build takes an archive only for the listed version.\n\
          format=1\n",
     );
     if let Some(version) = &list.version {

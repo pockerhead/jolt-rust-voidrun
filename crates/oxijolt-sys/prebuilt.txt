@@ -1,3 +1,3 @@
 # Release archives of oxijolt-sys. The Release workflow writes this file with
-# `cargo xtask prebuilt-list`; between releases it lists none.
+# `cargo xtask prebuilt-list`; a build takes an archive only for the listed version.
 format=1

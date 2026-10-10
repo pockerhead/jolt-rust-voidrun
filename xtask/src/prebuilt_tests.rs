@@ -64,17 +64,25 @@ fn a_release_list_round_trips_sorted_with_lf() {
     assert_eq!(write(&parsed), text);
 }
 
+/// The committed list holds no archives before the first release and a release's 16 after its
+/// release branch is merged; either way it is what the list writer writes.
 #[test]
-fn the_committed_placeholder_lists_no_archives() {
+fn the_committed_list_is_written_by_the_list_writer() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/oxijolt-sys/prebuilt.txt");
     let text = fs::read_to_string(path).expect("prebuilt.txt is committed");
     let list = parse(&text).expect("parses");
+    assert_eq!(write(&list), text.replace("\r\n", "\n"));
+}
+
+#[test]
+fn a_placeholder_lists_no_archives() {
+    let list = parse(&write(&ArchiveList::default())).expect("parses");
     assert_eq!(list, ArchiveList::default());
+    assert_eq!(parse("format=1\n").expect("parses"), list);
     assert_eq!(
         select(&list, "1.2.0", &config(WINDOWS, 0)),
         Err(Unavailable::NoArchives)
     );
-    assert_eq!(write(&list), text.replace("\r\n", "\n"));
 }
 
 #[test]

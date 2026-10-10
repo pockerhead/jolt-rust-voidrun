@@ -18,10 +18,11 @@ It needs Rust (stable), CMake 3.20 or newer and a C++ toolchain: MSVC on Windows
 needs nothing else. On Linux, install `pkg-config libx11-dev libxi-dev libgl1-mesa-dev` first; CI
 builds the window on Windows only.
 
-A checkout whose native sources are those of a release (a release tag, or `main` right after the
-release branch is merged) downloads that release's `debug-renderer` archive on x86_64 Windows and
-Linux and compiles no C++ ([building](building.md#prebuilt-native-libraries)). A checkout with newer
-native code compiles Jolt, which takes several minutes.
+A checkout that carries a release's archive list and that release's native sources downloads its
+`debug-renderer` archive on x86_64 Windows and Linux and compiles no C++
+([building](building.md#prebuilt-native-libraries)): the branch `release/v<version>`, and `main`
+from the merge of that branch until the next change to the native code. The release tag itself
+still carries the previous list. Any other checkout compiles Jolt, which takes several minutes.
 
 To skip that on Windows, download
 `oxijolt-sys-<version>-x86_64-pc-windows-msvc-debug-renderer.tar.gz` from the
