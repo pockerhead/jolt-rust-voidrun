@@ -513,7 +513,8 @@ impl ConstraintRef<'_, PathConstraint> {
         unsafe { JPH_PathConstraint_GetTotalLambdaPositionLimits(self.ptr()) }
     }
 
-    /// The impulse in N·s the motor applied in the last step.
+    /// The impulse in N·s the motor, or the friction while the motor is off, applied in the last
+    /// step.
     pub fn total_lambda_motor(&self) -> f32 {
         // SAFETY: as in `path_fraction`.
         unsafe { JPH_PathConstraint_GetTotalLambdaMotor(self.ptr()) }

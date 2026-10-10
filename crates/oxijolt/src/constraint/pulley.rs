@@ -226,7 +226,8 @@ impl ConstraintRef<'_, PulleyConstraint> {
         unsafe { pulley_settings(self.ptr()) }.ratio
     }
 
-    /// The impulse in N·s the rope applied in the last step.
+    /// The impulse in N·s the rope applied in the last step on body 1 along its rope; body 2 gets
+    /// `ratio` times it along its rope.
     pub fn total_lambda_position(&self) -> f32 {
         // SAFETY: as in `current_length`.
         unsafe { JPH_PulleyConstraint_GetTotalLambdaPosition(self.ptr()) }

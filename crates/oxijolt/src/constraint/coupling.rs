@@ -239,7 +239,11 @@ impl ConstraintSettings for GearConstraintSettings {
 }
 
 impl ConstraintRef<'_, GearConstraint> {
-    /// The angular impulse in N·m·s the gear applied in the last step.
+    /// The angular impulse in N·m·s the gear applied in the last step: to body 1 about its axis
+    /// and, as is rather than `ratio` times it, to body 2 about its axis (see
+    /// [docs/constraints.md#limits-on-what-is-accepted]).
+    ///
+    /// [docs/constraints.md#limits-on-what-is-accepted]: https://github.com/pockerhead/oxijolt/blob/main/docs/constraints.md#limits-on-what-is-accepted
     pub fn total_lambda(&self) -> f32 {
         // SAFETY: the world borrowed here owns the constraint; the getter reads a member.
         unsafe { JPH_GearConstraint_GetTotalLambda(self.ptr()) }
@@ -401,7 +405,8 @@ impl ConstraintSettings for RackAndPinionConstraintSettings {
 }
 
 impl ConstraintRef<'_, RackAndPinionConstraint> {
-    /// The impulse the rack and pinion applied in the last step.
+    /// The angular impulse in N·m·s the rack and pinion applied to the pinion (body 1) in the
+    /// last step; the rack (body 2) gets `-ratio` times it in N·s along its axis.
     pub fn total_lambda(&self) -> f32 {
         // SAFETY: the world borrowed here owns the constraint; the getter reads a member.
         unsafe { JPH_RackAndPinionConstraint_GetTotalLambda(self.ptr()) }

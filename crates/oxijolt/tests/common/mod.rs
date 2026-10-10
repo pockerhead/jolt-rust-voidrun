@@ -5,6 +5,7 @@
 
 pub mod animation;
 pub mod constraint_kinds;
+pub mod constraint_rigs;
 pub mod controls;
 pub mod determinism;
 pub mod events;

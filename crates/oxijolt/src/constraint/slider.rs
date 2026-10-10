@@ -263,7 +263,17 @@ impl ConstraintRef<'_, SliderConstraint> {
         unsafe { JPH_SliderConstraint_GetMaxFrictionForce(self.ptr()) }
     }
 
-    /// The impulse in N·s the motor applied in the last step.
+    /// The impulses in N·s that kept body 2 on the slider axis in the last step, along the two
+    /// constraint axes perpendicular to it.
+    pub fn total_lambda_position(&self) -> [f32; 2] {
+        let mut value = [0.0; 2];
+        // SAFETY: as in `motor_state`; `value` has room for the two values joltc writes.
+        unsafe { JPH_SliderConstraint_GetTotalLambdaPosition(self.ptr(), value.as_mut_ptr()) };
+        value
+    }
+
+    /// The impulse in N·s the motor, or the friction while the motor is off, applied in the last
+    /// step.
     pub fn total_lambda_motor(&self) -> f32 {
         // SAFETY: as in `motor_state`.
         unsafe { JPH_SliderConstraint_GetTotalLambdaMotor(self.ptr()) }
