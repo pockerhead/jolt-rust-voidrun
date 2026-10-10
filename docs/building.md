@@ -12,8 +12,8 @@ Rust bindings are committed, so no build needs LLVM.
   minor release, noted in the changelog.
 - The platform linker Rust needs anyway: the MSVC Build Tools on Windows, `cc` and `libstdc++` on
   Linux.
-- For the download: `curl` on the `PATH`. Windows 10 (1803 and later) and most Linux systems ship
-  it.
+- For the download: `curl`. Windows 10 (1803 and later) ships it in `System32`, which is found
+  without the `PATH`; on Linux it has to be on the `PATH`, as it is on most systems.
 - For the source build only: a C++ toolchain (MSVC on Windows, GCC or Clang elsewhere) and CMake
   3.20 or newer.
 
@@ -157,6 +157,7 @@ The warning (or the `require` error) ends with one of these reasons:
 |---|---|
 | offline build, vendored sources, inside a Nix build | nothing: the source build is intended; use `JOLTC_LIB_DIR` for a prebuilt prefix |
 | the archive list has no archives | a git checkout from before the first release with archives: build from source or set `JOLTC_PREBUILT=off` |
+| the archive list is malformed | the packaged `prebuilt.txt` was edited by hand: restore it from the release |
 | the archive list is for version X, the crate is Y | the version was bumped after the list was recorded: as above |
 | the native sources differ from the released ones | a checkout with native changes: as above |
 | native sources missing or not regular files | `git submodule update --init` |

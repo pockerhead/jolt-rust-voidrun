@@ -2,12 +2,12 @@
 
 All notable changes to this fork. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 1.1.0 — 2026-10-11
 
 - Prebuilt native libraries: on `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` the build
   script of `oxijolt-sys` downloads the GitHub release archive of its own version that matches the
   target, C runtime and features, checks it against the sha256 recorded in the packaged
-  `prebuilt.txt`, and links it without CMake or a C++ compiler. It needs `curl` on the `PATH`.
+  `prebuilt.txt`, and links it without CMake or a C++ compiler. It needs `curl`.
   It builds from source with one warning when no archive fits: other targets or features
   (`asserts`), `crt-static`, native sources that differ from the release, an older MSVC toolset or
   glibc than the archive's, a linker override or cross build, offline (`CARGO_NET_OFFLINE`),

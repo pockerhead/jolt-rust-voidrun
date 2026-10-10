@@ -2841,7 +2841,7 @@ dependencies = [
 
 [[package]]
 name = "oxijolt"
-version = "1.0.1+jolt-5.6.0"
+version = "1.1.0+jolt-5.6.0"
 dependencies = [
  "glam 0.32.1",
  "mesh-import",
@@ -2852,7 +2852,7 @@ dependencies = [
 
 [[package]]
 name = "oxijolt-sys"
-version = "1.0.1+jolt-5.6.0"
+version = "1.1.0+jolt-5.6.0"
 dependencies = [
  "anyhow",
  "bindgen",
